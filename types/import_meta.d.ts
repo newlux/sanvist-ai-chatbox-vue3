@@ -1,13 +1,10 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_WEB_TITLE: string;
-  readonly VITE_WEB_TITLE_EN: string;
   readonly VITE_WEB_ENV: string;
-  readonly VITE_WEB_BASE_API: string;
-  readonly VITE_API_URL: string;
-  readonly VITE_PROXY_TARGET: string;
-  readonly VITE_CLIENT_ID: string;
+  readonly VITE_H5_OUT_DIR: number;
+  readonly VITE_AI_QUESTION_BASE_URL: string;
+  readonly VITE_STATIC_BASE_URL: string;
   readonly VITE_CJS_IGNORE_WARNING: boolean;
   readonly VITE_USER_NODE_ENV: string;
   readonly VITE_ROOT_DIR: string;

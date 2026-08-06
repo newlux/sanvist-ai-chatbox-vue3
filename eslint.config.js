@@ -15,11 +15,14 @@ export default antfu({
   stylistic: {
     indent: 2, // 缩进
     semi: true, // 语句分号
-    quotes: "single", // 单引号
+    quotes: "double", // 双引号
   },
   rules: {
     "new-cap": ["off", { newIsCap: true, capIsNew: false }],
-    "no-console": "off", // 忽略console
+    'no-console': 'off', // 忽略console
+    "style/quote-props": ["error", "as-needed"],
+    "style/operator-linebreak": "off",
+    "style/brace-style": "off"
   },
   ignores: [
     "**/dist/**",
