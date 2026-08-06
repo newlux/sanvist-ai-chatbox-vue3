@@ -30,7 +30,9 @@ src/
 **API 层**（`src/api/`）：
 - 每个模块使用 `index.ts` 编写 API 调用，使用 `types.ts` 定义 TypeScript 接口
 - 使用集成 JWT 插件的 `hook-fetch` 进行认证
-- 通过环境变量 `VITE_API_URL` 配置基础地址
+- 通过环境变量 `AI_QUESTION_BASE_URL` 配置基础地址
+- API 模块从 `@/utils/request` 导入 `request`；使用 `request.get(...).json()`、`request.post(...).json()` 等方法发起 JSON 请求
+- 登录或应用启动时调用 `setRequestAuth` 注入 token 与 ClientID；请求模块不直接依赖 Pinia 或 uni Storage
 
 **状态管理**（`src/stores/`）：
 - 状态仓库使用组合式 API 风格的 `defineStore`，仅管理运行期状态
@@ -39,7 +41,7 @@ src/
 - 聊天仓库管理消息与深度思考状态
 
 **HTTP 请求**（`src/utils/request.ts`）：
-- 自动注入 `Bearer` token 和 `ClientID` 请求头
+- 自动注入 `Bearer` token 请求头
 - 处理 401（退出登录）和 403（重定向）响应
 - 通过 `sseTextDecoderPlugin` 支持 SSE 流式响应
 
@@ -53,7 +55,7 @@ src/
 ### 环境变量
 
 在 `.env.development` 中配置：
-- `VITE_API_URL`：后端 API 基础地址
+- `AI_QUESTION_BASE_URL`：后端 API 基础地址
 - `VITE_CLIENT_ID`：认证客户端标识
 - `VITE_WEB_TITLE`：页面标题
 
