@@ -19,14 +19,17 @@ export default antfu({
   },
   rules: {
     "new-cap": ["off", { newIsCap: true, capIsNew: false }],
-    'no-console': 'off', // 忽略console
+    "no-console": "off", // 忽略console
     "style/quote-props": ["error", "as-needed"],
     "style/operator-linebreak": "off",
-    "style/brace-style": "off"
+    "style/brace-style": "off",
+    "antfu/if-newline": "off",
+    "vue/custom-event-name-casing": ["error", "kebab-case", { ignores: ["update:modelValue"] }],
   },
   ignores: [
     "**/dist/**",
     "**/node_modules/**",
+    "**/uni_modules/**",
     "**/build/**",
     "**/lib/**",
     "**/es/**",

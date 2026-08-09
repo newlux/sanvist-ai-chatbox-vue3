@@ -69,9 +69,31 @@ export function h5PostBuild(options: H5PostBuildOptions = {}): Plugin {
 
   return {
     name: "h5-post-build",
-    apply: "build",
     configResolved(resolvedConfig) {
       config = resolvedConfig;
+    },
+    configureServer(server) {
+      const staticFiles = {
+        "/scriptError.js": {
+          filePath: path.resolve(config.root, "public/scriptError.js"),
+          contentType: "application/javascript; charset=utf-8",
+        },
+        "/scriptStyle.css": {
+          filePath: path.resolve(config.root, "public/scriptStyle.css"),
+          contentType: "text/css; charset=utf-8",
+        },
+      };
+
+      for (const [url, file] of Object.entries(staticFiles)) {
+        server.middlewares.use(url, async (_request, response, next) => {
+          try {
+            response.setHeader("Content-Type", file.contentType);
+            response.end(await fs.readFile(file.filePath));
+          } catch {
+            next();
+          }
+        });
+      }
     },
     async buildStart() {
       if (process.env.UNI_PLATFORM === "h5") {

@@ -2,10 +2,8 @@ import type { ConfigEnv, PluginOption } from "vite";
 import path from "node:path";
 import * as uniModule from "@dcloudio/vite-plugin-uni";
 import { codeInspectorPlugin } from "code-inspector-plugin";
-import UnoCSS from "unocss/vite";
+// import UnoCSS from "unocss/vite";
 import AutoImport from "unplugin-auto-import/vite";
-import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
-import Components from "unplugin-vue-components/vite";
 import { loadEnv } from "vite";
 import envTyped from "vite-plugin-env-typed";
 import { h5PostBuild } from "./h5-post-build";
@@ -18,7 +16,7 @@ function plugins({ mode, command }: ConfigEnv): PluginOption[] {
   const env = loadEnv(mode, root);
 
   return [
-    UnoCSS(),
+    // UnoCSS(),
     envTyped({
       mode,
       envDir: root,
@@ -31,12 +29,7 @@ function plugins({ mode, command }: ConfigEnv): PluginOption[] {
       eslintrc: {
         enabled: true,
       },
-      resolvers: [ElementPlusResolver()],
       dts: path.join(root, "types", "auto-imports.d.ts"),
-    }),
-    Components({
-      resolvers: [ElementPlusResolver()],
-      dts: path.join(root, "types", "components.d.ts"),
     }),
     createSvgIcon(command === "build"),
     h5PostBuild({ outDirName: env.VITE_H5_OUT_DIR }),

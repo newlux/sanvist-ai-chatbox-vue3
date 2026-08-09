@@ -7,6 +7,8 @@
   "ai-assistant-greeting": "Hello, I'm your AI Assistant",
   "ai-assistant-description": "I can help check device status, analyze data, and answer questions",
   "ai-click-to-explore": "Click the icon above to explore",
+  "ai-welcome-title": "AI Ask",
+  "ai-welcome-subtitle": "Answering your equipment questions anytime",
   "ai-enterprise-agents": "Enterprise AI Agents",
   "ai-ask-example-title": "You can ask me like this",
   "ai-ask-example-text": "Show devices with longest working hours this week",
