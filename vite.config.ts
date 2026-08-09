@@ -13,6 +13,13 @@ export default defineConfig((cnf) => {
   return {
     base: VITE_WEB_ENV === "production" ? "/" : "/",
     plugins: plugins(cnf),
+    css: {
+      preprocessorOptions: {
+        scss: {
+          silenceDeprecations: ["legacy-js-api"],
+        },
+      },
+    },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

@@ -3,7 +3,7 @@ import hookFetch from "hook-fetch";
 import { sseTextDecoderPlugin } from "hook-fetch/plugins";
 // import { useUserStore } from '@/stores';
 
-interface BaseResponse<T = unknown> {
+export interface BaseResponse<T = unknown> {
   code: number;
   data: T;
   message: string;
@@ -17,9 +17,6 @@ export function setRequestAuth(value: string) {
 
 export const request = hookFetch.create<BaseResponse, "data">({
   baseURL: import.meta.env.VITE_AI_QUESTION_BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
   plugins: [sseTextDecoderPlugin({ json: true, prefix: "data:" })],
 });
 

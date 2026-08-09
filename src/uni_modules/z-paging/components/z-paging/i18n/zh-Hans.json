@@ -1,0 +1,22 @@
+{	
+	"zp.refresher.default": "",
+	"zp.refresher.pulling": "",
+	"zp.refresher.refreshing": "",
+	"zp.refresher.complete": "",
+	
+	"zp.loadingMore.default": "",
+	"zp.loadingMore.loading": "",
+	"zp.loadingMore.noMore": "",
+	"zp.loadingMore.fail": "",
+	
+	"zp.emptyView.title": "",
+	"zp.emptyView.reload": "",
+	"zp.emptyView.error": "",
+	
+	"zp.refresherUpdateTime.title": "",
+	"zp.refresherUpdateTime.none": "",
+	"zp.refresherUpdateTime.today": "",
+	"zp.refresherUpdateTime.yesterday": "",
+	
+	"zp.systemLoading.title": ""
+}

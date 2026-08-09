@@ -7,6 +7,8 @@
   "ai-assistant-greeting": "Bonjour, je suis votre Assistant IA",
   "ai-assistant-description": "Je peux aider à vérifier l'état des appareils, analyser les données et répondre aux questions",
   "ai-click-to-explore": "Cliquez sur l'icône ci-dessus pour explorer",
+  "ai-welcome-title": "IA Questions",
+  "ai-welcome-subtitle": "Répond à vos questions sur les équipements à tout moment",
   "ai-enterprise-agents": "Agents IA d'Entreprise",
   "ai-ask-example-title": "Vous pouvez me demander comme ceci",
   "ai-ask-example-text": "Afficher les appareils avec les heures de travail les plus longues cette semaine",

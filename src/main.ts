@@ -5,7 +5,7 @@ import App from "./App.vue";
 import i18n from "./i18n";
 import store from "./stores";
 import "./uni.scss";
-import "uno.css";
+// import "uno.css";
 
 export function createApp() {
   const app = createSSRApp(App);
