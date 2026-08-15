@@ -1,28 +1,3 @@
-<template>
-  <view v-if="showAble">
-    <view class="fh-toast" :class="{ fixed }">
-      <view class="m-toast-warp">
-        <view class="m-toast-warp-icon" v-if="icon != 'fail'">
-          <image
-            class="m-toast-warp-icon-img"
-            :class="
-              icon === 'loading' ? 'm-toast-loading' : 'm-toast-loading-end'
-            "
-            :src="iconCpt"
-          ></image>
-        </view>
-        <view class="m-toast-warp-msg" v-if="isSlot">
-          <slot></slot>
-        </view>
-        <view class="m-toast-warp-msg" v-else>
-          {{ title }}
-        </view>
-      </view>
-    </view>
-    <view v-if="showAble" class="fh-toast-mask"></view>
-  </view>
-</template>
-
 <script>
 export default {
   name: "FhToast",
@@ -37,7 +12,7 @@ export default {
       type: Boolean,
     },
     isSlot: {
-      default: false, //slot 是否使用插槽
+      default: false, // slot 是否使用插槽
       type: Boolean,
     },
   },
@@ -53,14 +28,24 @@ export default {
       list: [
         {
           type: "success",
-          src: _this.$getImage('toast_success_icon.png'),
+          src: _this.$getImage("toast_success_icon.png"),
         },
         {
           type: "loading",
-          src: _this.$getImage('toast_loading_icon.png'),
+          src: _this.$getImage("toast_loading_icon.png"),
         },
       ],
     };
+  },
+  computed: {
+    iconCpt() {
+      let src = "";
+      let obj = this.list.find(e => e.type == this.icon);
+      if (obj && obj.src) {
+        src = obj.src;
+      }
+      return src;
+    },
   },
   watch: {
     loading(val) {
@@ -71,16 +56,6 @@ export default {
       } else {
         this.hide();
       }
-    },
-  },
-  computed: {
-    iconCpt() {
-      let src = "";
-      let obj = this.list.find((e) => e.type == this.icon);
-      if (obj && obj.src) {
-        src = obj.src;
-      }
-      return src;
     },
   },
   methods: {
@@ -111,7 +86,7 @@ export default {
       }
     },
 
-    changeToast({ icon, title, duration = 1500 })  {
+    changeToast({ icon, title, duration = 1500 }) {
       this.title = title;
       this.icon = icon;
       if (duration) {
@@ -122,18 +97,43 @@ export default {
       }
     },
 
-    //关闭loading
+    // 关闭loading
     hideLoading() {
       this.showAble = false;
     },
 
-    //关闭所有(预留)
+    // 关闭所有(预留)
     hide() {
       this.showAble = false;
     },
   },
 };
 </script>
+
+<template>
+  <view v-if="showAble">
+    <view class="fh-toast" :class="{ fixed }">
+      <view class="m-toast-warp">
+        <view v-if="icon != 'fail'" class="m-toast-warp-icon">
+          <image
+            class="m-toast-warp-icon-img"
+            :class="
+              icon === 'loading' ? 'm-toast-loading' : 'm-toast-loading-end'
+            "
+            :src="iconCpt"
+          />
+        </view>
+        <view v-if="isSlot" class="m-toast-warp-msg">
+          <slot />
+        </view>
+        <view v-else class="m-toast-warp-msg">
+          {{ title }}
+        </view>
+      </view>
+    </view>
+    <view v-if="showAble" class="fh-toast-mask" />
+  </view>
+</template>
 
 <style scoped lang="scss">
 .fh-toast {

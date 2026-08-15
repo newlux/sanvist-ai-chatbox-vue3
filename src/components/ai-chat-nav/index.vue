@@ -2,7 +2,6 @@
 import { computed } from "vue";
 import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
-import iconInsight from "@/assets/img/icon-insight.svg";
 import iconVox from "@/assets/img/icon-vox.svg";
 
 defineOptions({
@@ -28,30 +27,9 @@ const navItems = computed(() => {
   }
 
   return [
-    {
-      key: "vox-core",
-      title: "AI 听播",
-      desc: "日报语音播报",
-      icon: iconVox,
-    },
-    {
-      key: "slide-insight",
-      title: "AI 闪鉴",
-      desc: "项目洞察助手",
-      icon: iconInsight,
-    },
-    {
-      key: "fix-master-ai",
-      title: "维修助手",
-      desc: "快捷故障排查",
-      icon: iconHelp,
-    },
-    {
-      key: "ai-form",
-      title: "AI 表单",
-      desc: "语音填单",
-      icon: iconForm,
-    },
+    { key: "vox-core", title: "听汇报", icon: iconVox },
+    { key: "fix-master-ai", title: "作业指导", icon: iconHelp },
+    { key: "ai-form", title: "任务协同", icon: iconForm },
   ];
 });
 
@@ -68,24 +46,15 @@ function onItemTap(item) {
       :autoplay="false"
       :circular="false"
       :display-multiple-items="3"
-      previous-margin="24rpx"
-      next-margin="24rpx"
+      previous-margin="40rpx"
+      next-margin="40rpx"
     >
       <swiper-item v-for="item in navItems" :key="item.key">
         <view class="ai-chat-nav__slide">
-          <view class="ai-chat-nav__card" @tap="onItemTap(item)">
-            <view class="ai-chat-nav__card-header">
-              <image
-                class="ai-chat-nav__icon"
-                :src="item.icon"
-                mode="aspectFit"
-              />
-              <text class="ai-chat-nav__title">
-                {{ item.title }}
-              </text>
-            </view>
-            <text class="ai-chat-nav__desc">
-              {{ item.desc }}
+          <view class="ai-chat-nav__chip" @tap="onItemTap(item)">
+            <image class="ai-chat-nav__icon" :src="item.icon" mode="aspectFit" />
+            <text class="ai-chat-nav__title">
+              {{ item.title }}
             </text>
           </view>
         </view>
@@ -100,70 +69,46 @@ function onItemTap(item) {
   z-index: 2;
   width: 100%;
   box-sizing: border-box;
-  padding: 16rpx 0;
 }
 
 .ai-chat-nav__swiper {
   width: 100%;
-  height: 144rpx;
+  height: 72rpx;
 }
 
 .ai-chat-nav__slide {
-  height: 100%;
-  padding-right: 16rpx;
-  box-sizing: border-box;
   display: flex;
-  align-items: center;
-}
-
-.ai-chat-nav__card {
-  width: 100%;
-  min-height: 112rpx;
-  padding: 16rpx 24rpx;
-  border-radius: 16rpx;
+  height: 100%;
   box-sizing: border-box;
-  background: #ffffff;
-  display: inline-flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-items: flex-start;
-  gap: 8rpx;
-  box-shadow: inset 0 0 0 2rpx rgba(0, 0, 0, 0.05);
+  align-items: center;
+  padding-right: 16rpx;
 }
 
-.ai-chat-nav__card-header {
+.ai-chat-nav__chip {
+  display: flex;
   width: 100%;
-  display: inline-flex;
+  height: 72rpx;
+  box-sizing: border-box;
   align-items: center;
+  justify-content: center;
   gap: 12rpx;
+  padding: 0 24rpx;
+  border: 1rpx solid #efefef;
+  border-radius: 32rpx;
+  background: #fff;
+  white-space: nowrap;
 }
 
 .ai-chat-nav__icon {
-  width: 44rpx;
-  height: 44rpx;
+  width: 32rpx;
+  height: 32rpx;
   flex-shrink: 0;
 }
 
 .ai-chat-nav__title {
-  flex: 1;
-  min-width: 0;
-  color: #1f2937;
-  font-size: 28rpx;
-  font-weight: 600;
-  line-height: 32rpx;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ai-chat-nav__desc {
-  width: 100%;
-  color: #5f6775;
+  color: #1a1a1a;
   font-size: 24rpx;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 32rpx;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 </style>

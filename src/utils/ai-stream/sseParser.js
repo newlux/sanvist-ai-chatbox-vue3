@@ -1,15 +1,3 @@
-const EVENT_TYPES = new Set([
-  "answer",
-  "think",
-  "status",
-  "tool_call",
-  "chart",
-  "table",
-  "metric",
-  "error",
-  "suggestion",
-]);
-
 function parseEventData(data) {
   try {
     return JSON.parse(data);
@@ -31,10 +19,10 @@ function parseJsonObjectStream(rawText) {
     if (inString) {
       if (escaped) escaped = false;
       else if (char === "\\") escaped = true;
-      else if (char === '"') inString = false;
+      else if (char === "\"") inString = false;
       continue;
     }
-    if (char === '"') {
+    if (char === "\"") {
       inString = true;
       continue;
     }
@@ -92,43 +80,4 @@ export function parseHistoryBlocks(rawText) {
     }
     return blocks;
   }, []);
-}
-
-export function parseSseBlocks(rawText) {
-  const source = rawText || "";
-  const blocks = [];
-  const pattern = /event:\s*([^\r\n]+)\r?\ndata:\s*([^\r\n]*)/g;
-  let match = null;
-  let done = false;
-
-  while ((match = pattern.exec(source))) {
-    const type = match[1].trim();
-    const payload = parseEventData(match[2]);
-
-    if (!payload) continue;
-    if (type === "done" && payload.is_end) {
-      done = true;
-      continue;
-    }
-    if (!EVENT_TYPES.has(type)) continue;
-
-    const previousBlock = blocks[blocks.length - 1];
-    if (
-      ["answer", "think"].includes(type) &&
-      previousBlock &&
-      previousBlock.type === type
-    ) {
-      previousBlock.payload.content += payload.content;
-      continue;
-    }
-
-    blocks.push({
-      id: `${type}-${blocks.length}`,
-      type,
-      payload,
-      complete: false,
-    });
-  }
-
-  return blocks.map((block) => ({ ...block, complete: done }));
 }

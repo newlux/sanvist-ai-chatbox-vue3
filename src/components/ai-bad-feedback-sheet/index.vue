@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch } from "vue";
-import { useI18n } from "vue-i18n";
+import { useSafeArea } from "@/hooks/useSafeArea";
 
 defineOptions({
   name: "AiBadFeedbackSheet",
@@ -14,36 +14,41 @@ const props = defineProps({
   options: {
     type: Array,
     default: () => [
-      { value: "answer_not_right", labelKey: "feedback-opt-answer_not_right" },
-      { value: "data_inaccurate", labelKey: "feedback-opt-data_inaccurate" },
-      { value: "answer_not_match", labelKey: "feedback-opt-answer_not_match" },
-      { value: "answer_incomplete", labelKey: "feedback-opt-answer_incomplete" },
-      { value: "response_slow", labelKey: "feedback-opt-response_slow" },
-      { value: "other", labelKey: "feedback-opt-other" },
+      { value: "data_inaccurate", label: "数据不准确" },
+      { value: "data_incomplete", label: "数据不完整" },
+      { value: "answer_not_match", label: "没有回答到重点" },
+      { value: "answer_incomplete", label: "回答不够详细或不易理解" },
+      { value: "response_slow", label: "回答速度太慢" },
     ],
   },
 });
 
 const emit = defineEmits(["close", "confirm"]);
-const { t } = useI18n();
+const { safeAreaStyle } = useSafeArea({ mpaasFallbackPx: 0 });
 const selectedValue = ref([]);
 const supplement = ref("");
 
-watch(() => props.visible, (visible) => {
-  if (visible) {
-    selectedValue.value = [];
-    supplement.value = "";
-  }
-});
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) {
+      selectedValue.value = [];
+      supplement.value = "";
+    }
+  },
+);
 
 function onClose() {
   emit("close");
 }
 
 function onOptionTap(value) {
-  selectedValue.value = selectedValue.value.includes(value)
-    ? selectedValue.value.filter(item => item !== value)
-    : [...selectedValue.value, value];
+  selectedValue.value = [value];
+  const option = props.options.find(item => item.value === value);
+  emit("confirm", {
+    remark: option?.label || option?.labelKey || value,
+    immediate: true,
+  });
 }
 
 function onSupplementInput(event) {
@@ -55,20 +60,26 @@ function onConfirm() {
 
   const chosen = props.options
     .filter(option => selectedValue.value.includes(option.value))
-    .map(option => option.label || t(option.labelKey))
+    .map(option => option.label || option.labelKey)
     .join(",");
-  emit("confirm", [chosen, supplement.value].join(","));
+  emit("confirm", {
+    remark: [chosen, supplement.value].filter(Boolean).join(","),
+    immediate: false,
+  });
 }
 </script>
 
 <template>
   <view v-if="visible" class="bad-feedback-sheet">
     <view class="bad-feedback-sheet__mask" @tap="onClose" />
-    <view class="bad-feedback-sheet__panel" @tap.stop>
+    <view class="bad-feedback-sheet__panel" :style="safeAreaStyle" @tap.stop>
       <view class="bad-feedback-sheet__header">
-        <view>
+        <view class="bad-feedback-sheet__title-wrap">
           <text class="bad-feedback-sheet__title">
-            {{ t("feedback-thank-you") }}
+            意见反馈
+          </text>
+          <text class="bad-feedback-sheet__subtitle">
+            你的反馈是我们持续进步的方向
           </text>
         </view>
         <view class="bad-feedback-sheet__close-btn" @tap="onClose">
@@ -79,7 +90,6 @@ function onConfirm() {
           />
         </view>
       </view>
-
       <view class="bad-feedback-sheet__body">
         <view class="bad-feedback-sheet__options">
           <view
@@ -87,15 +97,13 @@ function onConfirm() {
             :key="opt.value"
             class="bad-feedback-sheet__option"
             :class="{
-              'bad-feedback-sheet__option--active': selectedValue.includes(
-                opt.value,
-              ),
+              'bad-feedback-sheet__option--active': selectedValue.includes(opt.value),
             }"
             @tap="onOptionTap(opt.value)"
           >
             <view class="bad-feedback-sheet__option-text-wrap">
               <text class="bad-feedback-sheet__option-text">
-                {{ opt.label || t(opt.labelKey) }}
+                {{ opt.label || opt.labelKey }}
               </text>
             </view>
             <view
@@ -115,7 +123,7 @@ function onConfirm() {
           <textarea
             class="bad-feedback-sheet__textarea"
             :value="supplement"
-            :placeholder="t('feedback-supplement-placeholder')"
+            placeholder="请输入其他反馈问题"
             placeholder-class="bad-feedback-sheet__textarea-placeholder"
             @input="onSupplementInput"
           />
@@ -123,14 +131,9 @@ function onConfirm() {
       </view>
 
       <view class="bad-feedback-sheet__actions">
-        <view
-          class="bad-feedback-sheet__btn bad-feedback-sheet__btn--primary"
-          @tap="onConfirm"
-        >
-          <text
-            class="bad-feedback-sheet__btn-text bad-feedback-sheet__btn-text--primary"
-          >
-            {{ t("feedback-submit") }}
+        <view class="bad-feedback-sheet__btn bad-feedback-sheet__btn--primary" @tap="onConfirm">
+          <text class="bad-feedback-sheet__btn-text bad-feedback-sheet__btn-text--primary">
+            提交反馈
           </text>
         </view>
       </view>
@@ -153,132 +156,162 @@ function onConfirm() {
 
 .bad-feedback-sheet__panel {
   position: absolute;
-  left: 0;
   right: 0;
   bottom: 0;
-  background: #ffffff;
-  border-top-left-radius: 32rpx;
-  border-top-right-radius: 32rpx;
-  padding: 24rpx 48rpx calc(32rpx + constant(safe-area-inset-bottom));
-  padding: 24rpx 48rpx calc(32rpx + env(safe-area-inset-bottom));
+  left: 0;
   box-sizing: border-box;
+  height: 1200rpx;
+  padding: 40rpx 60rpx;
+  padding-bottom: calc(70rpx + var(--safe-bottom, 0rpx));
+  overflow: hidden;
+  border-radius: 40rpx 40rpx 0 0;
+  background: #ffffff;
 }
 
 .bad-feedback-sheet__header {
-  padding-bottom: 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  position: relative;
+  height: 136rpx;
 }
+
+.bad-feedback-sheet__title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.bad-feedback-sheet__title {
+  color: #1a1a1a;
+  font-family: Inter;
+  font-size: 32rpx;
+  font-weight: 500;
+  line-height: 38rpx;
+}
+
+.bad-feedback-sheet__subtitle {
+  color: #999999;
+  font-family: Inter;
+  font-size: 26rpx;
+  font-weight: 400;
+  line-height: 32rpx;
+}
+
 .bad-feedback-sheet__close-btn {
-  width: 48rpx;
-  height: 48rpx;
+  position: absolute;
+  top: -20rpx;
+  right: -30rpx;
+  width: 72rpx;
+  height: 72rpx;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.bad-feedback-sheet__close-btn-icon {
-  width: 32rpx;
-  height: 32rpx;
-}
 
-.bad-feedback-sheet__title {
-  font-size: 32rpx;
-  color: #2f323c;
-  font-weight: 700;
+.bad-feedback-sheet__close-btn-icon {
+  width: 72rpx;
+  height: 72rpx;
 }
 
 .bad-feedback-sheet__body {
-  max-height: 55vh;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .bad-feedback-sheet__options {
   display: flex;
-  flex-wrap: wrap;
-  gap: 24rpx;
-  margin-bottom: 24rpx;
   flex-direction: column;
+  gap: 16rpx;
 }
 
 .bad-feedback-sheet__option {
-  padding: 28rpx 32rpx;
-  border-radius: 18rpx;
-  background: #f0f0f0;
-  display: flex;
-  align-items: center;
-}
-
-.bad-feedback-sheet__option--active {
-  background: #fff5f6;
-}
-.bad-feedback-sheet__option-text-wrap {
-  flex: 1;
-  display: flex;
-  align-items: center;
-}
-.bad-feedback-sheet__option-text {
-  font-size: 28rpx;
-  color: #5f6775;
-}
-
-.bad-feedback-sheet__option-icon-wrap {
-  width: 32rpx;
-  height: 32rpx;
+  box-sizing: border-box;
+  height: 96rpx;
+  padding: 0;
+  border: 2rpx solid #e4e4e4;
+  border-radius: 32rpx;
+  background: #fefefe;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.bad-feedback-sheet__option-icon {
-  width: 20rpx;
-  height: 14rpx;
+.bad-feedback-sheet__option--active {
+  border-color: #c8201e;
+  background: #fff3f3;
 }
+
+.bad-feedback-sheet__option-text-wrap {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+}
+
+.bad-feedback-sheet__option-text {
+  color: #666666;
+  font-family: Inter;
+  font-size: 28rpx;
+  font-weight: 400;
+  line-height: 34rpx;
+  text-align: center;
+}
+
+.bad-feedback-sheet__option-icon-wrap {
+  display: none;
+}
+
 .bad-feedback-sheet__option--active .bad-feedback-sheet__option-text {
-  color: #f8315e;
+  color: #c8201e;
 }
 
 .bad-feedback-sheet__input-wrap {
-  padding: 28rpx 32rpx;
+  box-sizing: border-box;
+  height: 276rpx;
+  margin-top: 34rpx;
+  padding: 32rpx;
   overflow: hidden;
-  border-radius: 20rpx;
-  background: #f8f8f8;
+  border: 0;
+  border-radius: 24rpx;
+  background: #f6f6f6;
 }
 
 .bad-feedback-sheet__textarea {
   width: 100%;
-  height: 80rpx;
-
-  color: #5f6775;
+  height: 200rpx;
+  color: #666666;
+  font-family: "Sarasa Gothic SC";
   font-size: 28rpx;
+  font-weight: 400;
+  line-height: 40rpx;
 }
 
 .bad-feedback-sheet__textarea-placeholder {
-  color: #9aa0a6;
+  color: #999999;
+  font-family: "Sarasa Gothic SC";
+  font-style: italic;
+  font-weight: 400;
 }
 
 .bad-feedback-sheet__actions {
   display: flex;
-  margin-top: 22rpx;
-  // padding: 0 48rpx;
+  margin-top: 20rpx;
 }
 
 .bad-feedback-sheet__btn {
   flex: 1;
-  border-radius: 16rpx;
-  height: 88rpx;
+  height: 80rpx;
+  border-radius: 120rpx;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .bad-feedback-sheet__btn--primary {
-  background: #f8315e;
+  background: #c8201e;
 }
 
 .bad-feedback-sheet__btn-text {
-  font-size: 28rpx;
-  font-weight: 700;
   color: #ffffff;
+  font-family: Inter;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 32rpx;
 }
 </style>

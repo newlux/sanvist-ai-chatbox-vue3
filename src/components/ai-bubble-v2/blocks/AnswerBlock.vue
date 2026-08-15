@@ -27,9 +27,9 @@ defineProps({
   background: transparent;
 }
 .answer-block ::v-deep .markdown-block {
-  color: #2f323c;
+  color: #1a1a1e;
   font-size: 28rpx;
-  line-height: 42rpx;
+  line-height: 36rpx;
 
   h1, h2, h3, h4, h5, h6 {
     margin: 20rpx 0 12rpx;

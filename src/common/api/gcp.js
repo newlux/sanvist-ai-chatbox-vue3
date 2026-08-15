@@ -11,13 +11,13 @@ import { gcpFetchFactory } from "@/utils/fetch/gcpFetch";
 
 export const GCPAPI = {
   fetchData: gcpFetchFactory("/hpfm/v1/lovs/data", "get"),
-  fetchAIReply: (sessionId, messageId) => gcpFetchFactory(`/ai-question-api/chat/stream/${sessionId}/${messageId}`, "get",),
+  fetchAIReply: (sessionId, messageId) => gcpFetchFactory(`/ai-question-api/chat/stream/${sessionId}/${messageId}`, "get"),
   fetchAISend: gcpFetchFactory("/ai-question-api/chat/send", "post"),
   fetchAIFeedback: gcpFetchFactory("/ai-question-api/chat/feedback", "post"),
   fetchAIChatFeedback: gcpFetchFactory("/ai-question-api/chat/feedback", "post"),
   fetchAIFeedbackCancel: gcpFetchFactory("/ai-question-api/chat/feedback/cancel", "post"),
   // TTS：返回 base64 音频内容
-  fetchAITTS: (url) =>
+  fetchAITTS: url =>
     gcpFetchFactory(url, "get"),
   // ASR：语音转文本（入参 audioBase64: "data:audioBase64;base64,..."）
   fetchASRBase64: ({ audioBase64 } = {}) =>
@@ -37,15 +37,15 @@ export const GCPAPI = {
           // ...(store.state.header || {}),
           "Content-Type": "application/json",
         },
-        success: (res) => resolve(res?.data),
-        fail: (err) => reject(err),
+        success: res => resolve(res?.data),
+        fail: err => reject(err),
       });
     }),
   fetchAISessionList: gcpFetchFactory("/ai-question-api/sessions", "get"),
-  fetchAISessionHistory: (sessionId) =>
+  fetchAISessionHistory: sessionId =>
     gcpFetchFactory(`/ai-question-api/sessions/${sessionId}/history`, "get"),
   // 编辑会话标题
-  updateAISession: (sessionId) =>
+  updateAISession: sessionId =>
     gcpFetchFactory(`/ai-question-api/sessions/${sessionId}`, "put"),
   // 单个逻辑删除
   deleteAISession: (sessionId, userId) =>

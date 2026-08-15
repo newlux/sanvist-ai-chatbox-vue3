@@ -1,6 +1,7 @@
 {
   "cSpell.words": [
     "dcloudio",
+    "Noyi",
     "vconsole",
     "VITE"
   ],
@@ -9,6 +10,6 @@
     "src/i18n",
     "src/i18n/lang"
   ],
-  "apiCenterServerPort": 10000,
+  "apiCenterServerPort": 60095,
   "i18n-ally.keystyle": "nested"
 }

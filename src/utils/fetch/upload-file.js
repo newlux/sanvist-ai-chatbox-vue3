@@ -1,10 +1,10 @@
 import { GCP_ORGANIZATION_ID } from "@/common/api/config";
-import store from "@/store";
 import i18n from "@/i18n";
+import store from "@/store";
 
 const baseUrl = "/hfle/v1/{organizationId}/gcp-files/multipart".replace(
   "{organizationId}",
-  GCP_ORGANIZATION_ID
+  GCP_ORGANIZATION_ID,
 );
 const formData = {
   tenantId: GCP_ORGANIZATION_ID,
@@ -17,9 +17,9 @@ const formData = {
  * @param {*} file 需要上传的文件
  * @param {*} index 文件索引
  * @param {*} callBack 接口返回执行回调
- * @returns 
+ * @returns
  */
-const goUpload = (file,index,callBack) => {
+function goUpload(file, index, callBack) {
   // api请求开始时间记录
   let apiStartTime = new Date().getTime();
   let param = {
@@ -31,12 +31,12 @@ const goUpload = (file,index,callBack) => {
   };
 
   return new Promise((resolve) => {
-    console.warn(file.path)
-    console.log(store.state.header,'...store.state.header')
+    console.warn(file.path);
+    console.log(store.state.header, "...store.state.header");
     const headers = {
-      ...store.state.header
-    }
-    delete headers['Content-Type']
+      ...store.state.header,
+    };
+    delete headers["Content-Type"];
     uni.uploadFile({
       hideLoading: true,
       filePath: file.path,
@@ -49,16 +49,16 @@ const goUpload = (file,index,callBack) => {
       },
       url: store.state.baseUrl + baseUrl,
       success: (res) => {
-        if (res.data && res.data.indexOf("http") > -1) {
-          callBack(res.data,index)
+        if (res.data && res.data.includes("http")) {
+          callBack(res.data, index);
           resolve(res.data, index);
         } else {
-          resolve('')
+          resolve("");
           console.error(res);
         }
       },
       fail: (error) => {
-        resolve('')
+        resolve("");
         console.error(error);
       },
       complete: (res) => {
@@ -81,7 +81,7 @@ const goUpload = (file,index,callBack) => {
       },
     });
   });
-};
+}
 
 /**
  * 并发上传方法
@@ -90,49 +90,48 @@ const goUpload = (file,index,callBack) => {
  * @param {*} results 返回结果队列
  * @param {*} callBack 每次接口返回执行回调
  */
-const goUpFiles = async (files,index=0,results=[],callBack=()=>{}) => {
+async function goUpFiles(files, index = 0, results = [], callBack = () => {}) {
   const requests = []; // 请求队列
   const concurrency = 2; // 并发数
   for (let i = 0; i < concurrency; i++) {
-    if(files[index]){
-      requests.push(goUpload(files[index],index,callBack));
-      index++
+    if (files[index]) {
+      requests.push(goUpload(files[index], index, callBack));
+      index++;
     }
   }
 
-  if(requests.length){
-    await Promise.all(requests).then(res=>{
-      results = [...results,...res]
-      console.warn(results)
-    })
+  if (requests.length) {
+    await Promise.all(requests).then((res) => {
+      results = [...results, ...res];
+      console.warn(results);
+    });
   }
 
-  if(files[index]){
-   return await goUpFiles(files,index,results,callBack)
+  if (files[index]) {
+    return await goUpFiles(files, index, results, callBack);
   }
 
   uni.hideLoading();
-  return results.filter(o=>o)
-};
+  return results.filter(o => o);
+}
 
 /**
  *
  * @param {[{path: string, type: 'image' | 'audio' | 'video'}]} files
  */
-export async function uploadFiles(files, callBack,showLoading=true) {
-  if(showLoading){
+export async function uploadFiles(files, callBack, showLoading = true) {
+  if (showLoading) {
     uni.showLoading({ title: i18n.t("loading"), mask: true });
   }
-  
-  let urls = await goUpFiles(files,0,[],callBack)
+
+  let urls = await goUpFiles(files, 0, [], callBack);
 
   if (urls.length !== files.length) {
     uni.showToast({ title: i18n.t("upload-failed"), icon: "none" });
   }
 
-  return urls
+  return urls;
 }
-
 
 /**
  * 单个上传文件 -旧版本
@@ -144,9 +143,9 @@ export async function singleUploadFiles(files) {
     const file = files[i];
     try {
       await new Promise((resolve, reject) => {
-        uni.showLoading({title:i18n.t("loading"),mask:true})
+        uni.showLoading({ title: i18n.t("loading"), mask: true });
         uni.uploadFile({
-          hideLoading:true,
+          hideLoading: true,
           filePath: file.path,
           name: "file",
           fileType: file.type || "image",
@@ -163,20 +162,20 @@ export async function singleUploadFiles(files) {
             store.state.baseUrl +
             "/hfle/v1/{organizationId}/gcp-files/multipart".replace(
               "{organizationId}",
-              GCP_ORGANIZATION_ID
+              GCP_ORGANIZATION_ID,
             ),
-          success: function(res) {
-            uni.hideLoading()
+          success(res) {
+            uni.hideLoading();
             if (res.data) urls.push(res.data);
             resolve(res);
           },
-          fail: function(res) {
-            uni.hideLoading()
-          }
+          fail(res) {
+            uni.hideLoading();
+          },
         });
-      })
+      });
     } catch (error) {
-      uni.hideLoading()
+      uni.hideLoading();
       uni.showToast({ title: error?.message || error, icon: "error" });
     }
   }

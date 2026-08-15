@@ -6,10 +6,6 @@ export const useSystemStore = defineStore("system", () => {
   const header = ref<Record<string, unknown>>({});
   const appVersion = ref("");
   const gridCountry = ref("");
-  const isVisitor = ref<boolean | null>(null);
-  const userId = ref("");
-  const username = ref("");
-  const userInfo = ref<Record<string, unknown>>({});
   const device = ref<Record<string, unknown>>({});
   const deviceCount = ref(0);
   const pageStartTime = ref(0);
@@ -52,10 +48,6 @@ export const useSystemStore = defineStore("system", () => {
     appVersion.value = value;
   }
 
-  function setIsVisitor(value: boolean | null) {
-    isVisitor.value = value;
-  }
-
   function setDeviceCount(value: number) {
     deviceCount.value = value;
   }
@@ -75,14 +67,6 @@ export const useSystemStore = defineStore("system", () => {
 
   function setGridCountry(value: string) {
     gridCountry.value = value;
-  }
-
-  function setUserId(value: string) {
-    userId.value = value;
-  }
-
-  function setUsername(value: string) {
-    username.value = value;
   }
 
   function setStatusBarHeight(value: number) {
@@ -105,10 +89,6 @@ export const useSystemStore = defineStore("system", () => {
     isIOS.value = value;
   }
 
-  function setUserInfo(value: Record<string, unknown>) {
-    userInfo.value = value;
-  }
-
   function setPageStartTime(value: number) {
     pageStartTime.value = value;
   }
@@ -118,7 +98,6 @@ export const useSystemStore = defineStore("system", () => {
   }
 
   async function initPhoneSizesInfo() {
-    const platform = uni.getSystemInfoSync().platform;
     const alipayJSBridge = globalThis as typeof globalThis & {
       AlipayJSBridge?: {
         call: (
@@ -129,19 +108,28 @@ export const useSystemStore = defineStore("system", () => {
       };
     };
 
-    if (platform !== "ios" || !alipayJSBridge.AlipayJSBridge) {
+    if (!alipayJSBridge.AlipayJSBridge) {
       statusBarHeight.value = 0;
       tabbarHeight.value = 0;
       return;
     }
 
-    await new Promise<void>((resolve) => {
-      alipayJSBridge.AlipayJSBridge?.call("getPhoneSizesInfo", {}, (result) => {
-        statusBarHeight.value = result.statusBarHeight || 0;
-        tabbarHeight.value = result.tabbarHeight || 0;
-        resolve();
-      });
-    });
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        alipayJSBridge.AlipayJSBridge?.call("getPhoneSizesInfo", {}, (result) => {
+          statusBarHeight.value = result.statusBarHeight || 0;
+          tabbarHeight.value = result.tabbarHeight || 0;
+          resolve();
+        });
+      }),
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          statusBarHeight.value = 0;
+          tabbarHeight.value = 0;
+          resolve();
+        }, 500);
+      }),
+    ]);
   }
 
   return {
@@ -149,10 +137,6 @@ export const useSystemStore = defineStore("system", () => {
     header,
     appVersion,
     gridCountry,
-    isVisitor,
-    userId,
-    username,
-    userInfo,
     device,
     deviceCount,
     pageStartTime,
@@ -166,20 +150,16 @@ export const useSystemStore = defineStore("system", () => {
     finalMapLanguage,
     finalMapRegion,
     setAppVersion,
-    setIsVisitor,
     setDeviceCount,
     setBaseUrl,
     setDevice,
     setHeader,
     setGridCountry,
-    setUserId,
-    setUsername,
     setStatusBarHeight,
     setTabbarHeight,
     setPixelRatio,
     setScreenWidth,
     setIsIOS,
-    setUserInfo,
     setPageStartTime,
     setKeyHeight,
     initPhoneSizesInfo,

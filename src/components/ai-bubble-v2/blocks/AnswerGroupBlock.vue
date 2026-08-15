@@ -11,6 +11,9 @@ defineProps({
 
 <template>
   <view class="answer-group-block">
+    <text class="answer-group-block__title">
+      输出结果
+    </text>
     <template v-for="block in blocks">
       <AnswerBlock
         v-if="block.type === 'answer'"
@@ -33,8 +36,16 @@ defineProps({
 .answer-group-block {
   display: flex;
   flex-direction: column;
-  padding: 32rpx;
-  border-radius: 20rpx;
-  background: #f9f9f9;
+  gap: 32rpx;
+  margin-top: 32rpx;
+  padding-top: 32rpx;
+  border-top: 2rpx solid #f0f0f2;
+}
+.answer-group-block__title {
+  color: #b0b0b0;
+  font-family: "PingFang SC";
+  font-size: 24rpx;
+  font-weight: 400;
+  line-height: 30rpx;
 }
 </style>

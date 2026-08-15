@@ -3,11 +3,11 @@ import { GCP_ORGANIZATION_ID } from "@/common/api/config";
 // import qs from "qs";
 // import store from "@/store";
 
-let shwoTokenExpiration = true
+let shwoTokenExpiration = true;
 
 // 请求参数处理
-const onBefore = function (config) {
-  config.url = config.url.replace(/\{(.*?)\}/gi, function (ori, key) {
+function onBefore(config) {
+  config.url = config.url.replace(/\{(.*?)\}/g, (ori, key) => {
     const value = config.data?.[key] ?? config.params?.[key];
     return value || ori;
   });
@@ -33,10 +33,10 @@ const onBefore = function (config) {
   }
 
   return config;
-};
+}
 
 // 对返回的数据进行错误判断
-const onAfter = function (response, url) {
+function onAfter(response, url) {
   const { data } = response;
 
   // 接口业务处理错误
@@ -47,8 +47,8 @@ const onAfter = function (response, url) {
   if (filterCustomerErrorShowUrl(url)) {
     msg = "";
   }
-  return { data: data?.data || data, msg: msg };
-};
+  return { data: data?.data || data, msg };
+}
 
 uni.addInterceptor("request", {
   invoke(args) {
@@ -69,7 +69,7 @@ uni.addInterceptor("request", {
 
 /**
  * fetch的工厂方法
- * @param {String} method 请求方法的 方式
+ * @param {string} method 请求方法的 方式
  * @returns
  */
 export function gcpFetchFactory(url, method = "post", apiOptions = {}) {
@@ -115,7 +115,7 @@ export function gcpFetchFactory(url, method = "post", apiOptions = {}) {
       param.event_params.push({ sy_api_params: sy_api_params.slice(0, 99) });
     }
 
-    const apiUrl = option.url
+    const apiUrl = option.url;
     // option.url = store.state.baseUrl + apiUrl;
     option.url = apiUrl;
 
@@ -134,7 +134,7 @@ export function gcpFetchFactory(url, method = "post", apiOptions = {}) {
               r(rst.data);
             } else {
               j(rst.msg);
-              let showToastCtrl = filterUrl(option.url); //控制拦截器是否显示错误的Toast
+              let showToastCtrl = filterUrl(option.url); // 控制拦截器是否显示错误的Toast
               if (showToastCtrl && rst.msg !== "null") {
                 uni.showToast({
                   title: rst.msg,
@@ -166,30 +166,30 @@ export function gcpFetchFactory(url, method = "post", apiOptions = {}) {
               event_name: "sy_api_error",
               event_params: [
                 { sy_api_url: option.url },
-                { sy_error: res.statusCode || 'network-error' },
-              ]
-            }
-            AlipayJSBridge.call("firebaseEvent", errorParams)
+                { sy_error: res.statusCode || "network-error" },
+              ],
+            };
+            AlipayJSBridge.call("firebaseEvent", errorParams);
             console.warn(`接口异常埋点`, JSON.stringify(errorParams));
-          }else if (res.statusCode === 200 && (!res.data || res.data.failed)) {
+          } else if (res.statusCode === 200 && (!res.data || res.data.failed)) {
             const errorMessage = `${res.data.code}_${res.data.message}`;
             const errorParams = {
               event_name: "sy_api_error",
               event_params: [
                 { sy_api_url: option.url },
                 { sy_error: errorMessage.length > 100 ? errorMessage.substring(0, 100) : errorMessage },
-              ]
-            }
+              ],
+            };
             console.warn(`接口异常埋点`, JSON.stringify(errorParams));
-            AlipayJSBridge.call("firebaseEvent", errorParams)
+            AlipayJSBridge.call("firebaseEvent", errorParams);
           }
 
           if (res.statusCode === 401) {
-            if(shwoTokenExpiration){
-              shwoTokenExpiration = false
-              setTimeout(()=>{
+            if (shwoTokenExpiration) {
+              shwoTokenExpiration = false;
+              setTimeout(() => {
                 shwoTokenExpiration = true;
-              },1000)
+              }, 1000);
               AlipayJSBridge.call("tokenExpiration", {}, () => {});
             }
           } else if (
@@ -221,23 +221,23 @@ export function gcpFetchFactory(url, method = "post", apiOptions = {}) {
   };
 }
 
-//网络异常捕获
+// 网络异常捕获
 function networkExceptionCapture(currUrl) {
   let showToastCtrl = true;
-  //要过滤的接口URL地址
+  // 要过滤的接口URL地址
   let filterUrlList = ["/aftersale/v1/device-users-auditor/save"];
   filterUrlList.some((e) => {
-    if (currUrl.indexOf(e) === -1) {
+    if (!currUrl.includes(e)) {
       showToastCtrl = false;
     }
   });
   return showToastCtrl;
 }
 
-//过滤判断url地址
+// 过滤判断url地址
 function filterUrl(currUrl) {
   let showToastCtrl = true;
-  //要过滤的接口URL地址
+  // 要过滤的接口URL地址
   let filterUrlList = [
     "/user-point-details",
     "/aftersale-servicess/createOrder",
@@ -248,23 +248,23 @@ function filterUrl(currUrl) {
     "/inquiry-orders/confirm",
   ];
   filterUrlList.some((e) => {
-    if (currUrl.indexOf(e) != -1) {
+    if (currUrl.includes(e)) {
       showToastCtrl = false;
     }
   });
   return showToastCtrl;
 }
 
-//过滤判断url地址
+// 过滤判断url地址
 function filterCustomerErrorShowUrl(currUrl) {
   let showModel = false;
-  //要过滤的接口URL地址
+  // 要过滤的接口URL地址
   let filterModelUrlList = [
     "/aftersale-servicess/batchCreateOrder",
     "/aftersale-servicess/postCancel",
   ];
   filterModelUrlList.some((e) => {
-    if (currUrl.indexOf(e) != -1) {
+    if (currUrl.includes(e)) {
       showModel = true;
     }
   });

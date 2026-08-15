@@ -11,15 +11,14 @@ const userRequest = hookFetch.create<BaseResponse, "data">({
 });
 
 // 自动解包 data 字段
-function dataExtractorPlugin(): HookFetchPlugin {
+function dataExtractorPlugin(): HookFetchPlugin<BaseResponse> {
   return {
     name: "data-extractor",
-    afterResponse: async (context) => {
-      const result = context.result as any;
-      if (result && typeof result === "object" && "data" in result) {
-        context.result = result.data;
+    afterResponse: async (response) => {
+      if (response.result?.errorCode === 200) {
+        return response;
       }
-      return context;
+      return Promise.reject(response);
     },
   };
 }
@@ -37,8 +36,8 @@ export async function getUserInfo(options: GetUserInfoOptions) {
   }
 
   return userRequest
-    .get(`${baseUrl}/customer/v1/${GCP_ORGANIZATION_ID}/user-self/get-user-info`, undefined, {
+    .get<UserInfo>(`${baseUrl}/customer/v1/${GCP_ORGANIZATION_ID}/user-self/get-user-info`, undefined, {
       headers,
     })
-    .json() as Promise<UserInfo>;
+    .json();
 }

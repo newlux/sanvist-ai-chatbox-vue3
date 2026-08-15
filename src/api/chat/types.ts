@@ -24,7 +24,7 @@ export interface ChatFile {
 
 export interface SendChatMessageParams {
   query: string;
-  user: string;
+  user?: string;
   conversationId: Identifier | null;
   language?: string;
   responseMode?: "streaming";
@@ -43,7 +43,12 @@ export interface StatusEvent {
   conversationId: Identifier;
   messageId: Identifier;
   data: {
-    stage: string;
+    stage?: string;
+    phase?: string;
+    node?: string;
+    call_id?: string;
+    duration_ms?: number;
+    tool_name?: string;
     message: string;
   };
 }
@@ -62,6 +67,7 @@ export interface ToolCallEvent {
   data: {
     name: string;
     args: Record<string, unknown>;
+    call_id?: string;
   };
 }
 
@@ -84,11 +90,13 @@ export interface MessageEndEvent {
   conversationId: Identifier;
   messageId: Identifier;
   metadata: {
-    is_end: true;
+    is_end: boolean;
     status: "succeeded" | "stopped" | "failed";
     reason: "normal" | "interrupt" | "timeout" | "exception";
-    message: string | null;
     duration_ms: number | null;
+    message?: string | null;
+    trace_id?: string;
+    timing?: Record<string, number>;
   };
 }
 
@@ -102,10 +110,10 @@ export type ChatStreamEvent =
   | MessageEndEvent;
 
 export interface ListConversationsParams {
-  user: string;
+  user?: string;
   lastId?: Identifier;
   limit?: number;
-  sortBy?: "created_at" | "-created_at" | "updated_at" | "-updated_at";
+  sortBy?: "created_at_asc" | "created_at_desc" | "updated_at_asc" | "updated_at_desc";
 }
 
 export interface Conversation {
@@ -127,23 +135,23 @@ export interface CursorPage<T> {
 }
 
 export interface GetConversationParams {
-  user: string;
+  user?: string;
 }
 
 export interface DeleteConversationParams {
-  user: string;
+  user?: string;
 }
 
 export interface ListMessagesParams {
   conversationId: Identifier;
-  user: string;
+  user?: string;
   firstId?: Identifier;
   limit?: number;
 }
 
 export interface GetMessageParams {
   conversationId: Identifier;
-  user: string;
+  user?: string;
 }
 
 export interface MessageFile extends Record<string, unknown> {
@@ -169,15 +177,18 @@ export interface ChatMessage {
 
 export interface GetFeedbackParams {
   conversationId: Identifier;
-  user: string;
+  user?: string;
 }
 
 export interface SubmitFeedbackParams extends GetFeedbackParams {
+  messageId: Identifier;
   rating: Feedback["rating"];
   content?: string;
 }
 
-export interface CancelFeedbackParams extends GetFeedbackParams {}
+export interface CancelFeedbackParams extends GetFeedbackParams {
+  messageId: Identifier;
+}
 
 export interface UploadedFile {
   fileId: string;
@@ -192,7 +203,7 @@ export interface UploadedFile {
 
 export interface UploadFileParams {
   file: File | Blob;
-  user: string;
+  user?: string;
 }
 
 export interface SpeechRecognitionResult {
