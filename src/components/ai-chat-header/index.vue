@@ -1,5 +1,4 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useSystemStore } from "@/stores";
 
@@ -7,13 +6,14 @@ defineOptions({ name: "AiChatHeader" });
 
 const props = defineProps({
   sessions: { type: Array, default: () => [] },
+  loadSessions: { type: Function, default: undefined },
   selectedSessionId: { type: [String, Number], default: "" },
+  generating: { type: Boolean, default: false },
   shareMode: { type: Boolean, default: false },
   shareSelectAllDisabled: { type: Boolean, default: false },
   shareAllChecked: { type: Boolean, default: false },
   shareSelectedRoundCount: { type: Number, default: 0 },
 });
-
 const emit = defineEmits([
   "back",
   "clear",
@@ -22,12 +22,16 @@ const emit = defineEmits([
   "session-delete",
   "session-delete-batch",
   "session-rename",
+  "update:sessions",
   "share-select-all",
 ]);
+
+console.log("🚀 ~ shareMode:", props.shareMode.value);
 
 const { t } = useI18n();
 const systemStore = useSystemStore();
 const historyPopup = ref();
+const sessionPaging = ref();
 const showActionMenu = ref(false);
 const actionSession = ref(null);
 const editingMode = ref(false);
@@ -35,26 +39,23 @@ const selectedIds = ref([]);
 const actionMenuTop = ref(220);
 const renamingId = ref("");
 const renameValue = ref("");
-const actionMenuOpenedAt = ref(0);
-const actionMenuCloseBlockedUntil = ref(0);
-let sessionPressTimer;
-let sessionPressFired = false;
+const ignoreNextLongPressReleaseTap = ref(false);
 
+const sessionList = computed({
+  get: () => props.sessions,
+  set: sessions => emit("update:sessions", sessions),
+});
 const actionMenuStyle = computed(() => ({ top: `${actionMenuTop.value}px` }));
+
 const statusbarStyle = computed(() => {
   const height = Number(systemStore.statusBarHeight) || 0;
   return height > 0 ? { height: `${height}px` } : { height: "env(safe-area-inset-top, 0px)" };
 });
-const drawerStyle = computed(() => {
-  const height = Number(systemStore.statusBarHeight) || 0;
-  return height > 0
-    ? { paddingTop: `${height + 12}px` }
-    : { paddingTop: "calc(24rpx + env(safe-area-inset-top, 0px))" };
-});
 
 function getSessionKey(session) {
-  return session?.sessionId || session?.id || "";
+  return session?.id || "";
 }
+
 function onBackTap() {
   emit("back");
 }
@@ -63,6 +64,16 @@ function onShareSelectAllTap() {
 }
 function openHistoryDrawer() {
   historyPopup.value?.open?.("left");
+  sessionPaging.value?.reload?.();
+}
+async function onSessionQuery(pageNo, pageSize) {
+  try {
+    const result = await props.loadSessions?.(pageNo, pageSize);
+    sessionPaging.value?.completeByNoMore?.(result?.data || [], !result?.hasMore);
+  } catch (error) {
+    console.error("[AiChatHeader] load sessions failed", error);
+    sessionPaging.value?.complete?.(false);
+  }
 }
 function closeDrawer() {
   historyPopup.value?.close?.("left");
@@ -80,29 +91,12 @@ function onNewConversationTap() {
   emit("new-conversation");
   closeDrawer();
 }
-function onSessionPressStart(session, event) {
-  if (editingMode.value) return;
-  if (renamingId.value) commitRename();
-  sessionPressFired = false;
-  clearTimeout(sessionPressTimer);
-  sessionPressTimer = setTimeout(() => {
-    sessionPressFired = true;
-    onSessionLongPress(session, event);
-  }, 450);
-}
-function onSessionPressEnd() {
-  clearTimeout(sessionPressTimer);
-  sessionPressTimer = undefined;
-  if (sessionPressFired) actionMenuOpenedAt.value = Date.now();
-}
-function onSessionPressCancel() {
-  clearTimeout(sessionPressTimer);
-  sessionPressTimer = undefined;
-}
+
 function onSessionLongPress(session, event) {
   if (editingMode.value) return;
   if (renamingId.value) commitRename();
   actionSession.value = session || null;
+  ignoreNextLongPressReleaseTap.value = true;
   const point = event?.changedTouches?.[0] || event?.touches?.[0] || event?.detail || {};
   const y = Number(point.clientY || point.pageY || event?.clientY || 220);
   let top = y + 18;
@@ -117,19 +111,27 @@ function onSessionLongPress(session, event) {
     top = Math.max(88, top);
   }
   actionMenuTop.value = top;
-  actionMenuOpenedAt.value = Date.now();
-  actionMenuCloseBlockedUntil.value = actionMenuOpenedAt.value + 450;
   showActionMenu.value = true;
 }
+
+function consumeLongPressReleaseTap() {
+  if (!ignoreNextLongPressReleaseTap.value) return false;
+  ignoreNextLongPressReleaseTap.value = false;
+  return true;
+}
+
 function closeActionMenu() {
-  if (Date.now() >= actionMenuCloseBlockedUntil.value) showActionMenu.value = false;
+  if (consumeLongPressReleaseTap()) return;
+  showActionMenu.value = false;
 }
 function onDrawerTap() {
   if (renamingId.value) commitRename();
 }
+
 function onRenameTap() {}
 
 function onSessionTap(session) {
+  if (consumeLongPressReleaseTap()) return;
   if (editingMode.value) {
     const id = getSessionKey(session);
     if (!id) return;
@@ -138,8 +140,7 @@ function onSessionTap(session) {
       : [...selectedIds.value, id];
     return;
   }
-  if (showActionMenu.value || Date.now() - actionMenuOpenedAt.value < 320 || renamingId.value)
-    return;
+  if (showActionMenu.value || renamingId.value) return;
   emit("session-click", session);
   closeDrawer();
 }
@@ -152,30 +153,33 @@ function deleteOne() {
   if (session && getSessionKey(session)) emit("session-delete", session);
 }
 function renameOne() {
-  if (Date.now() - actionMenuOpenedAt.value < 220) return;
   const session = actionSession.value;
   closeActionMenu();
   const id = getSessionKey(session);
   if (!session || !id) return;
   renamingId.value = id;
-  renameValue.value = session.title || "";
+  renameValue.value = session.name || "";
 }
+
 function onRenameInput(event) {
   renameValue.value = String(event?.detail?.value || "");
 }
+
 function commitRename() {
   const id = renamingId.value;
   if (!id) return;
   const target = props.sessions.find(session => getSessionKey(session) === id);
-  const title = renameValue.value.trim();
-  if (target && title && title !== (target.title || ""))
-    emit("session-rename", { ...target, title });
+  const name = renameValue.value.trim();
+  if (target && name && name !== (target.name || ""))
+    emit("session-rename", { ...target, name });
+
   renamingId.value = "";
   renameValue.value = "";
 }
+
 function onRenameBlur() {}
+
 function enterMultiSelect() {
-  if (Date.now() - actionMenuOpenedAt.value < 220) return;
   showActionMenu.value = false;
   if (renamingId.value) commitRename();
   editingMode.value = true;
@@ -189,7 +193,6 @@ function deleteSelected() {
   if (selectedIds.value.length) emit("session-delete-batch", [...selectedIds.value]);
   cancelMultiSelect();
 }
-onBeforeUnmount(() => clearTimeout(sessionPressTimer));
 </script>
 
 <template>
@@ -211,9 +214,43 @@ onBeforeUnmount(() => clearTimeout(sessionPressTimer));
             </view>
           </view>
 
-          <view class="chat-header__title-wrap">
+          <view
+            class="chat-header__title-wrap"
+            :class="{ 'chat-header__title-wrap--generating': props.generating }"
+          >
+            <svg
+              v-if="props.generating"
+              class="chat-header__generating-border"
+              viewBox="0 0 260 72"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <defs>
+                <linearGradient id="generating-border-gradient" x1="0" y1="0" x2="260" y2="0" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#fff5f5" />
+                  <stop offset="26%" stop-color="#ffd0d0" />
+                  <stop offset="50%" stop-color="#ff9595" />
+                  <stop offset="74%" stop-color="#ff5151" />
+                  <stop offset="100%" stop-color="#d90000" />
+                  <animateTransform attributeName="gradientTransform" type="rotate" from="0 130 36" to="360 130 36" dur="2.4s" repeatCount="indefinite" />
+                </linearGradient>
+              </defs>
+              <rect
+                x="2" y="2" width="256" height="68" rx="34"
+                fill="none"
+                stroke="url(#generating-border-gradient)"
+                stroke-width="2.4"
+              >
+                <animate attributeName="stroke-width" values="2.4;4;2.4" dur="1.8s" repeatCount="indefinite" />
+                <animate attributeName="stroke-opacity" values=".76;1;.76" dur="1.8s" repeatCount="indefinite" />
+              </rect>
+            </svg>
+            <view v-if="props.generating" class="chat-header__generating-mark">
+              <view />
+              <view />
+            </view>
             <text class="chat-header__title">
-              AI 问问
+              {{ props.generating ? '正在生成回答' : 'Noyi 休息中..' }}
             </text>
           </view>
 
@@ -273,10 +310,11 @@ onBeforeUnmount(() => clearTimeout(sessionPressTimer));
         ref="historyPopup"
         type="left"
         :animation="true"
+        background-color="#ffffff"
         :safe-area="true"
         :is-mask-click="true"
       >
-        <view class="history-drawer" :style="drawerStyle" @tap.stop="onDrawerTap">
+        <view class="history-drawer" @tap.stop="onDrawerTap">
           <view class="history-drawer__top">
             <image
               src="@/assets/img/icon-ai.png"
@@ -304,22 +342,25 @@ onBeforeUnmount(() => clearTimeout(sessionPressTimer));
               历史回答
             </text>
           </view>
-          <scroll-view
+          <z-paging
+            ref="sessionPaging"
+            v-model="sessionList"
             class="history-drawer__list-wrap"
-            scroll-y
-            :scroll-with-animation="true"
-            @scroll="onSessionPressCancel"
+            :auto="false"
+            :fixed="false"
+            height="100%"
+            :use-page-scroll="false"
+            :default-page-size="20"
+            :refresher-enabled="false"
+            empty-view-text="暂无历史会话"
+            @query="onSessionQuery"
           >
             <view class="history-drawer__list">
               <view
-                v-for="session in sessions"
+                v-for="session in sessionList"
                 :key="getSessionKey(session)"
                 class="history-drawer__row"
                 :class="{ 'history-drawer__row--editing': editingMode }"
-                @mousedown.stop="onSessionPressStart(session, $event)"
-                @mouseup.stop="onSessionPressEnd"
-                @mouseleave="onSessionPressCancel"
-                @mousemove="onSessionPressCancel"
                 @longpress="onSessionLongPress(session, $event)"
                 @tap="onSessionTap(session)"
               >
@@ -345,7 +386,7 @@ onBeforeUnmount(() => clearTimeout(sessionPressTimer));
                   }"
                 >
                   <text class="history-drawer_item-label">
-                    {{ session.title || "新对话" }}
+                    {{ session.name || "新对话" }}
                   </text>
                 </view>
                 <view v-if="editingMode" class="history-drawer__check">
@@ -364,7 +405,7 @@ onBeforeUnmount(() => clearTimeout(sessionPressTimer));
                 </view>
               </view>
             </view>
-          </scroll-view>
+          </z-paging>
 
           <view v-if="editingMode" class="history-drawer__multi-footer">
             <view class="history-drawer__multi-btn" @tap="cancelMultiSelect">
@@ -429,16 +470,14 @@ onBeforeUnmount(() => clearTimeout(sessionPressTimer));
 </template>
 
 <style lang="scss" scoped>
+.ai-chat-header {
+  position: relative;
+}
+
 .chat-header {
-  // 40815:506 本身无背景色，背景由页面容器承担
-  background: transparent;
   position: sticky;
   top: 0;
   z-index: 10;
-}
-
-.ai-chat-header {
-  position: relative;
 }
 
 .chat-header__statusbar {
@@ -451,9 +490,10 @@ onBeforeUnmount(() => clearTimeout(sessionPressTimer));
   height: 100rpx; // 50px
   display: flex;
   align-items: center;
-  padding: 26rpx 32rpx; // 13px 16px
+  padding: 8rpx 40rpx; // 4px 20px
   box-sizing: border-box;
   gap: 12rpx; // 6px
+  justify-content: space-between;
 }
 
 .chat-header__icon-btn {
@@ -469,23 +509,77 @@ onBeforeUnmount(() => clearTimeout(sessionPressTimer));
 }
 
 .chat-header__title-wrap {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 218rpx;
+  height: 72rpx;
+  padding: 0 24rpx;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 36rpx;
+  backdrop-filter: blur(32rpx);
+  -webkit-backdrop-filter: blur(32rpx);
+  box-shadow: 0 4rpx 8rpx rgba(238, 26, 26, 0.09);
 }
 
+.chat-header__title-wrap--generating {
+  position: relative;
+  min-width: 260rpx;
+  height: 72rpx;
+  gap: 12rpx;
+  padding: 0 28rpx;
+  border: 0;
+  border-radius: 36rpx;
+  background: rgba(255, 255, 255, .9);
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, .08);
+}
+
+.chat-header__generating-border {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.chat-header__title-wrap--generating > *:not(.chat-header__generating-border) {
+  position: relative;
+  z-index: 1;
+}
+
+.chat-header__generating-mark {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.chat-header__generating-mark view {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: #fe0000;
+  animation: header-generating 1.2s ease-in-out infinite;
+}
+
+.chat-header__generating-mark view:nth-child(2) { animation-delay: .16s; }
+
 .chat-header__title {
-  font-size: 32rpx; // 16px
-  font-weight: 600;
-  color: #232323;
-  line-height: 36rpx; // 18px
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #1a1a1a;
+  line-height: 36rpx;
+  letter-spacing: 0;
+}
+
+@keyframes header-generating {
+  0%, 100% { opacity: .35; transform: scale(.84); }
+  50% { opacity: 1; transform: scale(1); }
 }
 
 // --- icons (用 CSS 近似 Figma 形状，后续可替换为 svg 资源) ---
 .chat-header__icon-history {
-  width: 30rpx;
-  height: 18rpx;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -506,19 +600,11 @@ onBeforeUnmount(() => clearTimeout(sessionPressTimer));
 }
 
 .chat-header__icon-atlas {
-  width: 36rpx;
-  height: 36rpx;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.chat-header__icon-atlas-stroke {
-  width: 28rpx;
-  height: 28rpx;
-  border: 4rpx solid #232323;
-  border-radius: 6rpx;
-}
 .chat-header__icon-history-img {
   width: 48rpx;
   height: 48rpx;

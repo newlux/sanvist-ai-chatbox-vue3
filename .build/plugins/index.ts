@@ -35,6 +35,7 @@ function plugins({ mode, command }: ConfigEnv): PluginOption[] {
     h5PostBuild({ outDirName: env.VITE_H5_OUT_DIR }),
     codeInspectorPlugin({
       bundler: "vite",
+      editor: "codebuddy",
     }),
   ];
 }

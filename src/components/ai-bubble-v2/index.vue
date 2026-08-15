@@ -1,9 +1,11 @@
 <script setup>
 import { computed } from "vue";
 
-import iconBadFill from "@/assets/img/icon-bad-fill.svg";
+import iconCopy from "@/assets/img/icon-action-copy.svg";
+import iconShare from "@/assets/img/icon-action-share.svg";
+import iconBadFilled from "@/assets/img/icon-bad-fill.svg";
 import iconBad from "@/assets/img/icon-bad.svg";
-import iconGoodFill from "@/assets/img/icon-good-fill.svg";
+import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
 
 import AiContentBlocks from "./AiContentBlocks.vue";
@@ -18,7 +20,8 @@ const props = defineProps({
   ttsEnabled: { type: Boolean, default: false },
   ttsLoading: { type: Boolean, default: false },
   showActions: { type: Boolean, default: false },
-  showRefresh: { type: Boolean, default: false },
+  waitingText: { type: String, default: "" },
+  durationMs: { type: Number, default: null },
   positive: { type: Boolean, default: null },
   selected: { type: Boolean, default: false },
   suppressHighlight: { type: Boolean, default: false },
@@ -33,7 +36,7 @@ const emit = defineEmits([
   "tts-click",
   "share-click",
   "feedback-change",
-  "refresh-click",
+  "copy-click",
   "select-toggle",
 ]);
 
@@ -50,16 +53,12 @@ function onSuggestionTap(event) {
   emit("suggestion-tap", event);
 }
 
-function onTtsTap() {
-  if (!props.ttsLoading) emit("tts-click");
-}
-
 function onShareTap() {
   emit("share-click");
 }
 
-function onRefreshTap() {
-  emit("refresh-click");
+function onCopyTap() {
+  emit("copy-click");
 }
 
 function onFeedbackChange(value) {
@@ -112,45 +111,57 @@ function onNegativeFeedback() {
       </text>
 
       <template v-else>
+        <view v-if="props.waitingText" class="ai-bubble-v2__waiting">
+          <text class="ai-bubble-v2__waiting-mark">
+            ✓
+          </text>
+          <text class="ai-bubble-v2__waiting-label">
+            等待模型响应：
+          </text>
+          <text class="ai-bubble-v2__waiting-query">
+            {{ props.waitingText }}
+          </text>
+          <text class="ai-bubble-v2__waiting-suffix">
+            努力链接中
+          </text>
+        </view>
         <AiContentBlocks
           :blocks="visibleBlocks"
           :force-thinking-expanded="props.forceThinkingExpanded"
           @suggestion-tap="onSuggestionTap"
         />
-        <!-- loading -->
-        <view v-if="props.loading" class="ai-bubble-v2__streaming">
-          <view class="ai-bubble-v2__typing">
-            <view class="ai-bubble-v2__dot" />
-            <view class="ai-bubble-v2__dot" />
-            <view class="ai-bubble-v2__dot" />
-          </view>
-        </view>
-
         <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
-          <view class="ai-bubble-v2__actions-left">
-            <view
-              v-if="props.ttsEnabled"
-              class="ai-bubble-v2__action-btn"
-              :class="{ 'ai-bubble-v2__action-btn--disabled': props.ttsLoading }"
-              @tap.stop="onTtsTap"
-            >
-              <image src="@/assets/img/icon-sound.svg" mode="aspectFit" class="ai-bubble-v2__action-icon" />
-            </view>
-            <view class="ai-bubble-v2__action-btn" @tap.stop="onShareTap">
-              <image src="@/assets/img/icon-share.svg" mode="aspectFit" class="ai-bubble-v2__action-icon" />
-            </view>
-            <view v-if="props.showRefresh" class="ai-bubble-v2__action-btn" @tap.stop="onRefreshTap">
-              <image src="@/assets/img/icon-refresh.svg" mode="aspectFit" class="ai-bubble-v2__action-icon" />
-            </view>
+          <view class="ai-bubble-v2__action-btn" @tap.stop="onCopyTap">
+            <image :src="iconCopy" mode="aspectFit" class="ai-bubble-v2__action-icon" />
           </view>
-          <view class="ai-bubble-v2__actions-right">
-            <view class="ai-bubble-v2__action-btn" @tap.stop="onPositiveFeedback">
-              <image :src="props.positive === true ? iconGoodFill : iconGood" mode="aspectFit" class="ai-bubble-v2__action-icon" />
-            </view>
-            <view class="ai-bubble-v2__action-btn" @tap.stop="onNegativeFeedback">
-              <image :src="props.positive === false ? iconBadFill : iconBad" mode="aspectFit" class="ai-bubble-v2__action-icon" />
-            </view>
+          <view class="ai-bubble-v2__action-btn" @tap.stop="onShareTap">
+            <image :src="iconShare" mode="aspectFit" class="ai-bubble-v2__action-icon" />
           </view>
+          <view
+            class="ai-bubble-v2__action-btn"
+            :class="{ 'ai-bubble-v2__action-btn--liked': props.positive === true }"
+            @tap.stop="onPositiveFeedback"
+          >
+            <image
+              :src="props.positive === true ? iconGoodFilled : iconGood"
+              mode="aspectFit"
+              class="ai-bubble-v2__action-icon"
+            />
+          </view>
+          <view
+            class="ai-bubble-v2__action-btn"
+            :class="{ 'ai-bubble-v2__action-btn--disliked': props.positive === false }"
+            @tap.stop="onNegativeFeedback"
+          >
+            <image
+              :src="props.positive === false ? iconBadFilled : iconBad"
+              mode="aspectFit"
+              class="ai-bubble-v2__action-icon"
+            />
+          </view>
+          <text v-if="props.durationMs !== null" class="ai-bubble-v2__duration">
+            已消耗 {{ props.durationMs }} ms
+          </text>
         </view>
       </template>
     </view>
@@ -160,7 +171,7 @@ function onNegativeFeedback() {
 <style lang="scss" scoped>
 .ai-bubble-v2 {
   display: flex;
-  margin-bottom: 32rpx;
+  margin-bottom: 40rpx;
 }
 
 .ai-bubble-v2--selected { justify-content: space-between; }
@@ -168,19 +179,50 @@ function onNegativeFeedback() {
 .ai-bubble-v2__check { width: 40rpx; padding-left: 32rpx; display: flex; align-items: center; flex-shrink: 0; }
 .ai-bubble-v2__check-img { width: 32rpx; height: 32rpx; }
 .ai-bubble-v2__body { flex: 1; min-width: 0; overflow: hidden; box-sizing: border-box; }
-.ai-bubble-v2--user .ai-bubble-v2__body { flex: 0 1 auto; max-width: calc(100% - 64rpx); padding: 24rpx 32rpx; border-radius: 20rpx; background: linear-gradient(98deg, #ffe7e7 -3.78%, #f0f3ff 118.21%); }
+.ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
+  padding: 40rpx;
+  border: 1rpx solid #eeeeee;
+  border-radius: 32rpx;
+  background: #ffffff;
+  box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
+}
+.ai-bubble-v2--user .ai-bubble-v2__body {
+  flex: 0 1 auto;
+  max-width: calc(100% - 64rpx);
+  padding: 22rpx 32rpx;
+  border-radius: 28rpx;
+  background: #c8201e;
+}
 .ai-bubble-v2__body--highlighted { background: rgba(248, 49, 94, .06); }
-.ai-bubble-v2__user-content { font-size: 28rpx; line-height: 1.75; color: #1f2937; white-space: pre-wrap; word-break: break-word; }
+.ai-bubble-v2--user .ai-bubble-v2__user-content {
+  font-size: 28rpx;
+  line-height: 40rpx;
+  color: #ffffff;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ai-bubble-v2__waiting { display: flex; align-items: center; flex-wrap: wrap; gap: 8rpx; margin-bottom: 24rpx; color: #a5a5a5; font-family: "PingFang SC"; font-size: 26rpx; line-height: 36rpx; }
+.ai-bubble-v2__waiting-mark { color: #a5a5a5; font-size: 24rpx; line-height: 36rpx; }
+.ai-bubble-v2__waiting-label, .ai-bubble-v2__waiting-query, .ai-bubble-v2__waiting-suffix { color: #a5a5a5; font-weight: 400; }
+.ai-bubble-v2__duration { color: #bababa; font-size: 22rpx; line-height: 32rpx; white-space: nowrap; }
 .ai-bubble-v2__typing { display: flex; gap: 8rpx; align-items: center; padding: 6rpx 4rpx; }
 .ai-bubble-v2__dot { width: 12rpx; height: 12rpx; border-radius: 50%; background: #bbc0c9; animation: typing-blink 1.2s infinite; }
 .ai-bubble-v2__dot:nth-child(2) { animation-delay: .2s; }
 .ai-bubble-v2__dot:nth-child(3) { animation-delay: .4s; }
 .ai-bubble-v2__streaming { padding-top: 24rpx; }
-.ai-bubble-v2__actions { display: flex; justify-content: space-between; padding: 24rpx 0; }
-.ai-bubble-v2__actions-left, .ai-bubble-v2__actions-right { display: flex; align-items: center; gap: 40rpx; }
-.ai-bubble-v2__action-btn { width: 36rpx; height: 36rpx; display: flex; align-items: center; justify-content: center; }
+.ai-bubble-v2__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 28rpx;
+  margin-top: 32rpx;
+  padding-top: 28rpx;
+  border-top: 2rpx solid #f0f0f2;
+}
+.ai-bubble-v2__action-btn { width: 32rpx; height: 32rpx; display: flex; align-items: center; justify-content: center; }
 .ai-bubble-v2__action-btn--disabled { opacity: .6; }
-.ai-bubble-v2__action-icon { width: 36rpx; height: 36rpx; }
+.ai-bubble-v2__action-icon { width: 32rpx; height: 32rpx; }
+.ai-bubble-v2__duration { margin-left: 8rpx; }
 
 @keyframes typing-blink { 0%, 80%, 100% { opacity: .2; transform: scale(.8); } 40% { opacity: 1; transform: scale(1); } }
 </style>

@@ -1,6 +1,15 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRefs, watch } from "vue";
+import { onShow } from "@dcloudio/uni-app";
+import { useHookFetch } from "hook-fetch/vue";
 import { useI18n } from "vue-i18n";
+import {
+  cancelFeedback,
+  deleteConversation,
+  getConversations,
+  interruptChat,
+  sendChatMessage,
+  submitFeedback,
+} from "@/api/chat";
 import iconCopyLink from "@/assets/img/icon-copyLink.svg";
 import iconShareImage from "@/assets/img/icon-shareImage.svg";
 import { GCPAPI } from "@/common/api/gcp";
@@ -10,17 +19,25 @@ import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
-import AiWelcome from "@/components/ai-welcome/index.vue";
 
+import AiWelcome from "@/components/ai-welcome/index.vue";
 import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
-import { useSystemStore } from "@/stores";
-import { parseHistoryBlocks, parseSseBlocks } from "@/utils/ai-stream/sseParser";
-import { getConversations } from "@/api/chat";
+import { useSystemStore, useUserStore } from "@/stores";
+import {
+  applyEventToBlocks,
+  buildInitialBlocks,
+} from "@/utils/ai-stream/chatStreamParser";
+import { parseHistoryBlocks } from "@/utils/ai-stream/sseParser";
 
 defineOptions({ name: "AiChatPage" });
 
 const { t } = useI18n();
 const systemStore = useSystemStore();
+const userStore = useUserStore();
+const { stream, cancel } = useHookFetch({
+  request: sendChatMessage,
+  onError: error => console.error("[AiChatPage] stream request failed", error),
+});
 const sharePosterWrap = ref(null);
 
 const state = reactive({
@@ -29,16 +46,8 @@ const state = reactive({
   sessions: [],
   // 快捷提示词（后续由接口提供；这里用本地默认值兜底）
   quickPrompts: [
-    "今天有多少台设备在线？在线率是多少？",
-    "BC5230CG1750 设备现在怎么样？帮我看一下BC5230CG1750设备的实时工况。",
-    "BC5230CG1750设备现在在哪里？给我看一下BC5230CG1750设备的经纬度。",
-    "帮我查下设备BC5230CG1733在7月14日的行驶轨迹？",
-    "BC5230CG1750设备还剩多少油/电？需要加油/充电吗？",
-    "BC5230CG1750设备当前关键参数怎么样？吊重、转速或温度是多少？",
-    "看看BC5230CG1733设备上周/本月的运营情况。",
-    "BC5230CG1733设备本月工作多久？工作了几天？日均工时多少？",
-    "BC5230CG1733设备上周用了多少油/电？平均能耗怎么样？",
-    "BC5230CG1733设备本月跑了多少公里、泵了多少方或吊了多少次？",
+    "设备的在线或离线情况",
+    "最近 7 天设备作业情况",
   ],
   showQuickPrompts: true,
   showQuickList: true,
@@ -93,12 +102,9 @@ const state = reactive({
 
   /** AI 会话 id：首条为 null，send 成功后由接口返回写入 */
   aiSessionId: null,
-  /** 避免同一 userId 重复拉会话列表 */
-  _sessionListFetchedForUserId: null,
   /** 会话列表游标分页 */
   _sessionHasMore: true,
   _sessionLastId: null,
-  _sessionLoading: false,
 });
 
 const {
@@ -122,6 +128,7 @@ const {
   scrollIntoView,
   aiSessionId,
 } = toRefs(state);
+console.log("🚀 ~ stage:", stage);
 
 const shareSheetOptions = computed(() => {
   return [
@@ -193,16 +200,10 @@ watch(
 );
 
 watch(
-  () => systemStore.userId,
+  () => userStore.userId,
   (val) => {
-    const id = val != null && String(val).trim() !== "" ? String(val).trim() : "";
-    if (!id) {
-      state._sessionListFetchedForUserId = null;
-      return;
-    }
-    if (state._sessionListFetchedForUserId === id) return;
-    state._sessionListFetchedForUserId = id;
-    getAISessionList();
+    if (!val) return;
+    getAISessionList().catch(error => console.error("[AiChatPage] preload sessions failed", error));
   },
   { immediate: true },
 );
@@ -296,63 +297,42 @@ function onKeyboardHeightChange(heightPx) {
   }, 200);
 }
 
-function _nextRequestSeq() {
-  const cur = Number(state._requestSeq);
-  const safeCur = Number.isFinite(cur) ? cur : 0;
-  const next = safeCur + 1;
-  state._requestSeq = next;
-  state._activeRequestSeq = next;
-  return next;
-}
-
 function _cancelActiveStream() {
-  // 取消上一次流式请求（仅对 fetch-stream 环境有效）
-  if (state._activeReplyAbortFn) {
-    try {
-      state._activeReplyAbortFn();
-    } catch (e) {
-      console.error("[AiChatPage] caught error", e);
-      // ignore
-    }
-    state._activeReplyAbortFn = null;
-  }
-
-  try {
-    if (state._activeStreamHardTimeout) {
-      clearTimeout(state._activeStreamHardTimeout);
-    }
-  } catch (e) {
-    console.error("[AiChatPage] caught error", e);
-    // ignore
-  }
-
-  state._activeStreamHardTimeout = null;
-
-  try {
-    if (state._activeStreamAbortController) {
-      state._activeStreamAbortController.abort();
-    }
-  } catch (e) {
-    console.error("[AiChatPage] caught error", e);
-    // ignore
-  }
-
-  state._activeStreamAbortController = null;
-
-  // 无论底层是否支持 abort，都要立即结束上一次 AI 占位 loading
   const idx = Number(state._activeAiMsgIndex);
-  if (Number.isInteger(idx) && idx >= 0) {
-    const cur = state.messages[idx];
-    if (cur && cur.loading) {
-      _replaceMessage(idx, {
-        ...cur,
-        loading: false,
-        interrupted: true,
-      });
-    }
+  const activeMessage = Number.isInteger(idx) && idx >= 0 ? state.messages[idx] : null;
+
+  state._activeRequestSeq = state._requestSeq + 1;
+  state._requestSeq = state._activeRequestSeq;
+  try {
+    cancel();
+  } catch (error) {
+    console.error("[AiChatPage] failed to cancel stream", error);
+  }
+
+  if (activeMessage?.sessionId && activeMessage?.messageId) {
+    interruptChat({
+      conversationId: activeMessage.sessionId,
+      messageId: activeMessage.messageId,
+    }).catch(error => console.error("[AiChatPage] failed to interrupt chat", error));
+  }
+
+  if (activeMessage?.loading) {
+    _replaceMessage(idx, {
+      ...activeMessage,
+      loading: false,
+      interrupted: true,
+    });
   }
   state._activeAiMsgIndex = -1;
 }
+
+function stopGenerating() {
+  if (!state.isLoading) return;
+  _cancelActiveStream();
+  state.isLoading = false;
+  _scrollToBottom();
+}
+
 function onShareClick(payload) {
   const group = Array.isArray(payload?.group) ? payload.group : [];
   state.shareSelectedIndexes = group;
@@ -519,7 +499,6 @@ async function _generateSharePosterLongImage() {
   }
 
   // html2canvas 只在 Web 环境工作
-  const html2canvas = require("html2canvas");
   const elFromDom =
     typeof document !== "undefined" ? document.getElementById("share-poster-wrap") : null;
   const el = elFromDom || sharePosterWrap.value;
@@ -570,7 +549,7 @@ async function _generateSharePosterLongImage() {
     (typeof document !== "undefined" &&
       document.documentElement &&
       document.documentElement.clientHeight) ||
-    0;
+      0;
   const minHeightPx = viewportH ? viewportH * 0.75 : 0;
   if (minHeightPx && finalHeightPx < minHeightPx) {
     finalHeightPx = minHeightPx;
@@ -601,7 +580,7 @@ async function _generateSharePosterLongImage() {
     (typeof document !== "undefined" &&
       document.documentElement &&
       document.documentElement.clientWidth) ||
-    0;
+      0;
   const minWidthPx = viewportW ? viewportW * 0.6 : 0;
   // JS 侧按 px 计算：把 580rpx 转成 px
   const rpxToPx = viewportW ? viewportW / 750 : 1;
@@ -666,8 +645,7 @@ async function onSaveSharePoster() {
   if (typeof window !== "undefined" && window.AlipayJSBridge?.call) {
     const granted = await new Promise((resolve) => {
       window.AlipayJSBridge.call("requestPermission", { permissions: "photo" }, result =>
-        resolve(String(result?.result) === "1" || result?.status === "granted"),
-      );
+        resolve(String(result?.result) === "1" || result?.status === "granted"));
     });
     if (!granted) {
       uni.showToast({ title: "请允许访问相册", icon: "none", duration: 3000 });
@@ -707,51 +685,12 @@ function _resetToQuickPrompts() {
   state.showQuickPrompts = true;
   state.showQuickList = true;
 }
-function _toAiBlocks(rawText = "") {
-  const text = String(rawText || "").trim();
-  const blocks = parseSseBlocks(text);
-  if (blocks.length) return blocks;
-  if (!text) return [];
-  return [
-    {
-      id: "answer-0",
-      type: "answer",
-      payload: { content: text },
-      complete: true,
-    },
-  ];
-}
-function _mergeStreamBlocks(previous, next) {
-  const previousById = new Map(
-    (Array.isArray(previous) ? previous : []).map(block => [block.id, block]),
-  );
-  return (Array.isArray(next) ? next : []).map((block) => {
-    const oldBlock = previousById.get(block.id);
-    if (block.type === "chart" && oldBlock) {
-      return { ...oldBlock, complete: block.complete };
-    }
-    return block;
-  });
-}
-function _applyStreamText(messageIndex, rawSseText, requestSeq) {
-  if (requestSeq !== state._activeRequestSeq) return [];
-  const current = state.messages[messageIndex];
-  if (!current) return [];
-  const blocks = _mergeStreamBlocks(current.blocks, parseSseBlocks(rawSseText));
-  _replaceMessage(messageIndex, {
-    ...current,
-    rawSseText,
-    blocks,
-    loading: true,
-  });
-  return blocks;
-}
 function _mapHistoryMessages(list) {
   const rows = Array.isArray(list) ? list : [];
   const mapped = [];
   rows.forEach((item) => {
-    const sessionId = state.aiSessionId || item?.sessionId || null;
-    const messageId = item?.messageId ?? null;
+    const sessionId = state.aiSessionId || item?.conversationId || item?.sessionId || null;
+    const messageId = item?.id ?? item?.messageId ?? null;
     const userText = String(item?.userMessage || "").trim();
     const aiText = String(item?.outputMessage || "").trim();
     if (userText) {
@@ -785,9 +724,10 @@ function _mapHistoryMessages(list) {
   });
   return mapped;
 }
+
 async function loadSessionHistory(sessionId) {
   if (!sessionId) return;
-  const userId = systemStore.userId || "user_001";
+  const userId = userStore.userId;
   const res = await GCPAPI.fetchAISessionHistory(sessionId)({
     userId,
     limit: 15,
@@ -799,19 +739,39 @@ async function loadSessionHistory(sessionId) {
   state.showQuickList = false;
   nextTick(() => _scrollToBottom());
 }
-async function getAISessionList() {
+
+async function getAISessionList(pageNo = 1, pageSize = 20) {
+  const user = String(userStore.userId || "");
+  if (!user) return { data: [], hasMore: false };
+
+  if (pageNo === 1) {
+    state._sessionLastId = null;
+    state._sessionHasMore = true;
+  }
+
   try {
-    const res = await GCPAPI.fetchAISessionList({
-      userId: systemStore.userId || "user_001",
+    const res = await getConversations({
+      user,
+      lastId: pageNo > 1 ? state._sessionLastId || undefined : undefined,
+      limit: pageSize,
+      sortBy: "updated_at_desc",
     });
-    state.sessions = res.sessions || [];
-    return state.sessions;
+    const page = res.data;
+    const sessions = Array.isArray(page?.data) ? page.data : [];
+
+    state._sessionLastId = sessions.at(-1)?.id || null;
+    state._sessionHasMore = Boolean(page?.hasMore);
+    state.sessions = pageNo === 1
+      ? sessions
+      : [...state.sessions, ...sessions.filter(session => !state.sessions.some(item => item.id === session.id))];
+
+    return { data: sessions, hasMore: state._sessionHasMore };
   } catch (e) {
-    console.error("[AiChatPage] caught error", e);
-    console.error("getAISessionList failed", e);
-    return [];
+    console.error("[AiChatPage] getAISessionList failed", e);
+    throw e;
   }
 }
+
 function goToChat() {
   try {
     uni.setStorageSync(AI_ASK_WELCOME_DONE_KEY, true);
@@ -824,6 +784,10 @@ function goToChat() {
 
 /** 已要求欢迎页仅首次展示，返回不再回到欢迎页，优先退出当前页 */
 function backToWelcome() {
+  if (userStore.isVisitor) {
+    userStore.setVisitorRole(null);
+    userStore.setUserId("");
+  }
   const bridge = globalThis.AlipayJSBridge;
   if (bridge?.call) {
     bridge.call("popWindow");
@@ -831,7 +795,6 @@ function backToWelcome() {
   }
 
   const pages = getCurrentPages();
-  console.log("backToWelcome", pages);
   if (pages.length > 1) {
     uni.navigateBack({ delta: 1 });
   }
@@ -858,10 +821,11 @@ async function onSessionClick(session) {
     state.isSessionSwitching = false;
   }
 }
+
 async function onSessionDelete(session) {
-  const id = session?.sessionId || session?.id;
+  const id = session?.id;
   if (!id) return;
-  const userId = systemStore.userId || "user_001";
+  const userId = userStore.userId;
   const modalRes = await new Promise((resolve) => {
     uni.showModal({
       title: "删除此对话？",
@@ -873,12 +837,11 @@ async function onSessionDelete(session) {
   });
   if (!modalRes?.confirm) return;
   try {
-    await GCPAPI.deleteAISession(id, userId)();
+    await deleteConversation(id, { user: String(userId || "") });
     await getAISessionList();
     if (String(state.aiSessionId) === String(id)) {
       // 删除命中当前选中会话：回到默认状态（logo + 快捷问题）
       _resetToQuickPrompts();
-      1;
     }
   } catch (e) {
     console.error("[AiChatPage] caught error", e);
@@ -894,18 +857,15 @@ async function onSessionDeleteBatch(ids) {
   if (!idSet.size) return;
   const modalRes = await new Promise((resolve) => {
     uni.showModal({
-      title: t("delete-title"),
-      content: t("batch-delete-confirm-content", {
-        count: idSet.size,
-      }),
-      confirmText: t("delete-confirm-text"),
+      title: "批量删除选中对话？",
+      content: `删除后，选中对话记录将无法找回。确定删除选中对话？`,
       confirmColor: "#F8315E",
       success: res => resolve(res),
       fail: () => resolve({ confirm: false }),
     });
   });
   if (!modalRes?.confirm) return;
-  const userId = systemStore.userId || "user_001";
+  const userId = userStore.userId;
   try {
     await GCPAPI.batchDeleteAISession({
       userId,
@@ -926,20 +886,20 @@ async function onSessionDeleteBatch(ids) {
 }
 
 async function onSessionRename(session) {
-  const id = session?.sessionId || session?.id;
-  const title = (session?.title || "").trim();
-  if (!id || !title) return;
-  const userId = systemStore.userId || "user_001";
+  const id = session?.id;
+  const name = (session?.name || "").trim();
+  if (!id || !name) return;
+  const userId = userStore.userId;
   try {
     await GCPAPI.updateAISession(id)({
       userId,
-      title: title.slice(0, 200),
+      title: name.slice(0, 200),
     });
     state.sessions = state.sessions.map(x =>
       (x.sessionId || x.id) === id
         ? {
             ...x,
-            title,
+            name,
           }
         : x,
     );
@@ -958,10 +918,11 @@ async function onFeedbackChange(payload) {
   const msg = payload?.msg || {};
   const value = payload?.value || "";
   const targetMsg = Number.isInteger(index) ? state.messages[index] : null;
-  const sessionId = msg?.sessionId || targetMsg?.sessionId || state.aiSessionId;
-  const messageId = msg?.messageId || targetMsg?.messageId;
+  const conversationId = msg?.conversationId || msg?.sessionId || targetMsg?.conversationId || targetMsg?.sessionId || state.aiSessionId;
+  const messageId = msg?.messageId ?? targetMsg?.messageId ?? msg?.id ?? targetMsg?.id;
+  const user = userStore.userId || undefined;
 
-  if (!targetMsg || !sessionId || !messageId) {
+  if (!targetMsg || !conversationId || !messageId) {
     uni.showToast({
       title: t("feedback-unavailable"),
       icon: "none",
@@ -979,9 +940,10 @@ async function onFeedbackChange(payload) {
       feedbackRemark: "",
     });
     try {
-      await GCPAPI.fetchAIFeedbackCancel({
-        sessionId: Number(sessionId),
-        messageId: Number(messageId),
+      await cancelFeedback(messageId, {
+        conversationId,
+        user,
+        messageId,
       });
     } catch (e) {
       console.error("[AiChatPage] caught error", e);
@@ -1007,10 +969,11 @@ async function onFeedbackChange(payload) {
       feedbackRemark: prev.feedbackRemark || "",
     });
     try {
-      await GCPAPI.fetchAIChatFeedback({
-        sessionId: Number(sessionId),
-        messageId: Number(messageId),
-        positive: true,
+      await submitFeedback(messageId, {
+        conversationId,
+        user,
+        messageId,
+        rating: "like",
       });
     } catch (e) {
       console.error("[AiChatPage] caught error", e);
@@ -1027,25 +990,17 @@ async function onFeedbackChange(payload) {
   }
 
   if (value === "bad") {
-    state._badFeedbackCtx = { index, sessionId, messageId };
+    state._badFeedbackCtx = { index, conversationId, messageId, user };
     state.badFeedbackSheetVisible = true;
   }
 }
 
 // ---- 消息发送 ----
-function onRefreshClick(payload) {
-  const idx = Number(payload?.index);
-  if (!Number.isInteger(idx)) return;
-  sendMessage({ refreshDerivedData: true, refreshAiIndex: idx });
-}
-
-async function onBadFeedbackConfirm(remark) {
+async function onBadFeedbackConfirm(payload) {
   const ctx = state._badFeedbackCtx;
-  state._badFeedbackCtx = null;
-  state.badFeedbackSheetVisible = false;
-
   if (!ctx) return;
-  const safeRemark = String(remark || "").trim();
+
+  const safeRemark = String(payload?.remark || "").trim();
   if (!safeRemark) {
     uni.showToast({
       title: t("please-enter-feedback-reason"),
@@ -1064,12 +1019,22 @@ async function onBadFeedbackConfirm(remark) {
   });
 
   try {
-    await GCPAPI.fetchAIChatFeedback({
-      sessionId: Number(ctx.sessionId),
-      messageId: Number(ctx.messageId),
-      positive: false,
-      remark: safeRemark,
+    await submitFeedback(ctx.messageId, {
+      conversationId: ctx.conversationId,
+      user: ctx.user,
+      messageId: ctx.messageId,
+      rating: "dislike",
+      content: safeRemark,
     });
+    uni.showToast({
+      title: "感谢反馈",
+      icon: "none",
+      duration: 1500,
+    });
+    setTimeout(() => {
+      state._badFeedbackCtx = null;
+      state.badFeedbackSheetVisible = false;
+    }, 1500);
   } catch (e) {
     console.error("[AiChatPage] caught error", e);
     // 失败回滚
@@ -1103,552 +1068,126 @@ function toggleQuickList(show) {
   state.showQuickList = show;
 }
 
-/**
- * 发送并拉流式回复的统一流程（减少 sendMessage 两大分支重复代码）
- * - 负责：fetchAISend -> 写入 sessionId/messageId -> _streamReplyFromApi
- * - 统一兜底：loading/isLoading/_activeAiMsgIndex/需要时刷新会话列表
- */
-async function _sendAiFlow({ aiMsgIndex, content, requestSeq, hadSessionId, refreshDerivedData }) {
-  const userId = systemStore.userId || "user_001";
-
-  try {
-    const sendRes = await GCPAPI.fetchAISend({
-      sessionId: state.aiSessionId,
-      userId,
-      content,
-      ...(refreshDerivedData ? { refreshDerivedData: true } : {}),
-    });
-    const sessionId = sendRes?.sessionId ?? sendRes?.session_id;
-    const messageId = sendRes?.messageId ?? sendRes?.message_id;
-
-    // 避免旧轮次覆盖新的会话 id
-    if (requestSeq === state._activeRequestSeq && sessionId) {
-      state.aiSessionId = sessionId;
-    }
-    if (!sessionId || !messageId) {
-      throw new Error("fetchAISend response missing sessionId/messageId");
-    }
-
-    // 仅在当前 requestSeq 生效时写入占位消息的二次字段
-    if (requestSeq === state._activeRequestSeq) {
-      const aiMsg = state.messages[aiMsgIndex] || {};
-      _replaceMessage(aiMsgIndex, {
-        ...aiMsg,
-        sessionId,
-        messageId,
-        feedbackValue: aiMsg.feedbackValue || "",
-        ttsSessionId: sessionId,
-        ttsIndex: aiMsg.ttsIndex || 1,
-      });
-    }
-
-    await _streamReplyFromApi(aiMsgIndex, sessionId, messageId, requestSeq);
-  } catch (e) {
-    console.error("[AiChatPage] caught error", e);
-    const aiMsg = state.messages[aiMsgIndex];
-    if (aiMsg) {
-      // 被新发送取消：只收尾 loading，不覆写内容为“失败”
-      if (requestSeq !== state._activeRequestSeq || _isAbortError(e)) {
-        _replaceMessage(aiMsgIndex, {
-          ...aiMsg,
-          loading: false,
-        });
-        return;
-      }
-
-      _replaceMessage(aiMsgIndex, {
-        ...aiMsg,
-        content: t("ai-unavailable-retry-later"),
-        blocks: [],
-        rawSseText: "",
-        loading: false,
-      });
-    }
-  } finally {
-    // 强制兜底：接口流程结束后，本轮占位消息不得继续处于 loading
-    const tailMsg = state.messages[aiMsgIndex];
-    if (tailMsg && tailMsg.loading && requestSeq === state._activeRequestSeq) {
-      _replaceMessage(aiMsgIndex, {
-        ...tailMsg,
-        loading: false,
-      });
-    }
-
-    // 收尾：仅对当前 requestSeq 生效
-    if (requestSeq === state._activeRequestSeq) {
-      state.isLoading = false;
-      _scrollToBottom();
-      state._activeAiMsgIndex = -1;
-    }
-
-    // 如果此前没有 sessionId，则本次发送会创建新会话
-    // 发送结束后刷新一次会话列表，确保 New Conversation 后能显示新会话
-    if (!hadSessionId && requestSeq === state._activeRequestSeq) {
-      try {
-        await getAISessionList();
-      } catch (e2) {
-        console.error("[AiChatPage] failed to refresh AI sessions", e2);
-        // 忽略刷新失败
-      }
-    }
-  }
-}
-
-async function sendMessage(options = {}) {
-  const refreshDerivedData = Boolean(options?.refreshDerivedData);
-  const refreshAiIndex = Number.isInteger(options?.refreshAiIndex) ? options.refreshAiIndex : -1;
-
-  // ---- 刷新最后一条回答（不重复插入 user 消息）----
-  if (refreshDerivedData) {
-    const prevAiMsg = state.messages[refreshAiIndex];
-    if (!prevAiMsg || prevAiMsg.role !== "ai") return;
-
-    const prevPositive =
-      typeof prevAiMsg.positive === "boolean"
-        ? prevAiMsg.positive
-        : prevAiMsg.feedbackValue === "good"
-          ? true
-          : prevAiMsg.feedbackValue === "bad"
-            ? false
-            : null;
-    const prevFeedbackValue = prevAiMsg.feedbackValue || "";
-    const prevFeedbackRemark = prevAiMsg.feedbackRemark || "";
-
-    // 找到紧邻前的 user 内容（兜底向前找）
-    let userIndex = refreshAiIndex - 1;
-    while (userIndex >= 0 && state.messages[userIndex]?.role !== "user") {
-      userIndex -= 1;
-    }
-
-    const text = String(state.messages[userIndex]?.content || "").trim();
-    if (!text) return;
-
-    // 取消上一次流式请求（避免多个流并发写入）
-    _cancelActiveStream();
-    const requestSeq = _nextRequestSeq();
-    const hadSessionId = !!state.aiSessionId;
-
-    state.showQuickPrompts = false;
-    state.isLoading = true;
-
-    // 删除旧 AI 回答，然后在原位置插入新的 AI loading 占位
-    state.messages.splice(refreshAiIndex, 1);
-    const aiMsgIndex = refreshAiIndex;
-    state.messages.splice(aiMsgIndex, 0, {
-      role: "ai",
-      content: "",
-      blocks: [],
-      rawSseText: "",
-      loading: true,
-      interrupted: false,
-      sessionId: state.aiSessionId || null,
-      messageId: null,
-      positive: prevPositive,
-      feedbackValue: prevFeedbackValue,
-      feedbackRemark: prevFeedbackRemark,
-      ttsEnabled: false,
-      ttsLoading: false,
-      ttsIndex: 1,
-      ttsSessionId: null,
-      id: prevAiMsg.id,
-    });
-    state._activeAiMsgIndex = aiMsgIndex;
-    _scrollToBottom();
-
-    await _sendAiFlow({
-      aiMsgIndex,
-      content: text,
-      requestSeq,
-      hadSessionId,
-      refreshDerivedData: true,
-    });
-
-    return;
-  }
-
-  const text = state.inputText.trim();
-  if (!text) return;
-
-  // 避免同一次操作触发多次发送（例如 textarea confirm + 发送按钮）
-  const now = Date.now();
-  if (text === state._lastSendText && state._lastSendAt && now - state._lastSendAt < 300) {
-    return;
-  }
-  state._lastSendAt = now;
-  state._lastSendText = text;
-
-  // 新发送时：取消上一次流式请求（避免多个流并发写入）
-  _cancelActiveStream();
-  const requestSeq = _nextRequestSeq();
-
-  const hadSessionId = !!state.aiSessionId;
-  state.inputText = "";
-  state.showQuickPrompts = false;
-  state.isLoading = true;
-
-  // 用户消息入队
-  const uuid = crypto.randomUUID();
-  state.messages.push({ id: `user-${uuid}`, role: "user", content: text });
-  _scrollToBottom();
-
-  // AI loading 占位
-  const aiMsgIndex = state.messages.length;
-  state.messages.push({
-    role: "ai",
-    id: `ai-${uuid}`,
-    content: "",
-    blocks: [],
-    rawSseText: "",
-    loading: true,
-    interrupted: false,
-    sessionId: state.aiSessionId || null,
-    messageId: null,
-    positive: null,
-    feedbackValue: "",
-    feedbackRemark: "",
-    // TTS 元信息：是否可播、ttsIndex（接口 /1）、会话 id
-    ttsEnabled: false,
-    ttsLoading: false,
-    ttsIndex: 1,
-    ttsSessionId: null,
-  });
-  state._activeAiMsgIndex = aiMsgIndex;
-  _scrollToBottom();
-
-  await _sendAiFlow({
-    aiMsgIndex,
-    content: text,
-    requestSeq,
-    hadSessionId,
-    refreshDerivedData: false,
-  });
-}
-
-function _buildAIReplyStreamUrl(sessionId, messageId) {
-  const base = systemStore.baseUrl || "";
-  return `${base}/ai-question-api/chat/stream/${sessionId}/${messageId}`;
-}
-
-function _mergeStreamHeaders() {
-  const baseHeaders = systemStore.header || {};
-  return {
-    ...baseHeaders,
-    Accept: "text/event-stream",
-  };
-}
-
-/**
- * 将 fetchAIReply 返回体统一为气泡可用的字符串
- */
-function _normalizeAIReply(data) {
-  if (data == null) return "";
-  if (typeof data === "string") return data;
-  if (typeof data === "object") {
-    if (typeof data.content === "string") return data.content;
-    if (typeof data.text === "string") return data.text;
-    if (typeof data.message === "string") return data.message;
-    if (typeof data.body === "string") return data.body;
-  }
-  try {
-    return JSON.stringify(data);
-  } catch (err) {
-    console.error("[AiChatPage] failed to serialize AI reply", err);
-    return String(data);
-  }
-}
-
-function _extractStreamContent(rawData) {
-  const raw = _normalizeAIReply(rawData);
-  if (!raw) return "";
-
-  const lines = raw.replace(/\r\n/g, "\n").split("\n");
-  const out = [];
-  for (let i = 0; i < lines.length; i += 1) {
-    const cleaned = lines[i].replace(/^data:\s?/, "");
-    if (!cleaned) continue;
-
-    // 终止标识：[DONE] 后全部忽略
-    if (cleaned.includes("[DONE]")) break;
-
-    const chunkText = _extractReplyChunkText(cleaned);
-    if (chunkText) out.push(chunkText);
-  }
-
-  return out.join("\n").trim();
-}
-
-function _extractReplyChunkText(payload) {
-  if (payload && typeof payload === "object") {
-    const obj = payload || {};
-    const picks = [
-      obj?.content,
-      obj?.text,
-      obj?.message,
-      obj?.body,
-      obj?.answer,
-      obj?.response,
-      obj?.output,
-      obj?.delta?.content,
-      obj?.data?.content,
-      obj?.data?.text,
-      obj?.data?.message,
-      obj?.data?.answer,
-      obj?.data?.data?.content,
-      obj?.data?.data?.text,
-      obj?.data?.data?.message,
-      obj?.data?.data?.answer,
-      obj?.payload?.content,
-      obj?.choices?.[0]?.delta?.content,
-      obj?.choices?.[0]?.text,
-    ];
-    for (let i = 0; i < picks.length; i += 1) {
-      if (typeof picks[i] === "string" && picks[i]) return picks[i];
-    }
-    // 无法确定文本字段：返回空，避免 "[object Object]" 进入渲染
-    return "";
-  }
-
-  // 不整体 trim：流式分片的首尾空格是内容的一部分（英文词间空格、代码缩进）
-  const s = String(payload || "");
-  if (!s.trim()) return "";
-
-  // done 事件不参与正文拼接
-  const lower = s.toLowerCase();
-  if (
-    s.includes("[DONE]") ||
-    lower === "done" ||
-    lower.includes('"type":"done"') ||
-    lower.includes('"event":"done"') ||
-    lower.includes('"done":true')
-  ) {
-    return "";
-  }
-
-  // 优先尝试 JSON chunk（兼容多种后端流格式）
-  try {
-    const obj = JSON.parse(s);
-    const picks = [
-      obj?.content,
-      obj?.text,
-      obj?.message,
-      obj?.body,
-      obj?.answer,
-      obj?.response,
-      obj?.output,
-      obj?.delta?.content,
-      obj?.data?.content,
-      obj?.data?.text,
-      obj?.data?.message,
-      obj?.data?.answer,
-      obj?.payload?.content,
-      obj?.choices?.[0]?.delta?.content,
-      obj?.choices?.[0]?.text,
-    ];
-    for (let i = 0; i < picks.length; i += 1) {
-      if (typeof picks[i] === "string" && picks[i]) return picks[i];
-    }
-    return "";
-  } catch (e) {
-    console.error("[AiChatPage] caught error", e);
-    // 非 JSON：直接按文本片段处理
-    return s;
-  }
+function _nextRequestSeq() {
+  state._requestSeq += 1;
+  state._activeRequestSeq = state._requestSeq;
+  return state._activeRequestSeq;
 }
 
 function _finishStreamMessage(messageIndex, requestSeq) {
   if (requestSeq !== state._activeRequestSeq) return;
   const current = state.messages[messageIndex];
   if (!current) return;
-  _replaceMessage(messageIndex, {
-    ...current,
-    loading: false,
-  });
-  // 流式已结束：释放 abort 控制器，避免后续误 abort
-  state._activeStreamAbortController = null;
-  state._activeStreamHardTimeout = null;
-
-  // 图表渲染属于二次初始化（loading=false 后才会 initCharts），
-  // 给一点时间等待高度稳定后再贴底，避免“图表高度变化导致抖动”。
-  nextTick(() => {
-    if (state._finalScrollTimer) clearTimeout(state._finalScrollTimer);
-    state._finalScrollTimer = setTimeout(() => {
-      _scrollToBottom();
-    }, 280);
-  });
-}
-
-async function _streamReplyFromApi(messageIndex, sessionId, messageId, requestSeq) {
-  const streamUrl = _buildAIReplyStreamUrl(sessionId, messageId);
-  const headers = _mergeStreamHeaders();
-
-  // 优先恢复原有流式体验：边接收边渲染
-  if (typeof fetch === "function" && typeof TextDecoder !== "undefined") {
-    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-    state._activeReplyAbortFn =
-      controller && typeof controller.abort === "function" ? () => controller.abort() : null;
-    state._activeStreamAbortController = controller;
-    const hardTimeout = setTimeout(() => {
-      controller && controller.abort();
-    }, 90000);
-    state._activeStreamHardTimeout = hardTimeout;
-
-    const response = await fetch(streamUrl, {
-      method: "GET",
-      headers,
-      ...(controller ? { signal: controller.signal } : {}),
-    });
-    clearTimeout(hardTimeout);
-    state._activeStreamHardTimeout = null;
-
-    if (!response.ok) {
-      throw new Error(`stream request failed: ${response.status}`);
-    }
-    if (!response.body || !response.body.getReader) {
-      const fallback = await GCPAPI.fetchAIReply(sessionId, messageId)({});
-      await _streamReplyToMessage(messageIndex, fallback, requestSeq);
-      return;
-    }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let ttsEnabled = false;
-    let ttsIndex = 1;
-    let ttsUrl = "";
-    let allReceived = "";
-    const updateTtsMeta = (text) => {
-      const ttsUrlMeta = _extractTtsUrlFromText(text);
-      if (ttsUrlMeta.enabled) {
-        ttsEnabled = true;
-        ttsUrl = ttsUrlMeta.ttsUrl;
-        return;
-      }
-      const ttsMeta = _extractTtsMetaFromText(text);
-      if (ttsMeta.enabled) {
-        ttsEnabled = true;
-        ttsIndex = ttsMeta.ttsIndex;
-      }
-    };
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      const decodedText = decoder.decode(value, { stream: true });
-      allReceived += decodedText;
-      updateTtsMeta(decodedText);
-      _applyStreamText(messageIndex, allReceived, requestSeq);
-    }
-    const remainingText = decoder.decode();
-    if (remainingText) {
-      allReceived += remainingText;
-      updateTtsMeta(remainingText);
-      _applyStreamText(messageIndex, allReceived, requestSeq);
-    }
-
-    if (ttsEnabled) {
-      const cur = state.messages[messageIndex] || {};
-      _replaceMessage(messageIndex, {
-        ...cur,
-        ttsEnabled: true,
-        ttsIndex,
-        ttsUrl: ttsUrl || cur.ttsUrl || "",
-      });
-    }
-
-    _finishStreamMessage(messageIndex, requestSeq);
-    if (requestSeq === state._activeRequestSeq) {
-      state._activeReplyAbortFn = null;
-    }
-    return;
-  }
-
-  // 非流式环境兜底：使用 uni.request，并保留 abort 能力
-  const replyReq = GCPAPI.fetchAIReply(sessionId, messageId)({});
-  state._activeReplyAbortFn =
-    replyReq && typeof replyReq.abort === "function" ? replyReq.abort : null;
-  try {
-    const fallback = await replyReq;
-    await _streamReplyToMessage(messageIndex, fallback, requestSeq);
-  } finally {
-    if (requestSeq === state._activeRequestSeq) {
-      state._activeReplyAbortFn = null;
-    }
-  }
-}
-
-async function _streamReplyToMessage(messageIndex, rawData = "", requestSeq) {
-  // 防御：异常值（NaN/undefined）统一视为过期请求
-  if (!Number.isFinite(Number(requestSeq)) || requestSeq !== state._activeRequestSeq) {
-    const cur = state.messages[messageIndex];
-    if (cur) {
-      _replaceMessage(messageIndex, {
-        ...cur,
-        loading: false,
-      });
-    }
-    return;
-  }
-  const blocks = _toAiBlocks(rawData);
-  const aiMsg = state.messages[messageIndex];
-  if (!aiMsg) return;
-
-  // 非 fetch stream 回退：tts 标志可能也在 [DONE] 后
-  const ttsUrlMeta = _extractTtsUrlFromText(rawData);
-  const ttsMeta = _extractTtsMetaFromText(rawData);
-  const nextTts =
-    ttsUrlMeta.enabled || ttsMeta.enabled
-      ? {
-          ttsEnabled: true,
-          ttsIndex: ttsMeta.ttsIndex,
-          ttsUrl: ttsUrlMeta.ttsUrl || aiMsg.ttsUrl || "",
-        }
-      : {};
-
-  _replaceMessage(messageIndex, {
-    ...aiMsg,
-    ...nextTts,
-    rawSseText: rawData,
-    blocks,
-    loading: false,
-  });
+  _replaceMessage(messageIndex, { ...current, loading: false });
+  state.isLoading = false;
+  state._activeAiMsgIndex = -1;
   _scrollToBottom();
 }
-// ---- TTS ----
-function _extractTtsUrlFromText(text) {
-  const s = String(text || "");
-  // 新协议：tts 行直接携带接口地址（path 或完整 url）
-  // 例：/ai-question-api/chat/tts/1774254785505955/1
-  const m = s.match(
-    /(https?:\/\/[^\s'"]*\/ai-question-api\/chat\/tts\/\d+\/\d+|\/ai-question-api\/chat\/tts\/\d+\/\d+)/,
-  );
-  if (m && m[1]) {
-    return { enabled: true, ttsUrl: m[1] };
-  }
-  return { enabled: false, ttsUrl: "" };
-}
 
-function _extractTtsMetaFromText(text) {
-  const s = String(text || "");
-  const lower = s.toLowerCase();
-  if (!lower.includes("tts")) {
-    return { enabled: false, ttsIndex: 1 };
-  }
+async function _sendAiFlow({ aiMsgIndex, content, hadSessionId, requestSeq, userMsgIndex }) {
+  let receivedContent = false;
 
-  // 支持：tts/1、tts:1、<TTS>1</TTS> 等
-  let ttsIndex = 1;
-  const m1 = lower.match(/tts\D*(\d+)/);
-  if (m1 && m1[1]) {
-    const n = Number.parseInt(m1[1], 10);
-    if (!Number.isNaN(n) && n > 0) ttsIndex = n;
-  } else {
-    const m2 = lower.match(/<\s*tts\s*\/?>\s*(\d+)/i);
-    if (m2 && m2[1]) {
-      const n2 = Number.parseInt(m2[1], 10);
-      if (!Number.isNaN(n2) && n2 > 0) ttsIndex = n2;
+  try {
+    for await (const chunk of stream({
+      query: content,
+      user: String(userStore.userId || ""),
+      conversationId: state.aiSessionId,
+    }, { timeout: 60_000 })) {
+      if (requestSeq !== state._activeRequestSeq) break;
+      if (chunk.error) throw chunk.error;
+      if (!chunk.result) continue;
+
+      const aiMessage = state.messages[aiMsgIndex];
+      if (!aiMessage) break;
+      const update = applyEventToBlocks(aiMessage.blocks || [], chunk.result);
+      console.log("🚀 ~ _sendAiFlow ~ update:", update);
+      receivedContent ||= update.receivedContent;
+      console.log("🚀 ~ _sendAiFlow ~ receivedContent:", receivedContent);
+
+      if (update.conversationId) state.aiSessionId = update.conversationId;
+      const nextMessage = {
+        ...aiMessage,
+        blocks: update.blocks,
+        sessionId: update.conversationId ?? aiMessage.sessionId,
+        messageId: update.messageId ?? aiMessage.messageId,
+        durationMs: update.metadata?.duration_ms ?? aiMessage.durationMs,
+        loading: chunk.result.event !== "message_end",
+        interrupted: update.metadata?.status === "stopped",
+      };
+      _replaceMessage(aiMsgIndex, nextMessage);
+
+      const userMessage = state.messages[userMsgIndex];
+      if (userMessage && update.conversationId && update.messageId) {
+        _replaceMessage(userMsgIndex, {
+          ...userMessage,
+          sessionId: update.conversationId,
+          messageId: update.messageId,
+        });
+      }
+
+      _scrollToBottom();
+      if (chunk.result.event === "message_end") break;
+    }
+  } catch (error) {
+    const aiMessage = state.messages[aiMsgIndex];
+    if (aiMessage && requestSeq === state._activeRequestSeq && !_isAbortError(error)) {
+      _replaceMessage(aiMsgIndex, {
+        ...aiMessage,
+        blocks: receivedContent ? aiMessage.blocks : buildInitialBlocks(),
+        content: receivedContent ? aiMessage.content : t("ai-unavailable-retry-later"),
+        loading: false,
+      });
+      console.error("[AiChatPage] stream consumption failed", error);
+    }
+  } finally {
+    if (requestSeq === state._activeRequestSeq) {
+      _finishStreamMessage(aiMsgIndex, requestSeq);
+      if (!hadSessionId && state.aiSessionId) {
+        getAISessionList().catch(error => console.error("[AiChatPage] failed to refresh AI sessions", error));
+      }
     }
   }
-
-  return { enabled: true, ttsIndex };
 }
 
+async function sendMessage() {
+  const text = state.inputText.trim();
+  if (!text) return;
+
+  _cancelActiveStream();
+  const requestSeq = _nextRequestSeq();
+  const hadSessionId = Boolean(state.aiSessionId);
+  const uuid = crypto.randomUUID();
+  const conversationId = state.aiSessionId;
+
+  state.inputText = "";
+  state.showQuickPrompts = false;
+  state.isLoading = true;
+  const userMsgIndex = state.messages.length;
+  state.messages.push({
+    id: `user-${uuid}`,
+    role: "user",
+    content: text,
+    sessionId: conversationId,
+    messageId: null,
+  });
+  const aiMsgIndex = state.messages.length;
+  state.messages.push({
+    id: `ai-${uuid}`,
+    role: "ai",
+    content: "",
+    blocks: buildInitialBlocks(),
+    loading: true,
+    interrupted: false,
+    sessionId: conversationId,
+    messageId: null,
+    waitingText: text,
+  });
+  state._activeAiMsgIndex = aiMsgIndex;
+  _scrollToBottom();
+
+  await _sendAiFlow({ aiMsgIndex, content: text, hadSessionId, requestSeq, userMsgIndex });
+}
+// ---- TTS ----
 async function onTtsClick(messageIndex) {
   const aiMsg = state.messages[messageIndex];
   if (!aiMsg) return;
@@ -1758,18 +1297,24 @@ function _scrollToBottom() {
   });
 }
 
-onMounted(() => {
+function syncPageStage() {
+  if (userStore.visitorRole) {
+    state.stage = "chat";
+    return;
+  }
+
   try {
     const done = uni.getStorageSync(AI_ASK_WELCOME_DONE_KEY);
-    if (done === true || done === "true" || done === 1) {
+    if (!userStore.isVisitor && !!done) {
       state.stage = "chat";
     }
-    // 会话列表在 $store.state.userId 就绪后由 watch 拉取（App 内可能异步 get-user-info）
   } catch (e) {
     console.error("[AiChatPage] caught error", e);
-    // 存储不可用时仍展示欢迎页
   }
-});
+}
+
+onMounted(syncPageStage);
+onShow(syncPageStage);
 
 onBeforeUnmount(() => {
   _cancelActiveStream();
@@ -1785,16 +1330,18 @@ onBeforeUnmount(() => {
 
     <!-- 问答页 -->
     <view v-else class="ai-page__chat">
-      <!-- 背景装饰（Figma: 40432:14 / 40815:502 / 40432:15） -->
-      <view class="ai-chat-bg">
-        <view class="ai-chat-bg__ellipse ai-chat-bg__ellipse--1" />
-        <view class="ai-chat-bg__ellipse ai-chat-bg__ellipse--2" />
-        <view class="ai-chat-bg__ellipse ai-chat-bg__ellipse--3" />
-      </view>
+      <!-- Background -->
+      <div class="ai-chat-bg" />
+      <!-- Decorative Glows -->
+      <div class="ai-chat-bg__glow ai-chat-bg__glow-blue" />
+      <div class="ai-chat-bg__glow ai-chat-bg__glow-red" />
 
+      <!-- Header -->
       <AiChatHeader
-        :sessions="sessions"
+        v-model:sessions="sessions"
+        :load-sessions="getAISessionList"
         :selected-session-id="aiSessionId"
+        :generating="isLoading"
         :share-mode="shareSheetVisible"
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
@@ -1807,7 +1354,6 @@ onBeforeUnmount(() => {
         @session-rename="onSessionRename"
         @share-select-all="onShareSelectAll"
       />
-
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
         :messages="messages"
@@ -1825,12 +1371,12 @@ onBeforeUnmount(() => {
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
+        @copy-click="onCopyMessage"
         @select-toggle="onShareSelectToggle"
-        @refresh-click="onRefreshClick"
         @scroll-top="onScrollTop"
       />
-      <!-- 导航 -->
-      <AiChatNav :visible="showQuickPrompts" />
+      <!-- 底部快捷导航与输入栏属于同一区域；键盘弹出时隐藏导航，仅保留输入栏/语音浮窗。 -->
+      <AiChatNav :visible="showQuickPrompts && keyboardHeightPx <= 0" />
 
       <view v-if="isSessionSwitching" class="session-loading">
         <view class="session-loading__spinner" />
@@ -1838,7 +1384,9 @@ onBeforeUnmount(() => {
 
       <view v-if="shareSheetVisible" class="share-sheet">
         <view class="share-sheet__header">
-          <text class="share-sheet__title"> 分享对话到 </text>
+          <text class="share-sheet__title">
+            分享对话到
+          </text>
         </view>
         <view class="share-sheet__options">
           <view
@@ -1906,12 +1454,16 @@ onBeforeUnmount(() => {
                     mode="aspectFit"
                   />
                 </view>
-                <text class="share-poster-modal__bottom-action-text"> 保存图片 </text>
+                <text class="share-poster-modal__bottom-action-text">
+                  保存图片
+                </text>
               </view>
             </view>
             <view class="share-sheet__cancel-wrap">
               <view class="share-sheet__cancel-btn" @tap="closeSharePosterModal">
-                <text class="share-sheet__cancel-text"> 取消 </text>
+                <text class="share-sheet__cancel-text">
+                  取消
+                </text>
               </view>
             </view>
           </view>
@@ -1928,6 +1480,7 @@ onBeforeUnmount(() => {
         v-model="inputText"
         :is-loading="isLoading"
         @send="sendMessage"
+        @stop="stopGenerating"
         @toggle-quick-list="toggleQuickList"
         @keyboard-height-change="onKeyboardHeightChange"
       />
@@ -1942,6 +1495,60 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
+/* Design tokens from Ardot */
+$color-text-primary: #1a1a1a;       // r:0.102
+$color-text-secondary: #6b6b6b;     // r:0.420
+$color-text-muted: #bababa;         // r:0.729
+$color-red-accent: #ff0000;
+$color-red-btn: #fe0000;             // r:0.996 g:0 b:0
+$color-bg-phone: #fafafa;           // r:0.98
+$color-bg-voice: #f5f5f5;           // r:0.96
+$color-border-light: #efefef;       // r:0.937
+$color-white: #ffffff;
+
+/* Background */
+.phone-bg {
+  position: absolute;
+  inset: 0;
+  background-color: $color-bg-phone;
+  z-index: 0;
+}
+
+/* Decorative glows — top corners */
+.glow {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.glow-blue {
+  left: -40px;
+  top: -20px;
+  width: 280px;
+  height: 180px;
+  background: radial-gradient(
+    ellipse 80% 60% at 40% 40%,
+    rgba(123, 167, 217, 0.10) 0%,
+    rgba(123, 167, 217, 0.04) 50%,
+    rgba(123, 167, 217, 0) 70%
+  );
+  filter: blur(8px);
+}
+
+.glow-red {
+  left: 44px;
+  top: -20px;
+  width: 380px;
+  height: 180px;
+  background: radial-gradient(
+    ellipse 70% 55% at 60% 35%,
+    rgba(255, 80, 80, 0.08) 0%,
+    rgba(255, 80, 80, 0.03) 50%,
+    rgba(255, 80, 80, 0) 70%
+  );
+  filter: blur(10px);
+}
+
 .ai-page {
   min-height: 100vh;
   height: 100%;
@@ -1964,39 +1571,41 @@ onBeforeUnmount(() => {
 .ai-chat-bg {
   position: absolute;
   inset: 0;
-  pointer-events: none;
-  overflow: hidden;
+  background-color: $color-bg-phone;
+  z-index: 0;
 }
 
-.ai-chat-bg__ellipse {
+.ai-chat-bg__glow {
   position: absolute;
-  border-radius: 50%;
+  z-index: 1;
+  pointer-events: none;
 }
-
-// 40432:14 Ellipse 1（可见）
-.ai-chat-bg__ellipse--1 {
-  left: -410rpx; // -205px
-  top: -708rpx; // -354px
-  width: 1022rpx; // 511px
-  height: 1032rpx; // 516px
+.ai-chat-bg__glow-blue {
+  left: -80rpx;
+  top: -40rpx;
+  width: 560rpx;
+  height: 360rpx;
   background: radial-gradient(
-    circle at 50% 50%,
-    rgba(255, 194, 208, 0.74) 0%,
-    rgba(252, 74, 120, 0) 95%
+    ellipse 80% 60% at 40% 40%,
+    rgba(123, 167, 217, 0.10) 0%,
+    rgba(123, 167, 217, 0.04) 50%,
+    rgba(123, 167, 217, 0) 70%
   );
-  opacity: 0.31;
+  filter: blur(16rpx);
 }
-
-// 40432:15 Ellipse 2（Figma 默认隐藏，先占位保留）
-.ai-chat-bg__ellipse--2 {
-  display: none;
+.ai-chat-bg__glow-red {
+  left: 88rpx;
+  top: -40rpx;
+  width: 760rpx;
+  height: 360rpx;
+  background: radial-gradient(
+    ellipse 70% 55% at 60% 35%,
+    rgba(255, 80, 80, 0.08) 0%,
+    rgba(255, 80, 80, 0.03) 50%,
+    rgba(255, 80, 80, 0) 70%
+  );
+  filter: blur(20rpx);
 }
-
-// 40815:502 Ellipse 3（Figma 默认隐藏，先占位保留）
-.ai-chat-bg__ellipse--3 {
-  display: none;
-}
-
 .session-loading {
   position: absolute;
   left: 0;

@@ -20,7 +20,7 @@
     "dev:quickapp-webview": "uni -p quickapp-webview",
     "dev:quickapp-webview-huawei": "uni -p quickapp-webview-huawei",
     "dev:quickapp-webview-union": "uni -p quickapp-webview-union",
-    "build": "pnpm run build:h5",
+    "build": "npm run build:h5",
     "build:h5": "cross-env UNI_PLATFORM=h5 uni build",
     "build:h5:ssr": "uni build --ssr",
     "build:mp-alipay": "uni build -p mp-alipay",

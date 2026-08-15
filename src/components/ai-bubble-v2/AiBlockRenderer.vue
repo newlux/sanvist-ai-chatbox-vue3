@@ -33,7 +33,13 @@ function onSuggestionTap(suggestion) {
 
 <template>
   <AnswerBlock v-if="block.type === 'answer'" :content="block.payload.content || ''" />
-  <ThinkBlock v-else-if="block.type === 'think'" :content="block.payload.content || ''" :complete="block.complete" :force-expanded="forceThinkingExpanded" />
+  <ThinkBlock
+    v-else-if="block.type === 'think'"
+    :content="block.payload.content || ''"
+    :steps="block.payload.steps || []"
+    :complete="block.complete"
+    :force-expanded="forceThinkingExpanded"
+  />
   <StatusBlock v-else-if="block.type === 'status'" :payload="block.payload" />
   <ToolCallBlock v-else-if="block.type === 'tool_call'" :payload="block.payload" :complete="block.complete" />
   <ChartBlock v-else-if="block.type === 'chart'" :block-id="block.id" :option="block.payload.option" />

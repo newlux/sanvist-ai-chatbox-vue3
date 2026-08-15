@@ -21,3 +21,5 @@ dist
 *.sw?
 
 docs
+.trae
+.codebuddy

@@ -8,7 +8,7 @@ export const AI_QUESTION_BASE_URL =
 
 export const GCP_OFFICIAL_BASE_URL = "https://api-uat.sanyglobal.com";
 export const GCP_OFFICIAL_IMG_URL = "https://sanyglobal-img.sany.com.cn";
-//export const STATIC_BASE_URL = "https://mysany-img.sany.com.cn/h5-assets"
+// export const STATIC_BASE_URL = "https://mysany-img.sany.com.cn/h5-assets"
 export const STATIC_BASE_URL =
   "http://sanyme-1254375538.cos.ap-guangzhou.myqcloud.com/mysany-assets";
 
@@ -34,7 +34,7 @@ export const APP_AGENT_NETWORK_SHARE = `${GCP_PC_BASE_URL}/#/appAgentNetworkShar
 // 新闻分享落地页地址
 export const APP_NEWS_SHARE = `${GCP_PC_BASE_URL}/#/appNewsShare`;
 
-export const OPEN_ENCRYPT = true; //是否开启密码加密
+export const OPEN_ENCRYPT = true; // 是否开启密码加密
 
 export const GCP_ORGANIZATION_ID = 4; // GCP 项目默认组织机构ID
 

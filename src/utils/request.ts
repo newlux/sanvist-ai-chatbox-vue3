@@ -5,6 +5,7 @@ import { sseTextDecoderPlugin } from "hook-fetch/plugins";
 
 export interface BaseResponse<T = unknown> {
   code: number;
+  errorCode?: number;
   data: T;
   message: string;
 }
@@ -16,6 +17,9 @@ export function setRequestAuth(value: string) {
 }
 
 export const request = hookFetch.create<BaseResponse, "data">({
+  headers: {
+    "guest-role": "OWNER",
+  },
   baseURL: import.meta.env.VITE_AI_QUESTION_BASE_URL,
   plugins: [sseTextDecoderPlugin({ json: true, prefix: "data:" })],
 });
@@ -26,7 +30,7 @@ function jwtPlugin(): HookFetchPlugin<BaseResponse> {
     beforeRequest: async (config) => {
       config.headers = new Headers(config.headers);
       if (authorization && !config.headers.has("Authorization")) {
-        config.headers.set("Authorization", authorization);
+        // config.headers.set("Authorization", authorization);
       }
       return config;
     },

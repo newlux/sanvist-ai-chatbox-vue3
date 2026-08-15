@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onHide, onLaunch } from "@dcloudio/uni-app";
-import { getUserInfo } from "@/api/user";
+// import { getUserInfo } from "@/api/user";
 import { setLocale } from "@/i18n";
-import { useSystemStore } from "@/stores";
+import { useSystemStore, useUserStore } from "@/stores";
 import { setRequestAuth } from "@/utils/request";
 
 const browserAuthorization = "bearer 9ae76087-03f6-4db0-878b-ed6e9af37879";
@@ -14,6 +14,7 @@ interface LaunchOptions {
 }
 
 const systemStore = useSystemStore();
+const userStore = useUserStore();
 
 function isBrowser() {
   return typeof window !== "undefined" && !("AlipayJSBridge" in globalThis);
@@ -35,6 +36,7 @@ function initializeSystem(query: StartupQuery) {
 
   setRequestAuth(authorization);
 
+  userStore.setIsVisitor(true);
   systemStore.setHeader({
     Authorization: authorization,
     Lang: lang,
@@ -48,27 +50,31 @@ function initializeSystem(query: StartupQuery) {
   systemStore.setBaseUrl(baseUrl);
   systemStore.setGridCountry(country);
   systemStore.setAppVersion(version);
-  systemStore.setUsername(username);
+  userStore.setUsername(username);
   uni.setStorageSync("prevPageName", String(query.pageName || ""));
 
   return { authorization, baseUrl, lang, version };
 }
 
-async function initializeUserInfo(options: ReturnType<typeof initializeSystem>) {
-  try {
-    const userInfo = await getUserInfo(options);
-    systemStore.setUserInfo(userInfo);
-    systemStore.setUserId(String(userInfo.userId || ""));
-  } catch (e) {
-    console.log("🚀 ~ e:", e);
-    // 用户信息请求失败不阻断应用启动
-  }
-}
+// async function initializeUserInfo(options: ReturnType<typeof initializeSystem>) {
+//   try {
+//     const { data: userInfo } = await getUserInfo(options);
+//     userStore.setUserInfo(userInfo);
+//     userStore.setUserId(String(userInfo.userId || ""));
+//   } catch (e) {
+//     console.log("🚀 ~ e:", e);
+//     // 用户信息请求失败不阻断应用启动
+//   }
+// }
 
 function initializeDeviceInfo() {
   uni.getSystemInfo({
     success(info) {
-      systemStore.setStatusBarHeight(info.statusBarHeight || 0);
+      // H5 下 uni 的 statusBarHeight 恒为 0，不能把 mPaaS getPhoneSizesInfo 拿到的真实值覆盖掉
+      const statusBarHeight = Number(info.statusBarHeight) || 0;
+      if (statusBarHeight > 0) {
+        systemStore.setStatusBarHeight(statusBarHeight);
+      }
       systemStore.setPixelRatio(info.pixelRatio || 2);
       systemStore.setIsIOS(info.platform === "ios");
       systemStore.setScreenWidth(info.screenWidth || 0);
@@ -83,7 +89,7 @@ function initializeDeviceInfo() {
 onLaunch(async (options) => {
   const baseInfo = initializeSystem(getLaunchQuery(options));
   await setLocale(baseInfo.lang);
-  await initializeUserInfo(baseInfo);
+  // await initializeUserInfo(baseInfo);
   await systemStore.initPhoneSizesInfo();
   initializeDeviceInfo();
 });

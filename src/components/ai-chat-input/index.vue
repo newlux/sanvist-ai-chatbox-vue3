@@ -1,6 +1,7 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, toRefs, watch } from "vue";
-import { GCPAPI } from "@/common/api/gcp";
+import { recognizeSpeechByBase64, recognizeSpeechByUrl } from "@/api/chat";
+import { useKeyboardViewport } from "@/hooks/useKeyboardViewport";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useSystemStore } from "@/stores/modules/system";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
@@ -11,6 +12,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   "send",
+  "stop",
   "update:modelValue",
   "voice-start",
   "voice-cancel",
@@ -52,19 +54,16 @@ function canUseMediaDevicesMic() {
 
 const systemStore = useSystemStore();
 const state = reactive({
-  inputMode: "text", // text | voice（组件内部维护）
+  inputMode: "voice", // text | voice（组件内部维护）
   voicePhase: "idle", // idle | pressing | recording | finished | editing
-  voiceInputFocused: false,
-  keyboardHeightPx: 0,
-  initialWindowHeightPx: 0,
-  keyboardHeightTimer: null,
+  // text 键盘态下输入栏抽离为 fixed，用该高度在原位置留占位，避免内容区跳动
+  textInputBarHeightPx: 0,
   _pressTimer: null,
   _typingTimer: null,
   _typingIndex: 0,
   recorder: null,
   _voiceJobId: 0,
   _voicePressStartedAt: 0,
-  _onVisualViewportResize: null,
   recognizedTextFull: "",
   recognizedText: "",
   draftText: "",
@@ -72,94 +71,103 @@ const state = reactive({
   _keepOldRecognizedText: false,
   _micPermissionReady: false,
   _micPermissionRequesting: false,
+  _voiceCancelling: false,
+  _lastVoiceTouchAt: 0,
 });
+const { inputMode, voicePhase } = toRefs(state);
 const {
-  inputMode,
-  voicePhase,
   keyboardHeightPx,
   initialWindowHeightPx,
-} = toRefs(state);
+  viewportBottomOffsetPx,
+  voiceInputFocused,
+  textInputFocused,
+  onVoiceFocus,
+  onVoiceBlur,
+  onTextFocus,
+  onTextBlur,
+  resetKeyboardState,
+} = useKeyboardViewport();
+
+const voiceTextareaRef = ref(null);
 
 const isIOS = computed(() => Boolean(systemStore.isIOS));
+const { safeAreaStyle } = useSafeArea();
+
+const rootStyle = computed(() => {
+  // 语音浮窗高度基准：用组件加载时记录的窗口高度（稳定、不随键盘弹出/收起变化），
+  // 减去顶部留白 412rpx（换算成 px：rpx 基准宽 750，1rpx = screenWidth/750 px；
+  // 在 375 设计稿上 1px = 2rpx，等价 412rpx = 206px），
+  // 避免 100dvh 在键盘收起回弹期间抖动导致浮窗塌陷。
+  const screenW = Number(systemStore.screenWidth) || 375;
+  const topReservePx = Math.round((412 * screenW) / 750);
+  const voiceSheetHeightPx = Math.max(0, Number(initialWindowHeightPx.value || 0) - topReservePx);
+  return {
+    "--kbd-height": `${keyboardHeightPx.value || 0}px`,
+    "--kbd-extra": `${isIOS.value ? 8 : 0}px`,
+    "--window-height": `${initialWindowHeightPx.value || 0}px`,
+    "--voice-sheet-h": `${voiceSheetHeightPx}px`,
+    "--vv-bottom-offset": `${viewportBottomOffsetPx.value || 0}px`,
+    ...safeAreaStyle.value,
+  };
+});
 const voiceTextValue = computed(() => {
   if (state.voicePhase === "finished") {
-    return state.draftText || state.recognizedText;
+    return state.draftText;
   }
   return state.recognizedText;
 });
 const voiceKeyboardOpen = computed(() =>
-  Boolean(state.inputMode === "voice" && (state.voiceInputFocused || state.keyboardHeightPx > 0)),
+  Boolean(state.inputMode === "voice" && (voiceInputFocused.value || keyboardHeightPx.value > 0)),
 );
-function _getViewportHeightPx() {
-  if (typeof window !== "undefined" && window.innerHeight) {
-    return Number(window.innerHeight) || 0;
-  }
-  try {
-    const info = uni?.getSystemInfoSync?.();
-    return Number(info?.windowHeight) || 0;
-  } catch (e) {
-    console.error("[AiChatInput] getSystemInfoSync failed", e);
-    return 0;
-  }
-}
-
-function _updateKeyboardHeightByViewport() {
-  if (!state.initialWindowHeightPx) return;
-  const now = _getViewportHeightPx();
-  if (!now) return;
-  const delta = Math.max(0, state.initialWindowHeightPx - now);
-  // 有些端会有轻微波动，忽略过小值
-  _setKeyboardHeightPx(delta > 20 ? delta : 0);
-}
-
-function _setKeyboardHeightPx(heightPx) {
-  if (state.inputMode === "text") return;
-  const h = Number(heightPx) || 0;
-  const maxH = 600;
-  const clamped = Math.max(0, Math.min(h, maxH));
-  if (state.keyboardHeightTimer) clearTimeout(state.keyboardHeightTimer);
-  state.keyboardHeightTimer = setTimeout(() => {
-    const prev = Number(state.keyboardHeightPx) || 0;
-    if (Math.abs(clamped - prev) < 20) return;
-    state.keyboardHeightPx = clamped;
-    console.log("[kbd] keyboardHeightPx updated to", clamped);
-  }, 100);
-}
+const textKeyboardOpen = computed(() =>
+  Boolean(state.inputMode === "text" && (textInputFocused.value || keyboardHeightPx.value > 0)),
+);
+const keyboardInteractionMasked = computed(() =>
+  Boolean(textInputFocused.value || voiceInputFocused.value),
+);
 
 function onVoiceTextareaFocus() {
-  state.voiceInputFocused = true;
-  // 键盘弹起后把三个操作按钮滚到可视区域
-  // 用 visualViewport resize 事件触发，时机比固定延时更准确
-  _scrollVoiceActionsIntoView(600);
-  // 再兜底一次，确保键盘完全弹出后仍然可见
-  // _scrollVoiceActionsIntoView(1200);
+  onVoiceFocus();
+  // 不再主动 scrollIntoView：浮窗会贴到键盘顶部，按钮天然在可视区内；
+  // 主动滚动会把 visualViewport 往下拽，导致消息内容区“飞上去”。
 }
-function _scrollVoiceActionsIntoView(delay) {
-  setTimeout(() => {
-    if (!state.voiceInputFocused || state.inputMode !== "voice") return;
-    try {
-      // 直接用 getElementById 拿真实 DOM，避免 uni-app ref 返回 Vue 实例的问题
-      const el =
-        typeof document !== "undefined" ? document.getElementById("voice-actions-anchor") : null;
-      if (!el) {
-        console.log("[scroll] el not found");
-        return;
-      }
-      console.log("[scroll] scrollIntoView called");
-      el.scrollIntoView({ block: "end", behavior: "smooth" });
-    } catch (e) {
-      console.log("[scroll] error", String(e));
-    }
-  }, delay || 600);
-}
+
 function onVoiceTextareaBlur() {
-  state.voiceInputFocused = false;
-  if (state.keyboardHeightTimer) clearTimeout(state.keyboardHeightTimer);
-  // 键盘抬起阶段不要立刻把 bottom 归零：否则会出现“抖一下”的回弹
-  state.keyboardHeightTimer = setTimeout(() => {
-    state.keyboardHeightPx = 0;
-    state.keyboardHeightTimer = null;
-  }, 180);
+  onVoiceBlur();
+}
+
+function onTextTextareaFocus() {
+  // 聚焦时记录输入栏实际高度，键盘态抽离 fixed 后在原位置留等高占位
+  try {
+    const el = document.querySelector(".chat-input");
+    if (el) state.textInputBarHeightPx = Math.round(el.getBoundingClientRect().height) || 0;
+  } catch {
+    // 忽略
+  }
+  onTextFocus();
+}
+
+function onTextTextareaBlur() {
+  onTextBlur();
+}
+
+function focusVoiceTextarea() {
+  // 真机上必须在用户手势回调里调用 focus 才能生效
+  nextTick(() => {
+    try {
+      const el = voiceTextareaRef.value;
+      if (el && typeof el.focus === "function") {
+        el.focus();
+      }
+      else if (typeof document !== "undefined") {
+        const dom = document.querySelector(".voice-recording__textarea");
+        dom?.focus();
+      }
+    }
+    catch (e) {
+      console.warn("[AiChatInput] focusVoiceTextarea failed", e);
+    }
+  });
 }
 
 function onTrySend() {
@@ -281,7 +289,7 @@ async function _requestMicrophonePermission() {
         return true;
       }
     }
-  } catch (e) {
+  } catch {
     // ignore
   }
   return false;
@@ -295,15 +303,11 @@ function _resetVoiceText() {
 }
 function onVoiceClose() {
   // 立即重置键盘状态，避免第二次进入语音模式时 voice-sheet 高度异常
-  state.voiceInputFocused = false;
-  state.keyboardHeightPx = 0;
-  if (state.keyboardHeightTimer) {
-    clearTimeout(state.keyboardHeightTimer);
-    state.keyboardHeightTimer = null;
-  }
+  resetKeyboardState();
+  _resetVoiceText();
+  state._voiceJobId = Date.now();
+  _stopVoiceRecorder(true);
   state.voicePhase = "idle";
-  state.inputMode = "text";
-  state.recognizedText = "";
   emit("toggle-quick-list", true);
 }
 async function onVoiceIconTap() {
@@ -314,19 +318,14 @@ async function onVoiceIconTap() {
     console.log("onVoiceIconTap ok", ok);
     if (!ok) return;
 
+    _resetVoiceText();
+    state._voiceJobId = Date.now();
     state.inputMode = "voice";
     state.voicePhase = "pressing";
-    emit("toggle-quick-list", false);
+    emit("toggle-quick-list", true);
   } finally {
     state._micPermissionRequesting = false;
   }
-}
-function switchToVoice() {
-  if (props.isLoading) return;
-  state.inputMode = "voice";
-  state.voicePhase = "pressing";
-  state._voiceJobId = Date.now();
-  _resetVoiceText();
 }
 function switchToText() {
   if (props.isLoading) return;
@@ -335,17 +334,17 @@ function switchToText() {
   if (state._typingTimer) clearInterval(state._typingTimer);
   state._typingTimer = null;
 }
-function enterEditing() {
-  if (state.voicePhase !== "finished") return;
-  state.draftText = state.recognizedText;
-  state.voicePhase = "editing";
+
+function switchToDefaultVoice() {
+  if (props.isLoading) return;
+  state.inputMode = "voice";
+  state.voicePhase = "idle";
+  emit("toggle-quick-list", true);
 }
 
-function onVoiceTextTap() {
-  enterEditing();
-}
-function onDraftInput(e) {
-  state.draftText = e.detail.value;
+function onToggleQuickList() {
+  if (props.isLoading) return;
+  emit("toggle-quick-list", true);
 }
 function onVoiceTextareaInput(e) {
   if (state.voicePhase !== "finished") return;
@@ -353,16 +352,27 @@ function onVoiceTextareaInput(e) {
 }
 function onVoiceTouchStart(e) {
   console.info("[voice] press start", { phase: state.voicePhase, isLoading: props.isLoading });
-  if (props.isLoading || state.voicePhase === "editing") return;
+  if (
+    props.isLoading ||
+    state.voicePhase === "editing" ||
+    state._voiceCancelling ||
+    Date.now() - state._lastVoiceTouchAt < 350
+  ) {
+    return;
+  }
+  state._lastVoiceTouchAt = Date.now();
   // iOS Safari：避免默认手势/选择导致 touch 流程被打断
   try {
     if (e && e.cancelable) e.preventDefault();
-  } catch (err) {
+  } catch {
     // ignore
   }
 
-  // 再次说话时：只要已有识别文本就保留，等新识别覆盖
-  state._keepOldRecognizedText = !!state.recognizedText;
+  // 再次说话时：保留已编辑文本，识别结果在其末尾追加。
+  const existingText = state.draftText || state.recognizedText;
+  state.recognizedText = existingText;
+  state.draftText = existingText;
+  state._keepOldRecognizedText = !!existingText;
 
   state.inputMode = "voice";
   state.voicePhase = "pressing";
@@ -392,8 +402,7 @@ function onVoiceTouchEnd() {
     state._typingTimer = null;
     state._typingIndex = 0;
     if (Date.now() - state._voicePressStartedAt < 300) {
-      _stopVoiceRecorder(true);
-      state.voicePhase = "pressing";
+      _cancelShortVoiceRecording();
       return;
     }
     _stopVoiceRecorderAndRecognize();
@@ -408,30 +417,13 @@ function onVoiceTouchCancel() {
   state._typingTimer = null;
   state._typingIndex = 0;
   // _resetVoiceText();
-  state._voiceJobId = Date.now();
-  _stopVoiceRecorder(true);
-  state.voicePhase = "pressing";
-  emit("voice-cancel");
-}
-function onVoiceCancel() {
-  if (state._typingTimer) clearInterval(state._typingTimer);
-  state._typingTimer = null;
-  state._typingIndex = 0;
-  _resetVoiceText();
-  state._voiceJobId = Date.now();
-  _stopVoiceRecorder(true);
-  state.voicePhase = "pressing";
+  _cancelShortVoiceRecording();
   emit("voice-cancel");
 }
 function onVoiceSend() {
   // 立即重置键盘状态，避免后续再进入语音模式时高度异常
-  state.voiceInputFocused = false;
-  state.keyboardHeightPx = 0;
-  if (state.keyboardHeightTimer) {
-    clearTimeout(state.keyboardHeightTimer);
-    state.keyboardHeightTimer = null;
-  }
-  const payload = state.draftText || state.recognizedText;
+  resetKeyboardState();
+  const payload = state.voicePhase === "finished" ? state.draftText : state.recognizedText;
   const finalPayload = String(payload || "").trim();
   if (!finalPayload) return;
   state.voicePhase = "idle";
@@ -439,47 +431,27 @@ function onVoiceSend() {
   if (state._typingTimer) clearInterval(state._typingTimer);
   state._typingTimer = null;
 
-  // 对齐父组件：更新 v-model 并触发 send
+  // 对齐父组件：更新 v-model，待父组件同步后只触发一次 send
   emit("update:modelValue", finalPayload);
-  onTrySend();
-  nextTick(() => {
-    emit("send");
-  });
+  nextTick(onTrySend);
   emit("voice-send", finalPayload);
 }
 function onVoiceRestart() {
-  state.voicePhase = "pressing";
+  if (props.isLoading) return;
   if (state._typingTimer) clearInterval(state._typingTimer);
   state._typingTimer = null;
-  _resetVoiceText();
+  // 再次录音从当前已编辑文本继续，识别完成后在其末尾追加。
+  const existingText = state.draftText || state.recognizedText;
+  state.recognizedText = existingText;
+  state.draftText = existingText;
+  state._keepOldRecognizedText = !!existingText;
   state._voiceJobId = Date.now();
-  if (state._pressTimer) clearTimeout(state._pressTimer);
-  state._pressTimer = setTimeout(() => {
-    if (state.voicePhase === "pressing") {
-      state.voicePhase = "recording";
-      _startVoiceRecorder();
-      emit("voice-start");
-    }
-  }, 200);
+  _stopVoiceRecorder(true);
+  state.voicePhase = "pressing";
+  state.inputMode = "voice";
   emit("voice-restart");
 }
 
-// 语音识别完成后：切换回语音初始（pressing），允许继续长按录音
-function onVoiceInitialMode() {
-  if (state._pressTimer) {
-    clearTimeout(state._pressTimer);
-    state._pressTimer = null;
-  }
-  if (state._typingTimer) {
-    clearInterval(state._typingTimer);
-    state._typingTimer = null;
-  }
-  state._typingIndex = 0;
-  state.voicePhase = "pressing";
-  state.inputMode = "voice";
-  state._voiceJobId = Date.now();
-  emit("toggle-quick-list", false);
-}
 async function _startVoiceRecorder() {
   const recorder = _ensureRecorder();
   // 录音中不再展示“模拟识别文本”，避免出现前置占位文案
@@ -514,6 +486,20 @@ async function _startVoiceRecorder() {
     state.voicePhase = "pressing";
   }
 }
+async function _cancelShortVoiceRecording() {
+  if (state._voiceCancelling) return;
+  state._voiceCancelling = true;
+  state._voiceJobId = Date.now();
+  try {
+    console.info("[voice] short press: waiting recorder cancellation");
+    await _stopVoiceRecorder(true);
+  } finally {
+    state.voicePhase = "pressing";
+    state._voiceCancelling = false;
+    console.info("[voice] short press: recorder cancellation completed");
+  }
+}
+
 async function _stopVoiceRecorder(forceCancel = false) {
   try {
     const recorder = _ensureRecorder();
@@ -525,7 +511,7 @@ async function _stopVoiceRecorder(forceCancel = false) {
       return;
     }
     await recorder.stop?.();
-  } catch (e) {
+  } catch {
     // ignore
   }
 }
@@ -534,8 +520,8 @@ async function _stopVoiceRecorderAndRecognize() {
   try {
     // stop 会触发 recorder onStop(blob) -> _recognizeFromBlob
     await recorder.stop?.();
-  } catch (e) {
-    state.voicePhase = "finished";
+  } catch {
+    state.voicePhase = "pressing";
   }
 }
 async function _recognizeFromBlob(blob, jobId) {
@@ -552,25 +538,18 @@ async function _recognizeFromBlob(blob, jobId) {
   state._isRecognizing = true;
   try {
     if (jobId !== state._voiceJobId) return;
-    const audioBlob =
-      typeof blob === "string"
-        ? await (async () => {
-            console.info("[voice] download native audio", { url: blob });
-            const response = await fetch(blob);
-            console.info("[voice] native audio response", {
-              ok: response.ok,
-              status: response.status,
-              type: response.type,
-            });
-            return response.blob();
-          })()
-        : blob;
-    const audioBase64 = await _blobToAudioBase64(audioBlob);
-    console.info("[voice] audio converted to Base64", {
-      audioSize: audioBase64.length,
-    });
-    if (!audioBase64) {
-      // 无音频：保持旧识别结果
+    const isNativeAudioUrl = typeof blob === "string";
+    const text = isNativeAudioUrl
+      ? await _recognizeSpeechWithUrl(blob)
+      : await (async () => {
+          const audioBase64 = await _blobToAudioBase64(blob);
+          console.info("[voice] audio converted to Base64", {
+            audioSize: audioBase64.length,
+          });
+          if (!audioBase64) return "";
+          return _recognizeSpeechWithBase64(audioBase64);
+        })();
+    if (!text) {
       state.recognizedText = prevText;
       state.draftText = prevText;
       state.voicePhase = "pressing";
@@ -578,15 +557,14 @@ async function _recognizeFromBlob(blob, jobId) {
     }
     if (jobId !== state._voiceJobId) return;
 
-    console.info("[voice] ASR request", { audioSize: audioBase64.length });
-    const text = await _recognizeSpeechWithBase64(audioBase64);
     console.info("[voice] ASR response", { text });
     // 识别完成：在已有旧文字基础上拼接新识别结果
     const nextText = prevText ? `${prevText}${text}` : text;
     state.recognizedText = nextText;
     state.draftText = nextText;
     state.voicePhase = "finished";
-  } catch (e) {
+    state.inputMode = "voice";
+  } catch {
     if (jobId !== state._voiceJobId) return;
     // 识别失败：保持旧识别结果
     state.recognizedText = prevText;
@@ -632,107 +610,98 @@ function _extractAsrText(data) {
 }
 
 async function _recognizeSpeechWithBase64(audioBase64) {
-  console.info("[voice] ASR request", {
+  console.info("[voice] ASR Base64 request", {
     audioSize: audioBase64.length,
   });
-  const resp = await GCPAPI.fetchASRBase64({ audioBase64 });
-  console.info("[voice] ASR response", resp);
+  const resp = await recognizeSpeechByBase64({ audioBase64 });
+  console.info("[voice] ASR Base64 response", resp);
   const payload = resp?.data ? resp.data : resp;
   const text = _extractAsrText(payload);
   return text || state.recognizedTextFull;
 }
-watch(voiceKeyboardOpen, (isOpen) => {
-  if (state.inputMode !== "voice") return;
-  emit("keyboard-height-change", isOpen ? state.keyboardHeightPx || 0 : 0);
-});
 
+async function _recognizeSpeechWithUrl(audioUrl) {
+  console.info("[voice] ASR URL request", { audioUrl });
+  const resp = await recognizeSpeechByUrl({ audioUrl });
+  console.info("[voice] ASR URL response", resp);
+  const payload = resp?.data ? resp.data : resp;
+  const text = _extractAsrText(payload);
+  return text || state.recognizedTextFull;
+}
+// 输入与语音模式共用键盘高度状态：父页面据此隐藏底部快捷导航。
 watch(keyboardHeightPx, (height) => {
-  if (state.inputMode === "voice" && voiceKeyboardOpen.value) {
-    emit("keyboard-height-change", height || 0);
-  }
-});
-
-onMounted(() => {
-  try {
-    state.initialWindowHeightPx =
-      (typeof window !== "undefined" && window.innerHeight) ||
-      Number(uni?.getSystemInfoSync?.()?.windowHeight) ||
-      0;
-    if (typeof window !== "undefined" && window.visualViewport) {
-      state._onVisualViewportResize = () => {
-        const delta = Math.max(0, state.initialWindowHeightPx - window.visualViewport.height);
-        _setKeyboardHeightPx(delta > 60 ? delta : 0);
-      };
-      window.visualViewport.addEventListener("resize", state._onVisualViewportResize);
-    }
-    if (typeof uni !== "undefined" && typeof uni.onKeyboardHeightChange === "function") {
-      uni.onKeyboardHeightChange((event) => {
-        const height =
-          Number(event?.height ?? event?.keyboardHeight ?? event?.detail?.height ?? 0) || 0;
-        _setKeyboardHeightPx(height);
-      });
-    }
-  } catch {
-    // 忽略不支持的 WebView API。
-  }
+  emit("keyboard-height-change", height || 0);
 });
 
 onBeforeUnmount(() => {
-  try {
-    if (typeof window !== "undefined" && window.visualViewport && state._onVisualViewportResize) {
-      window.visualViewport.removeEventListener("resize", state._onVisualViewportResize);
-    }
-    if (typeof uni !== "undefined" && typeof uni.offKeyboardHeightChange === "function") {
-      uni.offKeyboardHeightChange();
-    }
-    if (state.keyboardHeightTimer) clearTimeout(state.keyboardHeightTimer);
-    if (state._pressTimer) clearTimeout(state._pressTimer);
-    if (state._typingTimer) clearInterval(state._typingTimer);
-  } catch {
-    // 忽略不支持的 WebView API。
-  }
+  if (state._pressTimer) clearTimeout(state._pressTimer);
+  if (state._typingTimer) clearInterval(state._typingTimer);
 });
 </script>
 
 <template>
   <view
+    v-if="keyboardInteractionMasked"
+    class="keyboard-interaction-mask"
+    :style="rootStyle"
+  />
+  <!-- text 键盘态：输入栏抽离为 fixed 贴键盘顶，这里在原位置留等高占位，避免内容区跳动 -->
+  <view
+    v-if="textKeyboardOpen && textInputBarHeightPx > 0"
+    :style="{ height: `${textInputBarHeightPx}px` }"
+  />
+  <view
     class="chat-input"
-    :class="{ 'chat-input--keyboard-open': voiceKeyboardOpen }"
-    :style="{
-      '--kbd-height': `${keyboardHeightPx || 0}px`,
-      '--kbd-extra': `${isIOS ? 8 : 0}px`,
-      '--window-height': `${initialWindowHeightPx || 0}px`,
+    :class="{
+      'chat-input--keyboard-open': voiceKeyboardOpen,
+      'chat-input--text-keyboard-open': textKeyboardOpen,
     }"
+    :style="rootStyle"
   >
-    <!-- 语音模式：按住 / 录音中 / 已完成 / 编辑（顶起页面而不是浮层） -->
+    <!-- 语音模式：悬浮在当前对话内容上的面板 -->
     <view
       v-if="inputMode === 'voice' && voicePhase !== 'idle'"
       class="voice-sheet"
       :class="{ 'voice-sheet--keyboard-open': voiceKeyboardOpen }"
     >
+      <view
+        v-if="voicePhase !== 'finished'"
+        class="voice-sheet__close"
+        aria-label="关闭语音面板"
+        @tap="onVoiceClose"
+      >
+        <text>×</text>
+      </view>
       <!-- 41167:414 正在说话：波纹动画 -->
-      <view class="voice-recording">
-        <view class="voice-recording__header">
-          <text v-if="voicePhase === 'recording'" class="voice-recording__listening">
-            {{ $t("voice-listening") }}
-          </text>
-          <text v-if="voicePhase === 'finished'" class="voice-recording__listening">
-            {{ $t("voice-recognition-completed") }}
-          </text>
-          <view v-else class="voice-recording__close" @tap="onVoiceClose">
-            <image class="voice-recording__close-img" src="@/assets/img/icon-close.svg" />
+      <view
+        class="voice-recording"
+        :class="{ 'voice-recording--finished': voicePhase === 'finished' }"
+      >
+        <view
+          v-if="voicePhase !== 'finished'"
+          class="voice-recording__live"
+        >
+          <view class="voice-recording__header">
+            <text class="voice-recording__listening">
+              {{ voicePhase === 'recording' ? 'Noyi正在听，请说话' : '长按下方按钮开始说话' }}
+            </text>
+            <text class="voice-recording__hint">
+              {{ voicePhase === 'recording' ? '说完松手  可编辑文字' : '按住即可开始语音输入' }}
+            </text>
+          </view>
+          <view v-if="voicePhase === 'recording'" class="voice-recording__wave" aria-hidden="true">
+            <view v-for="bar in 25" :key="bar" class="voice-recording__wave-bar" />
           </view>
         </view>
         <view
+          v-else
           class="voice-recording__stream"
-          :class="{
-            'voice-recording__stream--pressing': voicePhase === 'pressing',
-          }"
+          :class="{ 'voice-recording__stream--editing': voiceKeyboardOpen }"
         >
           <textarea
+            ref="voiceTextareaRef"
             class="voice-recording__textarea"
             :value="voiceTextValue"
-            :disabled="voicePhase !== 'finished'"
             :maxlength="500"
             placeholder=""
             :adjust-position="false"
@@ -740,17 +709,14 @@ onBeforeUnmount(() => {
             @input="onVoiceTextareaInput"
             @focus="onVoiceTextareaFocus"
             @blur="onVoiceTextareaBlur"
+            @tap="focusVoiceTextarea"
           />
         </view>
-        <view class="voice-recording__body">
+        <view
+          class="voice-recording__body"
+          :class="{ 'voice-recording__body--finished': voicePhase === 'finished' }"
+        >
           <view class="voice-recording__content">
-            <view class="voice-recording__top">
-              <view v-if="voicePhase === 'pressing'" class="voice-tip__header">
-                <text class="voice-tip__text">
-                  {{ $t("voice-press-and-speak") }}
-                </text>
-              </view>
-            </view>
             <view
               v-if="voicePhase === 'finished'"
               id="voice-actions-anchor"
@@ -765,7 +731,7 @@ onBeforeUnmount(() => {
                 @tap="onVoiceClose"
               >
                 <image
-                  src="@/assets/img/icon-close.svg"
+                  src="@/assets/img/icon-close-lg.svg"
                   mode="aspectFit"
                   class="voice-finished-actions__icon"
                 />
@@ -779,9 +745,9 @@ onBeforeUnmount(() => {
                 @tap="onVoiceSend"
               >
                 <image
-                  src="@/assets/img/icon-post.svg"
+                  src="@/assets/img/icon-send-2.svg"
                   mode="aspectFit"
-                  class="voice-finished-actions__icon"
+                  class="voice-finished-actions__icon voice-finished-actions__icon--send"
                 />
               </view>
 
@@ -790,11 +756,11 @@ onBeforeUnmount(() => {
                 :class="{
                   'voice-finished-actions--keyboard-open': voiceKeyboardOpen,
                 }"
-                @touchstart.stop.prevent="onVoiceInitialMode"
-                @tap="onVoiceInitialMode"
+                @touchstart.stop.prevent="onVoiceRestart"
+                @tap="onVoiceRestart"
               >
                 <image
-                  src="@/assets/img/icon-voice-fill.svg"
+                  src="@/assets/img/icon-voice-sm.svg"
                   mode="aspectFit"
                   class="voice-finished-actions__icon"
                 />
@@ -807,68 +773,105 @@ onBeforeUnmount(() => {
               @mouseup="onVoiceTouchEnd"
               @mouseleave="onVoiceTouchCancel"
               @contextmenu.prevent
-              @touchstart.stop="onVoiceTouchStart"
-              @touchend.stop="onVoiceTouchEnd"
-              @touchcancel.stop="onVoiceTouchCancel"
+              @touchstart.stop.prevent="onVoiceTouchStart"
+              @touchend.stop.prevent="onVoiceTouchEnd"
+              @touchcancel.stop.prevent="onVoiceTouchCancel"
             >
               <view v-if="voicePhase === 'recording'" class="voice-ring voice-ring--outer" />
               <view v-if="voicePhase === 'recording'" class="voice-ring voice-ring--middle" />
-              <view class="voice-ring voice-ring--inner">
-                <image
-                  mode="aspectFit"
-                  class="voice-ring--inner-img"
-                  src="@/assets/img/icon-microphone.svg"
-                />
-              </view>
+              <image
+                mode="aspectFit"
+                class="voice-ring--inner-img"
+                src="@/assets/img/icon-voice-lg.svg"
+              />
             </view>
           </view>
         </view>
       </view>
     </view>
-    <!-- 输入单元：两种模式（voicePhase!=idle 时隐藏，但按住期间保留触摸区域） -->
-    <view v-if="inputMode === 'text'" class="chat-input__unit">
-      <!-- 文本输入模式（Figma: 40852:4584） -->
+    <!-- 底部输入栏：默认语音、键盘文本、发送和生成中状态 -->
+    <view
+      v-if="inputMode === 'text' || voicePhase === 'idle'"
+      class="input-bar"
+      :class="{ 'input-bar--text': inputMode === 'text' }"
+    >
+      <view
+        v-if="inputMode === 'voice' && !isLoading"
+        class="input-bar__keyboard"
+        @tap="switchToText"
+      >
+        <image src="@/assets/img/icon-keyboard.svg" mode="aspectFit" />
+      </view>
+      <view
+        v-else-if="!isLoading && !modelValue"
+        class="input-bar__microphone"
+        @tap="switchToDefaultVoice"
+      >
+        <image src="@/assets/img/icon-voice.svg" mode="aspectFit" />
+      </view>
 
-      <template v-if="inputMode === 'text'">
+      <view
+        v-if="inputMode === 'voice'"
+        class="input-bar__voice-pill"
+        @tap="onVoiceIconTap"
+      >
+        <text class="input-bar__voice-hint">
+          按住 说话
+        </text>
+      </view>
+      <view v-else class="input-bar__text-field">
         <textarea
-          class="chat-input__field chat-input__field--text"
+          class="input-bar__textarea"
           :value="modelValue"
-          :placeholder="$t('ai-input-placeholder')"
+          placeholder="发消息"
           :auto-height="true"
           :maxlength="500"
           :adjust-position="false"
           confirm-type="send"
-          placeholder-class="chat-input__placeholder chat-input__placeholder--text"
+          placeholder-class="input-bar__placeholder"
           @input="emit('update:modelValue', $event.detail.value)"
           @confirm="onTrySend"
+          @focus="onTextTextareaFocus"
+          @blur="onTextTextareaBlur"
         />
-        <view v-if="modelValue" class="chat-input__icon-btn" @tap="onTrySend">
-          <image src="@/assets/img/icon-send.svg" mode="aspectFit" class="chat-input__icon-send" />
-        </view>
-        <view
-          v-else
-          class="chat-input__icon-btn"
-          @touchstart.stop="onVoiceIconTap"
-          @tap="onVoiceIconTap"
-        >
-          <image src="@/assets/img/icon-voice.svg" mode="aspectFit" class="chat-input__icon-send" />
-        </view>
-      </template>
+      </view>
+
+      <view class="input-bar__plus" @tap="onToggleQuickList">
+        <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
+      </view>
+
+      <view v-if="inputMode === 'text' && modelValue" class="input-bar__send" @tap="onTrySend">
+        <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
+      </view>
+      <view v-else-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
+        <image src="@/assets/img/icon-stop.svg" mode="aspectFit" />
+      </view>
     </view>
 
     <!-- 输入单元下提示（Figma: 41116:6071） -->
-    <view v-if="inputMode === 'text'" class="chat-input__footer">
+    <view v-if="inputMode === 'text' || voicePhase === 'idle'" class="chat-input__footer">
       <text class="chat-input__footer-text">
-        {{ $t("ai-generated-content") }}
+        内容由AI生成，请核实重要信息
       </text>
     </view>
   </view>
 </template>
 
 <style lang="scss" scoped>
+.keyboard-interaction-mask {
+  position: fixed;
+  z-index: 1100;
+  top: 0;
+  right: 0;
+  left: 0;
+  // 仅覆盖键盘上方的可见区域；键盘本身由系统接管，无需也无法覆盖。
+  height: max(0px, calc(var(--window-height, 100dvh) - var(--vv-bottom-offset, 0px)));
+  background: transparent;
+}
+
 .chat-input {
   background: transparent;
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom));
   box-sizing: border-box;
   position: relative;
 }
@@ -879,50 +882,100 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
+// 普通输入模式键盘弹出：输入栏脱离文档流，fixed 贴到键盘顶（visualViewport 底边），
+// 内容区容器保持不动，实现“键盘顶起输入框、内容区不飞”的效果。
+.chat-input--text-keyboard-open {
+  position: fixed;
+  z-index: 1200;
+  right: 0;
+  bottom: var(--vv-bottom-offset, 0px);
+  left: 0;
+  // 键盘态不再消费底部安全区：输入栏底边贴键盘顶即可
+  padding-bottom: 0;
+  background: #ffffff;
+}
+
 .voice-sheet {
-  background: #fafafa;
-  border-radius: 24rpx 24rpx 0 0;
-  overflow: hidden;
-  box-sizing: border-box;
-  width: 100%;
-  height: 828rpx; // 414px * 2 (1rpx ~= 2px when base width=375)
+  position: fixed;
+  z-index: 1300;
+  right: 0;
+  // 固定浮窗仅使用 px 安全区，避免与 visualViewport 的 px 偏移混算。
+  bottom: var(--safe-bottom-px, env(safe-area-inset-bottom));
+  left: 0;
+  height: min(540rpx, var(--voice-sheet-h, calc(100dvh - 412rpx)));
+  min-height: 420rpx;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 112rpx 112rpx 0 0;
+  background:
+    radial-gradient(ellipse 196rpx 117rpx at 0 0, rgba(123, 167, 217, 0.06) 50%, transparent 100%),
+    radial-gradient(ellipse 301rpx 117rpx at 100% 0, rgba(254, 0, 0, 0.07) 0%, transparent 100%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.86) 0%, rgba(255, 251, 251, 0.78) 100%);
+  backdrop-filter: blur(28rpx) saturate(122%);
+  -webkit-backdrop-filter: blur(28rpx) saturate(122%);
+  box-shadow: 0 -12rpx 56rpx rgba(75, 85, 99, 0.16);
+}
+
+.voice-sheet__close {
+  position: absolute;
+  z-index: 2;
+  top: 24rpx;
+  right: 28rpx;
+  width: 52rpx;
+  height: 52rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #7d8796;
+  background: transparent;
+  font-size: 40rpx;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.voice-sheet::after {
+  position: absolute;
+  z-index: 0;
+  bottom: -104rpx;
+  left: -30rpx;
+  width: 810rpx;
+  height: 342rpx;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #fce5e5 0%, rgba(252, 229, 229, 0) 99.43%);
+  content: '';
 }
 
 .voice-sheet--keyboard-open {
-  height: auto;
+  // 键盘弹出：浮窗底边贴 visualViewport 底边（即键盘顶），bottom 取安全区与键盘偏移的较大者。
+  bottom: max(var(--safe-bottom-px, env(safe-area-inset-bottom)), var(--vv-bottom-offset, 0px));
+  height: 540rpx;
   max-height: none;
-  overflow: visible;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
 .voice-sheet--keyboard-open .voice-recording {
-  // 占满 voice-sheet 全部高度，按钮用 margin-top:auto 推到底部
   flex: 1;
-  justify-content: flex-start;
+  justify-content: space-between;
   align-items: stretch;
-  padding: 0;
+  padding: 0 48rpx 40rpx;
   height: 100%;
   box-sizing: border-box;
   overflow: hidden;
 }
 
-.voice-sheet--keyboard-open .voice-recording__header {
-  height: 56rpx;
-  flex-shrink: 0;
-}
-
-.voice-sheet--keyboard-open .voice-recording__top {
-  display: none;
-}
-
 .voice-sheet--keyboard-open .voice-recording__stream {
-  flex: 1;
-  height: auto;
-  min-height: 80rpx;
-  padding: 0 36rpx;
+  flex: 1 1 0;
+  height: 0;
+  min-height: 160rpx;
+  margin: 52rpx 0 68rpx;
+  padding: 38rpx 32rpx;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.78);
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -931,21 +984,61 @@ onBeforeUnmount(() => {
   height: 100% !important;
 }
 
+/* 键盘弹起时保持原有流式布局，避免完成态的绝对定位覆盖输入区。 */
+.voice-sheet--keyboard-open .voice-recording--finished .voice-recording__stream {
+  position: static;
+  flex: 1 1 0;
+  height: 0;
+  min-height: 160rpx;
+  margin: 52rpx 0 68rpx;
+  padding: 38rpx 32rpx;
+}
+
+.voice-sheet--keyboard-open .voice-recording--finished .voice-finished-actions {
+  position: relative;
+  width: 460rpx;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 0 auto;
+  // 安全区由外层 .voice-recording 统一消费，此处不再重复叠加
+  padding: 0 0 36rpx;
+}
+
+.voice-sheet--keyboard-open .voice-recording--finished .voice-actions__btn {
+  transform: translateY(42rpx);
+}
+
+.voice-sheet--keyboard-open .voice-recording--finished .voice-actions__btn-send {
+  transform: none;
+}
+
 .voice-sheet--keyboard-open .voice-recording__body {
-  // 裸 wrapper，用 margin-top: auto 将按钮区推到底部
-  margin-top: auto;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 0;
+}
+
+.voice-recording__body {
+  flex: 0 0 auto;
+  width: 100%;
+}
+
+.voice-recording__body--finished {
+  position: static;
+  margin: 0 0 8rpx;
+}
+
+.voice-recording__content {
+  display: flex;
+  justify-content: center;
 }
 
 .voice-sheet--keyboard-open .voice-recording__content {
   padding-top: 0;
-}
-
-.voice-sheet--keyboard-open .voice-finished-actions {
-  flex-shrink: 0;
-  padding-top: 20rpx;
-  padding-bottom: 32rpx;
-  gap: 64rpx;
 }
 
 .voice-sheet--keyboard-open .voice-recording__rings {
@@ -977,12 +1070,19 @@ onBeforeUnmount(() => {
   border-radius: 0;
   overflow: visible;
 }
-.voice-recording__top {
-  height: 32rpx;
+.voice-recording__instruction {
+  height: 48rpx;
   display: flex;
   justify-content: center;
   align-items: center;
 }
+
+.voice-recording__instruction-text {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #5f6775;
+}
+
 .voice-recording__content {
   padding-top: 0;
 }
@@ -1021,26 +1121,132 @@ onBeforeUnmount(() => {
 }
 
 .voice-recording {
+  position: relative;
+  z-index: 1;
   display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  padding: 0 48rpx 40rpx;
+  box-sizing: border-box;
+}
+
+.voice-recording--finished {
+  justify-content: space-between;
+}
+
+.voice-recording__live {
+  display: flex;
+  flex: 1;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 0 0 40rpx;
+  min-height: 0;
+  // 上下对称 padding：安全区由外层 .voice-recording 统一消费，避免重复叠加导致居中内容偏移
+  padding: 40rpx 0;
+  box-sizing: border-box;
+}
+
+.voice-recording__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16rpx;
 }
 
 .voice-recording__listening {
-  font-size: 24rpx;
-  color: #9a9a9a;
-  line-height: 32rpx;
+  font-size: 30rpx;
+  font-weight: 500;
+  color: #2f323c;
+  line-height: 34rpx;
+}
+
+.voice-recording__hint {
+  font-size: 26rpx;
+  color: #8d95a3;
+  line-height: 30rpx;
+}
+
+.voice-recording__transcript {
+  width: 100%;
+  margin: 0 0 112rpx;
+  font-size: 30rpx;
+  color: #2f323c;
+  line-height: 46rpx;
+}
+
+.voice-recording__wave {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  width: 496rpx;
+  height: 46rpx;
+  margin: 48rpx 0 0;
+}
+
+.voice-recording__wave-bar {
+  width: 8rpx;
+  height: 12rpx;
+  border-radius: 100rpx;
+  background: #f12832;
+  transform-origin: center;
+  animation: voice-wave 0.82s ease-in-out infinite alternate;
+}
+
+.voice-recording__wave-bar:nth-child(2n) {
+  height: 18rpx;
+  animation-delay: 0.12s;
+}
+
+.voice-recording__wave-bar:nth-child(3n) {
+  height: 28rpx;
+  animation-delay: 0.24s;
+}
+
+.voice-recording__wave-bar:nth-child(4n) {
+  height: 38rpx;
+  animation-delay: 0.36s;
+}
+
+.voice-recording__wave-bar:nth-child(-n + 6),
+.voice-recording__wave-bar:nth-child(n + 20) {
+  opacity: 0.42;
+}
+
+@keyframes voice-wave {
+  from { transform: scaleY(0.55); }
+  to { transform: scaleY(1.12); }
 }
 
 .voice-recording__stream {
+  flex: 1;
   width: 100%;
-  height: 300rpx; // 150px
-  padding: 0 36rpx 48rpx; // 0 18px 24px
-  border-bottom: 1rpx solid #e5e7ea;
+  min-height: 160rpx;
+  margin: 52rpx 0 68rpx;
+  padding: 38rpx 32rpx;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.78);
   box-sizing: border-box;
   overflow: hidden;
+}
+
+.voice-recording--finished .voice-recording__stream {
+  position: static;
+  z-index: 1;
+  flex: 1 1 0;
+  width: 100%;
+  min-height: 160rpx;
+  margin: 52rpx 0 68rpx;
+  padding: 38rpx 32rpx;
+  border-radius: 24rpx;
+  background: #f6f6f6;
+}
+
+.voice-recording__stream--editing {
+  background: rgba(244, 247, 252, 0.96);
+  box-shadow: inset 0 0 0 2rpx rgba(54, 109, 255, 0.16);
 }
 .voice-recording__stream--pressing {
   border-bottom: none;
@@ -1059,6 +1265,7 @@ onBeforeUnmount(() => {
 .voice-recording__textarea {
   width: 100%;
   height: 100%;
+  min-height: 120rpx;
   padding: 0;
   margin: 0;
   font-size: 26rpx;
@@ -1113,10 +1320,9 @@ onBeforeUnmount(() => {
 
 .voice-recording__rings {
   position: relative;
-  width: 280rpx;
-  height: 280rpx;
-  margin-top: -10rpx;
-  // margin-top: -40rpx;
+  width: 84rpx;
+  height: 84rpx;
+  margin: 0 auto 24rpx;
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
@@ -1132,30 +1338,30 @@ onBeforeUnmount(() => {
 }
 
 .voice-ring--outer {
-  width: 280rpx;
-  height: 280rpx;
-  background: rgba(241, 40, 50, 0.05);
+  width: 104rpx;
+  height: 104rpx;
+  background: rgba(241, 40, 50, 0.12);
   animation: voice-pulse 2.4s ease-out infinite;
 }
 
 .voice-ring--middle {
-  width: 200rpx;
-  height: 200rpx;
-  background: rgba(241, 40, 50, 0.16);
+  width: 92rpx;
+  height: 92rpx;
+  background: rgba(241, 40, 50, 0.18);
   animation: voice-pulse 1.8s ease-out infinite;
 }
 
 .voice-ring--inner {
-  width: 160rpx;
-  height: 160rpx;
+  width: 84rpx;
+  height: 84rpx;
   background: #f12832;
   display: flex;
   justify-content: center;
   align-items: center;
 }
 .voice-ring--inner-img {
-  width: 40rpx;
-  height: 56rpx;
+  width: 84rpx;
+  height: 84rpx;
 }
 @keyframes voice-pulse {
   0% {
@@ -1221,48 +1427,47 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.voice-actions__btn {
-  width: 116rpx;
-  height: 116rpx;
-  border-radius: 58rpx;
+.voice-actions__btn,
+.voice-actions__btn-send {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  background: #f3f3f3;
+  background: transparent;
 
   &:active {
     opacity: 0.8;
   }
 }
-.voice-finished-actions {
-  .voice-finished-actions--keyboard-open {
-    width: 200rpx;
-    height: 84rpx;
-    border-radius: 46rpx;
-  }
+
+.voice-actions__btn {
+  width: 72rpx;
+  height: 72rpx;
 }
 
-.voice-actions__btn--send {
-  border-radius: 94rpx;
-  background: #f12832;
-  width: 160rpx;
-  height: 160rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.voice-actions__btn--red {
-  background: #f12832;
-}
 .voice-actions__btn-send {
-  width: 160rpx;
-  height: 160rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f12832;
-  border-radius: 94rpx;
+  width: 96rpx;
+  height: 96rpx;
+}
+
+.voice-finished-actions--keyboard-open {
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+
+.voice-actions__btn-symbol {
+  color: #9ca3af;
+  font-size: 40rpx;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.voice-actions__btn-arrow {
+  color: #fff;
+  font-size: 48rpx;
+  font-weight: 600;
+  line-height: 1;
+  transform: translateY(-2rpx);
 }
 
 .voice-actions__btn-text {
@@ -1271,74 +1476,133 @@ onBeforeUnmount(() => {
 }
 
 .voice-finished-actions {
-  width: 100%;
+  position: relative;
+  z-index: 1;
+  width: 460rpx;
   flex: 0 0 auto;
   display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 84rpx;
-  padding-top: 48rpx;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin: 0 auto;
+  // 安全区由外层 .voice-recording 统一消费，此处不再重复叠加
+  padding: 0 0 36rpx;
+}
+
+.voice-finished-actions .voice-actions__btn {
+  transform: translateY(42rpx);
+}
+
+.voice-finished-actions .voice-actions__btn-send {
+  transform: none;
 }
 
 .voice-finished-actions__icon {
-  width: 52rpx;
-  height: 52rpx;
+  display: block;
+  width: 72rpx;
+  height: 72rpx;
+}
+
+.voice-finished-actions .voice-actions__btn {
+  transform: translateY(42rpx);
+}
+
+.voice-finished-actions__icon--send {
+  width: 96rpx;
+  height: 96rpx;
 }
 
 .voice-actions__btn--red .voice-actions__btn-text {
   color: #ffffff;
 }
 
-.chat-input__unit {
-  background: #fff;
-  margin: 0 32rpx;
-  border-radius: 38rpx; // 19px
-  padding: 32rpx;
+.input-bar {
   display: flex;
   align-items: center;
-  gap: 32rpx;
-  box-shadow:
-    4rpx 0 18.6rpx rgba(107, 90, 90, 0.06),
-    0 12rpx 18.6rpx rgba(107, 90, 90, 0.09);
-}
-
-.chat-input__field {
-  flex: 1;
-  background: transparent;
-  min-height: 44rpx;
-  max-height: 220rpx;
-  line-height: 44rpx;
+  gap: 20rpx; // 10px
+  min-height: 128rpx; // 64px
+  padding: 0 40rpx; // 20px
   box-sizing: border-box;
 }
 
-.chat-input__field--text {
-  font-size: 32rpx; // 16px
-  color: #171c25;
-  text-align: left;
-}
-
-.chat-input__placeholder--text {
-  color: #bbc0c9;
-  font-size: 32rpx;
-  text-align: left;
-}
-
-.chat-input__icon-btn {
-  width: 40rpx; // 20px
-  height: 40rpx; // 20px
+.input-bar__keyboard,
+.input-bar__microphone {
+  width: 56rpx; // 28px
+  height: 56rpx;
+  flex: 0 0 56rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-
-  &:active {
-    opacity: 0.75;
-  }
 }
 
-.chat-input__icon-send {
-  width: 40rpx;
-  height: 40rpx;
+.input-bar__voice-pill,
+.input-bar__text-field {
+  flex: 1;
+  min-width: 0;
+  min-height: 88rpx; // 44px
+  border-radius: 44rpx;
+  background: #f5f5f5;
+  box-sizing: border-box;
+}
+
+.input-bar__voice-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.input-bar__voice-hint {
+  font-size: 24rpx; // 12px
+  font-weight: 400;
+  color: #999999;
+  line-height: 34rpx;
+}
+
+.input-bar__text-field {
+  display: flex;
+  align-items: center;
+  padding: 12rpx 24rpx;
+}
+
+.input-bar__textarea {
+  width: 100%;
+  min-height: 40rpx;
+  max-height: 176rpx;
+  line-height: 40rpx;
+  font-size: 28rpx; // 1p4x
+  color: #1a1a1a;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.input-bar__placeholder {
+  font-size: 24rpx;
+  color: #bababa;
+}
+
+.input-bar__plus,
+.input-bar__send,
+.input-bar__stop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.input-bar__plus,
+.input-bar__send {
+  width: 64rpx; // 32px
+  height: 64rpx;
+}
+.input-bar__stop {
+  width: 54rpx;
+  height: 54rpx;
+}
+
+.input-bar__keyboard:active,
+.input-bar__microphone:active,
+.input-bar__voice-pill:active,
+.input-bar__plus:active,
+.input-bar__send:active,
+.input-bar__stop:active {
+  opacity: 0.7;
 }
 
 .chat-input__hold {
@@ -1357,50 +1621,24 @@ onBeforeUnmount(() => {
 }
 
 .chat-input__footer {
-  padding-top: 12rpx;
+  padding-top: 4rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12rpx;
 }
 
 .chat-input__footer-text {
   width: 100%;
   font-size: 24rpx; // 12px
-  line-height: 32rpx;
-  color: #bbc0c9;
+  line-height: 30rpx;
+  color: #bababa;
   text-align: center;
-  margin-bottom: 12rpx; // 6px
+  margin-bottom: 0;
 }
 
 .chat-input__home-indicator-wrap {
   width: 100%;
   padding: 0 240rpx 16rpx;
   box-sizing: border-box;
-}
-.voice-recording__header {
-  height: 96rpx;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: relative;
-  width: 100%;
-}
-.voice-recording__close {
-  position: absolute;
-  right: 48rpx;
-  top: 24rpx;
-  width: 40rpx;
-  height: 40rpx;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  &:active {
-    opacity: 0.8;
-  }
-}
-.voice-recording__close-img {
-  width: 40rpx;
-  height: 40rpx;
 }
 </style>

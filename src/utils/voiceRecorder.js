@@ -12,6 +12,14 @@ class VoiceRecorder {
     this.onStop = null;
     this.useNativeRecorder = false;
     this.cancelled = false;
+    this.isStarting = false;
+    this.cancelRequested = false;
+    this._cancelPendingResolve = null;
+  }
+
+  resolvePendingCancel(result) {
+    this._cancelPendingResolve?.(result);
+    this._cancelPendingResolve = null;
   }
 
   isAlipayBridgeAvailable() {
@@ -49,7 +57,7 @@ class VoiceRecorder {
       });
 
       // 立即停止流，只是测试权限
-      stream.getTracks().forEach((track) => track.stop());
+      stream.getTracks().forEach(track => track.stop());
 
       return { success: true };
     } catch (error) {
@@ -66,34 +74,55 @@ class VoiceRecorder {
 
   /**
    * 开始录音
-   * @param {Object} options 录音选项
+   * @param {object} options 录音选项
    * @param {Function} onDataAvailable 数据可用回调
    * @param {Function} onStop 停止回调
    */
   async start(options = {}, onDataAvailable = null, onStop = null) {
     try {
-      if (this.isRecording) {
-        console.warn("录音已在进行中");
+      if (this.isRecording || this.isStarting) {
+        console.warn("[voice-recorder] start blocked", {
+          isRecording: this.isRecording,
+          isStarting: this.isStarting,
+        });
         return { success: false, error: "录音已在进行中" };
       }
+
+      this.isStarting = true;
+      this.cancelRequested = false;
+      console.info("[voice-recorder] start requested");
 
       if (this.isAlipayBridgeAvailable()) {
         const result = await this.callAlipayBridge("microphoneStart", {});
         console.info("[voice] native start result", result);
         if (!result?.success) {
-          return {
+          this.isStarting = false;
+          const failedResult = {
             success: false,
             error: result?.errorMessage || "开始录音失败",
           };
+          this.resolvePendingCancel(failedResult);
+          return failedResult;
+        }
+        if (this.cancelRequested) {
+          console.info("[voice-recorder] native start cancelled before ready");
+          await this.callAlipayBridge("microphoneCancel", {});
+          this.cleanup();
+          const cancelledResult = { success: false, error: "录音已取消" };
+          this.resolvePendingCancel(cancelledResult);
+          return cancelledResult;
         }
         this.useNativeRecorder = true;
         this.cancelled = false;
         this.onStop = onStop;
         this.isRecording = true;
+        this.isStarting = false;
+        console.info("[voice-recorder] native recorder started");
         return { success: true };
       }
 
       if (!VoiceRecorder.isSupported()) {
+        this.cleanup();
         return { success: false, error: "浏览器不支持录音功能" };
       }
 
@@ -107,6 +136,16 @@ class VoiceRecorder {
         },
       });
 
+      if (this.cancelRequested) {
+        console.info("[voice-recorder] browser start cancelled before ready");
+        this.stream.getTracks().forEach(track => track.stop());
+        this.stream = null;
+        this.cleanup();
+        const cancelledResult = { success: false, error: "录音已取消" };
+        this.resolvePendingCancel(cancelledResult);
+        return cancelledResult;
+      }
+
       // 设置回调
       this.onDataAvailable = onDataAvailable;
       this.onStop = onStop;
@@ -117,7 +156,7 @@ class VoiceRecorder {
       // 创建 MediaRecorder
       const mimeType = this.getSupportedMimeType();
       this.mediaRecorder = new MediaRecorder(this.stream, {
-        mimeType: mimeType,
+        mimeType,
         audioBitsPerSecond: options.audioBitsPerSecond || 128000,
       });
 
@@ -145,19 +184,22 @@ class VoiceRecorder {
       // 开始录音
       this.mediaRecorder.start(options.timeSlice || 1000); // 每1秒收集一次数据
       this.isRecording = true;
-      console.info("[voice] browser recorder started");
+      this.isStarting = false;
+      console.info("[voice-recorder] browser recorder started");
 
       return { success: true };
     } catch (error) {
-      console.error("开始录音失败:", error);
+      console.error("[voice-recorder] start failed", error);
       this.cleanup();
       const notAllowed =
         error?.name === "NotAllowedError" || error?.name === "SecurityError";
-      return {
+      const failedResult = {
         success: false,
         error: error.message || "无法开始录音",
         notAllowed,
       };
+      this.resolvePendingCancel(failedResult);
+      return failedResult;
     }
   }
 
@@ -213,6 +255,17 @@ class VoiceRecorder {
    */
   async cancel() {
     this.cancelled = true;
+    this.cancelRequested = true;
+    console.info("[voice-recorder] cancel requested", {
+      isRecording: this.isRecording,
+      isStarting: this.isStarting,
+      useNativeRecorder: this.useNativeRecorder,
+    });
+    if (this.isStarting && !this.isRecording) {
+      return new Promise((resolve) => {
+        this._cancelPendingResolve = resolve;
+      });
+    }
     if (this.useNativeRecorder && this.isRecording) {
       try {
         const result = await this.callAlipayBridge("microphoneCancel", {});
@@ -315,16 +368,23 @@ class VoiceRecorder {
    * 清理资源
    */
   cleanup() {
-    if (this.stream) {
-      this.stream.getTracks().forEach((track) => {
-        track.stop();
-      });
-      this.stream = null;
-    }
+    const tracks = this.stream?.getTracks?.() || [];
+    console.info("[voice-recorder] cleanup", {
+      trackCount: tracks.length,
+      trackStates: tracks.map(track => track.readyState),
+      isRecording: this.isRecording,
+      isStarting: this.isStarting,
+    });
+    tracks.forEach((track) => {
+      track.stop();
+    });
+    this.stream = null;
     this.mediaRecorder = null;
     this.isRecording = false;
+    this.isStarting = false;
     this.useNativeRecorder = false;
     this.cancelled = false;
+    this.cancelRequested = false;
   }
 
   /**

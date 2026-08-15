@@ -12,9 +12,8 @@ export function createApp() {
   app.use(store);
   app.use(i18n);
 
-  if (import.meta.env.DEV) {
-    void new VConsole();
-  }
+  // TODO: 真机调试期间写死开启；调试完成后恢复为 resolveVConsoleEnabled() 判断
+  void new VConsole();
 
   return {
     app,
