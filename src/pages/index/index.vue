@@ -1,6 +1,7 @@
 <script setup>
 import { onShow } from "@dcloudio/uni-app";
 import { useHookFetch } from "hook-fetch/vue";
+import html2canvas from "html2canvas";
 import { useI18n } from "vue-i18n";
 import {
   cancelFeedback,
@@ -10,8 +11,12 @@ import {
   sendChatMessage,
   submitFeedback,
 } from "@/api/chat";
-import iconCopyLink from "@/assets/img/icon-copyLink.svg";
-import iconShareImage from "@/assets/img/icon-shareImage.svg";
+import iconImage from "@/assets/img/icon-share-image.svg";
+import iconWechat from "@/assets/img/icon-share-wechat.svg";
+import iconQQ from "@/assets/img/icon-share-qq.svg";
+import iconLink from "@/assets/img/icon-share-link.svg";
+import iconSaveImage from "@/assets/img/icon-save-image.svg";
+import iconCopyImage from "@/assets/img/icon-copy-image.svg";
 import { GCPAPI } from "@/common/api/gcp";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
@@ -22,6 +27,7 @@ import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useSystemStore, useUserStore } from "@/stores";
 import {
   applyEventToBlocks,
@@ -34,6 +40,7 @@ defineOptions({ name: "AiChatPage" });
 const { t } = useI18n();
 const systemStore = useSystemStore();
 const userStore = useUserStore();
+const { safeAreaStyle } = useSafeArea();
 const { stream, cancel } = useHookFetch({
   request: sendChatMessage,
   onError: error => console.error("[AiChatPage] stream request failed", error),
@@ -128,30 +135,29 @@ const {
   scrollIntoView,
   aiSessionId,
 } = toRefs(state);
-console.log("🚀 ~ stage:", stage);
 
 const shareSheetOptions = computed(() => {
   return [
     {
-      key: "copy-link",
-      label: "复制链接",
-      icon: iconCopyLink,
+      key: "wechat",
+      label: "微信",
+      icon: iconWechat,
+    },
+    {
+      key: "qq",
+      label: "QQ",
+      icon: iconQQ,
     },
     {
       key: "share-image",
-      label: "分享图片",
-      icon: iconShareImage,
+      label: "图片分享",
+      icon: iconImage,
     },
-    // {
-    //   key: "whatsapp",
-    //   label: "WhatsApp",
-    //   icon: "@/assets/img/icon-whatsapp.svg",
-    // },
-    // {
-    //   key: "telegram",
-    //   label: "Telegram",
-    //   icon: "@/assets/img/icon-telegram.svg",
-    // },
+    {
+      key: "copy-link",
+      label: "分享链接",
+      icon: iconLink,
+    },
   ];
 });
 
@@ -400,36 +406,79 @@ async function _copyTextToClipboard(text) {
   const safeText = String(text || "");
   if (!safeText) return false;
 
-  // 1) uni-app：在部分平台可能没有实现 setClipboardData
-  // 2) H5：navigator.clipboard（部分 WebView 也可用）
+  try {
+    if (typeof uni !== "undefined" && typeof uni.setClipboardData === "function") {
+      await new Promise((resolve, reject) => {
+        uni.setClipboardData({
+          data: safeText,
+          success: resolve,
+          fail: reject,
+        });
+      });
+      return true;
+    }
+  } catch (e) {
+    console.error("[AiChatPage] uni clipboard error", e);
+  }
+
   try {
     if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
       await navigator.clipboard.writeText(safeText);
       return true;
     }
   } catch (e) {
-    console.error("[AiChatPage] caught error", e);
-    // fallback
+    console.error("[AiChatPage] navigator clipboard error", e);
   }
 
-  // try {
-  //   if (
-  //     typeof uni !== "undefined" &&
-  //     typeof uni.setClipboardData === "function"
-  //   ) {
-  //     await new Promise((resolve, reject) => {
-  //       uni.setClipboardData({
-  //         data: safeText,
-  //         success: () => resolve(true),
-  //       });
-  //     });
-  //     return true;
-  //   }
-  // } catch (e) {
-  //   // fallback
-  // }
-
   return false;
+}
+
+function _toPlainText(markdown) {
+  const source = String(markdown || "");
+  const codeBlocks = source.split("```");
+
+  return codeBlocks
+    .map((part, index) => {
+      const text = index % 2 === 1 ? part.replace(/^[^\n]*\n/, "") : part;
+      return text
+        .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+        .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+        .replace(/^\s*[-*+]\s+/gm, "• ")
+        .replace(/^\s*\d+\.\s+/gm, "")
+        .replace(/[*`_~]/g, "");
+    })
+    .join("")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function _getCopyableMessageContent(msg) {
+  const directContent = String(msg?.content || "").trim();
+  if (directContent) return _toPlainText(directContent);
+
+  const answerContent = (Array.isArray(msg?.blocks) ? msg.blocks : [])
+    .filter(block => block?.type === "answer")
+    .map(block => String(block?.payload?.content || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+  if (answerContent) return _toPlainText(answerContent);
+
+  return _toPlainText(msg?.rawSseText);
+}
+
+async function onCopyMessage({ msg }) {
+  const content = _getCopyableMessageContent(msg);
+  if (!content) {
+    uni.showToast({ title: "复制失败，请手动复制", icon: "none" });
+    return;
+  }
+
+  const copied = await _copyTextToClipboard(content);
+  uni.showToast({
+    title: copied ? t("copy-success") : "复制失败，请手动复制",
+    icon: "none",
+  });
 }
 async function onShareSheetOption(item) {
   const key = item?.key;
@@ -451,9 +500,15 @@ async function onShareSheetOption(item) {
     return;
   }
 
-  if (key === "share-image" || key === "whatsapp" || key === "telegram") {
+  if (key === "share-image") {
     if (state.shareSelectedIndexes.length === 0) return;
     openSharePoster();
+    return;
+  }
+
+  if (key === "wechat" || key === "qq") {
+    uni.showToast({ title: "暂不支持此分享方式", icon: "none" });
+    closeShareSheet(true);
     return;
   }
 
@@ -642,16 +697,6 @@ async function _generateSharePosterLongImage() {
 
 async function onSaveSharePoster() {
   if (!state.sharePosterDataUrl) return;
-  if (typeof window !== "undefined" && window.AlipayJSBridge?.call) {
-    const granted = await new Promise((resolve) => {
-      window.AlipayJSBridge.call("requestPermission", { permissions: "photo" }, result =>
-        resolve(String(result?.result) === "1" || result?.status === "granted"));
-    });
-    if (!granted) {
-      uni.showToast({ title: "请允许访问相册", icon: "none", duration: 3000 });
-      return;
-    }
-  }
   if (typeof document === "undefined") {
     uni.showToast({
       title: t("save-not-supported"),
@@ -669,6 +714,36 @@ async function onSaveSharePoster() {
   document.body.removeChild(link);
   uni.showToast({ title: t("download-start"), icon: "none" });
 }
+
+async function onCopySharePoster() {
+  if (!state.sharePosterDataUrl) return;
+
+  const canCopyImage =
+    typeof navigator !== "undefined" &&
+    typeof navigator.clipboard?.write === "function" &&
+    typeof ClipboardItem !== "undefined";
+
+  if (!canCopyImage) {
+    uni.showToast({
+      title: t("copy-failed-browser-not-supported"),
+      icon: "none",
+    });
+    return;
+  }
+
+  try {
+    const response = await fetch(state.sharePosterDataUrl);
+    const blob = await response.blob();
+    await navigator.clipboard.write([
+      new ClipboardItem({ [blob.type || "image/png"]: blob }),
+    ]);
+    uni.showToast({ title: t("copy-success"), icon: "none" });
+  } catch (error) {
+    console.error("[AiChatPage] clipboard image copy error", error);
+    uni.showToast({ title: t("copy-failed"), icon: "none" });
+  }
+}
+
 function startNewConversation() {
   // 新开会话：清空对话 + 重置会话 id，让后续发送触发创建新 session
   state.messages = [];
@@ -711,7 +786,6 @@ function _mapHistoryMessages(list) {
         rawSseText: aiText,
         ttsUrl: item?.ttsUrl || "",
         ttsEnabled: !!item?.ttsUrl,
-        ttsLoading: false,
         loading: false,
         sessionId,
         messageId,
@@ -1100,7 +1174,6 @@ async function _sendAiFlow({ aiMsgIndex, content, hadSessionId, requestSeq, user
       const aiMessage = state.messages[aiMsgIndex];
       if (!aiMessage) break;
       const update = applyEventToBlocks(aiMessage.blocks || [], chunk.result);
-      console.log("🚀 ~ _sendAiFlow ~ update:", update);
       receivedContent ||= update.receivedContent;
       console.log("🚀 ~ _sendAiFlow ~ receivedContent:", receivedContent);
 
@@ -1382,36 +1455,36 @@ onBeforeUnmount(() => {
         <view class="session-loading__spinner" />
       </view>
 
-      <view v-if="shareSheetVisible" class="share-sheet">
-        <view class="share-sheet__header">
+      <view v-if="shareSheetVisible" class="share-sheet-modal">
+        <view class="share-sheet-modal__mask" @tap="closeShareSheet" />
+        <view class="share-sheet" :style="safeAreaStyle" @tap.stop>
           <text class="share-sheet__title">
-            分享对话到
+            分享到：
           </text>
-        </view>
-        <view class="share-sheet__options">
-          <view
-            v-for="item in shareSheetOptions"
-            :key="item.key"
-            class="share-sheet__option"
-            :class="{
-              'share-sheet__option--disabled':
-                item.key === 'share-image' && shareSelectedIndexes.length === 0,
-            }"
-            @tap="
-              item.key === 'share-image' && shareSelectedIndexes.length === 0
-                ? null
-                : onShareSheetOption(item)
-            "
-          >
-            <view class="share-sheet__option-icon">
-              <image :src="item.icon" mode="aspectFit" class="share-sheet__option-icon-img" />
+          <view class="share-sheet__options">
+            <view
+              v-for="item in shareSheetOptions"
+              :key="item.key"
+              class="share-sheet__option"
+              :class="{
+                'share-sheet__option--disabled':
+                  item.key === 'share-image' && shareSelectedIndexes.length === 0,
+              }"
+              @tap="
+                item.key === 'share-image' && shareSelectedIndexes.length === 0
+                  ? null
+                  : onShareSheetOption(item)
+              "
+            >
+              <view class="share-sheet__option-icon">
+                <image :src="item.icon" mode="aspectFit" class="share-sheet__option-icon-img" />
+              </view>
+              <text class="share-sheet__option-label">
+                {{ item.label }}
+              </text>
             </view>
-            <text class="share-sheet__option-label">
-              {{ item.label }}
-            </text>
           </view>
-        </view>
-        <view class="share-sheet__cancel-wrap">
+          <view class="share-sheet__divider" />
           <view class="share-sheet__cancel-btn" @tap="closeShareSheet">
             <text class="share-sheet__cancel-text">
               {{ $t("cancel") }}
@@ -1420,17 +1493,17 @@ onBeforeUnmount(() => {
         </view>
       </view>
 
-      <!-- 分享长图预览/生成（Figma: 41648-647） -->
+      <!-- 分享图片预览/生成（Figma: 495:809） -->
       <view v-else-if="sharePosterVisible" class="share-poster-modal">
         <view class="share-poster-modal__mask" @tap="closeSharePosterModal" />
         <view class="share-poster-modal__card" @tap.stop>
           <view class="share-poster-modal__content">
             <view v-if="sharePosterGenerating" class="share-poster-modal__loading">
               <view class="share-poster-modal__loading-content">
-                <!-- <text class="share-poster-modal__loading-text">{{
-                  $t("loading")
-                }}</text> -->
-                <view class="session-loading__spinner" />
+                <view class="session-loading__spinner share-poster-modal__loading-spinner" />
+                <text class="share-poster-modal__loading-text">
+                  图片生成中
+                </text>
               </view>
             </view>
             <scroll-view
@@ -1444,27 +1517,31 @@ onBeforeUnmount(() => {
               </view>
             </scroll-view>
           </view>
-          <view class="share-poster-modal__bottom">
+
+          <view class="share-poster-modal__bottom" :style="safeAreaStyle">
             <view class="share-poster-modal__bottom-action-wrap">
-              <view class="share-sheet__option" @tap="onSaveSharePoster">
-                <view class="share-sheet__option-icon">
-                  <image
-                    class="share-poster-modal__bottom-action-icon"
-                    src="@/assets/img/icon-saveImg.svg"
-                    mode="aspectFit"
-                  />
+              <view class="share-poster-modal__option" @tap="onSaveSharePoster">
+                <view class="share-poster-modal__option-icon">
+                  <image class="share-poster-modal__option-icon-img" :src="iconSaveImage" mode="aspectFit" />
                 </view>
-                <text class="share-poster-modal__bottom-action-text">
+                <text class="share-poster-modal__option-label">
                   保存图片
                 </text>
               </view>
-            </view>
-            <view class="share-sheet__cancel-wrap">
-              <view class="share-sheet__cancel-btn" @tap="closeSharePosterModal">
-                <text class="share-sheet__cancel-text">
-                  取消
+              <view class="share-poster-modal__option" @tap="onCopySharePoster">
+                <view class="share-poster-modal__option-icon">
+                  <image class="share-poster-modal__option-icon-img" :src="iconCopyImage" mode="aspectFit" />
+                </view>
+                <text class="share-poster-modal__option-label">
+                  复制图片
                 </text>
               </view>
+            </view>
+            <view class="share-poster-modal__divider" />
+            <view class="share-poster-modal__cancel" @tap="closeSharePosterModal">
+              <text class="share-poster-modal__cancel-text">
+                取消
+              </text>
             </view>
           </view>
         </view>
@@ -1637,42 +1714,53 @@ $color-white: #ffffff;
   }
 }
 
-/* Share sheet (41148-602): occupy input area position */
-.share-sheet {
-  flex-shrink: 0;
-  width: 100%;
-  background: #ffffff;
-  box-shadow: 12rpx 0 28rpx rgba(107, 90, 90, 0.12);
-  padding-bottom: calc(32rpx + constant(safe-area-inset-bottom));
-  padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
+/* Share sheet (495:759) */
+.share-sheet-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
 }
 
-.share-sheet__header {
-  padding: 32rpx 48rpx 16rpx; /* 16px 24px 8px */
+.share-sheet-modal__mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.share-sheet {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  box-sizing: border-box;
   border-radius: 32rpx 32rpx 0 0;
+  background: #ffffff;
+  padding: 40rpx 60rpx calc(32rpx + var(--safe-bottom, env(safe-area-inset-bottom)));
 }
 
 .share-sheet__title {
-  font-size: 28rpx; /* 14px */
-  line-height: 32rpx;
-  color: #2f323c;
-  font-weight: 500;
+  display: block;
+  height: 40rpx;
+  font-family: "PingFang SC";
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+  color: #1a1a1a;
 }
 
 .share-sheet__options {
   display: flex;
   align-items: flex-start;
-  gap: 32rpx; /* 16px */
-  padding: 16rpx 48rpx 40rpx; /* 8px 24px 20px */
+  justify-content: space-between;
+  margin-top: 40rpx;
 }
 
 .share-sheet__option {
-  width: 96rpx; /* 48px */
-  height: 112rpx; /* 56px */
+  width: 112rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8rpx; /* 4px */
+  gap: 18rpx;
 }
 
 .share-sheet__option--disabled {
@@ -1681,57 +1769,51 @@ $color-white: #ffffff;
 }
 
 .share-sheet__option-icon {
-  width: 80rpx; /* 40px */
-  height: 80rpx; /* 40px */
-  border-radius: 14rpx; /* 7px */
-  background: #f9f9f9;
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
+  background: #f2f2f2;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
 }
 
 .share-sheet__option-icon-img {
-  width: 40rpx;
-  height: 40rpx;
+  width: 56rpx;
+  height: 56rpx;
 }
 
 .share-sheet__option-label {
-  width: 100%;
-  font-size: 18rpx; /* 9px */
-  line-height: 24rpx;
-  color: #2f323c;
+  height: 40rpx;
+  font-family: "PingFang SC";
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+  color: #1a1a1a;
   text-align: center;
+  white-space: nowrap;
 }
 
-.share-sheet__cancel-wrap {
-  padding: 0 48rpx;
+.share-sheet__divider {
+  height: 2rpx;
+  margin-top: 34rpx;
+  background: #e4e4e4;
 }
 
 .share-sheet__cancel-btn {
-  background: #f9f9f9;
-  border-radius: 16rpx; /* 8px */
-  padding: 24rpx 0; /* 12px */
+  height: 40rpx;
+  margin-top: 28rpx;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .share-sheet__cancel-text {
-  font-size: 28rpx; /* 14px */
-  color: #2f323c;
-}
-
-.share-sheet__home {
-  padding: 32rpx 242rpx 16rpx; /* 16px 121px 8px */
-  box-sizing: border-box;
-}
-
-.share-sheet__home-bar {
-  height: 10rpx; /* 5px */
-  border-radius: 100rpx;
-  background: #000000;
-  opacity: 0.9;
+  font-family: "PingFang SC";
+  font-size: 28rpx;
+  font-weight: 500;
+  line-height: 40rpx;
+  color: #999999;
 }
 
 /* Share Poster Modal */
@@ -1754,39 +1836,18 @@ $color-white: #ffffff;
   position: relative;
   width: 100%;
   height: 100%;
+  min-height: 0;
   background: transparent;
   display: flex;
   flex-direction: column;
 }
 
-.share-poster-modal__topbar {
-  display: none;
-}
-
-.share-poster-modal__title {
-  font-size: 28rpx;
-  line-height: 40rpx;
-  color: #2f323c;
-  font-weight: 600;
-}
-
-.share-poster-modal__close {
-  background: #f5f5f5;
-  border-radius: 16rpx;
-  padding: 16rpx 20rpx;
-}
-
-.share-poster-modal__close-text {
-  font-size: 26rpx;
-  color: #2f323c;
-}
-
 .share-poster-modal__content {
   flex: 1;
   display: flex;
-  align-items: stretch;
-  justify-content: flex-start;
-  padding: 40rpx 32rpx 32rpx;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 30rpx 42rpx 0;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -1810,128 +1871,110 @@ $color-white: #ffffff;
   border-radius: 30rpx;
   background: #fff;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 16rpx;
+}
+
+.share-poster-modal__loading-spinner {
+  border-top-color: #c8201e;
 }
 
 .share-poster-modal__loading-text {
-  font-size: 28rpx;
+  font-size: 24rpx;
+  line-height: 32rpx;
   color: #5f6775;
 }
 
 .share-poster-modal__bottom {
-  padding: 48rpx 32rpx calc(32rpx + constant(safe-area-inset-bottom));
-  padding: 48rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
-  border-radius: 32rpx 32rpx 0 0;
+  padding: 40rpx 60rpx 32rpx;
+  padding-bottom: calc(32rpx + var(--safe-bottom, constant(safe-area-inset-bottom)));
+  padding-bottom: calc(32rpx + var(--safe-bottom, env(safe-area-inset-bottom)));
   background: #fff;
-  box-shadow: 0 -1rpx 0 rgba(0, 0, 0, 0.04);
+  box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.0601);
   display: flex;
   flex-direction: column;
-  gap: 40rpx;
+  border-radius: 32rpx 32rpx 0 0;
+}
+
+.share-poster-modal__bottom-action-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 61.333rpx;
+}
+
+.share-poster-modal__option {
+  width: 112rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18rpx;
+}
+
+.share-poster-modal__option-icon {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
+  background: #f2f2f2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.share-poster-modal__option-icon-img {
+  width: 56rpx;
+  height: 56rpx;
+}
+
+.share-poster-modal__option-label {
+  height: 40rpx;
+  font-family: "PingFang SC";
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+  color: #1a1a1a;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.share-poster-modal__divider {
+  height: 2rpx;
+  margin-top: 34rpx;
+  background: #e4e4e4;
+}
+
+.share-poster-modal__cancel {
+  height: 40rpx;
+  margin-top: 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.share-poster-modal__cancel-text {
+  font-family: "PingFang SC";
+  font-size: 28rpx;
+  font-weight: 500;
+  line-height: 40rpx;
+  color: #999999;
 }
 
 .share-poster {
-  width: 690rpx;
+  width: 656rpx;
   margin: 0 auto;
   background: #ffffff;
   border-radius: 24rpx;
-  padding: 28rpx;
+  padding: 24rpx 30rpx 30rpx;
   box-sizing: border-box;
 }
 
-.share-poster__header {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-  margin-bottom: 20rpx;
-}
-
-.share-poster__logo {
-  width: 64rpx;
-  height: 64rpx;
-}
-
-.share-poster__header-text {
-  display: flex;
-  flex-direction: column;
-  gap: 6rpx;
-}
-
-.share-poster__header-title {
-  font-size: 32rpx;
-  line-height: 40rpx;
-  font-weight: 700;
-  color: #2f323c;
-}
-
-.share-poster__header-tip {
-  font-size: 24rpx;
-  line-height: 32rpx;
-  color: #7a7f8c;
-}
-
-.share-poster__items {
-  display: flex;
-  flex-direction: column;
-  gap: 22rpx;
-}
-
-.share-poster__item {
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-}
-
-.share-poster__q,
-.share-poster__a {
-  padding: 18rpx 18rpx;
-  border-radius: 18rpx;
-}
-
-.share-poster__q {
-  background: #f6f7fb;
-}
-
-.share-poster__a {
-  background: #ffffff;
-  border: 1rpx solid rgba(47, 50, 60, 0.12);
-}
-
-.share-poster__q-label,
-.share-poster__a-label {
-  display: inline-block;
-  font-size: 22rpx;
-  line-height: 28rpx;
-  color: #f8315e;
-  font-weight: 700;
-  margin-right: 12rpx;
-}
-
-.share-poster__text {
-  font-size: 26rpx;
-  line-height: 42rpx;
-  color: #2f323c;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.share-poster__markdown {
-  font-size: 26rpx;
-  line-height: 42rpx;
-  color: #2f323c;
-  word-break: break-word;
-}
-
-.share-poster__markdown ::v-deep img {
-  max-width: 100%;
-}
-
 .share-poster-modal__img {
-  width: 590rpx;
+  width: 584rpx;
   height: auto;
   display: block;
   margin: 0 auto;
-  border-radius: 16rpx;
+  border-radius: 24rpx;
 }
 
 .share-poster-modal__scroll-img {
@@ -1946,47 +1989,11 @@ $color-white: #ffffff;
 }
 
 .share-poster-modal__img-center {
-  min-height: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding-bottom: 32rpx;
 }
-.share-poster-modal__bottom-action {
-  padding: 24rpx 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12rpx;
-  flex: 1;
-}
-
-.share-poster-modal__bottom-action-text {
-  font-size: 18rpx;
-  color: #2f323c;
-  font-weight: 700;
-}
-
-.share-poster-modal__bottom-cancel {
-  flex: 1;
-  background: #f0f0f0;
-  border-radius: 50rpx;
-  padding: 24rpx 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.share-poster-modal__bottom-cancel-text {
-  font-size: 28rpx;
-  color: #2f323c;
-  font-weight: 700;
-}
-
-.share-poster-modal__bottom-action-icon {
-  width: 32rpx;
-  height: 32rpx;
-}
-
 .share-poster-hidden {
   position: fixed;
   left: 0;

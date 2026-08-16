@@ -120,11 +120,19 @@ const voiceKeyboardOpen = computed(() =>
   Boolean(state.inputMode === "voice" && (voiceInputFocused.value || keyboardHeightPx.value > 0)),
 );
 const textKeyboardOpen = computed(() =>
-  Boolean(state.inputMode === "text" && (textInputFocused.value || keyboardHeightPx.value > 0)),
+  Boolean(state.inputMode === "text" && keyboardHeightPx.value > 0),
 );
 const keyboardInteractionMasked = computed(() =>
-  Boolean(textInputFocused.value || voiceInputFocused.value),
+  Boolean(keyboardHeightPx.value > 0 && (textInputFocused.value || voiceInputFocused.value)),
 );
+
+const textTextareaHeight = computed(() => {
+  const maxCharsPerLine = 15;
+  const lineCount = String(props.modelValue || "")
+    .split("\n")
+    .reduce((count, line) => count + Math.max(1, Math.ceil(line.length / maxCharsPerLine)), 0);
+  return `${Math.min(Math.max(lineCount, 1), 4) * 40}rpx`;
+});
 
 function onVoiceTextareaFocus() {
   onVoiceFocus();
@@ -302,8 +310,6 @@ function _resetVoiceText() {
   state._typingTimer = null;
 }
 function onVoiceClose() {
-  // 立即重置键盘状态，避免第二次进入语音模式时 voice-sheet 高度异常
-  resetKeyboardState();
   _resetVoiceText();
   state._voiceJobId = Date.now();
   _stopVoiceRecorder(true);
@@ -791,7 +797,6 @@ onBeforeUnmount(() => {
     </view>
     <!-- 底部输入栏：默认语音、键盘文本、发送和生成中状态 -->
     <view
-      v-if="inputMode === 'text' || voicePhase === 'idle'"
       class="input-bar"
       :class="{ 'input-bar--text': inputMode === 'text' }"
     >
@@ -823,9 +828,9 @@ onBeforeUnmount(() => {
         <textarea
           class="input-bar__textarea"
           :value="modelValue"
+          :style="{ height: textTextareaHeight }"
           placeholder="发消息"
-          :auto-height="true"
-          :maxlength="500"
+          :auto-height="false"
           :adjust-position="false"
           confirm-type="send"
           placeholder-class="input-bar__placeholder"
@@ -849,7 +854,7 @@ onBeforeUnmount(() => {
     </view>
 
     <!-- 输入单元下提示（Figma: 41116:6071） -->
-    <view v-if="inputMode === 'text' || voicePhase === 'idle'" class="chat-input__footer">
+    <view class="chat-input__footer">
       <text class="chat-input__footer-text">
         内容由AI生成，请核实重要信息
       </text>
@@ -874,6 +879,10 @@ onBeforeUnmount(() => {
   padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom));
   box-sizing: border-box;
   position: relative;
+  uni-image {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 .chat-input--keyboard-open {
@@ -1560,13 +1569,16 @@ onBeforeUnmount(() => {
 .input-bar__text-field {
   display: flex;
   align-items: center;
+  min-width: 0;
   padding: 12rpx 24rpx;
+  overflow: hidden;
 }
 
 .input-bar__textarea {
   width: 100%;
   min-height: 40rpx;
   max-height: 176rpx;
+  overflow-y: auto;
   line-height: 40rpx;
   font-size: 28rpx; // 1p4x
   color: #1a1a1a;

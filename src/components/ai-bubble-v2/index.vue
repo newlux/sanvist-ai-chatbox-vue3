@@ -29,6 +29,8 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   forceThinkingExpanded: { type: Boolean, default: false },
   hideSuggestion: { type: Boolean, default: false },
+  // 分享海报场景：不渲染「输出结果」分组标题
+  noAnswerGroup: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -81,6 +83,7 @@ function onNegativeFeedback() {
       'ai-bubble-v2--selected': props.selectMode,
       'ai-bubble-v2--disabled': props.disabled,
       'ai-bubble-v2--user': isUser,
+      'ai-bubble-v2--no-answer-group': props.noAnswerGroup,
     }"
     @tap="onSelectTap"
   >
@@ -128,6 +131,7 @@ function onNegativeFeedback() {
         <AiContentBlocks
           :blocks="visibleBlocks"
           :force-thinking-expanded="props.forceThinkingExpanded"
+          :no-answer-group="props.noAnswerGroup"
           @suggestion-tap="onSuggestionTap"
         />
         <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
@@ -185,6 +189,12 @@ function onNegativeFeedback() {
   border-radius: 32rpx;
   background: #ffffff;
   box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
+}
+.ai-bubble-v2--no-answer-group:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 .ai-bubble-v2--user .ai-bubble-v2__body {
   flex: 0 1 auto;
