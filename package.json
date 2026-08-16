@@ -66,6 +66,7 @@
     "@vueuse/integrations": "^13.5.0",
     "echarts": "^5.4.3",
     "hook-fetch": "^2.3.2",
+    "html2canvas": "^1.4.1",
     "i18n-generator": "^0.5.1",
     "markdown-it": "14.0.0",
     "moment": "^2.29.4",

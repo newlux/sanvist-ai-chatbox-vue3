@@ -26,8 +26,6 @@ const emit = defineEmits([
   "share-select-all",
 ]);
 
-console.log("🚀 ~ shareMode:", props.shareMode.value);
-
 const { t } = useI18n();
 const systemStore = useSystemStore();
 const historyPopup = ref();

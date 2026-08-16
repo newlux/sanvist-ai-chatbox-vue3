@@ -16,11 +16,20 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  // 分享海报场景：不将 answer/chart 分组为 answer-group，避免渲染「输出结果」标题和分隔线
+  noAnswerGroup: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(["suggestion-tap"]);
 
 const renderItems = computed(() => {
+  // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
+  // 避免展示「输出结果」标题和分隔线；chart 内容本身仍由 AiBlockRenderer 渲染
+  if (props.noAnswerGroup) return props.blocks || [];
+
   const items = [];
   let group = [];
 

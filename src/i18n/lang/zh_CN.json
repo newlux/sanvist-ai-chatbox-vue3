@@ -22,6 +22,8 @@
   "identifying": "识别中",
   "long-press-to-convert-to-text": "长按可将语音转换为文本",
   "ai-thinking": "思考中",
+  "share-poster-header-title": "分享AI问问对话",
+  "share-poster-header-tip": "内容由AI生成，仅供参考",
   "copy-success": "复制成功",
   "copy-failed": "复制失败",
   "copy-failed-browser-not-supported": "浏览器不支持"
