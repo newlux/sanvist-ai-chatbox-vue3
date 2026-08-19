@@ -131,13 +131,16 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
       armIdleTimer();
       socketTask.done.then(succeed).catch((error: unknown) => {
         const normalized = toError(error);
-        // 连接没建起来且一个事件都没收到时才回落，否则整包重放会让内容重复
-        const canFallback = !finished
-          && !receivedEvent
-          && !socketTask.isConnected()
-          && normalized.name !== "AbortError";
+        // 一个事件都没收到才回落：此时界面上还没有任何内容，整包重放不会重复。
+        // 已经开始输出后再断，只能报错，否则会出现两段拼接的回答。
+        const canFallback = !finished && !receivedEvent && normalized.name !== "AbortError";
         if (canFallback) {
-          console.warn("[useChatStream] WebSocket 通道不可用，回落 HTTP：", normalized.message);
+          console.warn(
+            `[useChatStream] WebSocket 通道不可用（已建连=${socketTask.isConnected()}），回落 HTTP：`,
+            normalized.message,
+          );
+          // 先确保连接彻底关掉，避免服务端还在为这条僵尸连接生成回答
+          socketTask.abort();
           startHttpTransport();
           return;
         }

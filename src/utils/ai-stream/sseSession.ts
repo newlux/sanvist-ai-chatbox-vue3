@@ -23,9 +23,9 @@ export interface SseSession {
   consumeChunk: (data: ChunkData) => void;
   consumeText: (text: string) => void;
   /**
-   * 收尾。传入整包响应体时会做兜底解析：
-   * 部分支付宝真机不触发 onChunkReceived，只在 success 里给出完整 body，
-   * 此时若一个事件都没派发过，就把整包按 SSE 重新解析一遍，退化成非流式但内容不丢。
+   * 收尾。传入整包响应体时会补齐尚未解析的部分：
+   * 支付宝真机可能完全不触发 onChunkReceived，也可能只送了前几个分片，
+   * 两种情况都靠「整包比已消费部分长出来的尾巴」补齐，退化成非流式但内容不丢。
    */
   finalize: (responseBody?: unknown) => void;
   hasReceivedEvent: () => boolean;
@@ -44,6 +44,8 @@ function extractEventData(frame: string) {
 export function createSseSession(options: SseSessionOptions): SseSession {
   const decoder = createChunkDecoder();
   let buffer = "";
+  /** 已喂进解析器的文本长度，用于和整包响应体对齐出未解析的尾部 */
+  let consumedLength = 0;
   let receivedEvent = false;
 
   const isAborted = () => Boolean(options.isAborted?.());
@@ -71,6 +73,7 @@ export function createSseSession(options: SseSessionOptions): SseSession {
 
   function consumeText(text: string) {
     if (!text || isAborted()) return;
+    consumedLength += text.length;
     buffer += text;
     drainBuffer();
   }
@@ -81,13 +84,14 @@ export function createSseSession(options: SseSessionOptions): SseSession {
     },
     consumeText,
     finalize(responseBody?: unknown) {
-      buffer += decoder.flush();
+      consumeText(decoder.flush());
+      // 分块内容一定是整包响应体的前缀，按已消费长度截出尾巴补解析即可：
+      // 一个分片都没收到时补的是整包，只收到一半时补的是剩下那半，都不会重复输出。
+      if (typeof responseBody === "string" && responseBody.length > consumedLength) {
+        consumeText(responseBody.slice(consumedLength));
+      }
       if (buffer.trim()) emitFrame(buffer);
       buffer = "";
-
-      if (receivedEvent) return;
-      if (typeof responseBody !== "string" || !responseBody.includes("data:")) return;
-      responseBody.split(FRAME_SEPARATOR).forEach(emitFrame);
     },
     hasReceivedEvent: () => receivedEvent,
   };
