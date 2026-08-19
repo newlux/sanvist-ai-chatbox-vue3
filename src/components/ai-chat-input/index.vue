@@ -1,5 +1,5 @@
 <script setup>
-import { recognizeSpeechByBase64, recognizeSpeechByUrl } from "@/api/chat";
+import { recognizeSpeechByUpload } from "@/api/chat";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
 const props = defineProps({
@@ -33,7 +33,6 @@ const state = reactive({
   recorder: null,
   _jobSeq: 0, // 递增任务序号：每开始一次录音自增，作废迟到的异步回调
   _voicePressStartedAt: 0,
-  recognizedTextFull: "",
   recognizedText: "",
   draftText: "",
   _isRecognizing: false,
@@ -112,7 +111,6 @@ function setRecognizing(on) {
   }, VOICE_RECOGNIZE_WATCHDOG_MS);
 }
 function _resetVoiceText() {
-  state.recognizedTextFull = "";
   state.recognizedText = "";
   state.draftText = "";
   state._keepOldRecognizedText = false;
@@ -459,11 +457,16 @@ async function _stopVoiceRecorderAndRecognize(jobSeq) {
     }
     return;
   }
-  await _recognizeFromBlob(result.data, jobSeq);
+  await _recognizeFromRecording(result.data?.tempFilePath, jobSeq);
 }
-async function _recognizeFromBlob(blob, jobId) {
+
+/**
+ * 录音文件直传后端识别。不再走 base64：整段音频转 base64 会多占约 1/3 体积，
+ * 还要先把整个文件读进内存，长录音在小程序里很容易顶到请求体上限。
+ */
+async function _recognizeFromRecording(tempFilePath, jobId) {
   if (jobId !== state._jobSeq) return;
-  if (!blob) {
+  if (!tempFilePath) {
     resetVoiceInput();
     return;
   }
@@ -473,19 +476,12 @@ async function _recognizeFromBlob(blob, jobId) {
   setRecognizing(true);
   try {
     if (jobId !== state._jobSeq) return;
-    const isNativeAudioUrl = typeof blob === "string";
-    const text = isNativeAudioUrl
-      ? await _recognizeSpeechWithUrl(blob)
-      : await (async () => {
-          const audioBase64 = blob?.local
-            ? await _localAudioToBase64(blob.tempFilePath)
-            : await _blobToAudioBase64(blob);
-          console.info("[voice] audio converted to Base64", {
-            audioSize: audioBase64.length,
-          });
-          if (!audioBase64) return "";
-          return _recognizeSpeechWithBase64(audioBase64);
-        })();
+    const result = await withVoiceTimeout(recognizeSpeechByUpload({
+      filePath: tempFilePath,
+      timeout: VOICE_ASR_TIMEOUT_MS,
+    }));
+    if (jobId !== state._jobSeq) return;
+    const text = String(result?.text || "").trim();
     if (!text) {
       state.recognizedText = prevText;
       state.draftText = prevText;
@@ -506,7 +502,8 @@ async function _recognizeFromBlob(blob, jobId) {
     state.draftText = nextText;
     state.voicePhase = "finished";
     state.inputMode = "voice";
-  } catch {
+  } catch (error) {
+    console.error("[voice] ASR upload failed", error);
     if (jobId !== state._jobSeq) return;
     state.recognizedText = prevText;
     state.draftText = prevText;
@@ -523,74 +520,16 @@ async function _recognizeFromBlob(blob, jobId) {
   }
 }
 
-async function _localAudioToBase64(tempFilePath) {
-  return new Promise((resolve, reject) => {
-    uni.getFileSystemManager().readFile({
-      filePath: tempFilePath,
-      encoding: "base64",
-      success: result => resolve(`data:audioBase64;base64,${result.data}`),
-      fail: reject,
-    });
-  });
-}
-
-async function _blobToAudioBase64(blob) {
-  return new Promise((resolve, reject) => {
-    try {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = String(reader.result || "");
-        const base64 = result.includes(",") ? result.split(",")[1] : "";
-        if (!base64) return resolve("");
-        // 按你提供示例：data:audioBase64;base64,xxxx
-        resolve(`data:audioBase64;base64,${base64}`);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
-
-function _extractAsrText(data) {
-  if (!data) return "";
-  if (typeof data === "string") return data;
-  // 常见：{ success: true, text: '...' }
-  if (data.text && typeof data.text === "string") return data.text;
-  // 后端可能包了一层 data/result
-  if (data.data && typeof data.data.text === "string") return data.data.text;
-  if (data.result && typeof data.result.text === "string") return data.result.text;
-  if (data.data && typeof data.data.Result === "string") return data.data.Result;
-  if (data.Result && typeof data.Result === "string") return data.Result;
-  return "";
-}
-
+/**
+ * 兜底超时：uni.uploadFile 的 timeout 在部分环境不生效，
+ * 这里再包一层，保证识别态不会一直挂着。
+ */
 function withVoiceTimeout(promise, message = "语音识别超时") {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(message)), VOICE_ASR_TIMEOUT_MS);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-async function _recognizeSpeechWithBase64(audioBase64) {
-  console.info("[voice] ASR Base64 request", {
-    audioSize: audioBase64.length,
-  });
-  const resp = await withVoiceTimeout(recognizeSpeechByBase64({ audioBase64 }));
-  console.info("[voice] ASR Base64 response", resp);
-  const payload = resp?.data ? resp.data : resp;
-  const text = _extractAsrText(payload);
-  return text || state.recognizedTextFull;
-}
-
-async function _recognizeSpeechWithUrl(audioUrl) {
-  console.info("[voice] ASR URL request", { audioUrl });
-  const resp = await withVoiceTimeout(recognizeSpeechByUrl({ audioUrl }));
-  console.info("[voice] ASR URL response", resp);
-  const payload = resp?.data ? resp.data : resp;
-  const text = _extractAsrText(payload);
-  return text || state.recognizedTextFull;
 }
 
 onBeforeUnmount(() => {

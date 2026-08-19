@@ -19,9 +19,7 @@ function itemText(item) {
 }
 
 function onSuggestionTap(item) {
-  const text = itemText(item);
-  console.debug("[SuggestionBlock] tap", text);
-  emit("suggestion-tap", text);
+  emit("suggestion-tap", itemText(item));
 }
 </script>
 

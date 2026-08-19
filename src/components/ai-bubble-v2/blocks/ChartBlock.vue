@@ -1,7 +1,20 @@
 <script setup>
 import * as echarts from "echarts";
-
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from "vue";
+import {
+  computed,
+  getCurrentInstance,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  toRaw,
+  watch,
+} from "vue";
+import {
+  dispatchAlipayChartTouch,
+  initAlipayEcharts,
+  queryAlipayChartCanvas,
+} from "@/utils/platform/alipay-echarts";
 
 defineOptions({ name: "ChartBlock" });
 
@@ -11,10 +24,17 @@ const props = defineProps({
   embedded: { type: Boolean, default: false },
 });
 
-const chartCanvas = ref(null);
-const chart = ref(null);
+const instance = getCurrentInstance();
+const chartEl = ref(null);
+const failed = ref(false);
+const canvasId = computed(() => `c-${String(props.blockId).replace(/[^\w-]/g, "-")}`);
+
+let chart = null;
 let renderTimer = null;
 let resizeObserver = null;
+let sizeRetry = 0;
+let disposed = false;
+const MAX_SIZE_RETRY = 8;
 
 /**
  * 将后端透传的 option 转换为 ECharts 可直接消费的纯净对象。
@@ -68,17 +88,78 @@ function normalizeOption(raw) {
 
 const chartOption = computed(() => normalizeOption(props.option));
 
-watch(() => props.option, scheduleRenderChart, { deep: true });
-onMounted(() => {
-  scheduleRenderChart();
-  if (typeof ResizeObserver !== "undefined") {
-    resizeObserver = new ResizeObserver(scheduleRenderChart);
-    if (chartCanvas.value) resizeObserver.observe(chartCanvas.value);
+function applyOption(target) {
+  target.setOption(chartOption.value, { notMerge: true, lazyUpdate: false, silent: true });
+}
+
+async function renderMiniChart() {
+  if (chart) {
+    applyOption(chart);
+    return;
   }
-});
-onBeforeUnmount(disposeChart);
+  const queried = await queryAlipayChartCanvas(canvasId.value, instance);
+  if (disposed) return;
+  if (!queried) {
+    if (sizeRetry < MAX_SIZE_RETRY) {
+      sizeRetry += 1;
+      scheduleRenderChart();
+    } else {
+      failed.value = true;
+    }
+    return;
+  }
+  sizeRetry = 0;
+  chart = initAlipayEcharts(queried.canvas, queried.width, queried.height, queried.dpr);
+  applyOption(chart);
+}
+
+function renderDomChart() {
+  const element = chartEl.value;
+  if (!element) {
+    if (sizeRetry < MAX_SIZE_RETRY) {
+      sizeRetry += 1;
+      scheduleRenderChart();
+    }
+    return;
+  }
+  if (!element.clientWidth || !element.clientHeight) {
+    if (sizeRetry < MAX_SIZE_RETRY) {
+      sizeRetry += 1;
+      scheduleRenderChart();
+    } else {
+      failed.value = true;
+    }
+    return;
+  }
+  sizeRetry = 0;
+  if (!chart) {
+    chart = echarts.init(element);
+  }
+  applyOption(chart);
+  chart.resize();
+}
+
+async function renderChart() {
+  if (disposed || !props.option || !echarts?.init) return;
+  failed.value = false;
+  try {
+    // #ifdef MP-ALIPAY
+    await renderMiniChart();
+    return;
+    // #endif
+    renderDomChart();
+  } catch (error) {
+    console.error("[ChartBlock] render failed", error);
+    failed.value = true;
+    if (chart) {
+      chart.dispose();
+      chart = null;
+    }
+  }
+}
 
 function scheduleRenderChart() {
+  if (disposed) return;
   if (renderTimer) clearTimeout(renderTimer);
   void nextTick(() => {
     renderTimer = setTimeout(() => {
@@ -89,6 +170,7 @@ function scheduleRenderChart() {
 }
 
 function disposeChart() {
+  disposed = true;
   if (renderTimer) {
     clearTimeout(renderTimer);
     renderTimer = null;
@@ -97,52 +179,63 @@ function disposeChart() {
     resizeObserver.disconnect();
     resizeObserver = null;
   }
-  if (chart.value) {
-    chart.value.dispose();
-    chart.value = null;
+  if (chart) {
+    chart.dispose();
+    chart = null;
   }
 }
 
-function renderChart() {
-  if (!props.option || !echarts?.init) {
-    console.warn("[ChartBlock] echarts unavailable");
-    return;
-  }
-
-  const element = chartCanvas.value;
-  if (!element) return;
-  if (!element.clientWidth || !element.clientHeight) {
-    scheduleRenderChart();
-    return;
-  }
-
-  let instance = chart.value;
-  if (!instance) {
-    try {
-      instance = echarts.init(element);
-      chart.value = instance;
-    } catch (error) {
-      console.error("[ChartBlock] echarts.init failed", error);
-      return;
-    }
-  }
-
-  try {
-    instance.setOption(chartOption.value, { notMerge: true, lazyUpdate: false, silent: true });
-    instance.resize();
-  } catch (error) {
-    console.error("[ChartBlock] echarts.setOption failed", error, chartOption.value);
-    disposeChart();
-  }
+function onCanvasTouchStart(event) {
+  if (chart) dispatchAlipayChartTouch(chart, "mousedown", event);
 }
+
+function onCanvasTouchMove(event) {
+  if (chart) dispatchAlipayChartTouch(chart, "mousemove", event);
+}
+
+function onCanvasTouchEnd(event) {
+  if (!chart) return;
+  dispatchAlipayChartTouch(chart, "mouseup", event);
+  dispatchAlipayChartTouch(chart, "click", event);
+}
+
+watch(() => props.option, scheduleRenderChart, { deep: true });
+onMounted(() => {
+  disposed = false;
+  scheduleRenderChart();
+  // #ifndef MP-ALIPAY
+  if (typeof ResizeObserver !== "undefined") {
+    resizeObserver = new ResizeObserver(scheduleRenderChart);
+    if (chartEl.value) resizeObserver.observe(chartEl.value);
+  }
+  // #endif
+});
+onBeforeUnmount(disposeChart);
 </script>
 
 <template>
   <view class="chart-block" :class="[{ 'chart-block--embedded': embedded }]">
-    <div
-      ref="chartCanvas"
+    <!-- #ifdef MP-ALIPAY -->
+    <canvas
+      v-show="!failed"
+      :id="canvasId"
+      type="2d"
+      :canvas-id="canvasId"
       class="chart-block__canvas"
+      @touchstart="onCanvasTouchStart"
+      @touchmove="onCanvasTouchMove"
+      @touchend="onCanvasTouchEnd"
     />
+    <text v-if="failed" class="chart-block__fallback">
+      图表暂无法展示
+    </text>
+    <!-- #endif -->
+    <!-- #ifndef MP-ALIPAY -->
+    <view v-show="!failed" ref="chartEl" class="chart-block__canvas" />
+    <text v-if="failed" class="chart-block__fallback">
+      图表暂无法展示
+    </text>
+    <!-- #endif -->
   </view>
 </template>
 
@@ -150,4 +243,5 @@ function renderChart() {
 .chart-block { width: 100%; padding: 32rpx; box-sizing: border-box; border-radius: 20rpx; background: #fff; }
 .chart-block--embedded { padding: 0; border-radius: 0; background: transparent; }
 .chart-block__canvas { width: 100%; overflow: hidden; height: 420rpx; }
+.chart-block__fallback { display: block; padding: 48rpx 0; color: #8a8f99; font-size: 26rpx; text-align: center; }
 </style>
