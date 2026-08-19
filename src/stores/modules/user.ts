@@ -1,7 +1,8 @@
+import type { AwakeningPrompt } from "@/api/user-role/role-options";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
-export type VisitorRole = "OWNER" | "ADMIN" | "MAINTAINER" | "PURCHASER" | "OPERATOR";
+export type VisitorRole = "OWNER" | "OPERATOR" | "ADMIN" | "MAINTAINER" | "PURCHASER";
 
 export const VISITOR_ROLE_ACCOUNTS: Record<VisitorRole, string> = {
   OWNER: "mock-boss-001",
@@ -17,6 +18,7 @@ export const useUserStore = defineStore("user", () => {
   const userId = ref("");
   const username = ref("");
   const userInfo = ref<Record<string, unknown>>({});
+  const awakeningPrompt = ref<AwakeningPrompt | null>(null);
 
   function setIsVisitor(value: boolean | null) {
     isVisitor.value = value;
@@ -41,16 +43,22 @@ export const useUserStore = defineStore("user", () => {
     userInfo.value = value;
   }
 
+  function setAwakeningPrompt(value: AwakeningPrompt | null) {
+    awakeningPrompt.value = value;
+  }
+
   return {
     isVisitor,
     visitorRole,
     userId,
     username,
     userInfo,
+    awakeningPrompt,
     setIsVisitor,
     setVisitorRole,
     setUserId,
     setUsername,
     setUserInfo,
+    setAwakeningPrompt,
   };
 });

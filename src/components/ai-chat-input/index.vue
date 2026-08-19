@@ -20,8 +20,13 @@ const emit = defineEmits([
   "voice-restart",
   "toggle-quick-list",
   "keyboard-height-change",
+  "input-focus",
 ]);
 
+const VOICE_LONG_PRESS_MS = 300;
+const VOICE_CANCEL_SWIPE_PX = 60;
+const VOICE_STOP_TIMEOUT_MS = 5000;
+const VOICE_ASR_TIMEOUT_MS = 30000;
 const MIC_GRANTED_STORAGE_KEY = "wvpn_sany_ai_mic_ok";
 
 function writeMicGrantedPersisted() {
@@ -55,14 +60,14 @@ function canUseMediaDevicesMic() {
 const systemStore = useSystemStore();
 const state = reactive({
   inputMode: "voice", // text | voice（组件内部维护）
-  voicePhase: "idle", // idle | pressing | recording | finished | editing
-  // text 键盘态下输入栏抽离为 fixed，用该高度在原位置留占位，避免内容区跳动
+  voicePhase: "idle", // idle | recording | recognizing | finished | editing
+  // text 键盘态下输入栏抽离为 absolute，用该高度在原位置留占位，避免内容区跳动
   textInputBarHeightPx: 0,
   _pressTimer: null,
   _typingTimer: null,
   _typingIndex: 0,
   recorder: null,
-  _voiceJobId: 0,
+  _jobSeq: 0, // 递增任务序号：每开始一次录音自增，作废迟到的异步回调
   _voicePressStartedAt: 0,
   recognizedTextFull: "",
   recognizedText: "",
@@ -72,9 +77,14 @@ const state = reactive({
   _micPermissionReady: false,
   _micPermissionRequesting: false,
   _voiceCancelling: false,
-  _lastVoiceTouchAt: 0,
+  // 上划取消手势：模板依赖 _voiceGestureCancelling，保留；其余手势状态收敛进 _gesture
+  _voiceGestureCancelling: false,
+  _gesture: { active: false, startY: 0, isRestart: false },
 });
 const { inputMode, voicePhase } = toRefs(state);
+// 当前录音会话上下文：存放本次录音的 jobSeq 与 start promise，
+// 避免模块级单变量被多入口并发覆盖。
+let currentJob = null;
 const {
   keyboardHeightPx,
   initialWindowHeightPx,
@@ -116,11 +126,17 @@ const voiceTextValue = computed(() => {
   }
   return state.recognizedText;
 });
+const isVoiceConfirmationOpen = computed(() =>
+  state.voicePhase === "finished" || state.voicePhase === "recognizing",
+);
 const voiceKeyboardOpen = computed(() =>
   Boolean(state.inputMode === "voice" && (voiceInputFocused.value || keyboardHeightPx.value > 0)),
 );
 const textKeyboardOpen = computed(() =>
-  Boolean(state.inputMode === "text" && keyboardHeightPx.value > 0),
+  Boolean(
+    state.inputMode === "text"
+    && (textInputFocused.value || keyboardHeightPx.value > 0),
+  ),
 );
 const keyboardInteractionMasked = computed(() =>
   Boolean(keyboardHeightPx.value > 0 && (textInputFocused.value || voiceInputFocused.value)),
@@ -136,16 +152,11 @@ const textTextareaHeight = computed(() => {
 
 function onVoiceTextareaFocus() {
   onVoiceFocus();
-  // 不再主动 scrollIntoView：浮窗会贴到键盘顶部，按钮天然在可视区内；
-  // 主动滚动会把 visualViewport 往下拽，导致消息内容区“飞上去”。
-}
-
-function onVoiceTextareaBlur() {
-  onVoiceBlur();
+  emit("input-focus");
 }
 
 function onTextTextareaFocus() {
-  // 聚焦时记录输入栏实际高度，键盘态抽离 fixed 后在原位置留等高占位
+  // 聚焦时记录输入栏实际高度，键盘态抽离 absolute 后在原位置留等高占位
   try {
     const el = document.querySelector(".chat-input");
     if (el) state.textInputBarHeightPx = Math.round(el.getBoundingClientRect().height) || 0;
@@ -153,6 +164,11 @@ function onTextTextareaFocus() {
     // 忽略
   }
   onTextFocus();
+  emit("input-focus");
+}
+
+function onVoiceTextareaBlur() {
+  onVoiceBlur();
 }
 
 function onTextTextareaBlur() {
@@ -190,7 +206,20 @@ function _ensureRecorder() {
   }
   return state.recorder;
 }
+function getVoiceDebugContext() {
+  return {
+    href: typeof location !== "undefined" ? location.href : "",
+    isSecureContext: typeof window !== "undefined" ? window.isSecureContext : false,
+    hasMediaDevices: typeof navigator !== "undefined" && Boolean(navigator.mediaDevices),
+    hasGetUserMedia: canUseMediaDevicesMic(),
+    hasAlipayBridge: typeof window !== "undefined" && Boolean(window.AlipayJSBridge?.call),
+    permissionReady: state._micPermissionReady,
+    permissionRequesting: state._micPermissionRequesting,
+    voicePhase: state.voicePhase,
+  };
+}
 async function _requestMicrophonePermission() {
+  console.info("[voice-debug] permission check", getVoiceDebugContext());
   if (state._micPermissionReady) return true;
 
   const hasAlipayBridge = typeof window !== "undefined" && window.AlipayJSBridge?.call;
@@ -297,38 +326,65 @@ async function _requestMicrophonePermission() {
         return true;
       }
     }
-  } catch {
-    // ignore
+  } catch (e) {
+    console.warn("[voice-debug] uni permission fallback failed", e);
   }
+
+  const isInsecureBrowser =
+    typeof window !== "undefined"
+    && !window.isSecureContext
+    && typeof location !== "undefined"
+    && location.hostname !== "localhost";
+  const title = isInsecureBrowser
+    ? "浏览器录音需要 HTTPS 或 localhost"
+    : "当前环境无法使用麦克风";
+  console.error("[voice-debug] no microphone permission channel", getVoiceDebugContext());
+  uni.showToast({ title, icon: "none", duration: 4000 });
   return false;
 }
 function _resetVoiceText() {
+  state.recognizedTextFull = "";
   state.recognizedText = "";
   state.draftText = "";
+  state._keepOldRecognizedText = false;
+  state._isRecognizing = false;
   state._typingIndex = 0;
   if (state._typingTimer) clearInterval(state._typingTimer);
   state._typingTimer = null;
 }
-function onVoiceClose() {
+function _invalidateJob() {
+  state._jobSeq += 1;
+  currentJob = null;
+}
+function resetVoiceInput() {
   _resetVoiceText();
-  state._voiceJobId = Date.now();
-  _stopVoiceRecorder(true);
+  _invalidateJob();
   state.voicePhase = "idle";
+  state.inputMode = "voice";
   emit("toggle-quick-list", true);
 }
-async function onVoiceIconTap() {
-  if (props.isLoading || state._micPermissionRequesting) return;
-  state._micPermissionRequesting = true;
-  try {
-    const ok = await _requestMicrophonePermission();
-    console.log("onVoiceIconTap ok", ok);
-    if (!ok) return;
+function onVoiceClose() {
+  _stopVoiceRecorder(true);
+  resetVoiceInput();
+  // 关闭面板时同步清理手势与权限状态，保证再次进入录音可用
+  state._voiceGestureCancelling = false;
+  state._voiceCancelling = false;
+  state._micPermissionRequesting = false;
+  state._isRecognizing = false;
+  state._gesture.active = false;
+  state._gesture.startY = 0;
+  state._gesture.isRestart = false;
+}
+async function ensureVoicePermission() {
+  if (state._micPermissionReady) return true;
+  if (state._micPermissionRequesting) return false;
 
-    _resetVoiceText();
-    state._voiceJobId = Date.now();
-    state.inputMode = "voice";
-    state.voicePhase = "pressing";
-    emit("toggle-quick-list", true);
+  state._micPermissionRequesting = true;
+  console.info("[voice-debug] permission request start", getVoiceDebugContext());
+  try {
+    const result = await _requestMicrophonePermission();
+    console.info("[voice-debug] permission request end", { result, ...getVoiceDebugContext() });
+    return result;
   } finally {
     state._micPermissionRequesting = false;
   }
@@ -356,75 +412,223 @@ function onVoiceTextareaInput(e) {
   if (state.voicePhase !== "finished") return;
   state.draftText = e.detail.value;
 }
-function onVoiceTouchStart(e) {
-  console.info("[voice] press start", { phase: state.voicePhase, isLoading: props.isLoading });
-  if (
-    props.isLoading ||
-    state.voicePhase === "editing" ||
-    state._voiceCancelling ||
-    Date.now() - state._lastVoiceTouchAt < 350
-  ) {
+function getVoiceGestureClientY(e) {
+  return Number(e?.touches?.[0]?.clientY ?? e?.changedTouches?.[0]?.clientY ?? e?.clientY ?? 0);
+}
+function beginVoiceGesture(e, isRestart = false) {
+  state._gesture.startY = getVoiceGestureClientY(e);
+  state._gesture.isRestart = isRestart;
+  state._voiceGestureCancelling = false;
+}
+function updateVoiceGesture(e) {
+  if (!state._gesture.active) return;
+  const currentY = getVoiceGestureClientY(e);
+  if (!currentY || !state._gesture.startY) return;
+  state._voiceGestureCancelling = state._gesture.startY - currentY >= VOICE_CANCEL_SWIPE_PX;
+  try {
+    if (e && e.cancelable) e.preventDefault();
+  } catch {
+    // ignore
+  }
+}
+function resetVoiceGestureState() {
+  state._gesture.startY = 0;
+  state._gesture.isRestart = false;
+  state._voiceGestureCancelling = false;
+}
+async function cancelVoiceSwipeGesture() {
+  const isRestart = state._gesture.isRestart;
+  const existingText = state.recognizedText;
+  const job = currentJob;
+  _invalidateJob();
+  state._isRecognizing = false;
+
+  if (isRestart && existingText) {
+    state.recognizedText = existingText;
+    state.draftText = existingText;
+    state.voicePhase = "finished";
+    state.inputMode = "voice";
+  } else {
+    resetVoiceInput();
+  }
+  resetVoiceGestureState();
+  state._gesture.active = false;
+  emit("voice-cancel");
+
+  try {
+    await job?.start;
+  } catch {
+    // ignore
+  }
+  await _stopVoiceRecorder(true);
+}
+
+/**
+ * 统一开始一次录音会话（底部按住说话 / 确认页大圆环 / 再次识别小按钮 三入口复用）。
+ * - restart=true 表示从识别成功面板再次识别，保留旧文本；否则为全新录音。
+ */
+function beginVoiceRecording({ restart = false } = {}) {
+  // 幂等：已有进行中的录音则忽略
+  if (state._gesture.active) return;
+
+  const existingText = state.draftText || state.recognizedText;
+  state.recognizedText = existingText;
+  state.draftText = existingText;
+  state._keepOldRecognizedText = Boolean(existingText);
+  state.inputMode = "voice";
+  state.voicePhase = "recording";
+  state._gesture.active = true;
+  state._gesture.isRestart = restart;
+  state._voicePressStartedAt = Date.now();
+  emit("toggle-quick-list", true);
+  emit(restart ? "voice-restart" : "voice-start");
+
+  const jobSeq = state._jobSeq;
+  // start 立即为一个可 await 的 promise：
+  // 先申请权限，成功后真正启动录音。这样松手时无论权限是否返回，finishVoiceGesture
+  // 都能 await 到 job.start，不会因权限异步而把正常长按误判为短按取消。
+  currentJob = {
+    seq: jobSeq,
+    start: (async () => {
+      const ok = await ensureVoicePermission();
+      if (state._jobSeq !== jobSeq) return { success: false, error: "任务已失效" };
+      if (!ok) return { success: false, error: "请允许使用麦克风" };
+      return _startVoiceRecorder(jobSeq);
+    })(),
+    end: null,
+  };
+}
+
+/**
+ * 统一结束一次录音会话（正常松手 / 上划取消 / 短按）。
+ * cancel=true 表示取消（上划或短按），不触发识别。
+ */
+async function endVoiceRecording({ cancel = false } = {}) {
+  if (!state._gesture.active) return;
+  if (cancel) {
+    await cancelVoiceSwipeGesture();
     return;
   }
-  state._lastVoiceTouchAt = Date.now();
-  // iOS Safari：避免默认手势/选择导致 touch 流程被打断
+  const isRestart = state._gesture.isRestart;
+  resetVoiceGestureState();
+  state._gesture.active = false;
+  if (isRestart) {
+    await finishVoiceRestartGesture();
+  } else {
+    await finishVoiceGesture();
+  }
+}
+async function finishVoiceGesture() {
+  if (state._typingTimer) clearInterval(state._typingTimer);
+  state._typingTimer = null;
+  state._typingIndex = 0;
+
+  const pressDuration = Date.now() - state._voicePressStartedAt;
+  const job = currentJob;
+  console.info("[voice-debug] gesture end", {
+    pressDuration,
+    hasJob: Boolean(job),
+    ...getVoiceDebugContext(),
+  });
+  // 短按（<300ms）或录音未真正启动：按取消处理，不触发识别
+  if (pressDuration < VOICE_LONG_PRESS_MS || !job?.start) {
+    currentJob = null;
+    await _cancelShortVoiceRecording();
+    return;
+  }
+
+  state.voicePhase = "recognizing";
+  state.inputMode = "voice";
+  state._isRecognizing = true;
+
+  await job.start;
+  currentJob = null;
+  if (state.voicePhase !== "recognizing") return;
+  await _stopVoiceRecorderAndRecognize();
+}
+async function onVoicePillTouchStart(e) {
+  const blockedReason = props.isLoading
+    ? "loading"
+    : state._isRecognizing
+      ? "recognizing"
+      : state._gesture.active
+        ? "gesture-active"
+        : state._voiceCancelling
+          ? "cancelling"
+          : state._micPermissionRequesting
+            ? "permission-requesting"
+            : "";
+  console.info("[voice-debug] gesture start", {
+    eventType: e?.type,
+    blockedReason,
+    ...getVoiceDebugContext(),
+  });
+  if (blockedReason) return;
+
   try {
     if (e && e.cancelable) e.preventDefault();
   } catch {
     // ignore
   }
 
-  // 再次说话时：保留已编辑文本，识别结果在其末尾追加。
-  const existingText = state.draftText || state.recognizedText;
-  state.recognizedText = existingText;
-  state.draftText = existingText;
-  state._keepOldRecognizedText = !!existingText;
-
-  state.inputMode = "voice";
-  state.voicePhase = "pressing";
-  if (state._pressTimer) clearTimeout(state._pressTimer);
-  state._voiceJobId = Date.now();
-  // _resetVoiceText();
-
-  state._voicePressStartedAt = Date.now();
-  state.voicePhase = "recording";
-  _startVoiceRecorder();
-  emit("voice-start");
+  beginVoiceGesture(e, false);
+  beginVoiceRecording({ restart: false });
 }
-function onVoiceTouchEnd() {
-  console.info("[voice] press end", { phase: state.voicePhase });
-  if (state._pressTimer) {
-    clearTimeout(state._pressTimer);
-    state._pressTimer = null;
+async function onVoicePillTouchEnd(e) {
+  try {
+    if (e && e.cancelable) e.preventDefault();
+  } catch {
+    // ignore
   }
-  if (state.voicePhase === "pressing") {
-    // 短按：保持语音面板，不退出语音模式（否则“点击就退出”）
-    state.voicePhase = "pressing";
-    state.inputMode = "voice";
+  if (!state._gesture.active) return;
+  const shouldCancel = state._voiceGestureCancelling;
+  await endVoiceRecording({ cancel: shouldCancel });
+}
+function removeVoiceMouseUpListener() {
+  if (typeof window === "undefined") return;
+  window.removeEventListener("mousemove", updateVoiceGesture);
+  window.removeEventListener("mouseup", onVoicePillMouseUp);
+}
+function onVoicePillMouseDown(e) {
+  console.info("[voice-debug] mouse down", { button: e?.button, eventType: e?.type });
+  if (typeof e?.button === "number" && e.button !== 0) return;
+  removeVoiceMouseUpListener();
+  if (typeof window !== "undefined") {
+    window.addEventListener("mousemove", updateVoiceGesture);
+    window.addEventListener("mouseup", onVoicePillMouseUp, { once: true });
+  }
+  onVoicePillTouchStart(e);
+}
+function onVoicePillMouseUp(e) {
+  removeVoiceMouseUpListener();
+  onVoicePillTouchEnd(e);
+}
+async function onVoicePillTouchCancel() {
+  if (!state._gesture.active) return;
+  await endVoiceRecording({ cancel: true });
+}
+function onVoiceTouchStart(e) {
+  console.info("[voice] press start", { phase: state.voicePhase, isLoading: props.isLoading });
+  if (props.isLoading || state.voicePhase === "editing" || state._voiceCancelling || state._gesture.active) {
     return;
   }
-  if (state.voicePhase === "recording") {
-    if (state._typingTimer) clearInterval(state._typingTimer);
-    state._typingTimer = null;
-    state._typingIndex = 0;
-    if (Date.now() - state._voicePressStartedAt < 300) {
-      _cancelShortVoiceRecording();
-      return;
-    }
-    _stopVoiceRecorderAndRecognize();
+  beginVoiceGesture(e, false);
+  try {
+    if (e && e.cancelable) e.preventDefault();
+  } catch {
+    // ignore
   }
+  beginVoiceRecording({ restart: false });
 }
-function onVoiceTouchCancel() {
-  if (state._pressTimer) {
-    clearTimeout(state._pressTimer);
-    state._pressTimer = null;
-  }
-  if (state._typingTimer) clearInterval(state._typingTimer);
-  state._typingTimer = null;
-  state._typingIndex = 0;
-  // _resetVoiceText();
-  _cancelShortVoiceRecording();
-  emit("voice-cancel");
+async function onVoiceTouchEnd() {
+  console.info("[voice] press end", { phase: state.voicePhase });
+  if (!state._gesture.active) return;
+  const shouldCancel = state._voiceGestureCancelling;
+  await endVoiceRecording({ cancel: shouldCancel });
+}
+async function onVoiceTouchCancel() {
+  if (!state._gesture.active) return;
+  await endVoiceRecording({ cancel: true });
 }
 function onVoiceSend() {
   // 立即重置键盘状态，避免后续再进入语音模式时高度异常
@@ -441,24 +645,83 @@ function onVoiceSend() {
   emit("update:modelValue", finalPayload);
   nextTick(onTrySend);
   emit("voice-send", finalPayload);
+  _resetVoiceText();
 }
-function onVoiceRestart() {
-  if (props.isLoading) return;
+async function finishVoiceRestartGesture() {
   if (state._typingTimer) clearInterval(state._typingTimer);
   state._typingTimer = null;
-  // 再次录音从当前已编辑文本继续，识别完成后在其末尾追加。
-  const existingText = state.draftText || state.recognizedText;
-  state.recognizedText = existingText;
-  state.draftText = existingText;
-  state._keepOldRecognizedText = !!existingText;
-  state._voiceJobId = Date.now();
-  _stopVoiceRecorder(true);
-  state.voicePhase = "pressing";
+  state._typingIndex = 0;
+
+  const job = currentJob;
+  // restart 短按同样视为取消：保留旧文本（cancelVoiceSwipeGesture 逻辑），不触发识别
+  if (!job?.start) {
+    currentJob = null;
+    await _cancelShortVoiceRecording({ keepText: true });
+    return;
+  }
+
+  state.voicePhase = "recognizing";
   state.inputMode = "voice";
-  emit("voice-restart");
+  state._isRecognizing = true;
+
+  await job.start;
+  currentJob = null;
+  if (state.voicePhase !== "recognizing") return;
+  await _stopVoiceRecorderAndRecognize();
+}
+async function onVoiceRestartStart(e) {
+  if (
+    props.isLoading ||
+    state._isRecognizing ||
+    state._gesture.active ||
+    state._voiceCancelling ||
+    state._micPermissionRequesting
+  ) {
+    return;
+  }
+  try {
+    if (e && e.cancelable) e.preventDefault();
+  } catch {
+    // ignore
+  }
+
+  beginVoiceGesture(e, true);
+  beginVoiceRecording({ restart: true });
+}
+async function onVoiceRestartEnd(e) {
+  try {
+    if (e && e.cancelable) e.preventDefault();
+  } catch {
+    // ignore
+  }
+  if (!state._gesture.active) return;
+  const shouldCancel = state._voiceGestureCancelling;
+  await endVoiceRecording({ cancel: shouldCancel });
+}
+function removeVoiceRestartMouseUpListener() {
+  if (typeof window === "undefined") return;
+  window.removeEventListener("mousemove", updateVoiceGesture);
+  window.removeEventListener("mouseup", onVoiceRestartMouseUp);
+}
+function onVoiceRestartMouseDown(e) {
+  if (typeof e?.button === "number" && e.button !== 0) return;
+  removeVoiceRestartMouseUpListener();
+  if (typeof window !== "undefined") {
+    window.addEventListener("mousemove", updateVoiceGesture);
+    window.addEventListener("mouseup", onVoiceRestartMouseUp, { once: true });
+  }
+  onVoiceRestartStart(e);
+}
+function onVoiceRestartMouseUp(e) {
+  removeVoiceRestartMouseUpListener();
+  onVoiceRestartEnd(e);
+}
+async function onVoiceRestartCancel() {
+  if (!state._gesture.active) return;
+  await endVoiceRecording({ cancel: true });
 }
 
-async function _startVoiceRecorder() {
+async function _startVoiceRecorder(jobSeq) {
   const recorder = _ensureRecorder();
   // 录音中不再展示“模拟识别文本”，避免出现前置占位文案
   state._typingIndex = 0;
@@ -471,36 +734,49 @@ async function _startVoiceRecorder() {
   state._keepOldRecognizedText = false;
 
   // 开始录音并在 stop 后触发识别
-  const jobId = state._voiceJobId;
+  const jobId = jobSeq;
   const result = await recorder.start(
     { sampleRate: 16000, timeSlice: 1000 },
     null,
     async (blob) => {
       // 忽略旧任务的回调
-      if (jobId !== state._voiceJobId) return;
+      if (jobId !== state._jobSeq) return;
       await _recognizeFromBlob(blob, jobId);
     },
   );
+  console.info("[voice-debug] recorder start result", { result, ...getVoiceDebugContext() });
   if (!result || result.success === false) {
     if (result?.notAllowed) {
       clearMicGrantedPersisted();
       state._micPermissionReady = false;
     }
-    // 录音失败：回到 pressing
     if (state._typingTimer) clearInterval(state._typingTimer);
     state._typingTimer = null;
-    state.voicePhase = "pressing";
+    uni.showToast({
+      title: result?.error || "录音启动失败",
+      icon: "none",
+      duration: 4000,
+    });
+    // 关键：录音启动失败时，必须彻底重置手势状态，否则下一次按压会被残留值锁住，调不起原生。
+    _cancelShortVoiceRecording({ keepText: state._keepOldRecognizedText });
   }
 }
-async function _cancelShortVoiceRecording() {
+async function _cancelShortVoiceRecording({ keepText = false } = {}) {
   if (state._voiceCancelling) return;
   state._voiceCancelling = true;
-  state._voiceJobId = Date.now();
+  _invalidateJob();
+  if (keepText && (state.recognizedText || state.draftText)) {
+    state.voicePhase = "finished";
+    state.inputMode = "voice";
+    state._isRecognizing = false;
+  } else {
+    resetVoiceInput();
+  }
+  state._gesture.active = false;
   try {
     console.info("[voice] short press: waiting recorder cancellation");
     await _stopVoiceRecorder(true);
   } finally {
-    state.voicePhase = "pressing";
     state._voiceCancelling = false;
     console.info("[voice] short press: recorder cancellation completed");
   }
@@ -512,7 +788,7 @@ async function _stopVoiceRecorder(forceCancel = false) {
     if (!recorder) return;
     if (forceCancel) {
       // 作废当前识别任务（避免 onStop 异步回调覆盖 UI）
-      state._voiceJobId = Date.now();
+      _invalidateJob();
       await recorder.cancel?.();
       return;
     }
@@ -523,27 +799,47 @@ async function _stopVoiceRecorder(forceCancel = false) {
 }
 async function _stopVoiceRecorderAndRecognize() {
   const recorder = _ensureRecorder();
+  let stopTimer;
   try {
     // stop 会触发 recorder onStop(blob) -> _recognizeFromBlob
-    await recorder.stop?.();
+    const stopPromise = recorder.stop?.();
+    const result = await Promise.race([
+      stopPromise,
+      new Promise((resolve) => {
+        stopTimer = setTimeout(() => resolve({ success: false, error: "停止录音超时" }), VOICE_STOP_TIMEOUT_MS);
+      }),
+    ]);
+    if (!result || result.success === false) {
+      _invalidateJob();
+      await recorder.cancel?.();
+      state._isRecognizing = false;
+      resetVoiceInput();
+      uni.showToast({ title: result.error || "语音识别失败", icon: "none" });
+    }
   } catch {
-    state.voicePhase = "pressing";
+    _invalidateJob();
+    await recorder.cancel?.();
+    state._isRecognizing = false;
+    resetVoiceInput();
+    uni.showToast({ title: "语音识别失败", icon: "none" });
+  } finally {
+    if (stopTimer) clearTimeout(stopTimer);
   }
 }
 async function _recognizeFromBlob(blob, jobId) {
-  if (jobId !== state._voiceJobId) return;
+  if (jobId !== state._jobSeq) return;
   if (!blob) {
-    // 取消/失败场景：直接回到 pressing，避免错误切换
-    state.voicePhase = "pressing";
+    state._isRecognizing = false;
+    resetVoiceInput();
     return;
   }
-  if (jobId !== state._voiceJobId) return;
+  if (jobId !== state._jobSeq) return;
 
   const prevText = String(state.recognizedText || "");
 
   state._isRecognizing = true;
   try {
-    if (jobId !== state._voiceJobId) return;
+    if (jobId !== state._jobSeq) return;
     const isNativeAudioUrl = typeof blob === "string";
     const text = isNativeAudioUrl
       ? await _recognizeSpeechWithUrl(blob)
@@ -558,10 +854,15 @@ async function _recognizeFromBlob(blob, jobId) {
     if (!text) {
       state.recognizedText = prevText;
       state.draftText = prevText;
-      state.voicePhase = "pressing";
+      if (prevText) {
+        state.voicePhase = "finished";
+      } else {
+        resetVoiceInput();
+        uni.showToast({ title: "未识别到语音内容", icon: "none" });
+      }
       return;
     }
-    if (jobId !== state._voiceJobId) return;
+    if (jobId !== state._jobSeq) return;
 
     console.info("[voice] ASR response", { text });
     // 识别完成：在已有旧文字基础上拼接新识别结果
@@ -571,11 +872,15 @@ async function _recognizeFromBlob(blob, jobId) {
     state.voicePhase = "finished";
     state.inputMode = "voice";
   } catch {
-    if (jobId !== state._voiceJobId) return;
-    // 识别失败：保持旧识别结果
+    if (jobId !== state._jobSeq) return;
     state.recognizedText = prevText;
     state.draftText = prevText;
-    state.voicePhase = "pressing";
+    if (prevText) {
+      state.voicePhase = "finished";
+    } else {
+      resetVoiceInput();
+      uni.showToast({ title: "语音识别失败", icon: "none" });
+    }
   } finally {
     state._isRecognizing = false;
     if (state._typingTimer) clearInterval(state._typingTimer);
@@ -615,11 +920,18 @@ function _extractAsrText(data) {
   return "";
 }
 
+function withVoiceTimeout(promise, message = "语音识别超时") {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), VOICE_ASR_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 async function _recognizeSpeechWithBase64(audioBase64) {
   console.info("[voice] ASR Base64 request", {
     audioSize: audioBase64.length,
   });
-  const resp = await recognizeSpeechByBase64({ audioBase64 });
+  const resp = await withVoiceTimeout(recognizeSpeechByBase64({ audioBase64 }));
   console.info("[voice] ASR Base64 response", resp);
   const payload = resp?.data ? resp.data : resp;
   const text = _extractAsrText(payload);
@@ -628,7 +940,7 @@ async function _recognizeSpeechWithBase64(audioBase64) {
 
 async function _recognizeSpeechWithUrl(audioUrl) {
   console.info("[voice] ASR URL request", { audioUrl });
-  const resp = await recognizeSpeechByUrl({ audioUrl });
+  const resp = await withVoiceTimeout(recognizeSpeechByUrl({ audioUrl }));
   console.info("[voice] ASR URL response", resp);
   const payload = resp?.data ? resp.data : resp;
   const text = _extractAsrText(payload);
@@ -640,6 +952,17 @@ watch(keyboardHeightPx, (height) => {
 });
 
 onBeforeUnmount(() => {
+  removeVoiceMouseUpListener();
+  removeVoiceRestartMouseUpListener();
+  _invalidateJob();
+  state._voiceGestureCancelling = false;
+  state._gesture.active = false;
+  state._gesture.startY = 0;
+  state._gesture.isRestart = false;
+  state._voiceCancelling = false;
+  state._micPermissionRequesting = false;
+  state._isRecognizing = false;
+  void _stopVoiceRecorder(true);
   if (state._pressTimer) clearTimeout(state._pressTimer);
   if (state._typingTimer) clearInterval(state._typingTimer);
 });
@@ -651,7 +974,7 @@ onBeforeUnmount(() => {
     class="keyboard-interaction-mask"
     :style="rootStyle"
   />
-  <!-- text 键盘态：输入栏抽离为 fixed 贴键盘顶，这里在原位置留等高占位，避免内容区跳动 -->
+  <!-- text 键盘态：输入栏抽离为 absolute 贴键盘顶，这里在原位置留等高占位，避免内容区跳动 -->
   <view
     v-if="textKeyboardOpen && textInputBarHeightPx > 0"
     :style="{ height: `${textInputBarHeightPx}px` }"
@@ -671,7 +994,7 @@ onBeforeUnmount(() => {
       :class="{ 'voice-sheet--keyboard-open': voiceKeyboardOpen }"
     >
       <view
-        v-if="voicePhase !== 'finished'"
+        v-if="!isVoiceConfirmationOpen"
         class="voice-sheet__close"
         aria-label="关闭语音面板"
         @tap="onVoiceClose"
@@ -681,18 +1004,21 @@ onBeforeUnmount(() => {
       <!-- 41167:414 正在说话：波纹动画 -->
       <view
         class="voice-recording"
-        :class="{ 'voice-recording--finished': voicePhase === 'finished' }"
+        :class="{ 'voice-recording--finished': isVoiceConfirmationOpen }"
       >
         <view
-          v-if="voicePhase !== 'finished'"
+          v-if="!isVoiceConfirmationOpen"
           class="voice-recording__live"
         >
-          <view class="voice-recording__header">
+          <view
+            class="voice-recording__header"
+            :class="{ 'voice-recording__header--cancelling': state._voiceGestureCancelling }"
+          >
             <text class="voice-recording__listening">
-              {{ voicePhase === 'recording' ? 'Noyi正在听，请说话' : '长按下方按钮开始说话' }}
+              {{ state._voiceGestureCancelling ? '松开取消语音' : 'Noyi正在听，请说话' }}
             </text>
             <text class="voice-recording__hint">
-              {{ voicePhase === 'recording' ? '说完松手  可编辑文字' : '按住即可开始语音输入' }}
+              {{ state._voiceGestureCancelling ? '松开手指取消识别' : '说完松手  可编辑文字' }}
             </text>
           </view>
           <view v-if="voicePhase === 'recording'" class="voice-recording__wave" aria-hidden="true">
@@ -702,13 +1028,17 @@ onBeforeUnmount(() => {
         <view
           v-else
           class="voice-recording__stream"
-          :class="{ 'voice-recording__stream--editing': voiceKeyboardOpen }"
+          :class="{
+            'voice-recording__stream--editing': voiceKeyboardOpen,
+            'voice-recording__stream--recognizing': state._isRecognizing,
+          }"
         >
           <textarea
             ref="voiceTextareaRef"
             class="voice-recording__textarea"
             :value="voiceTextValue"
             :maxlength="500"
+            :disabled="state._isRecognizing"
             placeholder=""
             :adjust-position="false"
             confirm-type="send"
@@ -717,16 +1047,23 @@ onBeforeUnmount(() => {
             @blur="onVoiceTextareaBlur"
             @tap="focusVoiceTextarea"
           />
+          <view v-if="state._isRecognizing" class="voice-recognizing" aria-label="语音识别中">
+            <view class="voice-recognizing__spinner" />
+            <text class="voice-recognizing__text">
+              语音识别中...
+            </text>
+          </view>
         </view>
         <view
           class="voice-recording__body"
-          :class="{ 'voice-recording__body--finished': voicePhase === 'finished' }"
+          :class="{ 'voice-recording__body--finished': isVoiceConfirmationOpen }"
         >
           <view class="voice-recording__content">
             <view
-              v-if="voicePhase === 'finished'"
+              v-if="isVoiceConfirmationOpen"
               id="voice-actions-anchor"
               class="voice-finished-actions"
+              :class="{ 'voice-finished-actions--recognizing': state._isRecognizing }"
             >
               <view
                 class="voice-actions__btn voice-actions__btn--gray"
@@ -762,8 +1099,12 @@ onBeforeUnmount(() => {
                 :class="{
                   'voice-finished-actions--keyboard-open': voiceKeyboardOpen,
                 }"
-                @touchstart.stop.prevent="onVoiceRestart"
-                @tap="onVoiceRestart"
+                @mousedown="onVoiceRestartMouseDown"
+                @contextmenu.prevent
+                @touchstart.stop.prevent="onVoiceRestartStart"
+                @touchmove.stop.prevent="updateVoiceGesture"
+                @touchend.stop.prevent="onVoiceRestartEnd"
+                @touchcancel.stop.prevent="onVoiceRestartCancel"
               >
                 <image
                   src="@/assets/img/icon-voice-sm.svg"
@@ -777,9 +1118,10 @@ onBeforeUnmount(() => {
               class="voice-recording__rings"
               @mousedown="onVoiceTouchStart"
               @mouseup="onVoiceTouchEnd"
-              @mouseleave="onVoiceTouchCancel"
+              @mousemove="updateVoiceGesture"
               @contextmenu.prevent
               @touchstart.stop.prevent="onVoiceTouchStart"
+              @touchmove.stop.prevent="updateVoiceGesture"
               @touchend.stop.prevent="onVoiceTouchEnd"
               @touchcancel.stop.prevent="onVoiceTouchCancel"
             >
@@ -818,7 +1160,12 @@ onBeforeUnmount(() => {
       <view
         v-if="inputMode === 'voice'"
         class="input-bar__voice-pill"
-        @tap="onVoiceIconTap"
+        @mousedown="onVoicePillMouseDown"
+        @contextmenu.prevent
+        @touchstart.stop.prevent="onVoicePillTouchStart"
+        @touchmove.stop.prevent="updateVoiceGesture"
+        @touchend.stop.prevent="onVoicePillTouchEnd"
+        @touchcancel.stop.prevent="onVoicePillTouchCancel"
       >
         <text class="input-bar__voice-hint">
           按住 说话
@@ -891,10 +1238,10 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-// 普通输入模式键盘弹出：输入栏脱离文档流，fixed 贴到键盘顶（visualViewport 底边），
-// 内容区容器保持不动，实现“键盘顶起输入框、内容区不飞”的效果。
+// 普通输入模式键盘弹出：输入栏相对聊天容器绝对定位，并通过 visualViewport 偏移贴到键盘顶，
+// 避免 WebView 对 fixed 元素重复避让导致输入栏位置异常。
 .chat-input--text-keyboard-open {
-  position: fixed;
+  position: absolute;
   z-index: 1200;
   right: 0;
   bottom: var(--vv-bottom-offset, 0px);
@@ -1177,6 +1524,13 @@ onBeforeUnmount(() => {
   line-height: 30rpx;
 }
 
+.voice-recording__header--cancelling {
+  .voice-recording__listening,
+  .voice-recording__hint {
+    color: #f12832;
+  }
+}
+
 .voice-recording__transcript {
   width: 100%;
   margin: 0 0 112rpx;
@@ -1282,6 +1636,46 @@ onBeforeUnmount(() => {
   line-height: 40rpx;
   background: transparent;
   overflow: hidden;
+}
+
+.voice-recording__stream--recognizing {
+  position: relative;
+}
+
+.voice-recognizing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.voice-recognizing__spinner {
+  width: 30rpx;
+  height: 30rpx;
+  border: 4rpx solid rgba(241, 40, 50, 0.2);
+  border-top-color: #f12832;
+  border-radius: 50%;
+  animation: voice-recognizing-spin 0.8s linear infinite;
+}
+
+.voice-recognizing__text {
+  color: #7d8796;
+  font-size: 26rpx;
+}
+
+.voice-finished-actions--recognizing {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+@keyframes voice-recognizing-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .voice-finished {

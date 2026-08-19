@@ -114,22 +114,23 @@ export const useSystemStore = defineStore("system", () => {
       return;
     }
 
-    await Promise.race([
-      new Promise<void>((resolve) => {
-        alipayJSBridge.AlipayJSBridge?.call("getPhoneSizesInfo", {}, (result) => {
-          statusBarHeight.value = result.statusBarHeight || 0;
-          tabbarHeight.value = result.tabbarHeight || 0;
-          resolve();
-        });
-      }),
-      new Promise<void>((resolve) => {
-        setTimeout(() => {
-          statusBarHeight.value = 0;
-          tabbarHeight.value = 0;
-          resolve();
-        }, 500);
-      }),
-    ]);
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      }, 500);
+
+      alipayJSBridge.AlipayJSBridge?.call("getPhoneSizesInfo", {}, (result) => {
+        statusBarHeight.value = Number(result.statusBarHeight) || 0;
+        tabbarHeight.value = Number(result.tabbarHeight) || 0;
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   return {

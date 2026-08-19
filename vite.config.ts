@@ -12,6 +12,9 @@ export default defineConfig((cnf) => {
 
   return {
     base: VITE_WEB_ENV === "production" ? "/" : "/",
+    server: {
+      host: "0.0.0.0",
+    },
     plugins: plugins(cnf),
     css: {
       preprocessorOptions: {

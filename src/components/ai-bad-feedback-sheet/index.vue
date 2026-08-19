@@ -162,7 +162,7 @@ function onConfirm() {
   box-sizing: border-box;
   height: 1200rpx;
   padding: 40rpx 60rpx;
-  padding-bottom: calc(70rpx + var(--safe-bottom, 0rpx));
+  padding-bottom: calc(70rpx + var(--safe-bottom, 0px));
   overflow: hidden;
   border-radius: 40rpx 40rpx 0 0;
   background: #ffffff;

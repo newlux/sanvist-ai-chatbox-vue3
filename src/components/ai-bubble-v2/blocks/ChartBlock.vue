@@ -1,7 +1,7 @@
 <script setup>
-import * as echartsModule from "echarts";
+import * as echarts from "echarts";
 
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from "vue";
 
 defineOptions({ name: "ChartBlock" });
 
@@ -11,57 +11,92 @@ const props = defineProps({
   embedded: { type: Boolean, default: false },
 });
 
-const echarts = echartsModule.default || echartsModule;
-
 const chartCanvas = ref(null);
 const chart = ref(null);
+let renderTimer = null;
+let resizeObserver = null;
 
-const chartOption = computed(() => {
-  if (!props.option) return props.option;
+/**
+ * 将后端透传的 option 转换为 ECharts 可直接消费的纯净对象。
+ * - 用 Vue 的 toRaw 剥离响应式 Proxy，再借助 ECharts 官方的 clone 深拷贝，
+ *   避免 ECharts 内部遍历配置时访问 Proxy 触发 getter 异常。
+ * - 若 itemStyle.color 是数组（如 ["#5470c6","#fac858"]），转成每个数据项各自的颜色。
+ */
+function normalizeOption(raw) {
+  if (!raw) return raw;
+  const option = echarts.util.clone(toRaw(raw));
 
-  const option = { ...props.option };
-  const hasCartesianSeries = Array.isArray(option.series)
-    && option.series.some(series => series && (series.type === "bar" || series.type === "line"));
-  const hasPieSeries = Array.isArray(option.series)
-    && option.series.some(series => series && series.type === "pie");
-  if (!props.embedded) return option;
-
-  let normalizedOption = option;
-  if (hasPieSeries) {
-    normalizedOption = {
-      ...normalizedOption,
-      legend: option.legend && !Array.isArray(option.legend)
-        ? { ...option.legend, top: 8, left: "center", itemWidth: 20, itemHeight: 12, itemGap: 16 }
-        : option.legend,
-      series: option.series.map(series => series && series.type === "pie"
-        ? { ...series, center: ["50%", "58%"], radius: ["29%", "48%"] }
-        : series),
+  const series = Array.isArray(option.series) ? option.series : [];
+  const normalizedSeries = series.map((s) => {
+    if (!s || typeof s !== "object") return s;
+    const colors = Array.isArray(s.itemStyle?.color) ? [...s.itemStyle.color] : null;
+    if (!colors) return s;
+    const data = Array.isArray(s.data) ? s.data : [];
+    return {
+      ...s,
+      itemStyle: { ...s.itemStyle, color: undefined },
+      data: data.map((item, index) => ({
+        value: item,
+        itemStyle: { color: colors[index % colors.length] },
+      })),
     };
+  });
+
+  const next = { ...option, series: normalizedSeries };
+
+  if (!props.embedded) return next;
+
+  const hasPie = normalizedSeries.some(s => s && s.type === "pie");
+  const hasCartesian = normalizedSeries.some(s => s && (s.type === "bar" || s.type === "line"));
+  if (hasPie) {
+    next.series = normalizedSeries.map(s => (s && s.type === "pie"
+      ? { ...s, center: ["50%", "58%"], radius: ["29%", "48%"] }
+      : s));
   }
-
-  if (!hasCartesianSeries) return normalizedOption;
-
-  return {
-    ...normalizedOption,
-    legend: option.legend && !Array.isArray(option.legend)
-      ? { ...option.legend, top: 8, left: "center", itemWidth: 20, itemHeight: 12, itemGap: 16 }
-      : option.legend,
-    grid: {
+  if (hasCartesian) {
+    next.grid = {
       ...(option.grid && !Array.isArray(option.grid) ? option.grid : {}),
       top: 76,
       right: 12,
       bottom: 30,
       left: 12,
       containLabel: true,
-    },
-  };
-});
+    };
+  }
+  return next;
+}
 
-watch(() => props.option, () => nextTick(renderChart), { deep: true });
-onMounted(() => nextTick(renderChart));
+const chartOption = computed(() => normalizeOption(props.option));
+
+watch(() => props.option, scheduleRenderChart, { deep: true });
+onMounted(() => {
+  scheduleRenderChart();
+  if (typeof ResizeObserver !== "undefined") {
+    resizeObserver = new ResizeObserver(scheduleRenderChart);
+    if (chartCanvas.value) resizeObserver.observe(chartCanvas.value);
+  }
+});
 onBeforeUnmount(disposeChart);
 
+function scheduleRenderChart() {
+  if (renderTimer) clearTimeout(renderTimer);
+  void nextTick(() => {
+    renderTimer = setTimeout(() => {
+      renderTimer = null;
+      renderChart();
+    }, 80);
+  });
+}
+
 function disposeChart() {
+  if (renderTimer) {
+    clearTimeout(renderTimer);
+    renderTimer = null;
+  }
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
   if (chart.value) {
     chart.value.dispose();
     chart.value = null;
@@ -69,19 +104,34 @@ function disposeChart() {
 }
 
 function renderChart() {
-  if (!props.option || !echarts || typeof document === "undefined") {
-    disposeChart();
+  if (!props.option || !echarts?.init) {
+    console.warn("[ChartBlock] echarts unavailable");
     return;
   }
 
   const element = chartCanvas.value;
   if (!element) return;
+  if (!element.clientWidth || !element.clientHeight) {
+    scheduleRenderChart();
+    return;
+  }
+
+  let instance = chart.value;
+  if (!instance) {
+    try {
+      instance = echarts.init(element);
+      chart.value = instance;
+    } catch (error) {
+      console.error("[ChartBlock] echarts.init failed", error);
+      return;
+    }
+  }
 
   try {
-    if (!chart.value) chart.value = echarts.init(element);
-    chart.value.setOption(chartOption.value, { notMerge: true, lazyUpdate: true, silent: true });
-    chart.value.resize();
-  } catch {
+    instance.setOption(chartOption.value, { notMerge: true, lazyUpdate: false, silent: true });
+    instance.resize();
+  } catch (error) {
+    console.error("[ChartBlock] echarts.setOption failed", error, chartOption.value);
     disposeChart();
   }
 }

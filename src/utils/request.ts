@@ -11,15 +11,25 @@ export interface BaseResponse<T = unknown> {
 }
 
 let authorization = "";
+let guestRole = "";
 
 export function setRequestAuth(value: string) {
   authorization = value;
 }
 
+export const GUEST_ROLE_OPTIONS = ["OWNER", "OPERATOR"] as const;
+
+export type GuestRole = typeof GUEST_ROLE_OPTIONS[number];
+
+export function isGuestRole(value: unknown): value is GuestRole {
+  return typeof value === "string" && (GUEST_ROLE_OPTIONS as readonly string[]).includes(value);
+}
+
+export function setGuestRole(role: string) {
+  guestRole = role;
+}
+
 export const request = hookFetch.create<BaseResponse, "data">({
-  headers: {
-    "guest-role": "OWNER",
-  },
   baseURL: import.meta.env.VITE_AI_QUESTION_BASE_URL,
   plugins: [sseTextDecoderPlugin({ json: true, prefix: "data:" })],
 });
@@ -31,6 +41,9 @@ function jwtPlugin(): HookFetchPlugin<BaseResponse> {
       config.headers = new Headers(config.headers);
       if (authorization && !config.headers.has("Authorization")) {
         // config.headers.set("Authorization", authorization);
+      }
+      if (guestRole) {
+        config.headers.set("guest-role", guestRole);
       }
       return config;
     },

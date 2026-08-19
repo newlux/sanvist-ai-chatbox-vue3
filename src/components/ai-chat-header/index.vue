@@ -1,6 +1,9 @@
 <script setup>
 import { useI18n } from "vue-i18n";
-import { useSystemStore } from "@/stores";
+import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete.svg";
+import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
+import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
+import { useSafeArea } from "@/hooks/useSafeArea";
 
 defineOptions({ name: "AiChatHeader" });
 
@@ -27,9 +30,11 @@ const emit = defineEmits([
 ]);
 
 const { t } = useI18n();
-const systemStore = useSystemStore();
+const { safeAreaStyle, safeTopPx } = useSafeArea();
 const historyPopup = ref();
 const sessionPaging = ref();
+const historyLoading = ref(false);
+const historySearchKeyword = ref("");
 const showActionMenu = ref(false);
 const actionSession = ref(null);
 const editingMode = ref(false);
@@ -38,15 +43,22 @@ const actionMenuTop = ref(220);
 const renamingId = ref("");
 const renameValue = ref("");
 const ignoreNextLongPressReleaseTap = ref(false);
+const isSessionListScrolling = ref(false);
+let sessionScrollIdleTimer;
 
 const sessionList = computed({
   get: () => props.sessions,
   set: sessions => emit("update:sessions", sessions),
 });
 const actionMenuStyle = computed(() => ({ top: `${actionMenuTop.value}px` }));
+const filteredSessionList = computed(() => {
+  const keyword = historySearchKeyword.value.trim().toLowerCase();
+  if (!keyword) return sessionList.value;
+  return sessionList.value.filter(session => String(session?.name || "").toLowerCase().includes(keyword));
+});
 
 const statusbarStyle = computed(() => {
-  const height = Number(systemStore.statusBarHeight) || 0;
+  const height = safeTopPx.value || 0;
   return height > 0 ? { height: `${height}px` } : { height: "env(safe-area-inset-top, 0px)" };
 });
 
@@ -60,8 +72,10 @@ function onBackTap() {
 function onShareSelectAllTap() {
   if (!props.shareSelectAllDisabled) emit("share-select-all");
 }
-function openHistoryDrawer() {
+async function openHistoryDrawer() {
+  historyLoading.value = true;
   historyPopup.value?.open?.("left");
+  await nextTick();
   sessionPaging.value?.reload?.();
 }
 async function onSessionQuery(pageNo, pageSize) {
@@ -71,13 +85,16 @@ async function onSessionQuery(pageNo, pageSize) {
   } catch (error) {
     console.error("[AiChatHeader] load sessions failed", error);
     sessionPaging.value?.complete?.(false);
+  } finally {
+    historyLoading.value = false;
   }
 }
 function closeDrawer() {
+  closeActionMenu();
   historyPopup.value?.close?.("left");
 }
 function resetDrawerState() {
-  showActionMenu.value = false;
+  closeActionMenu();
   editingMode.value = false;
   selectedIds.value = [];
   renamingId.value = "";
@@ -90,8 +107,23 @@ function onNewConversationTap() {
   closeDrawer();
 }
 
+function closeActionMenu() {
+  showActionMenu.value = false;
+  actionSession.value = null;
+  ignoreNextLongPressReleaseTap.value = false;
+}
+
+function onSessionListScroll() {
+  isSessionListScrolling.value = true;
+  closeActionMenu();
+  if (sessionScrollIdleTimer) clearTimeout(sessionScrollIdleTimer);
+  sessionScrollIdleTimer = setTimeout(() => {
+    isSessionListScrolling.value = false;
+  }, 120);
+}
+
 function onSessionLongPress(session, event) {
-  if (editingMode.value) return;
+  if (isSessionListScrolling.value || editingMode.value) return;
   if (renamingId.value) commitRename();
   actionSession.value = session || null;
   ignoreNextLongPressReleaseTap.value = true;
@@ -101,8 +133,8 @@ function onSessionLongPress(session, event) {
   try {
     const info = uni.getSystemInfoSync();
     const windowHeight = info?.windowHeight || 667;
-    const menuHeight = 190;
-    const minTop = Math.max(Number(systemStore.statusBarHeight) || 0, 88);
+    const menuHeight = 137;
+    const minTop = Math.max(safeTopPx.value, 88);
     if (top + menuHeight > windowHeight - 20) top = y - menuHeight - 18;
     top = Math.max(minTop, Math.min(top, windowHeight - menuHeight - 20));
   } catch {
@@ -118,12 +150,21 @@ function consumeLongPressReleaseTap() {
   return true;
 }
 
-function closeActionMenu() {
+function onActionMenuMaskTap() {
   if (consumeLongPressReleaseTap()) return;
-  showActionMenu.value = false;
+  closeActionMenu();
 }
+
 function onDrawerTap() {
+  if (showActionMenu.value) {
+    onActionMenuMaskTap();
+    return;
+  }
   if (renamingId.value) commitRename();
+}
+
+function onHistoryPopupChange(event) {
+  if (!event?.show) closeActionMenu();
 }
 
 function onRenameTap() {}
@@ -178,7 +219,7 @@ function commitRename() {
 function onRenameBlur() {}
 
 function enterMultiSelect() {
-  showActionMenu.value = false;
+  closeActionMenu();
   if (renamingId.value) commitRename();
   editingMode.value = true;
   selectedIds.value = [];
@@ -248,7 +289,7 @@ function deleteSelected() {
               <view />
             </view>
             <text class="chat-header__title">
-              {{ props.generating ? '正在生成回答' : 'Noyi 休息中..' }}
+              {{ props.generating ? '正在生成回答' : 'Noyi 等待中..' }}
             </text>
           </view>
 
@@ -309,35 +350,36 @@ function deleteSelected() {
         type="left"
         :animation="true"
         background-color="#ffffff"
+        mask-background-color="rgba(0, 0, 0, 0.4)"
         :safe-area="true"
         :is-mask-click="true"
+        @change="onHistoryPopupChange"
       >
-        <view class="history-drawer" @tap.stop="onDrawerTap">
-          <view class="history-drawer__top">
-            <image
-              src="@/assets/img/icon-ai.png"
-              mode="aspectFit"
-              class="history-drawer__icon-img"
-            />
-            <text class="history-drawer__title">
-              AI 问问
-            </text>
+        <view class="history-drawer" :style="safeAreaStyle" @tap="onDrawerTap">
+          <view class="history-drawer__search">
+            <image src="@/assets/img/icon-history-search.svg" mode="aspectFit" class="history-drawer__search-icon" />
+            <input
+              v-model="historySearchKeyword"
+              class="history-drawer__search-input"
+              placeholder="搜索历史记录"
+              :maxlength="80"
+            >
           </view>
           <view class="history-drawer__new-conversation">
             <view class="history-drawer__new-conversation-item" @tap.stop="onNewConversationTap">
               <image
-                src="@/assets/img/icon-conversation.png"
+                src="@/assets/img/icon-new-conversation.svg"
                 mode="aspectFit"
                 class="history-drawer__new-conversation-item-icon"
               />
               <text class="history-drawer__new-conversation-item-label">
-                新对话
+                新建对话
               </text>
             </view>
           </view>
           <view class="history-drawer__session-history">
             <text class="history-drawer__session-history-label">
-              历史回答
+              历史对话
             </text>
           </view>
           <z-paging
@@ -346,21 +388,29 @@ function deleteSelected() {
             class="history-drawer__list-wrap"
             :auto="false"
             :fixed="false"
-            height="100%"
             :use-page-scroll="false"
             :default-page-size="20"
             :refresher-enabled="false"
+            :loading-more-enabled="true"
+            :show-loading-more-no-more-view="false"
             empty-view-text="暂无历史会话"
             @query="onSessionQuery"
+            @scroll="onSessionListScroll"
           >
-            <view class="history-drawer__list">
+            <view v-if="historyLoading" class="history-drawer__loading" aria-label="正在加载历史记录">
+              <view class="history-drawer__loading-spinner" />
+              <text class="history-drawer__loading-text">
+                正在加载
+              </text>
+            </view>
+            <view v-else class="history-drawer__list">
               <view
-                v-for="session in sessionList"
+                v-for="session in filteredSessionList"
                 :key="getSessionKey(session)"
                 class="history-drawer__row"
                 :class="{ 'history-drawer__row--editing': editingMode }"
-                @longpress="onSessionLongPress(session, $event)"
-                @tap="onSessionTap(session)"
+                @longpress.stop="onSessionLongPress(session, $event)"
+                @tap.stop="onSessionTap(session)"
               >
                 <input
                   v-if="renamingId === getSessionKey(session)"
@@ -420,49 +470,47 @@ function deleteSelected() {
               </text>
             </view>
           </view>
+          <view v-if="showActionMenu" class="history-action-menu-mask" @tap.stop="onActionMenuMaskTap" />
+          <view v-if="showActionMenu" class="history-action-menu" :style="actionMenuStyle" @tap.stop>
+            <view class="history-action-menu__item" @tap="deleteOne">
+              <view class="history-action-menu__icon-delete">
+                <image
+                  :src="actionDeleteIcon"
+                  mode="aspectFit"
+                  class="history-action-menu__icon-img"
+                />
+              </view>
+              <text class="history-action-menu__text history-action-menu__text--danger">
+                删除
+              </text>
+            </view>
+            <view class="history-action-menu__item" @tap="renameOne">
+              <view class="history-action-menu__icon-rename">
+                <image
+                  :src="actionEditIcon"
+                  mode="aspectFit"
+                  class="history-action-menu__icon-img"
+                />
+              </view>
+              <text class="history-action-menu__text">
+                修改标题
+              </text>
+            </view>
+            <view class="history-action-menu__item" @tap="enterMultiSelect">
+              <view class="history-action-menu__icon-multiple">
+                <image
+                  :src="actionBatchDeleteIcon"
+                  mode="aspectFit"
+                  class="history-action-menu__icon-img"
+                />
+              </view>
+              <text class="history-action-menu__text">
+                批量删除
+              </text>
+            </view>
+          </view>
         </view>
       </uni-popup>
-
-      <view v-if="showActionMenu" class="history-action-mask" @tap="closeActionMenu">
-        <view class="history-action-menu" :style="actionMenuStyle" @tap.stop>
-          <view class="history-action-menu__item" @tap="deleteOne">
-            <view class="history-action-menu__icon-delete">
-              <image
-                src="@/assets/img/icon-delete.svg"
-                mode="aspectFit"
-                class="history-action-menu__icon-img"
-              />
-            </view>
-            <text class="history-action-menu__text history-action-menu__text--danger">
-              删除
-            </text>
-          </view>
-          <view class="history-action-menu__item" @tap="renameOne">
-            <view class="history-action-menu__icon-rename">
-              <image
-                src="@/assets/img/icon-edit.svg"
-                mode="aspectFit"
-                class="history-action-menu__icon-img"
-              />
-            </view>
-            <text class="history-action-menu__text">
-              重命名
-            </text>
-          </view>
-          <view class="history-action-menu__item" @tap="enterMultiSelect">
-            <view class="history-action-menu__icon-multiple">
-              <image
-                src="@/assets/img/icon-multiple.svg"
-                mode="aspectFit"
-                class="history-action-menu__icon-img"
-              />
-            </view>
-            <text class="history-action-menu__text">
-              批量删除
-            </text>
-          </view>
-        </view>
-      </view>
     </view>
   </view>
 </template>
@@ -488,7 +536,7 @@ function deleteSelected() {
   height: 100rpx; // 50px
   display: flex;
   align-items: center;
-  padding: 8rpx 40rpx; // 4px 20px
+  padding: 16rpx 40rpx; // 4px 20px
   box-sizing: border-box;
   gap: 12rpx; // 6px
   justify-content: space-between;
@@ -651,23 +699,18 @@ function deleteSelected() {
 
 // ---- Left drawer (40834-437) ----
 .history-drawer {
-  width: 520rpx;
-  max-width: 80vw;
+  width: 644rpx;
+  max-width: none;
   height: 100vh;
-  background: #ffffff;
   box-sizing: border-box;
-  padding: 24rpx 32rpx calc(32rpx + constant(safe-area-inset-bottom));
-  padding: 24rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
+  padding: calc(32rpx + var(--safe-top, 0px)) 36rpx calc(32rpx + var(--safe-bottom, 0px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .history-drawer__top {
-  display: flex;
-  align-items: center;
-  margin: 0 0 40rpx;
-  gap: 16rpx;
+  display: none;
 }
 
 .history-drawer__title {
@@ -676,11 +719,35 @@ function deleteSelected() {
   color: #232323;
 }
 
+.history-drawer__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+  min-height: 160rpx;
+  color: #999999;
+}
+.history-drawer__loading-spinner {
+  width: 28rpx;
+  height: 28rpx;
+  box-sizing: border-box;
+  border: 4rpx solid #e0e0e0;
+  border-top-color: #999999;
+  border-radius: 50%;
+  animation: history-drawer-loading-spin 0.8s linear infinite;
+}
+.history-drawer__loading-text {
+  font-size: 26rpx;
+  line-height: 36rpx;
+}
+@keyframes history-drawer-loading-spin {
+  to { transform: rotate(360deg); }
+}
 .history-drawer__list {
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
-  padding: 0 0 40px;
+  gap: 4rpx;
+  padding: 0;
 }
 .history-drawer__row {
   display: flex;
@@ -700,18 +767,20 @@ function deleteSelected() {
   padding-right: 0;
 }
 .history-drawer_item {
-  padding: 28rpx 20rpx;
+  height: 92rpx;
+  padding: 0 32rpx;
   display: flex;
   align-items: center;
   flex: 1;
   min-width: 0;
+  box-sizing: border-box;
 }
 .history-drawer_item-label {
   font-size: 28rpx;
-  color: #111827;
+  line-height: 40rpx;
+  color: #1a1a1a;
   flex: 1;
   min-width: 0;
-  font-weight: 400;
 }
 
 .history-drawer__rename-input {
@@ -725,12 +794,11 @@ function deleteSelected() {
   height: 96rpx;
 }
 .history-drawer_item_active {
-  border-radius: 16px;
-  background: #f9f9f9;
+  border-radius: 16rpx;
+  background: #f5f5f5;
 }
 .history-drawer_item_active .history-drawer_item-label {
-  color: #111827;
-  font-weight: 400;
+  color: #1a1a1a;
 }
 
 .history-drawer_item_current {
@@ -773,6 +841,34 @@ function deleteSelected() {
   font-size: 24rpx;
   color: #bbc0c9;
 }
+.history-drawer__search {
+  height: 88rpx;
+  margin-bottom: 32rpx;
+  padding: 0 24rpx;
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  box-sizing: border-box;
+  border: 2rpx solid #e0e0e0;
+  border-radius: 20rpx;
+  background: #ffffff;
+}
+.history-drawer__search-icon {
+  width: 36rpx;
+  height: 36rpx;
+}
+.history-drawer__search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #1a1a1a;
+  line-height: 40rpx;
+}
+.history-drawer__search-input::placeholder {
+  color: #999999;
+}
 .history-drawer__new-conversation {
   padding: 0;
 }
@@ -780,33 +876,32 @@ function deleteSelected() {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16rpx;
-  border-radius: 16rpx;
-  background: #f9f9f9;
-  padding: 24rpx 0;
+  gap: 10rpx;
+  border-radius: 20rpx;
+  background: #f3f3f3;
+  padding: 26rpx 0;
 }
 .history-drawer__new-conversation-item-label {
-  font-size: 28rpx;
-  color: #232323;
-  font-weight: 600;
+  font-size: 32rpx;
+  color: #1a1a1a;
+  line-height: 44rpx;
 }
 .history-drawer__new-conversation-item-icon {
-  width: 48rpx;
-  height: 48rpx;
+  width: 36rpx;
+  height: 36rpx;
 }
 .history-drawer__session-history {
-  padding: 24rpx 0;
-  margin: 16rpx 0 0;
+  padding: 32rpx 0;
+  margin: 0;
 }
 .history-drawer__session-history-label {
-  font-size: 24rpx;
-  color: #bbc0c9;
+  font-size: 28rpx;
+  color: #666666;
+  line-height: 40rpx;
 }
 .history-drawer__list-wrap {
   flex: 1;
   min-height: 0;
-  height: 0;
-  overflow-y: auto;
 }
 
 .history-drawer__check {
@@ -855,41 +950,51 @@ function deleteSelected() {
   font-weight: 600;
 }
 
-.history-action-mask {
+.history-action-menu-mask {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  z-index: 1199;
 }
 
 .history-action-menu {
   position: fixed;
-  left: 32rpx;
-  width: 280rpx;
+  left: 36rpx;
+  z-index: 1200;
+  width: 336rpx;
+  height: 274rpx;
+  box-sizing: border-box;
+  border: 0;
   border-radius: 16rpx;
   background: #ffffff;
-  box-shadow: 2rpx 2rpx 20rpx rgba(0, 0, 0, 0.1);
-  padding: 32rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 48rpx;
+  box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.06);
+  padding: 36rpx 32rpx;
 }
 
 .history-action-menu__item {
   display: flex;
   align-items: center;
-  gap: 12rpx;
+  height: 44rpx;
+  gap: 16rpx;
+}
+.history-action-menu__item + .history-action-menu__item {
+  margin-top: 34rpx;
 }
 
 .history-action-menu__text {
   font-size: 28rpx;
-  color: #1f2937;
+  font-weight: 400;
+  line-height: 40rpx;
+  color: #1a1a1a;
 }
 
 .history-action-menu__text--danger {
-  color: #e60000;
+  color: #c8201e;
 }
 .history-action-menu__icon-img {
+  display: block;
   width: 32rpx;
   height: 32rpx;
+  flex: 0 0 32rpx;
+  object-fit: contain;
 }
 </style>
