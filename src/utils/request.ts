@@ -25,6 +25,7 @@ interface UploadOptions {
 let authorization = "";
 let guestRole = "";
 let baseURL = import.meta.env.VITE_AI_QUESTION_BASE_URL;
+let chatSocketPath = import.meta.env.VITE_AI_CHAT_WS_PATH || "";
 
 export function setRequestAuth(value: string) {
   authorization = value;
@@ -36,6 +37,21 @@ export function setRequestBaseURL(value: string) {
 
 export function getRequestBaseURL() {
   return baseURL;
+}
+
+export function setChatSocketPath(value: string) {
+  chatSocketPath = value || "";
+}
+
+/**
+ * 对话 WebSocket 地址。留空表示未开通，调用方走 HTTP 通道。
+ * 支付宝小程序的 my.request 不支持分块响应，只有 WebSocket 能做到真流式。
+ */
+export function getChatSocketURL() {
+  if (!chatSocketPath) return "";
+  if (/^wss?:\/\//i.test(chatSocketPath)) return chatSocketPath;
+  const origin = baseURL.replace(/\/$/, "").replace(/^http/i, "ws");
+  return `${origin}/${chatSocketPath.replace(/^\//, "")}`;
 }
 
 export function getRequestHeaders(headers: Record<string, string> = {}) {

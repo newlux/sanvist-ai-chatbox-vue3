@@ -19,6 +19,7 @@ defineProps({
         v-if="block.type === 'answer'"
         :key="`${block.id}-answer`"
         :content="block.payload.content || ''"
+        :streaming="!block.complete"
         embedded
       />
       <ChartBlock

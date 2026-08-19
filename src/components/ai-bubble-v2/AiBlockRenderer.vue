@@ -32,7 +32,11 @@ function onSuggestionTap(suggestion) {
 </script>
 
 <template>
-  <AnswerBlock v-if="block.type === 'answer'" :content="block.payload.content || ''" />
+  <AnswerBlock
+    v-if="block.type === 'answer'"
+    :content="block.payload.content || ''"
+    :streaming="!block.complete"
+  />
   <ThinkBlock
     v-else-if="block.type === 'think'"
     :content="block.payload.content || ''"

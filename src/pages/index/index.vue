@@ -30,9 +30,9 @@ import { useChatStream } from "@/hooks/useChatStream";
 // import { useSafeArea } from "@/hooks/useSafeArea";
 import { useUserStore } from "@/stores";
 import {
-  applyEventToBlocks,
   buildInitialBlocks,
-} from "@/utils/ai-stream/chatStreamParser";
+  consumeChatStream,
+} from "@/utils/ai-stream";
 import {
   createAlipayConversationPoster,
   savePosterToAlbum,
@@ -1161,48 +1161,49 @@ function _finishStreamMessage(messageIndex, requestSeq) {
   _scrollToBottom();
 }
 
+function _applyStreamSnapshot({ aiMsgIndex, userMsgIndex, snapshot }) {
+  const aiMessage = state.messages[aiMsgIndex];
+  if (!aiMessage) return;
+
+  if (snapshot.conversationId) state.aiSessionId = snapshot.conversationId;
+  _replaceMessage(aiMsgIndex, {
+    ...aiMessage,
+    blocks: snapshot.blocks,
+    sessionId: snapshot.conversationId ?? aiMessage.sessionId,
+    messageId: snapshot.messageId ?? aiMessage.messageId,
+    durationMs: snapshot.metadata?.duration_ms ?? aiMessage.durationMs,
+    loading: !snapshot.ended,
+    interrupted: snapshot.metadata?.status === "stopped",
+  });
+
+  const userMessage = state.messages[userMsgIndex];
+  if (userMessage && snapshot.conversationId && snapshot.messageId) {
+    _replaceMessage(userMsgIndex, {
+      ...userMessage,
+      sessionId: snapshot.conversationId,
+      messageId: snapshot.messageId,
+    });
+  }
+
+  _scrollToBottom();
+}
+
 async function _sendAiFlow({ aiMsgIndex, content, hadSessionId, requestSeq, userMsgIndex }) {
   let receivedContent = false;
 
   try {
-    for await (const chunk of stream({
-      query: content,
-      user: String(userStore.userId || ""),
-      conversationId: state.aiSessionId,
-    }, { timeout: 60_000 })) {
-      if (requestSeq !== state._activeRequestSeq) break;
-      if (chunk.error) throw chunk.error;
-      if (!chunk.result) continue;
-
-      const aiMessage = state.messages[aiMsgIndex];
-      if (!aiMessage) break;
-      const update = applyEventToBlocks(aiMessage.blocks || [], chunk.result);
-      receivedContent ||= update.receivedContent;
-
-      if (update.conversationId) state.aiSessionId = update.conversationId;
-      const nextMessage = {
-        ...aiMessage,
-        blocks: update.blocks,
-        sessionId: update.conversationId ?? aiMessage.sessionId,
-        messageId: update.messageId ?? aiMessage.messageId,
-        durationMs: update.metadata?.duration_ms ?? aiMessage.durationMs,
-        loading: chunk.result.event !== "message_end",
-        interrupted: update.metadata?.status === "stopped",
-      };
-      _replaceMessage(aiMsgIndex, nextMessage);
-
-      const userMessage = state.messages[userMsgIndex];
-      if (userMessage && update.conversationId && update.messageId) {
-        _replaceMessage(userMsgIndex, {
-          ...userMessage,
-          sessionId: update.conversationId,
-          messageId: update.messageId,
-        });
-      }
-
-      _scrollToBottom();
-      if (chunk.result.event === "message_end") break;
-    }
+    await consumeChatStream({
+      source: stream({
+        query: content,
+        user: String(userStore.userId || ""),
+        conversationId: state.aiSessionId,
+      }, { idleTimeoutMs: 60_000 }),
+      isStale: () => requestSeq !== state._activeRequestSeq,
+      onSnapshot: (snapshot) => {
+        receivedContent = snapshot.receivedContent;
+        _applyStreamSnapshot({ aiMsgIndex, userMsgIndex, snapshot });
+      },
+    });
   } catch (error) {
     const aiMessage = state.messages[aiMsgIndex];
     if (aiMessage && requestSeq === state._activeRequestSeq && !_isAbortError(error)) {
