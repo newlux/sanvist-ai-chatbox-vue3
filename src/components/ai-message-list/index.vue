@@ -236,10 +236,7 @@ function onCopyClick(index, message) {
           />
         </view>
       </view>
-      <!-- 底部占位，防止被输入框遮挡 -->
-      <view style="height: 32rpx" />
-
-      <!-- 底部锚点必须位于所有占位元素之后，才能真正滚到底 -->
+      <!-- 底部锚点用于流式输出时触发滚动到底部，不额外制造底部间距 -->
       <view id="msg-bottom-anchor-a" style="height: 1px" />
       <view id="msg-bottom-anchor-b" style="height: 1px" />
     </scroll-view>

@@ -24,16 +24,6 @@ const VOICE_CANCEL_SWIPE_PX = 60;
 const VOICE_ASR_TIMEOUT_MS = 30000;
 // 识别态是入口的硬拦截条件，用看门狗兜底，避免任何异常路径把语音入口永久锁死
 const VOICE_RECOGNIZE_WATCHDOG_MS = 45000;
-const MIC_GRANTED_STORAGE_KEY = "wvpn_sany_ai_mic_ok";
-
-function writeMicGrantedPersisted() {
-  uni.setStorageSync(MIC_GRANTED_STORAGE_KEY, "1");
-}
-
-function clearMicGrantedPersisted() {
-  uni.removeStorageSync(MIC_GRANTED_STORAGE_KEY);
-}
-
 const state = reactive({
   inputMode: "voice", // text | voice（组件内部维护）
   voicePhase: "idle", // idle | recording | recognizing | finished | editing
@@ -59,20 +49,6 @@ const { inputMode, voicePhase } = toRefs(state);
 // 当前录音会话上下文：存放本次录音的 jobSeq 与 start promise，
 // 避免模块级单变量被多入口并发覆盖。
 let currentJob = null;
-/*
-const {
-  keyboardHeightPx,
-  initialWindowHeightPx,
-  viewportBottomOffsetPx,
-  voiceInputFocused,
-  textInputFocused,
-  onVoiceFocus,
-  onVoiceBlur,
-  onTextFocus,
-  onTextBlur,
-  resetKeyboardState,
-} = useKeyboardViewport();
-*/
 
 const voiceTextareaRef = ref(null);
 const voiceTextValue = computed(() => {
@@ -113,36 +89,6 @@ function _ensureRecorder() {
     state.recorder = new VoiceRecorder();
   }
   return state.recorder;
-}
-async function _requestMicrophonePermission() {
-  if (state._micPermissionReady) return true;
-
-  const granted = await new Promise((resolve) => {
-    uni.getSetting({
-      success: (result) => {
-        if (result.authSetting?.["scope.record"]) {
-          resolve(true);
-          return;
-        }
-        uni.authorize({
-          scope: "scope.record",
-          success: () => resolve(true),
-          fail: () => resolve(false),
-        });
-      },
-      fail: () => resolve(false),
-    });
-  });
-
-  if (!granted) {
-    clearMicGrantedPersisted();
-    uni.showToast({ title: "请允许使用麦克风", icon: "none", duration: 3000 });
-    return false;
-  }
-
-  state._micPermissionReady = true;
-  writeMicGrantedPersisted();
-  return true;
 }
 /**
  * 识别态开关的唯一入口。开启时挂看门狗，保证即使某条异常路径漏了关闭，
@@ -198,17 +144,6 @@ function onVoiceClose() {
   state._gesture.active = false;
   state._gesture.startY = 0;
   state._gesture.isRestart = false;
-}
-async function ensureVoicePermission() {
-  if (state._micPermissionReady) return true;
-  if (state._micPermissionRequesting) return false;
-
-  state._micPermissionRequesting = true;
-  try {
-    return await _requestMicrophonePermission();
-  } finally {
-    state._micPermissionRequesting = false;
-  }
 }
 function switchToText() {
   if (props.isLoading) return;
@@ -301,17 +236,9 @@ function beginVoiceRecording({ restart = false } = {}) {
   emit(restart ? "voice-restart" : "voice-start");
 
   const jobSeq = ++state._jobSeq;
-  // start 立即为一个可 await 的 promise：
-  // 先申请权限，成功后真正启动录音。这样松手时无论权限是否返回，finishVoiceGesture
-  // 都能 await 到 job.start，不会因权限异步而把正常长按误判为短按取消。
   currentJob = {
     seq: jobSeq,
-    start: (async () => {
-      const ok = await ensureVoicePermission();
-      if (state._jobSeq !== jobSeq) return { success: false, error: "任务已失效" };
-      if (!ok) return { success: false, error: "请允许使用麦克风" };
-      return _startVoiceRecorder(jobSeq);
-    })(),
+    start: _startVoiceRecorder(jobSeq),
   };
 }
 
@@ -490,10 +417,6 @@ async function _startVoiceRecorder(jobSeq) {
   if (jobSeq !== state._jobSeq) return { success: false, error: "任务已失效" };
   if (result?.success) return result;
 
-  if (result?.notAllowed) {
-    clearMicGrantedPersisted();
-    state._micPermissionReady = false;
-  }
   if (state._typingTimer) clearInterval(state._typingTimer);
   state._typingTimer = null;
   if (!result?.cancelled) {
@@ -853,6 +776,8 @@ onBeforeUnmount(() => {
           :style="{ height: textTextareaHeight }"
           placeholder="发消息"
           :auto-height="false"
+          :adjust-position="false"
+          :cursor-spacing="0"
           :maxlength="-1"
           confirm-type="send"
           placeholder-class="input-bar__placeholder"

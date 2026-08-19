@@ -60,6 +60,9 @@ const filteredSessionList = computed(() => {
 const statusbarStyle = computed(() => ({
   height: `${safeTopPx.value}px`,
 }));
+const historyDrawerStyle = computed(() => ({
+  paddingTop: `calc(${safeTopPx.value}px + 32rpx)`,
+}));
 
 function getSessionKey(session) {
   return session?.id || "";
@@ -350,11 +353,11 @@ function deleteSelected() {
         :animation="true"
         background-color="#ffffff"
         mask-background-color="rgba(0, 0, 0, 0.4)"
-        :safe-area="true"
+        :safe-area="false"
         :is-mask-click="true"
         @change="onHistoryPopupChange"
       >
-        <view class="history-drawer" @tap="onDrawerTap">
+        <view class="history-drawer" :style="historyDrawerStyle" @tap="onDrawerTap">
           <view class="history-drawer__search">
             <image src="@/assets/img/icon-history-search.svg" mode="aspectFit" class="history-drawer__search-icon" />
             <input
@@ -892,6 +895,8 @@ function deleteSelected() {
   flex: 1;
   min-width: 0;
   height: 100%;
+  box-sizing: border-box;
+  background: transparent;
   font-size: 28rpx;
   font-weight: 500;
   color: #1a1a1a;
