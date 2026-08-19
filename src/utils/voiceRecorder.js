@@ -1,83 +1,145 @@
 /**
- * 浏览器录音工具类
- * 使用浏览器 MediaRecorder API 实现录音功能
+ * 录音工具：原生（支付宝 mPaaS JSBridge）优先，降级到浏览器 MediaRecorder。
+ *
+ * 原生侧 microphoneStart / microphoneEnd / microphoneCancel 共用一个全局单例会话，
+ * 因此这里有两条硬约束：
+ * 1. 任意时刻只允许一个桥调用在途，否则原生会话状态会错乱 —— 由串行队列保证；
+ * 2. 每个桥调用都必须在有限时间内落地，否则调用方被永久挂起 —— 每次调用持有自己的超时定时器。
+ *
+ * 会话状态机：idle -> starting -> recording -> stopping -> idle，
+ * 任何异常路径都直接回到 idle，并通过 nativeSessionMaybeActive 记录“原生侧可能仍占用麦克风”，
+ * 由下一次 start 前的一次 microphoneCancel 兜底释放。
  */
+
+const BRIDGE_METHOD = {
+  START: "microphoneStart",
+  END: "microphoneEnd",
+  CANCEL: "microphoneCancel",
+};
+
+// microphoneEnd 需要上传音频文件，弱网下明显慢于 start / cancel。
+// 上限不宜过大：超时期间队列里的后续调用（含下一次 start）都要排队等待。
+const BRIDGE_TIMEOUT_MS = {
+  [BRIDGE_METHOD.START]: 8000,
+  [BRIDGE_METHOD.END]: 12000,
+  [BRIDGE_METHOD.CANCEL]: 2000,
+};
+
+const BRIDGE_TIMEOUT_MESSAGE = {
+  [BRIDGE_METHOD.START]: "开始录音超时",
+  [BRIDGE_METHOD.END]: "录音上传超时",
+  [BRIDGE_METHOD.CANCEL]: "取消录音超时",
+};
+
+const BROWSER_STOP_TIMEOUT_MS = 5000;
+
+export const RECORDER_PHASE = {
+  IDLE: "idle",
+  STARTING: "starting",
+  RECORDING: "recording",
+  STOPPING: "stopping",
+};
+
 class VoiceRecorder {
   constructor() {
+    this.phase = RECORDER_PHASE.IDLE;
+    // 每开始/作废一次会话自增，用于识别“迟到的”异步结果
+    this.sessionId = 0;
+    this.isNativeSession = false;
+    // 原生侧可能仍持有麦克风（start 超时、end 失败、cancel 失败）
+    this.nativeSessionMaybeActive = false;
+
+    this.stream = null;
     this.mediaRecorder = null;
     this.audioChunks = [];
-    this.stream = null;
-    this.isRecording = false;
     this.onDataAvailable = null;
-    this.onStop = null;
-    this.useNativeRecorder = false;
-    this.cancelled = false;
-    this.isStarting = false;
-    this.cancelRequested = false;
-    this._cancelPendingResolve = null;
-    this.nativeStartTimeoutMs = 5000;
-    this.nativeStartTimeoutTimer = null;
-    // 原生会话泄漏标记：microphoneEnd 失败/超时时置 true，
-    // 表示原生侧麦克风可能仍被占用，需要 cancel 时主动调 microphoneCancel 释放。
-    this._nativeSessionLeaked = false;
+    this._browserStopResolve = null;
+    this._browserStopTimer = null;
+
+    this._bridgeQueue = Promise.resolve();
+    this._releasePending = false;
   }
 
-  /**
-   * 调用原生桥并带超时兜底；超时后清理并返回失败，避免 Promise 永不 resolve 卡死状态。
-   * @param {string} method
-   * @param {object} params
-   * @param {number} timeoutMs
-   */
-  callAlipayBridgeWithTimeout(method, params, timeoutMs) {
-    return new Promise((resolve) => {
-      let settled = false;
-      const done = (result) => {
-        if (settled) return;
-        settled = true;
-        if (this.nativeStartTimeoutTimer) {
-          clearTimeout(this.nativeStartTimeoutTimer);
-          this.nativeStartTimeoutTimer = null;
-        }
-        resolve(result);
-      };
-      try {
-        window.AlipayJSBridge.call(method, params, (result) => {
-          done(result || {});
-        });
-      } catch (error) {
-        done({ success: false, errorMessage: error?.message || "调用原生桥失败" });
-        return;
-      }
-      this.nativeStartTimeoutTimer = setTimeout(() => {
-        done({ success: false, errorMessage: "开始录音超时" });
-      }, timeoutMs || this.nativeStartTimeoutMs);
-    });
+  get isRecording() {
+    return this.phase === RECORDER_PHASE.RECORDING;
   }
 
-  resolvePendingCancel(result) {
-    this._cancelPendingResolve?.(result);
-    this._cancelPendingResolve = null;
+  static isSupported() {
+    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   }
 
   isAlipayBridgeAvailable() {
     return typeof window !== "undefined" && !!window.AlipayJSBridge?.call;
   }
 
-  callAlipayBridge(method, params) {
+  /**
+   * 把桥调用串到同一条队列上，保证原生侧同一时刻只有一个在途请求。
+   * 队列节点自身一定会 settle（成功回调或超时），因此队列不会被卡死。
+   */
+  enqueueBridgeCall(method, params = {}) {
+    const run = () => this.invokeBridge(method, params);
+    const task = this._bridgeQueue.then(run, run);
+    this._bridgeQueue = task.then(
+      () => {},
+      () => {},
+    );
+    return task;
+  }
+
+  invokeBridge(method, params) {
     return new Promise((resolve) => {
-      window.AlipayJSBridge.call(method, params, resolve);
+      if (!this.isAlipayBridgeAvailable()) {
+        resolve({ success: false, errorMessage: "原生录音能力不可用" });
+        return;
+      }
+      let settled = false;
+      let timer = null;
+      const done = (result) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        timer = null;
+        resolve(result);
+      };
+      timer = setTimeout(() => {
+        console.warn("[voice-recorder] bridge timeout", { method });
+        done({
+          success: false,
+          timeout: true,
+          errorMessage: BRIDGE_TIMEOUT_MESSAGE[method] || "原生录音调用超时",
+        });
+      }, BRIDGE_TIMEOUT_MS[method] || BRIDGE_TIMEOUT_MS[BRIDGE_METHOD.START]);
+      try {
+        window.AlipayJSBridge.call(method, params, (result) => {
+          console.info("[voice-recorder] bridge result", { method, result });
+          done(result || {});
+        });
+      } catch (error) {
+        done({ success: false, errorMessage: error?.message || "调用原生桥失败" });
+      }
     });
   }
 
   /**
-   * 检查浏览器是否支持录音
+   * 释放原生会话：只投递不等待，调用方永远不会因为它被挂起。
+   * cancel 成功才清除泄漏标记，否则留给下一次 start 前继续兜底。
    */
-  static isSupported() {
-    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  releaseNativeSession() {
+    if (!this.isAlipayBridgeAvailable()) return;
+    this.nativeSessionMaybeActive = true;
+    // 已有 cancel 在队列里排队时无需重复投递：它一定排在后续所有调用之前执行
+    if (this._releasePending) return;
+    this._releasePending = true;
+    void this.enqueueBridgeCall(BRIDGE_METHOD.CANCEL).then((result) => {
+      this._releasePending = false;
+      if (result?.success) {
+        this.nativeSessionMaybeActive = false;
+      }
+    });
   }
 
   /**
-   * 请求麦克风权限
+   * 请求麦克风权限（仅浏览器路径使用）
    */
   async requestPermission() {
     try {
@@ -92,10 +154,7 @@ class VoiceRecorder {
           autoGainControl: true,
         },
       });
-
-      // 立即停止流，只是测试权限
       stream.getTracks().forEach(track => track.stop());
-
       return { success: true };
     } catch (error) {
       console.error("获取麦克风权限失败:", error);
@@ -110,83 +169,60 @@ class VoiceRecorder {
   }
 
   /**
-   * 开始录音
-   * @param {object} options 录音选项
-   * @param {Function} onDataAvailable 数据可用回调
-   * @param {Function} onStop 停止回调
+   * 开始录音。返回 { success, error?, cancelled? }
    */
-  async start(options = {}, onDataAvailable = null, onStop = null) {
+  async start(options = {}) {
+    this.hardReset();
+    const sessionId = this.sessionId;
+    this.phase = RECORDER_PHASE.STARTING;
+    this.isNativeSession = this.isAlipayBridgeAvailable();
+    console.info("[voice-recorder] start", {
+      sessionId,
+      native: this.isNativeSession,
+      nativeSessionMaybeActive: this.nativeSessionMaybeActive,
+    });
+
+    if (this.isNativeSession) {
+      return this.startNative(sessionId);
+    }
+    return this.startBrowser(sessionId, options);
+  }
+
+  async startNative(sessionId) {
+    if (this.nativeSessionMaybeActive) {
+      // 队列保证这次 cancel 一定排在下面的 start 之前执行，无需在此 await
+      this.releaseNativeSession();
+    }
+
+    const result = await this.enqueueBridgeCall(BRIDGE_METHOD.START);
+    const superseded = sessionId !== this.sessionId;
+
+    if (!result?.success) {
+      // 超时不代表原生没起来，回调可能只是丢了，按“可能占用”处理
+      if (result?.timeout) this.nativeSessionMaybeActive = true;
+      if (!superseded) this.phase = RECORDER_PHASE.IDLE;
+      return { success: false, error: result?.errorMessage || "开始录音失败" };
+    }
+
+    this.nativeSessionMaybeActive = true;
+    if (superseded) {
+      // 会话已被 cancel 或新的 start 取代，立即把刚起来的原生录音释放掉
+      this.releaseNativeSession();
+      return { success: false, error: "录音已取消", cancelled: true };
+    }
+
+    this.phase = RECORDER_PHASE.RECORDING;
+    return { success: true };
+  }
+
+  async startBrowser(sessionId, options) {
+    if (!VoiceRecorder.isSupported()) {
+      this.phase = RECORDER_PHASE.IDLE;
+      return { success: false, error: "浏览器不支持录音功能" };
+    }
+
     try {
-      // 关键：每次 start 前先尝试释放可能残留的原生会话（microphoneCancel），
-      // 再无条件强制重置 JS 状态。这样无论上一轮发生过什么（microphoneEnd 失败、
-      // 短按立即松手、cancel 交错），下一次 start 一定从干净状态开始，
-      // 彻底解决"短按一次后再也唤不醒"。
-      if (this.isAlipayBridgeAvailable() && (this._nativeSessionLeaked || this.useNativeRecorder)) {
-        console.warn("[voice-recorder] release native session before start", {
-          useNativeRecorder: this.useNativeRecorder,
-          leaked: this._nativeSessionLeaked,
-        });
-        try {
-          await this.callAlipayBridgeWithTimeout(
-            "microphoneCancel",
-            {},
-            this.nativeStartTimeoutMs,
-          );
-        } catch {
-          // ignore，尽力而为，失败不阻塞后续 start
-        }
-      }
-      // 无条件强制重置所有 JS 状态（含 useNativeRecorder / _nativeSessionLeaked）
-      this.forceReset();
-
-      this.isStarting = true;
-      this.cancelRequested = false;
-      console.info("[voice-recorder] start requested");
-
-      if (this.isAlipayBridgeAvailable()) {
-        const result = await this.callAlipayBridgeWithTimeout(
-          "microphoneStart",
-          {},
-          this.nativeStartTimeoutMs,
-        );
-        console.info("[voice] native start result", result);
-        if (!result?.success) {
-          // 失败时彻底重置 useNativeRecorder/isRecording/isStarting，
-          // 并标记原生会话泄漏，以便 cancel/start 能主动调 microphoneCancel 释放。
-          this.isStarting = false;
-          this.useNativeRecorder = false;
-          this.isRecording = false;
-          this._nativeSessionLeaked = true;
-          this.resolvePendingCancel({
-            success: false,
-            error: result?.errorMessage || "开始录音失败",
-          });
-          return { success: false, error: result?.errorMessage || "开始录音失败" };
-        }
-        if (this.cancelRequested) {
-          console.info("[voice-recorder] native start cancelled before ready");
-          await this.callAlipayBridge("microphoneCancel", {});
-          this.cleanup();
-          const cancelledResult = { success: false, error: "录音已取消" };
-          this.resolvePendingCancel(cancelledResult);
-          return cancelledResult;
-        }
-        this.useNativeRecorder = true;
-        this.cancelled = false;
-        this.onStop = onStop;
-        this.isRecording = true;
-        this.isStarting = false;
-        console.info("[voice-recorder] native recorder started");
-        return { success: true };
-      }
-
-      if (!VoiceRecorder.isSupported()) {
-        this.cleanup();
-        return { success: false, error: "浏览器不支持录音功能" };
-      }
-
-      // 请求麦克风权限
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -195,277 +231,161 @@ class VoiceRecorder {
         },
       });
 
-      if (this.cancelRequested) {
-        console.info("[voice-recorder] browser start cancelled before ready");
-        this.stream.getTracks().forEach(track => track.stop());
-        this.stream = null;
-        this.cleanup();
-        const cancelledResult = { success: false, error: "录音已取消" };
-        this.resolvePendingCancel(cancelledResult);
-        return cancelledResult;
+      if (sessionId !== this.sessionId) {
+        stream.getTracks().forEach(track => track.stop());
+        return { success: false, error: "录音已取消", cancelled: true };
       }
 
-      // 设置回调
-      this.onDataAvailable = onDataAvailable;
-      this.onStop = onStop;
-
-      // 清空之前的录音数据
+      this.stream = stream;
       this.audioChunks = [];
+      this.onDataAvailable = options.onDataAvailable || null;
 
-      // 创建 MediaRecorder
       const mimeType = this.getSupportedMimeType();
-      this.mediaRecorder = new MediaRecorder(this.stream, {
+      this.mediaRecorder = new MediaRecorder(stream, {
         mimeType,
         audioBitsPerSecond: options.audioBitsPerSecond || 128000,
       });
-
-      // 监听数据可用事件
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data);
-          if (this.onDataAvailable) {
-            this.onDataAvailable(event.data);
-          }
+          this.onDataAvailable?.(event.data);
         }
       };
-
-      // 监听停止事件
       this.mediaRecorder.onstop = () => {
-        this.handleStop();
+        this.settleBrowserStop(this.getAudioBlob());
       };
-
-      // 监听错误事件
       this.mediaRecorder.onerror = (event) => {
-        console.error("录音错误:", event.error);
-        this.stop();
+        console.error("[voice-recorder] browser recorder error", event?.error);
+        this.settleBrowserStop(null);
       };
-
-      // 开始录音
-      this.mediaRecorder.start(options.timeSlice || 1000); // 每1秒收集一次数据
-      this.isRecording = true;
-      this.isStarting = false;
-      console.info("[voice-recorder] browser recorder started");
-
+      this.mediaRecorder.start(options.timeSlice || 1000);
+      this.phase = RECORDER_PHASE.RECORDING;
       return { success: true };
     } catch (error) {
-      console.error("[voice-recorder] start failed", error);
-      this.cleanup();
+      console.error("[voice-recorder] browser start failed", error);
+      this.teardownBrowserRecorder();
+      this.phase = RECORDER_PHASE.IDLE;
       const notAllowed =
         error?.name === "NotAllowedError" || error?.name === "SecurityError";
-      const failedResult = {
+      return {
         success: false,
         error: error.message || "无法开始录音",
         notAllowed,
       };
-      this.resolvePendingCancel(failedResult);
-      return failedResult;
     }
   }
 
   /**
-   * 停止录音
+   * 结束录音。成功时返回 { success: true, data }，
+   * data 为原生音频 URL（原生路径）或 Blob（浏览器路径）。
    */
   async stop() {
-    if (!this.isRecording) {
+    if (this.phase !== RECORDER_PHASE.RECORDING) {
       return { success: false, error: "当前没有正在进行的录音" };
     }
+    const sessionId = this.sessionId;
+    this.phase = RECORDER_PHASE.STOPPING;
 
-    if (this.useNativeRecorder) {
-      try {
-        const result = await this.callAlipayBridgeWithTimeout(
-          "microphoneEnd",
-          {},
-          this.nativeStartTimeoutMs,
-        );
-        console.info("[voice] native end result", result);
-        if (!result?.success || !result?.url) {
-          // microphoneEnd 失败：仅清掉 JS 侧 isRecording 标记，避免下次 start 被"录音已在进行中"拦截。
-          // 是否通过 microphoneCancel / microphonePause 释放原生麦克风，待原生侧确认后再定。
-          this.isRecording = false;
-          this.isStarting = false;
-          return {
-            success: false,
-            error: result?.errorMessage || "停止录音失败",
-          };
-        }
-        this.isRecording = false;
-        this.useNativeRecorder = false;
-        this._nativeSessionLeaked = false;
-        if (!this.cancelled && this.onStop) {
-          this.onStop(result.url);
-        }
-        return { success: true };
-      } catch (error) {
-        console.error("停止原生录音失败:", error);
-        this.isRecording = false;
-        this.isStarting = false;
-        return { success: false, error: error?.message || "停止录音失败" };
+    if (this.isNativeSession) {
+      const result = await this.enqueueBridgeCall(BRIDGE_METHOD.END);
+      const superseded = sessionId !== this.sessionId;
+      if (!superseded) this.phase = RECORDER_PHASE.IDLE;
+
+      if (!result?.success || !result?.url) {
+        // end 失败/超时后原生大概率仍持有会话，交给 cancel 释放
+        this.releaseNativeSession();
+        return { success: false, error: result?.errorMessage || "停止录音失败" };
       }
+      this.nativeSessionMaybeActive = false;
+      if (superseded) {
+        return { success: false, error: "录音已取消", cancelled: true };
+      }
+      return { success: true, data: result.url };
     }
 
-    if (!this.mediaRecorder) {
-      return { success: false, error: "当前没有正在进行的录音" };
+    const blob = await this.stopBrowserRecorder();
+    const superseded = sessionId !== this.sessionId;
+    if (!superseded) this.phase = RECORDER_PHASE.IDLE;
+    this.teardownBrowserRecorder();
+    if (superseded) {
+      return { success: false, error: "录音已取消", cancelled: true };
     }
+    if (!blob || !blob.size) {
+      return { success: false, error: "未录制到音频内容" };
+    }
+    return { success: true, data: blob };
+  }
 
-    try {
-      if (this.mediaRecorder.state === "recording") {
+  stopBrowserRecorder() {
+    if (!this.mediaRecorder || this.mediaRecorder.state === "inactive") {
+      return Promise.resolve(this.getAudioBlob());
+    }
+    return new Promise((resolve) => {
+      this._browserStopResolve = resolve;
+      this._browserStopTimer = setTimeout(() => {
+        console.warn("[voice-recorder] browser stop timeout");
+        this.settleBrowserStop(this.getAudioBlob());
+      }, BROWSER_STOP_TIMEOUT_MS);
+      try {
         this.mediaRecorder.stop();
-      }
-      return { success: true };
-    } catch (error) {
-      console.error("停止录音失败:", error);
-      this.cleanup();
-      return { success: false, error: error.message };
-    }
-  }
-
-  /**
-   * 取消录音
-   */
-  async cancel() {
-    this.cancelled = true;
-    this.cancelRequested = true;
-    console.info("[voice-recorder] cancel requested", {
-      isRecording: this.isRecording,
-      isStarting: this.isStarting,
-      useNativeRecorder: this.useNativeRecorder,
-    });
-    if (this.isStarting && !this.isRecording) {
-      // 若 start 已超时并 resolvePendingCancel，则这里可能已无挂起等待者；
-      // 挂起 promise 由 start 超时/失败路径 resolvePendingCancel 释放，不会永久卡住。
-      return new Promise((resolve) => {
-        this._cancelPendingResolve = resolve;
-      });
-    }
-    if (this.useNativeRecorder || this._nativeSessionLeaked) {
-      // 主动调 microphoneCancel 释放原生侧麦克风会话。
-      // 触发条件：进入过原生会话（useNativeRecorder），
-      // 或 stop() 失败/超时导致 _nativeSessionLeaked 置 true（此时 JS 侧 useNativeRecorder 已被 stop cleanup 置 false，
-      // 但原生侧可能仍占用麦克风，必须主动 cancel 释放，否则下次 microphoneStart 会被原生拒绝）。
-      try {
-        const result = await this.callAlipayBridgeWithTimeout(
-          "microphoneCancel",
-          {},
-          this.nativeStartTimeoutMs,
-        );
-        console.info("[voice] native cancel result", {
-          result,
-          useNativeRecorder: this.useNativeRecorder,
-          isRecording: this.isRecording,
-          leaked: this._nativeSessionLeaked,
-        });
-        // 无论 cancel 成功失败，JS 侧 useNativeRecorder 强制重置为 false。
-        // 原生侧麦克风如果还被占用，由下次 start() 入口的 _nativeSessionLeaked 分支再次尝试释放。
-        this.useNativeRecorder = false;
-        this.cleanup();
-        this._nativeSessionLeaked = false;
-        return result?.success
-          ? { success: true }
-          : { success: false, error: result?.errorMessage || "取消录音失败" };
       } catch (error) {
-        this.cleanup();
-        return { success: false, error: error?.message || "取消录音失败" };
+        console.error("[voice-recorder] browser stop failed", error);
+        this.settleBrowserStop(null);
       }
+    });
+  }
+
+  settleBrowserStop(blob) {
+    if (this._browserStopTimer) {
+      clearTimeout(this._browserStopTimer);
+      this._browserStopTimer = null;
     }
-    const result = await this.stop();
+    const resolve = this._browserStopResolve;
+    this._browserStopResolve = null;
+    resolve?.(blob);
+  }
+
+  /**
+   * 取消录音：同步作废当前会话并立即返回，原生释放动作投递到队列后台执行。
+   * 调用方不需要（也不应该）等待原生回包，避免任何取消路径把 UI 锁死。
+   */
+  cancel() {
+    const previousPhase = this.phase;
+    const wasNativeSession = this.isNativeSession;
+    console.info("[voice-recorder] cancel", {
+      sessionId: this.sessionId,
+      phase: previousPhase,
+      native: wasNativeSession,
+    });
+
+    this.sessionId += 1;
+    this.phase = RECORDER_PHASE.IDLE;
+    this.settleBrowserStop(null);
+
+    if (wasNativeSession && (this.nativeSessionMaybeActive || previousPhase !== RECORDER_PHASE.IDLE)) {
+      // 若此时 start/end 仍在途，这次 cancel 会被队列排在其后执行，顺序天然正确
+      this.releaseNativeSession();
+    }
+    this.teardownBrowserRecorder();
     this.audioChunks = [];
-    this.cleanup();
-    return result.success ? { success: true } : result;
-  }
-
-  base64ToBlob(value) {
-    const base64 = String(value).replace(/^data:[^,]+,/, "");
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return new Blob([bytes], { type: "audio/mp4" });
+    return { success: true };
   }
 
   /**
-   * 获取录音数据（Blob）
+   * 作废当前会话并清空 JS 侧状态。
+   * 不清 nativeSessionMaybeActive：那是留给下一次 start 释放原生残留会话的依据。
    */
-  getAudioBlob() {
-    if (this.audioChunks.length === 0) {
-      return null;
-    }
-    return new Blob(this.audioChunks, { type: this.getSupportedMimeType() });
+  hardReset() {
+    this.sessionId += 1;
+    this.phase = RECORDER_PHASE.IDLE;
+    this.isNativeSession = false;
+    this.settleBrowserStop(null);
+    this.teardownBrowserRecorder();
+    this.audioChunks = [];
   }
 
-  /**
-   * 获取录音数据（Base64）
-   */
-  async getAudioBase64() {
-    const blob = this.getAudioBlob();
-    if (!blob) {
-      return null;
-    }
-
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result.split(",")[1]; // 移除 data:audio/...;base64, 前缀
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }
-
-  /**
-   * 获取录音数据（ArrayBuffer）
-   */
-  async getAudioArrayBuffer() {
-    const blob = this.getAudioBlob();
-    if (!blob) {
-      return null;
-    }
-
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsArrayBuffer(blob);
-    });
-  }
-
-  /**
-   * 获取录音数据（File对象）
-   */
-  getAudioFile(filename = "recording.webm") {
-    const blob = this.getAudioBlob();
-    if (!blob) {
-      return null;
-    }
-    return new File([blob], filename, { type: blob.type });
-  }
-
-  /**
-   * 处理停止事件
-   */
-  handleStop() {
-    this.isRecording = false;
-    this.cleanup();
-
-    if (this.onStop) {
-      const blob = this.getAudioBlob();
-      this.onStop(blob);
-    }
-  }
-
-  /**
-   * 强制重置：无条件清空所有 JS 状态，确保下一次 start 一定从干净状态开始。
-   * 不依赖 isRecording/isStarting 判断，也不被"cleanup 需保留 useNativeRecorder 供 cancel 识别"
-   * 的约束影响。在每次录音结束（clean）和每次录音开始前（start）都应调用。
-   */
-  forceReset() {
+  teardownBrowserRecorder() {
     const tracks = this.stream?.getTracks?.() || [];
-    console.info("[voice-recorder] forceReset", {
-      trackCount: tracks.length,
-      isRecording: this.isRecording,
-      isStarting: this.isStarting,
-      useNativeRecorder: this.useNativeRecorder,
-      nativeSessionLeaked: this._nativeSessionLeaked,
-    });
     tracks.forEach((track) => {
       try {
         track.stop();
@@ -473,61 +393,28 @@ class VoiceRecorder {
         // ignore
       }
     });
-    if (this.nativeStartTimeoutTimer) {
-      clearTimeout(this.nativeStartTimeoutTimer);
-      this.nativeStartTimeoutTimer = null;
-    }
-    // 释放可能挂起的 cancel 等待者
-    this.resolvePendingCancel({ success: false, error: "录音已强制重置" });
     this.stream = null;
+    if (this.mediaRecorder) {
+      this.mediaRecorder.ondataavailable = null;
+      this.mediaRecorder.onstop = null;
+      this.mediaRecorder.onerror = null;
+      try {
+        if (this.mediaRecorder.state !== "inactive") this.mediaRecorder.stop();
+      } catch {
+        // ignore
+      }
+    }
     this.mediaRecorder = null;
-    this.onStop = null;
     this.onDataAvailable = null;
-    this.isRecording = false;
-    this.isStarting = false;
-    this.useNativeRecorder = false;
-    this._nativeSessionLeaked = false;
-    this.cancelled = false;
-    this.cancelRequested = false;
   }
 
-  /**
-   * 清理资源（保留原生会话识别所需状态，供 cancel 主动释放；真正彻底重置用 forceReset）
-   */
-  cleanup() {
-    const tracks = this.stream?.getTracks?.() || [];
-    console.info("[voice-recorder] cleanup", {
-      trackCount: tracks.length,
-      trackStates: tracks.map(track => track.readyState),
-      isRecording: this.isRecording,
-      isStarting: this.isStarting,
-      useNativeRecorder: this.useNativeRecorder,
-      nativeSessionLeaked: this._nativeSessionLeaked,
-    });
-    tracks.forEach((track) => {
-      track.stop();
-    });
-    if (this.nativeStartTimeoutTimer) {
-      clearTimeout(this.nativeStartTimeoutTimer);
-      this.nativeStartTimeoutTimer = null;
+  getAudioBlob() {
+    if (this.audioChunks.length === 0) {
+      return null;
     }
-    // 释放可能挂起的 cancel：避免 cleanup 后仍有等待者导致内存/状态泄漏
-    this.resolvePendingCancel({ success: false, error: "录音已清理" });
-    this.stream = null;
-    this.mediaRecorder = null;
-    this.isRecording = false;
-    this.isStarting = false;
-    // 关键：cleanup 不再重置 useNativeRecorder，让 cancel() 能识别需要主动释放原生会话。
-    // useNativeRecorder 由 cancel 调 microphoneCancel 成功后（或下次 start 开始前）重置。
-    // 同时保留 _nativeSessionLeaked，让 cancel() 在 useNativeRecorder 已被其他路径清掉时
-    // 仍能检测到原生侧麦克风可能未释放。
-    this.cancelled = false;
-    this.cancelRequested = false;
+    return new Blob(this.audioChunks, { type: this.getSupportedMimeType() });
   }
 
-  /**
-   * 获取支持的 MIME 类型
-   */
   getSupportedMimeType() {
     const types = [
       "audio/webm;codecs=opus",
@@ -542,18 +429,7 @@ class VoiceRecorder {
         return type;
       }
     }
-
-    // 默认返回 webm
     return "audio/webm";
-  }
-
-  /**
-   * 获取录音时长（秒）
-   */
-  getDuration() {
-    // MediaRecorder 不直接提供时长，需要从音频数据计算
-    // 这里返回一个估算值，实际应该从音频分析中获取
-    return this.audioChunks.length; // 简化处理，返回chunk数量
   }
 }
 
