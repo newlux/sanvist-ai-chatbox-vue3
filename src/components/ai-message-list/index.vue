@@ -50,6 +50,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  awakeningLoading: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits([
@@ -163,48 +167,53 @@ function onCopyClick(index, message) {
       @scrolltoupper="onScrollTop"
     >
       <view v-if="showQuickPrompts" class="business-overview">
-        <text class="business-overview__title">
-          {{ overview.greeting }}
-        </text>
-        <text class="business-overview__summary">
-          {{ overview.summary }}
-        </text>
-
-        <view
-          v-if="showQuickList"
-          class="business-overview__report"
-        >
-          <view class="business-overview__sound" aria-hidden="true">
-            <text class="business-overview__sound-bar business-overview__sound-bar--short" />
-            <text class="business-overview__sound-bar business-overview__sound-bar--tall" />
-            <text class="business-overview__sound-bar business-overview__sound-bar--middle" />
-          </view>
-          <view class="business-overview__report-info">
-            <text class="business-overview__report-title">
-              经营概览
-            </text>
-            <text class="business-overview__report-date">
-              （0806 早报）
-            </text>
-          </view>
-          <view class="business-overview__listen">
-            去收听
-          </view>
+        <view v-if="awakeningLoading" class="business-overview__loading">
+          <view class="business-overview__spinner" />
         </view>
-
-        <view v-if="showQuickList" class="business-overview__questions">
-          <text class="business-overview__questions-title">
-            你还可以这么问
+        <template v-else>
+          <text class="business-overview__title">
+            {{ overview.greeting }}
           </text>
+          <text class="business-overview__summary">
+            {{ overview.summary }}
+          </text>
+
           <view
-            v-for="(prompt, index) in quickPrompts"
-            :key="`${index}-${prompt}`"
-            class="business-overview__question"
-            @tap="onQuickPrompt(prompt)"
+            v-if="showQuickList"
+            class="business-overview__report"
           >
-            {{ prompt }}
+            <view class="business-overview__sound" aria-hidden="true">
+              <text class="business-overview__sound-bar business-overview__sound-bar--short" />
+              <text class="business-overview__sound-bar business-overview__sound-bar--tall" />
+              <text class="business-overview__sound-bar business-overview__sound-bar--middle" />
+            </view>
+            <view class="business-overview__report-info">
+              <text class="business-overview__report-title">
+                经营概览
+              </text>
+              <text class="business-overview__report-date">
+                （0806 早报）
+              </text>
+            </view>
+            <view class="business-overview__listen">
+              去收听
+            </view>
           </view>
-        </view>
+
+          <view v-if="showQuickList" class="business-overview__questions">
+            <text class="business-overview__questions-title">
+              你还可以这么问
+            </text>
+            <view
+              v-for="(prompt, index) in quickPrompts"
+              :key="`${index}-${prompt}`"
+              class="business-overview__question"
+              @tap="onQuickPrompt(prompt)"
+            >
+              {{ prompt }}
+            </view>
+          </view>
+        </template>
       </view>
 
       <view class="chat-box">
@@ -269,6 +278,27 @@ function onCopyClick(index, message) {
 }
 .business-overview {
   padding: 148rpx 40rpx 0;
+}
+
+.business-overview__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220rpx;
+}
+
+.business-overview__spinner {
+  width: 56rpx;
+  height: 56rpx;
+  border: 6rpx solid rgb(95 103 117 / 20%);
+  border-top-color: #c8201e;
+  border-radius: 50%;
+  animation: business-overview-spin 0.9s linear infinite;
+}
+
+@keyframes business-overview-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .business-overview__title {

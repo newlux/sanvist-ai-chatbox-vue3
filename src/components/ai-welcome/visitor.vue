@@ -1,5 +1,22 @@
 <script setup>
+import { onMounted } from "vue";
+import { getRoleOptions } from "@/api/user-role";
+import { VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
+
 defineOptions({ name: "AiWelcomeVisitor" });
+
+// 欢迎页挂载即预取角色选项并缓存，进入角色选择页时直接使用，避免页面加载闪动
+onMounted(async () => {
+  try {
+    const result = await getRoleOptions();
+    const roles = result?.data?.roles ?? [];
+    if (roles.length) {
+      uni.setStorageSync(VISITOR_ROLE_OPTIONS_CACHE_KEY, roles);
+    }
+  } catch (error) {
+    console.warn("[visitor] failed to prefetch role options", error);
+  }
+});
 
 function goToRoleSelect() {
   uni.navigateTo({ url: "/pages/role-select/index" });

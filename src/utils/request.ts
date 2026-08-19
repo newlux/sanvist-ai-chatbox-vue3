@@ -29,6 +29,10 @@ export function setGuestRole(role: string) {
   guestRole = role;
 }
 
+export function clearGuestRole() {
+  guestRole = "";
+}
+
 export const request = hookFetch.create<BaseResponse, "data">({
   baseURL: import.meta.env.VITE_AI_QUESTION_BASE_URL,
   plugins: [sseTextDecoderPlugin({ json: true, prefix: "data:" })],
