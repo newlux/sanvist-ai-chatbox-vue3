@@ -127,6 +127,23 @@ function parseUploadPayload<T>(data: unknown): BaseResponse<T> | T {
   }
 }
 
+function readHttpErrorMessage(data: unknown, fallback: string) {
+  const payload = typeof data === "string"
+    ? (() => {
+        try {
+          return JSON.parse(data) as { message?: string };
+        } catch {
+          return null;
+        }
+      })()
+    : data;
+  if (payload && typeof payload === "object" && "message" in payload) {
+    const message = String((payload as { message?: unknown }).message || "").trim();
+    if (message) return message;
+  }
+  return fallback;
+}
+
 function createUploadRequest<T>(path: string, options: UploadOptions): JsonRequest<T> {
   return {
     async json() {
@@ -150,8 +167,9 @@ function createUploadRequest<T>(path: string, options: UploadOptions): JsonReque
       });
       const statusCode = Number(response.statusCode) || 0;
       if (statusCode < 200 || statusCode >= 300) {
-        notifyAuthFailure(statusCode, `上传失败（${statusCode}）`);
-        throw new PlatformRequestError(`上传失败（${statusCode}）`, statusCode, response.data);
+        const message = readHttpErrorMessage(response.data, `上传失败（${statusCode}）`);
+        notifyAuthFailure(statusCode, message);
+        throw new PlatformRequestError(message, statusCode, response.data);
       }
       return unwrapResponse(parseUploadPayload<T>(response.data));
     },
