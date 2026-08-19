@@ -87,7 +87,7 @@ const date = computed(() => moment().format("YYYY年M月D日"));
   margin: 0 auto;
   background: #ffffff;
   border-radius: 24rpx;
-  padding: 24rpx 30rpx 30rpx;
+  padding: 54rpx 30rpx 30rpx;
   box-sizing: border-box;
 }
 

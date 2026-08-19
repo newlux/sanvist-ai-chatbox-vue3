@@ -37,9 +37,7 @@ defineProps({
   display: flex;
   flex-direction: column;
   gap: 32rpx;
-  margin-top: 32rpx;
   padding-top: 32rpx;
-  border-top: 2rpx solid #f0f0f2;
 }
 .answer-group-block__title {
   color: #b0b0b0;

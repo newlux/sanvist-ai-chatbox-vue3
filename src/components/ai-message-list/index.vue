@@ -1,6 +1,4 @@
 <script setup>
-import { computed } from "vue";
-
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
 
 defineOptions({
@@ -48,6 +46,10 @@ const props = defineProps({
     type: Number,
     default: 0,
   },
+  awakening: {
+    type: Object,
+    default: null,
+  },
 });
 
 const emit = defineEmits([
@@ -61,7 +63,22 @@ const emit = defineEmits([
   "select-toggle",
 ]);
 
-const keyboardSpacerPx = computed(() => 0);
+const FALLBACK_OVERVIEW = {
+  greeting: "杜老板，你好。",
+  summary: "7月28日至8月3日设备作业126小时，较前期增加12%，先看整体变化吧！",
+};
+
+// 键盘占位：键盘弹起时给消息列表底部留出键盘高度空间，
+// 防止 scroll-view 滚到底时最后一条消息/底部按钮被键盘遮住。
+const keyboardSpacerPx = computed(() => Math.max(0, Number(props.keyboardHeightPx) || 0));
+
+const overview = computed(() => {
+  const data = props.awakening;
+  if (!data) return FALLBACK_OVERVIEW;
+  const greeting = data.userName ? `${data.userName}，你好。` : FALLBACK_OVERVIEW.greeting;
+  const summary = data.content || FALLBACK_OVERVIEW.summary;
+  return { greeting, summary };
+});
 function resolvePositive(message) {
   if (typeof message?.positive === "boolean") return message.positive;
   if (message?.feedbackValue === "good") return true;
@@ -147,10 +164,10 @@ function onCopyClick(index, message) {
     >
       <view v-if="showQuickPrompts" class="business-overview">
         <text class="business-overview__title">
-          杜老板，你好。
+          {{ overview.greeting }}
         </text>
         <text class="business-overview__summary">
-          7月28日至8月3日设备作业126小时，较前期增加12%，先看整体变化吧！
+          {{ overview.summary }}
         </text>
 
         <view
@@ -167,7 +184,7 @@ function onCopyClick(index, message) {
               经营概览
             </text>
             <text class="business-overview__report-date">
-              （0806 年报）
+              （0806 早报）
             </text>
           </view>
           <view class="business-overview__listen">
@@ -176,6 +193,9 @@ function onCopyClick(index, message) {
         </view>
 
         <view v-if="showQuickList" class="business-overview__questions">
+          <text class="business-overview__questions-title">
+            你还可以这么问
+          </text>
           <view
             v-for="(prompt, index) in quickPrompts"
             :key="`${index}-${prompt}`"
@@ -205,6 +225,7 @@ function onCopyClick(index, message) {
             :suppress-highlight="suppressHighlight"
             :select-mode="selectMode"
             :disabled="isMessageDisabled(index, msg)"
+            :no-answer-group="!!msg.noAnswerGroup"
             @suggestion-tap="onSuggestionTap"
             @tts-click="onTtsClick(index)"
             @share-click="onShareClick(index, msg)"
@@ -244,10 +265,10 @@ function onCopyClick(index, message) {
   -webkit-overflow-scrolling: touch;
 }
 .chat-box {
-  padding: 40rpx 40rpx 0;
+  padding: 0 40rpx;
 }
 .business-overview {
-  padding: 112rpx 40rpx 0;
+  padding: 148rpx 40rpx 0;
 }
 
 .business-overview__title {
@@ -263,77 +284,100 @@ function onCopyClick(index, message) {
   margin-top: 24rpx;
   color: #6b6b6b;
   font-size: 28rpx;
-  line-height: 44rpx;
 }
 
 .business-overview__report {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   margin-top: 40rpx;
-  padding: 28rpx 32rpx;
+  padding: 24rpx 32rpx;
   background: #fff;
-  border-radius: 22rpx;
-  box-shadow: 0 6rpx 22rpx rgb(0 0 0 / 8%);
-  gap: 24rpx;
+  border: 1px solid #efefef;
+  border-radius: 32rpx;
+  box-shadow: 0 4rpx 16rpx rgb(0 0 0 / 4%);
 }
 
 .business-overview__sound {
   display: flex;
   align-items: center;
-  gap: 5rpx;
+  gap: 6rpx;
   width: 40rpx;
+  height: 40rpx;
 }
 
 .business-overview__sound-bar {
   display: block;
-  width: 3rpx;
-  background: #363636;
+  width: 4rpx;
+  background: #6b6b6b;
   border-radius: 4rpx;
 }
 
-.business-overview__sound-bar--short { height: 14rpx; }
+.business-overview__sound-bar--short { height: 8rpx; }
 .business-overview__sound-bar--middle { height: 20rpx; }
-.business-overview__sound-bar--tall { height: 28rpx; }
+.business-overview__sound-bar--tall { height: 32rpx; }
 
 .business-overview__report-info {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex: 1;
-  gap: 14rpx;
+  margin-left: 32rpx;
+  gap: 28rpx;
 }
 
 .business-overview__report-title {
-  color: #262626;
+  color: #1a1a1a;
   font-size: 30rpx;
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 36rpx;
+  white-space: nowrap;
 }
 
 .business-overview__report-date {
-  color: #868686;
-  font-size: 22rpx;
+  color: #6b6b6b;
+  font-size: 30rpx;
+  line-height: 36rpx;
+  white-space: nowrap;
 }
 
 .business-overview__listen {
-  padding: 12rpx 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 134rpx;
+  height: 64rpx;
   color: #fff;
   font-size: 26rpx;
-  font-weight: 600;
-  line-height: 28rpx;
-  background: #f11;
-  border-radius: 28rpx;
+  font-weight: 700;
+  line-height: 32rpx;
+  background: #c8201e;
+  border-radius: 32rpx;
 }
 
 .business-overview__questions {
-  margin-top: 32rpx;
-  border-top: 1px solid #eee;
+  margin-top: 66rpx;
+}
+
+.business-overview__questions-title {
+  display: block;
+  color: #999;
+  font-size: 30rpx;
+  margin-bottom: 16rpx;
 }
 
 .business-overview__question {
-  padding: 24rpx 0;
-  color: #343434;
+  display: flex;
+  align-items: center;
+  padding: 32rpx 0;
+  color: #1a1a1a;
   font-size: 30rpx;
-  line-height: 34rpx;
-  border-bottom: 1px solid #eee;
+  line-height: 36rpx;
+  border-top: 1px solid #efefef;
+}
+
+.business-overview__question:last-child {
+  border-bottom: 1px solid #efefef;
 }
 
 .business-overview__report:active,

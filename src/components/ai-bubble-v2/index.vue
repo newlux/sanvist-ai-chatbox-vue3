@@ -40,7 +40,52 @@ const emit = defineEmits([
   "feedback-change",
   "copy-click",
   "select-toggle",
+  "longpress-copy",
 ]);
+
+async function copyText(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+
+  try {
+    if (typeof uni !== "undefined" && typeof uni.setClipboardData === "function") {
+      await new Promise((resolve, reject) => {
+        uni.setClipboardData({
+          data: value,
+          success: resolve,
+          fail: reject,
+        });
+      });
+      return true;
+    }
+  } catch {
+    // 回退到浏览器剪贴板 API
+  }
+
+  try {
+    if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // 忽略
+  }
+
+  return false;
+}
+
+function onUserLongpress() {
+  if (props.selectMode || props.disabled) return;
+
+  copyText(props.content).then((copied) => {
+    if (typeof uni !== "undefined" && typeof uni.showToast === "function") {
+      uni.showToast({
+        title: copied ? "已复制" : "复制失败",
+        icon: "none",
+      });
+    }
+  });
+}
 
 const isUser = computed(() => props.role === "user");
 const visibleBlocks = computed(() => props.hideSuggestion
@@ -109,7 +154,13 @@ function onNegativeFeedback() {
     </view>
 
     <view class="ai-bubble-v2__body">
-      <text v-if="isUser" class="ai-bubble-v2__user-content">
+      <text
+        v-if="isUser"
+        class="ai-bubble-v2__user-content"
+        :selectable="false"
+        :user-select="false"
+        @longpress="onUserLongpress"
+      >
         {{ props.content }}
       </text>
 
@@ -210,6 +261,9 @@ function onNegativeFeedback() {
   color: #ffffff;
   white-space: pre-wrap;
   word-break: break-word;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .ai-bubble-v2__waiting { display: flex; align-items: center; flex-wrap: wrap; gap: 8rpx; margin-bottom: 24rpx; color: #a5a5a5; font-family: "PingFang SC"; font-size: 26rpx; line-height: 36rpx; }
 .ai-bubble-v2__waiting-mark { color: #a5a5a5; font-size: 24rpx; line-height: 36rpx; }

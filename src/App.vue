@@ -20,8 +20,25 @@ function isBrowser() {
   return typeof window !== "undefined" && !("AlipayJSBridge" in globalThis);
 }
 
+function parseQueryString(raw: string): StartupQuery {
+  const query: StartupQuery = {};
+  new URLSearchParams(raw).forEach((value, key) => {
+    query[key] = value === "false" ? false : value;
+  });
+  return query;
+}
+
 function getLaunchQuery(options?: LaunchOptions): StartupQuery {
-  return isBrowser() ? {} : options?.query || {};
+  // mPaaS WebView 环境下优先从 AlipayJSBridge.startupParams 中获取启动参数
+  interface StartupParams {
+    startupParams?: { query?: string };
+  }
+  const bridge = (globalThis as typeof globalThis & { AlipayJSBridge?: StartupParams }).AlipayJSBridge;
+  const rawQuery = bridge?.startupParams?.query;
+  if (rawQuery) {
+    return parseQueryString(rawQuery);
+  }
+  return options?.query || {};
 }
 
 function initializeSystem(query: StartupQuery) {
@@ -70,6 +87,7 @@ function initializeSystem(query: StartupQuery) {
 function initializeDeviceInfo() {
   uni.getSystemInfo({
     success(info) {
+      systemStore.setDevice({ ...info });
       // H5 下 uni 的 statusBarHeight 恒为 0，不能把 mPaaS getPhoneSizesInfo 拿到的真实值覆盖掉
       const statusBarHeight = Number(info.statusBarHeight) || 0;
       if (statusBarHeight > 0) {
@@ -80,14 +98,11 @@ function initializeDeviceInfo() {
       systemStore.setScreenWidth(info.screenWidth || 0);
     },
   });
-
-  uni.onKeyboardHeightChange?.((result) => {
-    systemStore.setKeyHeight(result.height);
-  });
 }
 
 onLaunch(async (options) => {
   const baseInfo = initializeSystem(getLaunchQuery(options));
+  // console.log("🚀 ~ baseInfo:", baseInfo);
   await setLocale(baseInfo.lang);
   // await initializeUserInfo(baseInfo);
   await systemStore.initPhoneSizesInfo();

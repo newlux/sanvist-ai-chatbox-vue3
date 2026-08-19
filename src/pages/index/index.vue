@@ -7,16 +7,18 @@ import {
   cancelFeedback,
   deleteConversation,
   getConversations,
+  getMessages,
   interruptChat,
   sendChatMessage,
   submitFeedback,
 } from "@/api/chat";
-import iconImage from "@/assets/img/icon-share-image.svg";
-import iconWechat from "@/assets/img/icon-share-wechat.svg";
-import iconQQ from "@/assets/img/icon-share-qq.svg";
-import iconLink from "@/assets/img/icon-share-link.svg";
-import iconSaveImage from "@/assets/img/icon-save-image.svg";
+import { getTodayAwakeningPrompt } from "@/api/user-role";
 import iconCopyImage from "@/assets/img/icon-copy-image.svg";
+import iconSaveImage from "@/assets/img/icon-save-image.svg";
+import iconImage from "@/assets/img/icon-share-image.svg";
+import iconLink from "@/assets/img/icon-share-link.svg";
+import iconQQ from "@/assets/img/icon-share-qq.svg";
+import iconWechat from "@/assets/img/icon-share-wechat.svg";
 import { GCPAPI } from "@/common/api/gcp";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
@@ -33,7 +35,6 @@ import {
   applyEventToBlocks,
   buildInitialBlocks,
 } from "@/utils/ai-stream/chatStreamParser";
-import { parseHistoryBlocks } from "@/utils/ai-stream/sseParser";
 
 defineOptions({ name: "AiChatPage" });
 
@@ -68,6 +69,7 @@ const state = reactive({
   // 键盘打开时间戳（用于判断是否是真正抬起，避免 iPhone 聚焦过程抖动误触发滚动）
   _keyboardOpenedAt: 0,
   _scrollToBottomOnKeyboardHideTimer: null,
+  _scrollToBottomOnKeyboardFocusTimer: null,
   shareSheetVisible: false,
   shareSelectedIndexes: [],
   shareSuppressHighlight: false,
@@ -205,15 +207,6 @@ watch(
   },
 );
 
-watch(
-  () => userStore.userId,
-  (val) => {
-    if (!val) return;
-    getAISessionList().catch(error => console.error("[AiChatPage] preload sessions failed", error));
-  },
-  { immediate: true },
-);
-
 function _replaceMessage(index, message) {
   state.messages.splice(index, 1, message);
 }
@@ -262,6 +255,20 @@ function _isAbortError(err) {
         .toLowerCase()
         .includes("abort")
   );
+}
+
+function onInputFocus() {
+  if (state.stage !== "chat") return;
+  if (state._scrollToBottomOnKeyboardFocusTimer) {
+    clearTimeout(state._scrollToBottomOnKeyboardFocusTimer);
+  }
+
+  // 键盘动画和输入栏定位完成后再滚动，避免第一次滚动被布局更新覆盖。
+  _scrollToBottom();
+  state._scrollToBottomOnKeyboardFocusTimer = setTimeout(() => {
+    _scrollToBottom();
+    state._scrollToBottomOnKeyboardFocusTimer = null;
+  }, 260);
 }
 
 function onKeyboardHeightChange(heightPx) {
@@ -760,14 +767,35 @@ function _resetToQuickPrompts() {
   state.showQuickPrompts = true;
   state.showQuickList = true;
 }
+function _mapHistoryBlocks(contents, messageId) {
+  const items = Array.isArray(contents) ? contents : [];
+  return items.reduce((blocks, content, index) => {
+    const type = String(content?.type || "").toLowerCase();
+    const payload = content?.data && typeof content.data === "object" ? content.data : {};
+    const id = `history-${messageId ?? "message"}-${index}`;
+
+    if (type === "text" && String(payload.text || "").trim()) {
+      blocks.push({
+        id,
+        type: "answer",
+        payload: { content: String(payload.text).trim() },
+        complete: true,
+      });
+    } else if (["chart", "table", "metric", "suggestion"].includes(type)) {
+      blocks.push({ id, type, payload, complete: true });
+    }
+    return blocks;
+  }, []);
+}
+
 function _mapHistoryMessages(list) {
   const rows = Array.isArray(list) ? list : [];
   const mapped = [];
   rows.forEach((item) => {
-    const sessionId = state.aiSessionId || item?.conversationId || item?.sessionId || null;
-    const messageId = item?.id ?? item?.messageId ?? null;
-    const userText = String(item?.userMessage || "").trim();
-    const aiText = String(item?.outputMessage || "").trim();
+    const sessionId = item?.conversationId ?? state.aiSessionId ?? null;
+    const messageId = item?.id ?? null;
+    const userText = String(item?.query || "").trim();
+    const blocks = _mapHistoryBlocks(item?.contents, messageId);
     if (userText) {
       mapped.push({
         role: "user",
@@ -776,23 +804,20 @@ function _mapHistoryMessages(list) {
         messageId,
       });
     }
-    if (aiText) {
-      const positive =
-        item?.positiveFeedback === true ? true : item?.positiveFeedback === false ? false : null;
+    if (blocks.length) {
+      const feedback = item?.feedback;
+      const positive = feedback?.rating === "like" ? true : feedback?.rating === "dislike" ? false : null;
       mapped.push({
         role: "ai",
         content: "",
-        blocks: parseHistoryBlocks(aiText),
-        rawSseText: aiText,
-        ttsUrl: item?.ttsUrl || "",
-        ttsEnabled: !!item?.ttsUrl,
+        blocks,
+        // noAnswerGroup: true,
         loading: false,
         sessionId,
         messageId,
         positive,
-        feedbackValue:
-          item?.positiveFeedback === true ? "good" : item?.positiveFeedback === false ? "bad" : "",
-        feedbackRemark: item?.feedbackRemark || "",
+        feedbackValue: feedback?.rating === "like" ? "good" : feedback?.rating === "dislike" ? "bad" : "",
+        feedbackRemark: feedback?.content || "",
       });
     }
   });
@@ -801,13 +826,12 @@ function _mapHistoryMessages(list) {
 
 async function loadSessionHistory(sessionId) {
   if (!sessionId) return;
-  const userId = userStore.userId;
-  const res = await GCPAPI.fetchAISessionHistory(sessionId)({
-    userId,
-    limit: 15,
+  const page = await getMessages({
+    conversationId: sessionId,
+    user: String(userStore.userId || ""),
+    limit: 100,
   });
-  const payload = res?.data ? res.data : res;
-  const rows = _mapHistoryMessages(payload?.messages || []);
+  const rows = _mapHistoryMessages(page?.data?.data || []);
   state.messages = rows;
   state.showQuickPrompts = false;
   state.showQuickList = false;
@@ -1229,7 +1253,7 @@ async function sendMessage() {
   _cancelActiveStream();
   const requestSeq = _nextRequestSeq();
   const hadSessionId = Boolean(state.aiSessionId);
-  const uuid = crypto.randomUUID();
+  const uuid = Date.now();
   const conversationId = state.aiSessionId;
 
   state.inputText = "";
@@ -1370,6 +1394,17 @@ function _scrollToBottom() {
   });
 }
 
+async function loadAwakeningPrompt() {
+  if (userStore.awakeningPrompt) return;
+  try {
+    const result = await getTodayAwakeningPrompt();
+    userStore.setAwakeningPrompt(result?.data ?? null);
+  } catch (error) {
+    console.warn("[AiChatPage] failed to load awakening prompt", error);
+    userStore.setAwakeningPrompt(null);
+  }
+}
+
 function syncPageStage() {
   if (userStore.visitorRole) {
     state.stage = "chat";
@@ -1386,13 +1421,17 @@ function syncPageStage() {
   }
 }
 
-onMounted(syncPageStage);
+onMounted(() => {
+  syncPageStage();
+  loadAwakeningPrompt();
+});
 onShow(syncPageStage);
 
 onBeforeUnmount(() => {
   _cancelActiveStream();
   clearTimeout(state._finalScrollTimer);
   clearTimeout(state._scrollToBottomOnKeyboardHideTimer);
+  clearTimeout(state._scrollToBottomOnKeyboardFocusTimer);
 });
 </script>
 
@@ -1439,6 +1478,7 @@ onBeforeUnmount(() => {
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
         :keyboard-height-px="keyboardHeightPx"
+        :awakening="userStore.awakeningPrompt"
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="sendQuickPrompt"
         @tts-click="onTtsClick"
@@ -1496,7 +1536,7 @@ onBeforeUnmount(() => {
       <!-- 分享图片预览/生成（Figma: 495:809） -->
       <view v-else-if="sharePosterVisible" class="share-poster-modal">
         <view class="share-poster-modal__mask" @tap="closeSharePosterModal" />
-        <view class="share-poster-modal__card" @tap.stop>
+        <view class="share-poster-modal__card" :style="safeAreaStyle" @tap.stop>
           <view class="share-poster-modal__content">
             <view v-if="sharePosterGenerating" class="share-poster-modal__loading">
               <view class="share-poster-modal__loading-content">
@@ -1560,6 +1600,7 @@ onBeforeUnmount(() => {
         @stop="stopGenerating"
         @toggle-quick-list="toggleQuickList"
         @keyboard-height-change="onKeyboardHeightChange"
+        @input-focus="onInputFocus"
       />
 
       <AiBadFeedbackSheet
@@ -1701,7 +1742,7 @@ $color-white: #ffffff;
   height: 56rpx;
   border-radius: 50%;
   border: 6rpx solid rgba(95, 103, 117, 0.2);
-  border-top-color: #f8315e;
+  border-top-color: #c8201e;
   animation: session-spin 0.9s linear infinite;
 }
 
@@ -1847,7 +1888,7 @@ $color-white: #ffffff;
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 30rpx 42rpx 0;
+  padding: calc(30rpx + var(--safe-top, 0px)) 42rpx 0;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -1888,9 +1929,7 @@ $color-white: #ffffff;
 }
 
 .share-poster-modal__bottom {
-  padding: 40rpx 60rpx 32rpx;
-  padding-bottom: calc(32rpx + var(--safe-bottom, constant(safe-area-inset-bottom)));
-  padding-bottom: calc(32rpx + var(--safe-bottom, env(safe-area-inset-bottom)));
+  padding: 40rpx 60rpx calc(32rpx + var(--safe-bottom, 0px));
   background: #fff;
   box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.0601);
   display: flex;

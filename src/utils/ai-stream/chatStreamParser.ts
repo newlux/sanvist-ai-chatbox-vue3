@@ -4,7 +4,7 @@ import type {
   MessageEndEvent,
 } from "@/api/chat/types";
 
-export type AiBlockType = "answer" | "think" | "suggestion";
+export type AiBlockType = "answer" | "think" | "suggestion" | "chart";
 
 export interface AiBlock {
   id: string;
@@ -101,13 +101,24 @@ export function applyEventToBlocks(
         ...base,
         blocks: upsertBlock(blocks, "suggestion-0", "suggestion", event.data),
       };
+    case "chart": {
+      const chartData = event.data || {};
+      const option = chartData.option;
+      if (!option || typeof option !== "object") return base;
+      const chartIndex = blocks.filter(block => block.type === "chart").length;
+      const chartId = `chart-${chartIndex}`;
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, chartId, "chart", { option }),
+        receivedContent: true,
+      };
+    }
     case "message_end":
       return {
         ...base,
         blocks: completeBlocks(blocks),
         metadata: event.metadata,
       };
-    case "chart":
     case "table":
     case "metric":
     case "think":

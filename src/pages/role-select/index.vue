@@ -1,42 +1,93 @@
 <script setup lang="ts">
+import type { RoleOption } from "@/api/user-role/role-options";
 import type { VisitorRole } from "@/stores";
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { getRoleOptions } from "@/api/user-role";
 import iconBoss from "@/assets/img/icon-boss.png";
 import iconOperator from "@/assets/img/icon-operator.png";
 import { useUserStore } from "@/stores";
+import { isGuestRole, setGuestRole } from "@/utils/request";
 
 defineOptions({ name: "RoleSelectPage" });
 
-interface RoleOption {
+interface ViewRole extends RoleOption {
   value: VisitorRole;
-  label: string;
   description: string;
+  avatar?: string;
   deviceSummary: string;
   deviceDetail: string;
-  avatar?: string;
 }
+
+const ROLE_DESCRIPTIONS: Record<VisitorRole, { description: string; avatar?: string }> = {
+  OWNER: {
+    description: "从整体运营视角，了解设备的状态与变化。",
+    avatar: iconBoss,
+  },
+  OPERATOR: {
+    description: "聚焦自己正在使用的设备，快速了解工况。",
+    avatar: iconOperator,
+  },
+  ADMIN: { description: "" },
+  MAINTAINER: { description: "" },
+  PURCHASER: { description: "" },
+};
+
+function formatSummary(role: RoleOption) {
+  return `已为你绑定 ${role.deviceCount} 台体验设备`;
+}
+
+function formatDetail(role: RoleOption) {
+  if (!role.deviceTypeSummary?.length) return "";
+  return role.deviceTypeSummary
+    .map(item => `${item.count} 台${item.deviceTypeName || item.deviceType}`)
+    .join(" · ");
+}
+
+function mapToViewRole(role: RoleOption): ViewRole | null {
+  if (!isGuestRole(role.roleCode)) return null;
+  const meta = ROLE_DESCRIPTIONS[role.roleCode];
+  return {
+    ...role,
+    value: role.roleCode,
+    description: meta?.description ?? "",
+    avatar: meta?.avatar,
+    deviceSummary: formatSummary(role),
+    deviceDetail: formatDetail(role),
+  };
+}
+
+const FALLBACK_ROLES: ViewRole[] = [
+  {
+    roleCode: "OWNER",
+    roleName: "老板",
+    deviceCount: 0,
+    deviceTypeSummary: [],
+    value: "OWNER",
+    description: ROLE_DESCRIPTIONS.OWNER.description,
+    avatar: ROLE_DESCRIPTIONS.OWNER.avatar,
+    deviceSummary: "已为你绑定体验设备",
+    deviceDetail: "",
+  },
+  {
+    roleCode: "OPERATOR",
+    roleName: "操作手",
+    deviceCount: 0,
+    deviceTypeSummary: [],
+    value: "OPERATOR",
+    description: ROLE_DESCRIPTIONS.OPERATOR.description,
+    avatar: ROLE_DESCRIPTIONS.OPERATOR.avatar,
+    deviceSummary: "已为你绑定体验设备",
+    deviceDetail: "",
+  },
+];
 
 const userStore = useUserStore();
 const selectedRole = ref<VisitorRole | null>(null);
+const roles = ref<ViewRole[]>(FALLBACK_ROLES);
+const loading = ref(false);
+const loadError = ref<string | null>(null);
 
-const roles: RoleOption[] = [
-  {
-    value: "OWNER",
-    label: "老板",
-    description: "从整体运营视角，了解设备的状态与变化。",
-    deviceSummary: "已为你绑定 5 台体验设备",
-    deviceDetail: "2 台塔吊 · 3 台泵车",
-    avatar: iconBoss,
-  },
-  {
-    value: "OPERATOR",
-    label: "操作手",
-    description: "聚焦自己正在使用的设备，快速了解工况。",
-    deviceSummary: "已为你绑定 1 台体验设备",
-    deviceDetail: "1 台泵车",
-    avatar: iconOperator,
-  },
-];
+const submitDisabled = computed(() => !selectedRole.value || loading.value);
 
 function selectRole(role: VisitorRole) {
   selectedRole.value = role;
@@ -48,8 +99,37 @@ function startChat() {
     return;
   }
   userStore.setVisitorRole(selectedRole.value);
+  setGuestRole(selectedRole.value);
   uni.redirectTo({ url: "/pages/index/index" });
 }
+
+async function loadRoleOptions() {
+  loading.value = true;
+  loadError.value = null;
+  try {
+    const result = await getRoleOptions();
+    const list = result?.data?.roles ?? [];
+    const mapped = list
+      .map(mapToViewRole)
+      .filter((role): role is ViewRole => role !== null);
+    if (mapped.length) {
+      roles.value = mapped;
+    } else {
+      loadError.value = "暂无可用身份";
+      roles.value = FALLBACK_ROLES;
+    }
+  } catch (error) {
+    loadError.value = "身份选项加载失败，请稍后重试";
+    roles.value = FALLBACK_ROLES;
+    console.warn("[role-select] failed to load role options", error);
+  } finally {
+    loading.value = false;
+  }
+}
+
+onMounted(() => {
+  loadRoleOptions();
+});
 </script>
 
 <template>
@@ -61,6 +141,9 @@ function startChat() {
       <text class="page-title">
         选择你的体验身份
       </text>
+      <view v-if="loadError" class="role-select__error">
+        {{ loadError }}
+      </view>
       <view
         v-for="role in roles"
         :key="role.value"
@@ -73,7 +156,7 @@ function startChat() {
         </view>
         <view class="card-info">
           <text class="card-name">
-            {{ role.label }}
+            {{ role.roleName }}
           </text>
           <text class="card-desc">
             {{ role.description }}
@@ -86,8 +169,12 @@ function startChat() {
           </text>
         </view>
       </view>
-      <view class="primary-btn" @tap="startChat">
-        <text>开始体验</text>
+      <view
+        class="primary-btn"
+        :class="{ 'primary-btn--disabled': submitDisabled }"
+        @tap="startChat"
+      >
+        <text>{{ loading ? "加载中..." : "开始体验" }}</text>
       </view>
     </view>
   </view>
@@ -104,6 +191,7 @@ $color-card-selected-border: #f00;
 $color-avatar-bg: #e4e4e4;
 $color-bg-start: #f5f3f7;
 $color-bg-end: #e8e4ee;
+$color-text-warning: #a31717;
 
 .role-select {
   position: relative;
@@ -167,6 +255,15 @@ $color-bg-end: #e8e4ee;
   font-size: 48rpx;
   font-weight: 700;
   line-height: 68rpx;
+}
+
+.role-select__error {
+  display: block;
+  margin-bottom: 24rpx;
+  color: $color-text-warning;
+  font-size: 26rpx;
+  font-weight: 500;
+  line-height: 36rpx;
 }
 
 .identity-card {
@@ -248,5 +345,9 @@ $color-bg-end: #e8e4ee;
   font-size: 36rpx;
   font-weight: 700;
   line-height: 44rpx;
+}
+
+.primary-btn--disabled {
+  opacity: 0.6;
 }
 </style>
