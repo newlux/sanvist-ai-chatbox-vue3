@@ -63,15 +63,14 @@ function onSuggestionTap(suggestion) {
 
 <template>
   <view class="ai-content-blocks">
-    <template v-for="item in renderItems">
+    <!-- key 必须落在 template 上：放到分支子节点上编译到小程序会丢掉 a:key，只能按下标 diff -->
+    <template v-for="item in renderItems" :key="item.id">
       <AnswerGroupBlock
         v-if="item.type === 'answer-group'"
-        :key="`${item.id}-group`"
         :blocks="item.blocks"
       />
       <AiBlockRenderer
         v-else
-        :key="`${item.id}-block`"
         :block="item"
         :force-thinking-expanded="forceThinkingExpanded"
         @suggestion-tap="onSuggestionTap"

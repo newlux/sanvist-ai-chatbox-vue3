@@ -93,9 +93,18 @@ function parseMarkdown(content) {
 function renderLatest() {
   clearRenderTimer();
   if (pendingContent === lastRenderedContent) return;
-  renderedHtml.value = parseMarkdown(pendingContent);
+  const html = parseMarkdown(pendingContent);
+  // 有正文却解析不出任何标签，说明 markdown-it 在当前运行环境失效了，
+  // 直接把原文交给 mp-html，至少不会白屏
+  renderedHtml.value = !html && pendingContent ? pendingContent : html;
   lastRenderedContent = pendingContent;
   lastRenderAt = Date.now();
+
+  if (import.meta.env.DEV) {
+    console.log(
+      `[MarkdownRenderer] 正文 ${pendingContent.length} 字 → HTML ${renderedHtml.value.length} 字`,
+    );
+  }
 }
 
 watch(
@@ -153,7 +162,15 @@ function onParseError(e) {
     @linktap="onLinkTap"
     @error="onParseError"
     @ready="emit('ready')"
-  />
+  >
+    <!--
+      mp-html 在节点树为空时渲染默认插槽。把原文放进来，
+      任何一环（解析、节点渲染）失效都会退化成纯文本而不是空白气泡。
+    -->
+    <text v-if="props.content" class="markdown-renderer__fallback" :selectable="true">
+      {{ props.content }}
+    </text>
+  </mpHtml>
 </template>
 
 <style lang="scss" scoped>
@@ -164,5 +181,14 @@ function onParseError(e) {
   font-size: 28rpx;
   line-height: 42rpx;
   word-break: break-word;
+}
+.markdown-renderer__fallback {
+  display: block;
+  width: 100%;
+  color: #2f323c;
+  font-size: 28rpx;
+  line-height: 42rpx;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 </style>

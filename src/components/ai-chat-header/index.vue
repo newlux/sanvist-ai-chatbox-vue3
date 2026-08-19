@@ -259,33 +259,9 @@ function deleteSelected() {
             class="chat-header__title-wrap"
             :class="{ 'chat-header__title-wrap--generating': props.generating }"
           >
-            <svg
-              v-if="props.generating"
-              class="chat-header__generating-border"
-              viewBox="0 0 260 72"
-              preserveAspectRatio="none"
-              aria-hidden="true"
-            >
-              <defs>
-                <linearGradient id="generating-border-gradient" x1="0" y1="0" x2="260" y2="0" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stop-color="#fff5f5" />
-                  <stop offset="26%" stop-color="#ffd0d0" />
-                  <stop offset="50%" stop-color="#ff9595" />
-                  <stop offset="74%" stop-color="#ff5151" />
-                  <stop offset="100%" stop-color="#d90000" />
-                  <animateTransform attributeName="gradientTransform" type="rotate" from="0 130 36" to="360 130 36" dur="2.4s" repeatCount="indefinite" />
-                </linearGradient>
-              </defs>
-              <rect
-                x="2" y="2" width="256" height="68" rx="34"
-                fill="none"
-                stroke="url(#generating-border-gradient)"
-                stroke-width="2.4"
-              >
-                <animate attributeName="stroke-width" values="2.4;4;2.4" dur="1.8s" repeatCount="indefinite" />
-                <animate attributeName="stroke-opacity" values=".76;1;.76" dur="1.8s" repeatCount="indefinite" />
-              </rect>
-            </svg>
+            <view v-if="props.generating" class="chat-header__generating-border">
+              <view class="chat-header__generating-border-inner" />
+            </view>
             <view v-if="props.generating" class="chat-header__generating-mark">
               <view />
               <view />
@@ -599,14 +575,33 @@ function deleteSelected() {
   box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, .08);
 }
 
+/**
+ * 生成中的流光描边。
+ * 小程序不支持 svg 元素（会直接报「元素不存在」），这里改用双层圆角视图模拟：
+ * 外层跑渐变动画，内层用不透明底色盖住中间，只留下 2rpx 的环。
+ */
 .chat-header__generating-border {
   position: absolute;
   z-index: 0;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 36rpx;
+  background: linear-gradient(90deg, #fff5f5, #ffd0d0, #ff9595, #ff5151, #d90000, #ff5151, #ff9595, #ffd0d0, #fff5f5);
+  background-size: 300% 100%;
+  animation: header-generating-border 2.4s linear infinite;
   pointer-events: none;
+}
+
+.chat-header__generating-border-inner {
+  position: absolute;
+  top: 2rpx;
+  right: 2rpx;
+  bottom: 2rpx;
+  left: 2rpx;
+  border-radius: 34rpx;
+  background: #fff;
 }
 
 .chat-header__title-wrap--generating > *:not(.chat-header__generating-border) {
@@ -641,6 +636,11 @@ function deleteSelected() {
 @keyframes header-generating {
   0%, 100% { opacity: .35; transform: scale(.84); }
   50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes header-generating-border {
+  0% { background-position: 0 50%; }
+  100% { background-position: 300% 50%; }
 }
 
 // --- icons (用 CSS 近似 Figma 形状，后续可替换为 svg 资源) ---

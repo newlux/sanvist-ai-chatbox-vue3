@@ -179,6 +179,10 @@ function onNegativeFeedback() {
             努力链接中
           </text>
         </view>
+        <!-- 流式失败等场景只有纯文本没有 blocks，不兜住就是一个空气泡 -->
+        <text v-if="!visibleBlocks.length && props.content" class="ai-bubble-v2__ai-content">
+          {{ props.content }}
+        </text>
         <AiContentBlocks
           :blocks="visibleBlocks"
           :force-thinking-expanded="props.forceThinkingExpanded"
@@ -264,6 +268,14 @@ function onNegativeFeedback() {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+}
+.ai-bubble-v2__ai-content {
+  display: block;
+  color: #2f323c;
+  font-size: 28rpx;
+  line-height: 42rpx;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .ai-bubble-v2__waiting { display: flex; align-items: center; flex-wrap: wrap; gap: 8rpx; margin-bottom: 24rpx; color: #a5a5a5; font-family: "PingFang SC"; font-size: 26rpx; line-height: 36rpx; }
 .ai-bubble-v2__waiting-mark { color: #a5a5a5; font-size: 24rpx; line-height: 36rpx; }
