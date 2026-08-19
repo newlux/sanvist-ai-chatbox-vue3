@@ -156,8 +156,16 @@ export function createAlipaySocketStream(
       finish(connected ? new Error(message) : new SocketUnavailableError(message));
     });
 
-    socket.onClose?.(() => {
+    socket.onClose?.((result) => {
       session.finalize();
+      // 握手没成功就被关闭（端点不存在、被网关拒绝、鉴权失败）时，
+      // 部分基础库只回调 onClose 而不回调 onError。这里必须按「不可用」上报，
+      // 否则调用方会把空流当成正常结束，既不回落 HTTP 也不报错，界面就是一片空白。
+      if (!connected) {
+        const detail = result?.reason || (result?.code ? `code=${result.code}` : "连接未建立");
+        finish(new SocketUnavailableError(`WebSocket 连接被关闭：${detail}`));
+        return;
+      }
       finish();
     });
   });
@@ -165,8 +173,10 @@ export function createAlipaySocketStream(
   return {
     abort() {
       aborted = true;
-      if (settled) return;
+      // 无论是否已结束都要关连接：建流失败后回落 HTTP 时，
+      // 残留的连接会让服务端继续为这轮问答生成内容
       closeSocket();
+      if (settled) return;
       const error = new Error("请求已取消");
       error.name = "AbortError";
       finish(error);
