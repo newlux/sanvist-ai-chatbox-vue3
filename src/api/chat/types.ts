@@ -1,11 +1,5 @@
 export type Identifier = string | number;
 
-export interface ApiResponse<T> {
-  code: number;
-  message: string;
-  data: T;
-}
-
 export interface DeviceInfo {
   deviceId: string;
   deviceModel?: string;
@@ -126,20 +120,28 @@ export interface Conversation {
   updatedAt: number;
 }
 
-export interface ConversationDetail extends Omit<Conversation, "inputs"> {}
-
 export interface CursorPage<T> {
   limit: number;
   hasMore: boolean;
   data: T[];
 }
 
-export interface GetConversationParams {
+export interface DeleteConversationParams {
   user?: string;
 }
 
-export interface DeleteConversationParams {
+export interface BatchDeleteConversationsParams {
   user?: string;
+  conversationIds: Identifier[];
+}
+
+export interface BatchDeleteResult {
+  deleted: number;
+}
+
+export interface RenameConversationParams {
+  user?: string;
+  name: string;
 }
 
 export interface ListMessagesParams {
@@ -147,11 +149,6 @@ export interface ListMessagesParams {
   user?: string;
   firstId?: Identifier;
   limit?: number;
-}
-
-export interface GetMessageParams {
-  conversationId: Identifier;
-  user?: string;
 }
 
 export interface MessageFile extends Record<string, unknown> {
@@ -169,6 +166,10 @@ export interface ChatMessage {
   inputs: Record<string, unknown>;
   query: string;
   answer: string;
+  contents?: Array<{
+    type?: string;
+    data?: Record<string, unknown>;
+  }>;
   messageFiles: MessageFile[];
   feedback: Feedback | null;
   retrieverResources: Record<string, unknown>[];
@@ -190,67 +191,20 @@ export interface CancelFeedbackParams extends GetFeedbackParams {
   messageId: Identifier;
 }
 
-export interface UploadedFile {
-  fileId: string;
-  name: string;
-  size: number;
-  extension: string;
-  mimeType: string;
-  createdBy: string;
-  createdAt: number;
-  url: string;
-}
-
-export interface UploadFileParams {
-  filePath: string;
-  name?: string;
-  user?: string;
-}
-
 export interface SpeechRecognitionResult {
   text: string;
   language: string;
 }
 
-export interface RecognizeSpeechByUrlParams {
-  audioUrl: string;
-  language?: string;
-}
-
-export interface RecognizeSpeechByBase64Params {
-  audioBase64: string;
-  mimeType?: string;
-  language?: string;
-}
-
 export interface RecognizeSpeechByUploadParams {
   filePath: string;
-  name?: string;
   language?: string;
-}
-
-export interface AudioBase64Result {
-  audioUrl: string;
-  audioBase64: string;
-  mimeType: string;
-  dataUrl: string;
-  fileName: string;
-  size: number;
-}
-
-export interface CreateAudioBase64Params {
-  audioUrl: string;
+  timeout?: number;
 }
 
 export interface TextToSpeechResult {
-  format: string;
-  audioBase64: string;
-  dataUrl?: string;
-}
-
-export interface GetTextToSpeechResult {
-  audioBase64: string;
-  format: string;
+  audioBase64?: string;
+  format?: string;
 }
 
 export interface InterruptChatParams {

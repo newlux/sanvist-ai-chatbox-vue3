@@ -1,29 +1,20 @@
 import type {
-  AudioBase64Result,
+  BatchDeleteConversationsParams,
+  BatchDeleteResult,
   CancelFeedbackParams,
   ChatMessage,
   Conversation,
-  ConversationDetail,
-  CreateAudioBase64Params,
   CursorPage,
   DeleteConversationParams,
-  Feedback,
-  GetConversationParams,
-  GetFeedbackParams,
-  GetMessageParams,
-  GetTextToSpeechResult,
   Identifier,
   InterruptChatParams,
   ListConversationsParams,
   ListMessagesParams,
-  RecognizeSpeechByBase64Params,
   RecognizeSpeechByUploadParams,
-  RecognizeSpeechByUrlParams,
+  RenameConversationParams,
   SpeechRecognitionResult,
   SubmitFeedbackParams,
   TextToSpeechResult,
-  UploadedFile,
-  UploadFileParams,
 } from "./types";
 import { request } from "@/utils/request";
 
@@ -41,10 +32,6 @@ export function getConversations(params: ListConversationsParams) {
   return request.get<CursorPage<Conversation>>("/conversations", params).json();
 }
 
-export function getConversation(conversationId: Identifier, params: GetConversationParams) {
-  return request.get<ConversationDetail>(`/conversations/${conversationId}`, params).json();
-}
-
 export function deleteConversation(conversationId: Identifier, params: DeleteConversationParams) {
   return request.delete<null, DeleteConversationParams>(`/conversations/${conversationId}`, {
     ...jsonOptions,
@@ -52,16 +39,19 @@ export function deleteConversation(conversationId: Identifier, params: DeleteCon
   }).json();
 }
 
+export function batchDeleteConversations(params: BatchDeleteConversationsParams) {
+  return request.delete<BatchDeleteResult, BatchDeleteConversationsParams>("/conversations", {
+    ...jsonOptions,
+    data: params,
+  }).json();
+}
+
+export function renameConversation(conversationId: Identifier, params: RenameConversationParams) {
+  return request.post<null>(`/conversations/${conversationId}/name`, params, jsonOptions).json();
+}
+
 export function getMessages(params: ListMessagesParams) {
   return request.get<CursorPage<ChatMessage>>("/messages", params).json();
-}
-
-export function getMessage(messageId: Identifier, params: GetMessageParams) {
-  return request.get<ChatMessage>(`/messages/${messageId}`, params).json();
-}
-
-export function getFeedback(messageId: Identifier, params: GetFeedbackParams) {
-  return request.get<Feedback>(`/messages/${messageId}/feedbacks`, params).json();
 }
 
 export function submitFeedback(messageId: Identifier, params: SubmitFeedbackParams) {
@@ -75,38 +65,21 @@ export function cancelFeedback(messageId: Identifier, params: CancelFeedbackPara
   }).json();
 }
 
-export function uploadFile(params: UploadFileParams) {
-  return request.upload<UploadedFile>("/files/upload", {
-    filePath: params.filePath,
-    name: params.name || "file",
-    formData: { user: params.user || "" },
-  }).json();
-}
-
-export function recognizeSpeechByUrl(params: RecognizeSpeechByUrlParams) {
-  return request.post<SpeechRecognitionResult>("/speech/asr", params, jsonOptions).json();
-}
-
-export function recognizeSpeechByBase64(params: RecognizeSpeechByBase64Params) {
-  return request.post<SpeechRecognitionResult>("/speech/asr/base64", params, jsonOptions).json();
+/**
+ * 录音文件直传识别。相比 base64 通道少一次整文件编码，
+ * 也绕开了小程序对 JSON 请求体体积的限制。
+ * 契约：multipart 字段名固定为 `file`，language 走 query。
+ */
+export function getTextToSpeech(conversationId: Identifier, messageId: Identifier) {
+  return request.get<TextToSpeechResult>(`/chat/tts/${conversationId}/${messageId}`).json();
 }
 
 export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {
-  return request.upload<SpeechRecognitionResult>("/speech/asr/upload", {
+  const query = params.language ? `?language=${encodeURIComponent(params.language)}` : "";
+  return request.upload<SpeechRecognitionResult>(`/speech/asr/upload${query}`, {
     filePath: params.filePath,
-    name: params.name || "file",
-    formData: params.language ? { language: params.language } : undefined,
+    name: "file",
+    fileType: "audio",
+    timeout: params.timeout,
   }).json();
-}
-
-export function getAudioBase64(params: CreateAudioBase64Params) {
-  return request.post<AudioBase64Result>("/speech/audio/base64", params, jsonOptions).json();
-}
-
-export function testTextToSpeech(text: string) {
-  return request.post<TextToSpeechResult>("/speech/tts/test", { text }, jsonOptions).json();
-}
-
-export function getTextToSpeech(conversationId: Identifier, messageId: Identifier) {
-  return request.get<GetTextToSpeechResult>(`/chat/tts/${conversationId}/${messageId}`).json();
 }

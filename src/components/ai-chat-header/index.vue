@@ -234,6 +234,10 @@ function deleteSelected() {
   if (selectedIds.value.length) emit("session-delete-batch", [...selectedIds.value]);
   cancelMultiSelect();
 }
+
+onBeforeUnmount(() => {
+  clearTimeout(sessionScrollIdleTimer);
+});
 </script>
 
 <template>

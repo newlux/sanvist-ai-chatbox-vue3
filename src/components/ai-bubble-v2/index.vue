@@ -1,4 +1,5 @@
-<script setup>
+<script setup lang="ts">
+import type { AiBlock } from "@/utils/ai-stream";
 import { computed } from "vue";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
@@ -15,7 +16,7 @@ defineOptions({ name: "AiBubbleV2" });
 const props = defineProps({
   role: { type: String, default: "ai" },
   content: { type: String, default: "" },
-  blocks: { type: Array, default: () => [] },
+  blocks: { type: Array as () => AiBlock[], default: () => [] },
   loading: { type: Boolean, default: false },
   ttsEnabled: { type: Boolean, default: false },
   ttsLoading: { type: Boolean, default: false },

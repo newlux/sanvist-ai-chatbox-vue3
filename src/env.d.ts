@@ -7,7 +7,3 @@ declare module "*.vue" {
   const component: DefineComponent<{}, {}, any>;
   export default component;
 }
-
-declare module "hook-fetch/plugins" {
-  export { sseTextDecoderPlugin } from "hook-fetch";
-}

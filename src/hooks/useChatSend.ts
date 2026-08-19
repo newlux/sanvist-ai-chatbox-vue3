@@ -1,0 +1,191 @@
+import type { Identifier } from "@/api/chat/types";
+import { useI18n } from "vue-i18n";
+import { interruptChat } from "@/api/chat";
+import { useChatStream } from "@/hooks/useChatStream";
+import { useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { buildInitialBlocks, consumeChatStream } from "@/utils/ai-stream";
+
+function isAbortError(error: unknown) {
+  if (!error) return false;
+  const err = error as { name?: string; message?: string };
+  const name = err.name || "";
+  const message = String(err.message || "").toLowerCase();
+  return name === "AbortError" || message.includes("aborted") || message.includes("abort");
+}
+
+export function useChatSend() {
+  const { t } = useI18n();
+  const chatStore = useChatStore();
+  const sessionStore = useSessionStore();
+  const userStore = useUserStore();
+  const { stream, cancel } = useChatStream({
+    onError: (error) => {
+      if (!isAbortError(error)) console.error("[AiChatPage] stream request failed", error);
+    },
+  });
+
+  function cancelActiveStream() {
+    const idx = Number(chatStore.activeAiMsgIndex);
+    const activeMessage = Number.isInteger(idx) && idx >= 0 ? chatStore.messages[idx] : null;
+
+    chatStore.invalidateActiveRequest();
+    try {
+      cancel();
+    } catch (error) {
+      console.error("[AiChatPage] failed to cancel stream", error);
+    }
+
+    if (activeMessage?.sessionId && activeMessage?.messageId) {
+      interruptChat({
+        conversationId: activeMessage.sessionId,
+        messageId: activeMessage.messageId,
+      }).catch(error => console.error("[AiChatPage] failed to interrupt chat", error));
+    }
+
+    if (activeMessage?.loading) {
+      chatStore.replaceMessage(idx, {
+        ...activeMessage,
+        loading: false,
+        interrupted: true,
+      });
+    }
+    chatStore.activeAiMsgIndex = -1;
+  }
+
+  function stopGenerating() {
+    if (!chatStore.isLoading) return;
+    cancelActiveStream();
+    chatStore.isLoading = false;
+    chatStore.scrollToBottom();
+  }
+
+  function applySnapshot(aiMsgIndex: number, userMsgIndex: number, snapshot: {
+    blocks: ReturnType<typeof buildInitialBlocks>;
+    conversationId?: Identifier;
+    messageId?: Identifier;
+    metadata?: { duration_ms?: number | null; status?: string };
+    ended?: boolean;
+  }) {
+    const aiMessage = chatStore.messages[aiMsgIndex];
+    if (!aiMessage) return;
+
+    if (snapshot.conversationId) chatStore.aiSessionId = snapshot.conversationId;
+    chatStore.replaceMessage(aiMsgIndex, {
+      ...aiMessage,
+      blocks: snapshot.blocks,
+      sessionId: snapshot.conversationId ?? aiMessage.sessionId,
+      messageId: snapshot.messageId ?? aiMessage.messageId,
+      durationMs: snapshot.metadata?.duration_ms ?? aiMessage.durationMs,
+      loading: !snapshot.ended,
+      interrupted: snapshot.metadata?.status === "stopped",
+    });
+
+    const userMessage = chatStore.messages[userMsgIndex];
+    if (userMessage && snapshot.conversationId && snapshot.messageId) {
+      chatStore.replaceMessage(userMsgIndex, {
+        ...userMessage,
+        sessionId: snapshot.conversationId,
+        messageId: snapshot.messageId,
+      });
+    }
+    chatStore.scrollToBottom();
+  }
+
+  async function sendAiFlow(options: {
+    aiMsgIndex: number;
+    userMsgIndex: number;
+    content: string;
+    hadSessionId: boolean;
+    requestSeq: number;
+  }) {
+    const { aiMsgIndex, userMsgIndex, content, hadSessionId, requestSeq } = options;
+    let receivedContent = false;
+
+    try {
+      await consumeChatStream({
+        source: stream({
+          query: content,
+          user: String(userStore.userId || ""),
+          conversationId: chatStore.aiSessionId,
+        }, { idleTimeoutMs: 60_000 }),
+        isStale: () => requestSeq !== chatStore.activeRequestSeq,
+        onSnapshot: (snapshot) => {
+          receivedContent = snapshot.receivedContent;
+          applySnapshot(aiMsgIndex, userMsgIndex, snapshot);
+        },
+      });
+    } catch (error) {
+      const aiMessage = chatStore.messages[aiMsgIndex];
+      if (aiMessage && requestSeq === chatStore.activeRequestSeq && !isAbortError(error)) {
+        chatStore.replaceMessage(aiMsgIndex, {
+          ...aiMessage,
+          blocks: receivedContent ? aiMessage.blocks : buildInitialBlocks(),
+          content: receivedContent ? aiMessage.content : t("ai-unavailable-retry-later"),
+          loading: false,
+        });
+        console.error("[AiChatPage] stream consumption failed", error);
+      }
+    } finally {
+      if (requestSeq === chatStore.activeRequestSeq) {
+        const current = chatStore.messages[aiMsgIndex];
+        if (current) chatStore.replaceMessage(aiMsgIndex, { ...current, loading: false });
+        chatStore.isLoading = false;
+        chatStore.activeAiMsgIndex = -1;
+        chatStore.scrollToBottom();
+        if (!hadSessionId && chatStore.aiSessionId) {
+          sessionStore.loadSessions().catch(error => console.error("[AiChatPage] failed to refresh AI sessions", error));
+        }
+      }
+    }
+  }
+
+  async function sendMessage() {
+    const text = chatStore.inputText.trim();
+    if (!text) return;
+
+    cancelActiveStream();
+    const requestSeq = chatStore.nextRequestSeq();
+    const hadSessionId = Boolean(chatStore.aiSessionId);
+    const uuid = Date.now();
+    const conversationId = chatStore.aiSessionId;
+
+    chatStore.inputText = "";
+    chatStore.showQuickPrompts = false;
+    chatStore.isLoading = true;
+    const userMsgIndex = chatStore.messages.length;
+    chatStore.messages.push({
+      id: `user-${uuid}`,
+      role: "user",
+      content: text,
+      sessionId: conversationId,
+      messageId: null,
+    });
+    const aiMsgIndex = chatStore.messages.length;
+    chatStore.messages.push({
+      id: `ai-${uuid}`,
+      role: "ai",
+      content: "",
+      blocks: buildInitialBlocks(),
+      loading: true,
+      interrupted: false,
+      sessionId: conversationId,
+      messageId: null,
+      waitingText: text,
+    });
+    chatStore.activeAiMsgIndex = aiMsgIndex;
+    chatStore.scrollToBottom();
+    await sendAiFlow({ aiMsgIndex, userMsgIndex, content: text, hadSessionId, requestSeq });
+  }
+
+  function sendQuickPrompt(text: string) {
+    chatStore.inputText = text;
+    void sendMessage();
+  }
+
+  return {
+    sendMessage,
+    sendQuickPrompt,
+    stopGenerating,
+    cancelActiveStream,
+  };
+}

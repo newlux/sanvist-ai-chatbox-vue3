@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { onHide, onLaunch } from "@dcloudio/uni-app";
-// import { getUserInfo } from "@/api/user";
+import { onLaunch } from "@dcloudio/uni-app";
 import { setLocale } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
-import { setRequestAuth, setRequestBaseURL } from "@/utils/request";
+import { setAuthFailureHandler, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
-const authorizationFallback = "bearer 9ae76087-03f6-4db0-878b-ed6e9af37879";
+// 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
+// 否则一旦这串固定 token 泄漏或过期，线上会静默变成无鉴权请求
+const authorizationFallback = import.meta.env.DEV
+  ? "bearer 9ae76087-03f6-4db0-878b-ed6e9af37879"
+  : "";
 
 type StartupQuery = Record<string, any>;
 
@@ -53,16 +56,19 @@ function initializeSystem(query: StartupQuery) {
   return { authorization, baseUrl, lang, version };
 }
 
-// async function initializeUserInfo(options: ReturnType<typeof initializeSystem>) {
-//   try {
-//     const { data: userInfo } = await getUserInfo(options);
-//     userStore.setUserInfo(userInfo);
-//     userStore.setUserId(String(userInfo.userId || ""));
-//   } catch (e) {
-//     console.log("🚀 ~ e:", e);
-//     // 用户信息请求失败不阻断应用启动
-//   }
-// }
+/**
+ * token 由宿主通过启动参数注入，前端自己换不了，
+ * 只能通知宿主重新下发；拿不到 bridge 时至少让用户知道要重进。
+ */
+function handleAuthFailure(_statusCode: number, message: string) {
+  console.error("[App] auth failed", message);
+  const bridge = (globalThis as Record<string, any>).AlipayJSBridge;
+  if (bridge?.call) {
+    bridge.call("tokenExpiration", {}, () => {});
+    return;
+  }
+  uni.showToast({ title: "登录已失效，请重新进入", icon: "none", duration: 3000 });
+}
 
 function initializeDeviceInfo() {
   uni.getSystemInfo({
@@ -81,15 +87,11 @@ function initializeDeviceInfo() {
 }
 
 onLaunch(async (options) => {
+  setAuthFailureHandler(handleAuthFailure);
   const baseInfo = initializeSystem(getLaunchQuery(options));
   await setLocale(baseInfo.lang);
-  // await initializeUserInfo(baseInfo);
   await systemStore.initPhoneSizesInfo();
   initializeDeviceInfo();
-});
-
-onHide(() => {
-  console.log("App Hide");
 });
 </script>
 

@@ -37,13 +37,12 @@
     "build:quickapp-webview-huawei": "uni build -p quickapp-webview-huawei",
     "build:quickapp-webview-union": "uni build -p quickapp-webview-union",
     "type-check": "vue-tsc --noEmit",
-    "i18n:generate": "node src/i18n/i18nMake.cjs",
-    "i18n:watch": "node src/i18n/make.cjs",
-    "i18n:merge": "node src/i18n/merge.cjs",
+    "i18n:generate": "node i18n/i18nMake.cjs",
+    "i18n:watch": "node i18n/make.cjs",
+    "i18n:merge": "node i18n/merge.cjs",
     "lint": "eslint .",
     "lint:stylelint": "stylelint --cache --fix \"**/*.{vue,less,postcss,css,scss}\" --cache --cache-location node_modules/.cache/stylelint/",
-    "fix": "eslint . --fix",
-    "i18n": "node ./i18n/make.js "
+    "fix": "eslint . --fix"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-5010520260709002",
@@ -62,17 +61,13 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-5010520260709002",
     "@dcloudio/uni-mp-xhs": "3.0.0-5010520260709002",
     "@dcloudio/uni-quickapp-webview": "3.0.0-5010520260709002",
-    "@vueuse/core": "^13.5.0",
-    "@vueuse/integrations": "^13.5.0",
     "echarts": "^5.4.3",
-    "hook-fetch": "^2.3.2",
     "html2canvas": "^1.4.1",
     "i18n-generator": "^0.5.1",
     "markdown-it": "14.0.0",
     "moment": "^2.29.4",
     "mp-html": "^2.5.2",
     "pinia": "^2.2.6",
-    "radash": "^12.1.1",
     "vue": "^3.4.21",
     "vue-i18n": "9.1.9"
   },
@@ -109,14 +104,9 @@
     "stylelint-config-standard": "^38.0.0",
     "stylelint-config-standard-scss": "^15.0.1",
     "typescript": "^4.9.4",
-    "typescript-api-pro": "^0.0.7",
-    "unocss": "66.3.3",
     "unplugin-auto-import": "^19.3.0",
-    "unplugin-vue-components": "^28.8.0",
-    "vconsole": "^3.15.1",
     "vite": "5.2.8",
     "vite-plugin-env-typed": "^0.0.2",
-    "vite-plugin-svg-icons": "^2.0.1",
     "vue-tsc": "^1.0.24"
   }
 }

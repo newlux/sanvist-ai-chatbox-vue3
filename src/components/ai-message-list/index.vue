@@ -1,4 +1,5 @@
-<script setup>
+<script setup lang="ts">
+import type { UiChatMessage } from "@/stores/chat-types";
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
 
 defineOptions({
@@ -7,7 +8,7 @@ defineOptions({
 
 const props = defineProps({
   messages: {
-    type: Array,
+    type: Array as () => UiChatMessage[],
     default: () => [],
   },
   scrollTop: {
@@ -75,14 +76,14 @@ const overview = computed(() => {
   const summary = data.content || FALLBACK_OVERVIEW.summary;
   return { greeting, summary };
 });
-function resolvePositive(message) {
+function resolvePositive(message: UiChatMessage) {
   if (typeof message?.positive === "boolean") return message.positive;
   if (message?.feedbackValue === "good") return true;
   if (message?.feedbackValue === "bad") return false;
   return null;
 }
 
-function isMessageDisabled(index, message) {
+function isMessageDisabled(index: number, message: UiChatMessage) {
   const list = Array.isArray(props.messages) ? props.messages : [];
   if (message?.role === "ai") return Boolean(message.interrupted);
   return message?.role === "user" && Boolean(

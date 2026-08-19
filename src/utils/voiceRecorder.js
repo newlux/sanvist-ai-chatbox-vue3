@@ -98,7 +98,7 @@ class VoiceRecorder {
         }
         resolve({
           success: true,
-          data: { tempFilePath: result.tempFilePath, local: true },
+          data: { tempFilePath: result.tempFilePath },
         });
       });
       manager.onError((error) => {
