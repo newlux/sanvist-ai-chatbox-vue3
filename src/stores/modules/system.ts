@@ -98,39 +98,12 @@ export const useSystemStore = defineStore("system", () => {
   }
 
   async function initPhoneSizesInfo() {
-    const alipayJSBridge = globalThis as typeof globalThis & {
-      AlipayJSBridge?: {
-        call: (
-          method: string,
-          params: Record<string, never>,
-          callback: (result: { statusBarHeight?: number; tabbarHeight?: number }) => void,
-        ) => void;
-      };
-    };
-
-    if (!alipayJSBridge.AlipayJSBridge) {
-      statusBarHeight.value = 0;
-      tabbarHeight.value = 0;
-      return;
-    }
-
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        resolve();
-      }, 500);
-
-      alipayJSBridge.AlipayJSBridge?.call("getPhoneSizesInfo", {}, (result) => {
-        statusBarHeight.value = Number(result.statusBarHeight) || 0;
-        tabbarHeight.value = Number(result.tabbarHeight) || 0;
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve();
-      });
-    });
+    const systemInfo = uni.getSystemInfoSync();
+    const screenHeight = Number(systemInfo.screenHeight || systemInfo.windowHeight || 0);
+    statusBarHeight.value = Number(systemInfo.statusBarHeight || 0);
+    tabbarHeight.value = systemInfo.safeArea
+      ? Math.max(0, screenHeight - Number(systemInfo.safeArea.bottom || screenHeight))
+      : 0;
   }
 
   return {

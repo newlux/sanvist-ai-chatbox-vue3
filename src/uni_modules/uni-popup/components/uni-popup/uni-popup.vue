@@ -430,7 +430,7 @@
 		&.left,
 		&.right {
 			/* #ifdef H5 */
-			// top: var(--window-top);
+			top: var(--window-top);
 			/* #endif */
 			/* #ifndef H5 */
 			top: 0;
@@ -451,7 +451,7 @@
 			&.left,
 			&.right {
 				/* #ifdef H5 */
-				// padding-top: var(--window-top);
+				padding-top: var(--window-top);
 				/* #endif */
 				/* #ifndef H5 */
 				padding-top: 0;

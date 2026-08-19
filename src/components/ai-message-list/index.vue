@@ -42,10 +42,6 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  keyboardHeightPx: {
-    type: Number,
-    default: 0,
-  },
   awakening: {
     type: Object,
     default: null,
@@ -71,10 +67,6 @@ const FALLBACK_OVERVIEW = {
   greeting: "杜老板，你好。",
   summary: "7月28日至8月3日设备作业126小时，较前期增加12%，先看整体变化吧！",
 };
-
-// 键盘占位：键盘弹起时给消息列表底部留出键盘高度空间，
-// 防止 scroll-view 滚到底时最后一条消息/底部按钮被键盘遮住。
-const keyboardSpacerPx = computed(() => Math.max(0, Number(props.keyboardHeightPx) || 0));
 
 const overview = computed(() => {
   const data = props.awakening;
@@ -246,11 +238,7 @@ function onCopyClick(index, message) {
       </view>
       <!-- 底部占位，防止被输入框遮挡 -->
       <view style="height: 32rpx" />
-      <!-- 键盘占位：防止键盘弹起时底部出现空白/按钮遮挡 -->
-      <view
-        v-if="keyboardSpacerPx > 0"
-        :style="{ height: `${keyboardSpacerPx}px` }"
-      />
+
       <!-- 底部锚点必须位于所有占位元素之后，才能真正滚到底 -->
       <view id="msg-bottom-anchor-a" style="height: 1px" />
       <view id="msg-bottom-anchor-b" style="height: 1px" />

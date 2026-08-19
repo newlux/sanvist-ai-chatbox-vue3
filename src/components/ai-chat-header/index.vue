@@ -30,7 +30,7 @@ const emit = defineEmits([
 ]);
 
 const { t } = useI18n();
-const { safeAreaStyle, safeTopPx } = useSafeArea();
+const { safeTopPx } = useSafeArea();
 const historyPopup = ref();
 const sessionPaging = ref();
 const historyLoading = ref(false);
@@ -57,10 +57,9 @@ const filteredSessionList = computed(() => {
   return sessionList.value.filter(session => String(session?.name || "").toLowerCase().includes(keyword));
 });
 
-const statusbarStyle = computed(() => {
-  const height = safeTopPx.value || 0;
-  return height > 0 ? { height: `${height}px` } : { height: "env(safe-area-inset-top, 0px)" };
-});
+const statusbarStyle = computed(() => ({
+  height: `${safeTopPx.value}px`,
+}));
 
 function getSessionKey(session) {
   return session?.id || "";
@@ -134,7 +133,7 @@ function onSessionLongPress(session, event) {
     const info = uni.getSystemInfoSync();
     const windowHeight = info?.windowHeight || 667;
     const menuHeight = 137;
-    const minTop = Math.max(safeTopPx.value, 88);
+    const minTop = 88;
     if (top + menuHeight > windowHeight - 20) top = y - menuHeight - 18;
     top = Math.max(minTop, Math.min(top, windowHeight - menuHeight - 20));
   } catch {
@@ -355,7 +354,7 @@ function deleteSelected() {
         :is-mask-click="true"
         @change="onHistoryPopupChange"
       >
-        <view class="history-drawer" :style="safeAreaStyle" @tap="onDrawerTap">
+        <view class="history-drawer" @tap="onDrawerTap">
           <view class="history-drawer__search">
             <image src="@/assets/img/icon-history-search.svg" mode="aspectFit" class="history-drawer__search-icon" />
             <input
@@ -453,6 +452,13 @@ function deleteSelected() {
                 </view>
               </view>
             </view>
+            <template #empty>
+              <view class="history-drawer__empty">
+                <text class="history-drawer__empty-text">
+                  暂无历史对话
+                </text>
+              </view>
+            </template>
           </z-paging>
 
           <view v-if="editingMode" class="history-drawer__multi-footer">
@@ -520,6 +526,18 @@ function deleteSelected() {
   position: relative;
 }
 
+:deep(.uni-popup) {
+  z-index: 1000 !important;
+}
+
+:deep(.uni-popup__wrapper.left) {
+  width: 644rpx !important;
+  max-width: 86vw;
+  height: 100vh;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
 .chat-header {
   position: sticky;
   top: 0;
@@ -527,9 +545,7 @@ function deleteSelected() {
 }
 
 .chat-header__statusbar {
-  // 高度由 JS 动态注入（statusbarStyle computed）
-  // 此处仅作渲染前的最小兜底，避免初始闪烁
-  min-height: env(safe-area-inset-top, 0px);
+  min-height: 0;
 }
 
 .chat-header__bar {
@@ -699,11 +715,11 @@ function deleteSelected() {
 
 // ---- Left drawer (40834-437) ----
 .history-drawer {
-  width: 644rpx;
+  width: 100%;
   max-width: none;
   height: 100vh;
   box-sizing: border-box;
-  padding: calc(32rpx + var(--safe-top, 0px)) 36rpx calc(32rpx + var(--safe-bottom, 0px));
+  padding: 32rpx 36rpx;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -748,6 +764,21 @@ function deleteSelected() {
   flex-direction: column;
   gap: 4rpx;
   padding: 0;
+}
+
+.history-drawer__empty {
+  display: flex;
+  min-height: 360rpx;
+  align-items: center;
+  justify-content: center;
+  padding: 0 32rpx;
+  box-sizing: border-box;
+}
+
+.history-drawer__empty-text {
+  color: #999999;
+  font-size: 28rpx;
+  line-height: 40rpx;
 }
 .history-drawer__row {
   display: flex;

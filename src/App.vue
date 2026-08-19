@@ -3,11 +3,11 @@ import { onHide, onLaunch } from "@dcloudio/uni-app";
 // import { getUserInfo } from "@/api/user";
 import { setLocale } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
-import { setRequestAuth } from "@/utils/request";
+import { setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
-const browserAuthorization = "bearer 9ae76087-03f6-4db0-878b-ed6e9af37879";
+const authorizationFallback = "bearer 9ae76087-03f6-4db0-878b-ed6e9af37879";
 
-type StartupQuery = Record<string, string | boolean | undefined>;
+type StartupQuery = Record<string, any>;
 
 interface LaunchOptions {
   query?: StartupQuery;
@@ -16,33 +16,12 @@ interface LaunchOptions {
 const systemStore = useSystemStore();
 const userStore = useUserStore();
 
-function isBrowser() {
-  return typeof window !== "undefined" && !("AlipayJSBridge" in globalThis);
-}
-
-function parseQueryString(raw: string): StartupQuery {
-  const query: StartupQuery = {};
-  new URLSearchParams(raw).forEach((value, key) => {
-    query[key] = value === "false" ? false : value;
-  });
-  return query;
-}
-
 function getLaunchQuery(options?: LaunchOptions): StartupQuery {
-  // mPaaS WebView 环境下优先从 AlipayJSBridge.startupParams 中获取启动参数
-  interface StartupParams {
-    startupParams?: { query?: string };
-  }
-  const bridge = (globalThis as typeof globalThis & { AlipayJSBridge?: StartupParams }).AlipayJSBridge;
-  const rawQuery = bridge?.startupParams?.query;
-  if (rawQuery) {
-    return parseQueryString(rawQuery);
-  }
   return options?.query || {};
 }
 
 function initializeSystem(query: StartupQuery) {
-  const authorization = isBrowser() ? browserAuthorization : String(query.Authorization || "");
+  const authorization = query?.Authorization || authorizationFallback;
   const lang = String(query.Lang || "zh_CN");
   const country = String(query.country || "");
   const version = String(query.version || "");
@@ -52,6 +31,7 @@ function initializeSystem(query: StartupQuery) {
   const baseUrl = String(query.baseUrl || import.meta.env.VITE_AI_QUESTION_BASE_URL);
 
   setRequestAuth(authorization);
+  setRequestBaseURL(baseUrl);
 
   userStore.setIsVisitor(true);
   systemStore.setHeader({
@@ -102,7 +82,6 @@ function initializeDeviceInfo() {
 
 onLaunch(async (options) => {
   const baseInfo = initializeSystem(getLaunchQuery(options));
-  // console.log("🚀 ~ baseInfo:", baseInfo);
   await setLocale(baseInfo.lang);
   // await initializeUserInfo(baseInfo);
   await systemStore.initPhoneSizesInfo();

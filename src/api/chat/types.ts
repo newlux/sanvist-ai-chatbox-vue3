@@ -202,7 +202,8 @@ export interface UploadedFile {
 }
 
 export interface UploadFileParams {
-  file: File | Blob;
+  filePath: string;
+  name?: string;
   user?: string;
 }
 
@@ -223,7 +224,8 @@ export interface RecognizeSpeechByBase64Params {
 }
 
 export interface RecognizeSpeechByUploadParams {
-  file: File | Blob;
+  filePath: string;
+  name?: string;
   language?: string;
 }
 

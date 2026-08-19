@@ -1,9 +1,7 @@
-import type { PostOptions } from "hook-fetch";
 import type {
   AudioBase64Result,
   CancelFeedbackParams,
   ChatMessage,
-  ChatStreamEvent,
   Conversation,
   ConversationDetail,
   CreateAudioBase64Params,
@@ -21,7 +19,6 @@ import type {
   RecognizeSpeechByBase64Params,
   RecognizeSpeechByUploadParams,
   RecognizeSpeechByUrlParams,
-  SendChatMessageParams,
   SpeechRecognitionResult,
   SubmitFeedbackParams,
   TextToSpeechResult,
@@ -35,23 +32,6 @@ const jsonOptions = {
     "Content-Type": "application/json",
   },
 };
-
-export function sendChatMessage(
-  params: SendChatMessageParams,
-  options: PostOptions<SendChatMessageParams> = {},
-) {
-  return request.post<ChatStreamEvent>(
-    "/chat/send",
-    {
-      ...params,
-      responseMode: "streaming",
-    },
-    {
-      ...jsonOptions,
-      ...options,
-    },
-  );
-}
 
 export function interruptChat(params: InterruptChatParams) {
   return request.post<null>("/chat/interrupt", params, jsonOptions).json();
@@ -96,11 +76,11 @@ export function cancelFeedback(messageId: Identifier, params: CancelFeedbackPara
 }
 
 export function uploadFile(params: UploadFileParams) {
-  const formData = new FormData();
-  formData.append("file", params.file);
-  formData.append("user", params.user || "");
-
-  return request.upload<UploadedFile>("/files/upload", formData).json();
+  return request.upload<UploadedFile>("/files/upload", {
+    filePath: params.filePath,
+    name: params.name || "file",
+    formData: { user: params.user || "" },
+  }).json();
 }
 
 export function recognizeSpeechByUrl(params: RecognizeSpeechByUrlParams) {
@@ -112,13 +92,11 @@ export function recognizeSpeechByBase64(params: RecognizeSpeechByBase64Params) {
 }
 
 export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {
-  const formData = new FormData();
-  formData.append("file", params.file);
-  if (params.language) {
-    formData.append("language", params.language);
-  }
-
-  return request.upload<SpeechRecognitionResult>("/speech/asr/upload", formData).json();
+  return request.upload<SpeechRecognitionResult>("/speech/asr/upload", {
+    filePath: params.filePath,
+    name: params.name || "file",
+    formData: params.language ? { language: params.language } : undefined,
+  }).json();
 }
 
 export function getAudioBase64(params: CreateAudioBase64Params) {
