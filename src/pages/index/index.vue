@@ -18,6 +18,7 @@ import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { getAlipayJSBridge } from "@/utils/platform/runtime-global";
 
 defineOptions({ name: "AiChatPage" });
 
@@ -98,7 +99,7 @@ function backToWelcome() {
     userStore.setUserId("");
   }
   // #ifdef H5
-  const bridge = (globalThis as Record<string, any>).AlipayJSBridge;
+  const bridge = getAlipayJSBridge();
   if (bridge?.call) {
     bridge.call("popWindow");
     return;

@@ -35,10 +35,7 @@ export function useChatTts() {
     audioCtx = audio;
 
     const fs = typeof uni.getFileSystemManager === "function" ? uni.getFileSystemManager() : null;
-    const env = (globalThis as Record<string, { env?: { USER_DATA_PATH?: string } }>).wx
-      || (globalThis as Record<string, { env?: { USER_DATA_PATH?: string } }>).my
-      || uni;
-    const baseDir = env?.env?.USER_DATA_PATH || "";
+    const baseDir = (uni as { env?: { USER_DATA_PATH?: string } }).env?.USER_DATA_PATH || "";
 
     if (fs?.writeFile && baseDir) {
       const ext = mime === "audio/wav" ? "wav" : "mp3";

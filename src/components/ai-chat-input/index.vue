@@ -437,6 +437,15 @@ function _cancelVoiceRecorder() {
   }
 }
 
+function toastVoiceError(error, fallback) {
+  const raw = error instanceof Error
+    ? error.message
+    : (error && typeof error === "object" && (error.message || error.errMsg || error.errorMessage))
+      || String(error || fallback);
+  const title = String(raw || fallback).replace(/^Error:\s*/, "").slice(0, 28) || fallback;
+  uni.showToast({ title, icon: "none" });
+}
+
 async function _stopVoiceRecorderAndRecognize(jobSeq) {
   const recorder = _ensureRecorder();
   let result;
@@ -444,7 +453,7 @@ async function _stopVoiceRecorderAndRecognize(jobSeq) {
     result = await recorder.stop();
   } catch (e) {
     console.error("[voice] stop recorder failed", e);
-    result = { success: false, error: "语音识别失败" };
+    result = { success: false, error: e?.message || "录音停止失败" };
   }
   if (jobSeq !== state._jobSeq) return;
 
@@ -453,11 +462,13 @@ async function _stopVoiceRecorderAndRecognize(jobSeq) {
     _cancelVoiceRecorder();
     resetVoiceInput();
     if (!result?.cancelled) {
-      uni.showToast({ title: result?.error || "语音识别失败", icon: "none" });
+      uni.showToast({ title: result?.error || "录音失败", icon: "none" });
     }
     return;
   }
-  await _recognizeFromRecording(result.data?.tempFilePath, jobSeq);
+  const filePath = result.data?.tempFilePath;
+  console.info("[voice] ready to upload", { filePath, jobSeq });
+  await _recognizeFromRecording(filePath, jobSeq);
 }
 
 /**
@@ -468,6 +479,7 @@ async function _recognizeFromRecording(tempFilePath, jobId) {
   if (jobId !== state._jobSeq) return;
   if (!tempFilePath) {
     resetVoiceInput();
+    uni.showToast({ title: "未录制到音频内容", icon: "none" });
     return;
   }
 
@@ -476,10 +488,12 @@ async function _recognizeFromRecording(tempFilePath, jobId) {
   setRecognizing(true);
   try {
     if (jobId !== state._jobSeq) return;
+    console.info("[voice] ASR upload start", { tempFilePath });
     const result = await withVoiceTimeout(recognizeSpeechByUpload({
       filePath: tempFilePath,
       timeout: VOICE_ASR_TIMEOUT_MS,
     }));
+    console.info("[voice] ASR upload done", result);
     if (jobId !== state._jobSeq) return;
     const text = String(result?.text || "").trim();
     if (!text) {
@@ -511,7 +525,7 @@ async function _recognizeFromRecording(tempFilePath, jobId) {
       state.voicePhase = "finished";
     } else {
       resetVoiceInput();
-      uni.showToast({ title: "语音识别失败", icon: "none" });
+      toastVoiceError(error, "语音上传失败");
     }
   } finally {
     setRecognizing(false);

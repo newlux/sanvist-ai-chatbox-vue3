@@ -7,3 +7,8 @@ declare module "*.vue" {
   const component: DefineComponent<{}, {}, any>;
   export default component;
 }
+
+/** 支付宝小程序运行时由宿主注入的 JSBridge */
+declare const AlipayJSBridge: {
+  call?: (name: string, params?: Record<string, unknown>, callback?: () => void) => void;
+} | undefined;

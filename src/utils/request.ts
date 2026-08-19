@@ -1,5 +1,5 @@
 import type { PlatformRequestOptions } from "@/utils/platform/alipay-request";
-import { alipayRequest, PlatformRequestError } from "@/utils/platform/alipay-request";
+import { alipayRequest, alipayUploadFile, PlatformRequestError } from "@/utils/platform/alipay-request";
 
 export interface BaseResponse<T = unknown> {
   code: number;
@@ -20,7 +20,7 @@ interface UploadOptions {
   filePath: string;
   name?: string;
   formData?: Record<string, string>;
-  /** 支付宝 my.uploadFile 必填，uni 不会自动补，缺失会直接上传失败 */
+  /** 支付宝必填；老版本只认 image，音频也会被映射成 image */
   fileType?: "image" | "video" | "audio";
   timeout?: number;
 }
@@ -115,38 +115,45 @@ function rethrowWithAuthCheck(error: unknown): never {
   throw error;
 }
 
+function parseUploadPayload<T>(data: unknown): BaseResponse<T> | T {
+  if (data == null || data === "") {
+    throw new PlatformRequestError("上传响应为空");
+  }
+  if (typeof data === "object") return data as BaseResponse<T> | T;
+  try {
+    return JSON.parse(String(data)) as BaseResponse<T> | T;
+  } catch {
+    throw new PlatformRequestError("上传响应无法解析");
+  }
+}
+
 function createUploadRequest<T>(path: string, options: UploadOptions): JsonRequest<T> {
   return {
-    json() {
-      return new Promise<T>((resolve, reject) => {
-        uni.uploadFile({
-          url: `${baseURL.replace(/\/$/, "")}/${path.replace(/^\//, "")}`,
-          filePath: options.filePath,
-          name: options.name || "file",
-          fileType: options.fileType || "image",
-          formData: options.formData,
-          timeout: options.timeout,
-          header: getRequestHeaders(),
-          success(response) {
-            const statusCode = Number(response.statusCode) || 0;
-            if (statusCode < 200 || statusCode >= 300) {
-              notifyAuthFailure(statusCode, `上传失败（${statusCode}）`);
-              reject(new PlatformRequestError(`上传失败（${statusCode}）`, statusCode, response.data));
-              return;
-            }
-            try {
-              const payload = JSON.parse(response.data) as BaseResponse<T> | T;
-              resolve(unwrapResponse(payload));
-            } catch (error) {
-              reject(error);
-            }
-          },
-          fail(error) {
-            reject(new PlatformRequestError(error.errMsg || "文件上传失败"));
-          },
-          // fileType / timeout 未进入 uni 的类型声明，但会透传给 my.uploadFile
-        } as UniApp.UploadFileOption);
+    async json() {
+      const url = `${baseURL.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
+      console.info("[request] upload", {
+        url,
+        filePath: options.filePath,
+        fileType: options.fileType,
       });
+      const response = await alipayUploadFile({
+        url,
+        filePath: options.filePath,
+        name: options.name || "file",
+        fileType: options.fileType || "image",
+        formData: options.formData,
+        headers: getRequestHeaders(),
+      });
+      console.info("[request] upload success", {
+        statusCode: response.statusCode,
+        data: String(response.data ?? "").slice(0, 200),
+      });
+      const statusCode = Number(response.statusCode) || 0;
+      if (statusCode < 200 || statusCode >= 300) {
+        notifyAuthFailure(statusCode, `上传失败（${statusCode}）`);
+        throw new PlatformRequestError(`上传失败（${statusCode}）`, statusCode, response.data);
+      }
+      return unwrapResponse(parseUploadPayload<T>(response.data));
     },
   };
 }

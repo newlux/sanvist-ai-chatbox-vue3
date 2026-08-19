@@ -2,6 +2,7 @@
 import { onLaunch } from "@dcloudio/uni-app";
 import { setLocale } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
+import { getAlipayJSBridge } from "@/utils/platform/runtime-global";
 import { setAuthFailureHandler, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
 // 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
@@ -62,7 +63,7 @@ function initializeSystem(query: StartupQuery) {
  */
 function handleAuthFailure(_statusCode: number, message: string) {
   console.error("[App] auth failed", message);
-  const bridge = (globalThis as Record<string, any>).AlipayJSBridge;
+  const bridge = getAlipayJSBridge();
   if (bridge?.call) {
     bridge.call("tokenExpiration", {}, () => {});
     return;
