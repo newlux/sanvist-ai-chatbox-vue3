@@ -70,6 +70,7 @@
     "i18n-generator": "^0.5.1",
     "markdown-it": "14.0.0",
     "moment": "^2.29.4",
+    "mp-html": "^2.5.2",
     "pinia": "^2.2.6",
     "radash": "^12.1.1",
     "vue": "^3.4.21",

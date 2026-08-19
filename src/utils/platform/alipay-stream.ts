@@ -1,3 +1,14 @@
+import { createSseSession } from "@/utils/ai-stream/sseSession";
+
+/**
+ * 支付宝小程序侧的 SSE 传输。本文件只负责「把字节取回来」和「中止」，
+ * 帧解析统一交给 sseSession。
+ *
+ * 注意：my.request 至今没有 enableChunked / onChunkReceived（官方文档参数表里没有这两项），
+ * 分块只在微信小程序成立。这里保留 enableChunked 是为了让支持分块的运行环境走真流式，
+ * 不支持时（当前支付宝的实际情况）自动退化为整包响应，由 success 一次性解析出全部事件。
+ */
+
 export interface AlipayStreamOptions {
   url: string;
   data: unknown;
@@ -12,93 +23,27 @@ export interface AlipayStreamTask {
 }
 
 interface ChunkedRequestTask {
-  abort: () => void;
+  abort?: () => void;
   onChunkReceived?: (callback: (result: { data: ArrayBuffer }) => void) => void;
-}
-
-function createUtf8Decoder() {
-  let pending: number[] = [];
-
-  return (data: ArrayBuffer) => {
-    const bytes = [...pending, ...new Uint8Array(data)];
-    const codePoints: number[] = [];
-    let offset = 0;
-    while (offset < bytes.length) {
-      const first = bytes[offset];
-      const length = first < 0x80 ? 1 : first < 0xE0 ? 2 : first < 0xF0 ? 3 : 4;
-      if (offset + length > bytes.length) break;
-      if (length === 1) {
-        codePoints.push(first);
-      }
-      else if (length === 2) {
-        codePoints.push(((first & 0x1F) << 6) | (bytes[offset + 1] & 0x3F));
-      }
-      else if (length === 3) {
-        codePoints.push(
-          ((first & 0x0F) << 12)
-          | ((bytes[offset + 1] & 0x3F) << 6)
-          | (bytes[offset + 2] & 0x3F),
-        );
-      }
-      else {
-        codePoints.push(
-          ((first & 0x07) << 18)
-          | ((bytes[offset + 1] & 0x3F) << 12)
-          | ((bytes[offset + 2] & 0x3F) << 6)
-          | (bytes[offset + 3] & 0x3F),
-        );
-      }
-      offset += length;
-    }
-    pending = bytes.slice(offset);
-    return String.fromCodePoint(...codePoints);
-  };
-}
-
-function createSseConsumer(onMessage: (payload: unknown) => void) {
-  let buffer = "";
-
-  function consumeEvent(event: string) {
-    const data = event
-      .split(/\r?\n/)
-      .filter(line => line.startsWith("data:"))
-      .map(line => line.slice(5).trimStart())
-      .join("\n");
-    if (!data || data === "[DONE]") return;
-    try {
-      onMessage(JSON.parse(data));
-    }
-    catch {
-      onMessage(data);
-    }
-  }
-
-  return {
-    push(text: string) {
-      buffer += text;
-      const events = buffer.split(/\r?\n\r?\n/);
-      buffer = events.pop() || "";
-      events.forEach(consumeEvent);
-    },
-    flush() {
-      if (buffer.trim()) consumeEvent(buffer);
-      buffer = "";
-    },
-  };
 }
 
 export function createAlipaySseRequest(options: AlipayStreamOptions): AlipayStreamTask {
   let requestTask: ChunkedRequestTask | undefined;
   let settled = false;
+  let aborted = false;
   let rejectDone: (reason?: unknown) => void = () => {};
-  const decodeChunk = createUtf8Decoder();
-  const consumer = createSseConsumer(options.onMessage);
+
+  const session = createSseSession({
+    onEvent: options.onMessage,
+    isAborted: () => aborted,
+  });
 
   const done = new Promise<void>((resolve, reject) => {
     rejectDone = reject;
     const requestWithTask = uni.request as unknown as (
       options: UniApp.RequestOptions,
     ) => ChunkedRequestTask;
+
     requestTask = requestWithTask({
       url: options.url,
       method: "POST",
@@ -108,13 +53,17 @@ export function createAlipaySseRequest(options: AlipayStreamOptions): AlipayStre
         "Content-Type": "application/json",
         ...options.headers,
       },
+      // SSE 响应体不是 JSON，交给 sseSession 解析，避免运行时先做一次失败的 JSON.parse
+      dataType: "text",
       timeout: options.timeout ?? 120_000,
       enableChunked: true,
       success(response) {
         if (settled) return;
         settled = true;
-        consumer.flush();
         const statusCode = Number(response.statusCode) || 0;
+        // 整包兜底：未收到任何分片时（部分机型不回调 onChunkReceived），
+        // 直接把完整响应体按 SSE 解析，退化成一次性输出而不是白屏。
+        session.finalize(response.data);
         if (statusCode >= 200 && statusCode < 300) resolve();
         else reject(new Error(`流式请求失败（${statusCode}）`));
       },
@@ -123,28 +72,34 @@ export function createAlipaySseRequest(options: AlipayStreamOptions): AlipayStre
         settled = true;
         const message = error.errMsg || "流式请求失败";
         const normalized = new Error(message);
-        if (/\babort\b|取消/i.test(message)) normalized.name = "AbortError";
+        if (aborted || /\babort\b|取消/i.test(message)) normalized.name = "AbortError";
         reject(normalized);
       },
     } as UniApp.RequestOptions);
 
     if (typeof requestTask.onChunkReceived !== "function") {
-      requestTask.abort();
-      settled = true;
-      reject(new Error("当前支付宝小程序运行环境不支持 HTTP 分块响应，请切换 WebSocket 流式协议"));
+      // 拿不到分片就等整包，请求本身照常进行，不能在这里中断
+      console.warn("[alipay-stream] 当前运行环境不支持 HTTP 分块响应，本次回答将在响应结束后一次性输出");
       return;
     }
 
     requestTask.onChunkReceived(({ data }) => {
-      consumer.push(decodeChunk(data));
+      if (aborted) return;
+      try {
+        session.consumeChunk(data);
+      }
+      catch (error) {
+        console.error("[alipay-stream] 处理数据块失败", error);
+      }
     });
   });
 
   return {
     abort() {
+      aborted = true;
       if (settled) return;
       settled = true;
-      requestTask?.abort();
+      requestTask?.abort?.();
       const error = new Error("请求已取消");
       error.name = "AbortError";
       rejectDone(error);

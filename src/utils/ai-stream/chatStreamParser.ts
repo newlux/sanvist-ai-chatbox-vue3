@@ -6,6 +6,13 @@ import type {
 
 export type AiBlockType = "answer" | "think" | "suggestion" | "chart";
 
+/** 深度思考步骤：由 status 事件按 node 聚合而来 */
+export interface ThinkStep {
+  node: string;
+  message: string;
+  complete: boolean;
+}
+
 export interface AiBlock {
   id: string;
   type: AiBlockType;
@@ -44,6 +51,11 @@ function upsertBlock(
   return nextBlocks;
 }
 
+function readThinkSteps(blocks: AiBlock[]): ThinkStep[] {
+  const steps = blocks.find(block => block.id === "think-0")?.payload.steps;
+  return Array.isArray(steps) ? steps as ThinkStep[] : [];
+}
+
 export function buildInitialBlocks(): AiBlock[] {
   return [];
 }
@@ -65,15 +77,10 @@ export function applyEventToBlocks(
     case "status": {
       const { node, message, phase } = event.data;
       if (!node || !message) return base;
-      const thinkIndex = blocks.findIndex(block => block.id === "think-0");
-      const previousSteps = thinkIndex < 0
-        ? []
-        : Array.isArray(blocks[thinkIndex].payload.steps)
-          ? blocks[thinkIndex].payload.steps
-          : [];
-      const stepIndex = previousSteps.findIndex(step => step?.node === node);
+      const previousSteps = readThinkSteps(blocks);
+      const stepIndex = previousSteps.findIndex(item => item?.node === node);
       const steps = [...previousSteps];
-      const step = { node, message, complete: phase === "completed" };
+      const step: ThinkStep = { node, message, complete: phase === "completed" };
       if (stepIndex < 0) steps.push(step);
       else steps[stepIndex] = { ...steps[stepIndex], ...step };
       return {
