@@ -104,7 +104,7 @@ async function startChat() {
     setGuestRole(selectedRole.value);
     // 设置身份后立刻预取今日觉醒内容，进入首页即可直接展示
     const result = await getTodayAwakeningPrompt();
-    userStore.setAwakeningPrompt(result?.data ?? null);
+    userStore.setAwakeningPrompt(result ?? null);
     uni.redirectTo({ url: "/pages/index/index" });
   } catch (error) {
     console.warn("[role-select] failed to prefetch awakening prompt", error);
@@ -139,7 +139,7 @@ async function loadRoleOptions() {
       return;
     }
     const result = await getRoleOptions();
-    applyRoleList(result?.data?.roles ?? []);
+    applyRoleList(result?.roles ?? []);
   } catch (error) {
     loadError.value = "身份选项加载失败，请稍后重试";
     roles.value = FALLBACK_ROLES;

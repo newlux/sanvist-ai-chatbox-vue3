@@ -1,7 +1,5 @@
 <script setup>
 import { onShow } from "@dcloudio/uni-app";
-import { useHookFetch } from "hook-fetch/vue";
-import html2canvas from "html2canvas";
 import { useI18n } from "vue-i18n";
 import {
   cancelFeedback,
@@ -9,7 +7,6 @@ import {
   getConversations,
   getMessages,
   interruptChat,
-  sendChatMessage,
   submitFeedback,
 } from "@/api/chat";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
@@ -29,22 +26,27 @@ import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
-import { useSafeArea } from "@/hooks/useSafeArea";
-import { useSystemStore, useUserStore } from "@/stores";
+import { useChatStream } from "@/hooks/useChatStream";
+// import { useSafeArea } from "@/hooks/useSafeArea";
+import { useUserStore } from "@/stores";
 import {
   applyEventToBlocks,
   buildInitialBlocks,
 } from "@/utils/ai-stream/chatStreamParser";
+import {
+  createAlipayConversationPoster,
+  savePosterToAlbum,
+} from "@/utils/platform/alipay-poster";
 
 defineOptions({ name: "AiChatPage" });
 
 const { t } = useI18n();
-const systemStore = useSystemStore();
 const userStore = useUserStore();
-const { safeAreaStyle } = useSafeArea();
-const { stream, cancel } = useHookFetch({
-  request: sendChatMessage,
-  onError: error => console.error("[AiChatPage] stream request failed", error),
+// const { safeAreaStyle } = useSafeArea();
+const { stream, cancel } = useChatStream({
+  onError: (error) => {
+    if (!_isAbortError(error)) console.error("[AiChatPage] stream request failed", error);
+  },
 });
 const sharePosterWrap = ref(null);
 
@@ -64,12 +66,6 @@ const state = reactive({
 
   // 输入框
   inputText: "",
-  // 键盘高度（px），用于消息列表滚动占位，避免底部空白/按钮被遮挡
-  keyboardHeightPx: 0,
-  // 键盘打开时间戳（用于判断是否是真正抬起，避免 iPhone 聚焦过程抖动误触发滚动）
-  _keyboardOpenedAt: 0,
-  _scrollToBottomOnKeyboardHideTimer: null,
-  _scrollToBottomOnKeyboardFocusTimer: null,
   shareSheetVisible: false,
   shareSelectedIndexes: [],
   shareSuppressHighlight: false,
@@ -125,7 +121,6 @@ const {
   showQuickList,
   messages,
   inputText,
-  keyboardHeightPx,
   shareSheetVisible,
   shareSelectedIndexes,
   shareSuppressHighlight,
@@ -258,59 +253,6 @@ function _isAbortError(err) {
         .toLowerCase()
         .includes("abort")
   );
-}
-
-function onInputFocus() {
-  if (state.stage !== "chat") return;
-  if (state._scrollToBottomOnKeyboardFocusTimer) {
-    clearTimeout(state._scrollToBottomOnKeyboardFocusTimer);
-  }
-
-  // 键盘动画和输入栏定位完成后再滚动，避免第一次滚动被布局更新覆盖。
-  _scrollToBottom();
-  state._scrollToBottomOnKeyboardFocusTimer = setTimeout(() => {
-    _scrollToBottom();
-    state._scrollToBottomOnKeyboardFocusTimer = null;
-  }, 260);
-}
-
-function onKeyboardHeightChange(heightPx) {
-  // 来自 `ai-chat-input`：只在键盘打开时写入，避免拖出多余空白
-  const prev = Number(state.keyboardHeightPx) || 0;
-  const h = Number(heightPx) || 0;
-  const isIOS = Boolean(systemStore.isIOS);
-  // iPhone 给足上限，避免按钮被键盘遮住
-  const maxH = isIOS ? 520 : 800;
-  const next = Math.max(0, Math.min(h, maxH));
-  // 抑制 iPhone 键盘动画阶段的小幅抖动更新
-  if (Math.abs(next - (Number(state.keyboardHeightPx) || 0)) < 25) return;
-  state.keyboardHeightPx = next;
-
-  // 键盘关闭滚到底：需要“持续打开足够时间”+ 再延迟，避免 iPhone 聚焦阶段的高度抖动触发误滚动
-  if (state.stage !== "chat") return;
-
-  if (next > 0) {
-    state._keyboardOpenedAt = state._keyboardOpenedAt || Date.now();
-    if (state._scrollToBottomOnKeyboardHideTimer) {
-      clearTimeout(state._scrollToBottomOnKeyboardHideTimer);
-      state._scrollToBottomOnKeyboardHideTimer = null;
-    }
-    return;
-  }
-
-  // next === 0
-  if (prev <= 0) return;
-  const openedDuration = state._keyboardOpenedAt ? Date.now() - state._keyboardOpenedAt : 0;
-  if (openedDuration < 300) return;
-
-  if (state._scrollToBottomOnKeyboardHideTimer) {
-    clearTimeout(state._scrollToBottomOnKeyboardHideTimer);
-  }
-  state._scrollToBottomOnKeyboardHideTimer = setTimeout(() => {
-    if (state.keyboardHeightPx !== 0) return;
-    _scrollToBottom();
-    state._scrollToBottomOnKeyboardHideTimer = null;
-  }, 200);
 }
 
 function _cancelActiveStream() {
@@ -559,9 +501,16 @@ function closeSharePosterModal() {
 }
 
 async function _generateSharePosterLongImage() {
-  if (typeof document === "undefined") {
-    throw new TypeError("not-h5");
-  }
+  // #ifdef MP-ALIPAY
+  const selectedMessages = (state.shareSelectedIndexes || [])
+    .map(index => state.messages[index])
+    .filter(Boolean);
+  state.sharePosterDataUrl = await createAlipayConversationPoster(selectedMessages);
+  return;
+  // #endif
+  // #ifndef MP-ALIPAY
+  const { default: html2canvas } = await import("html2canvas");
+  if (typeof document === "undefined") throw new TypeError("not-h5");
 
   // html2canvas 只在 Web 环境工作
   const elFromDom =
@@ -703,18 +652,22 @@ async function _generateSharePosterLongImage() {
   if (clone && clone.parentNode) document.body.removeChild(clone);
   console.log(canvas.height, canvas.width, canvas);
   state.sharePosterDataUrl = canvas.toDataURL("image/png");
+  // #endif
 }
 
 async function onSaveSharePoster() {
   if (!state.sharePosterDataUrl) return;
-  if (typeof document === "undefined") {
-    uni.showToast({
-      title: t("save-not-supported"),
-      icon: "none",
-    });
-    return;
+  // #ifdef MP-ALIPAY
+  try {
+    await savePosterToAlbum(state.sharePosterDataUrl);
+    uni.showToast({ title: t("save-success"), icon: "none" });
+  } catch (error) {
+    console.error("[AiChatPage] save poster failed", error);
+    uni.showToast({ title: t("save-not-supported"), icon: "none" });
   }
-
+  return;
+  // #endif
+  // #ifndef MP-ALIPAY
   // H5：触发下载（多数 WebView 容器可用）
   const link = document.createElement("a");
   link.href = state.sharePosterDataUrl;
@@ -723,11 +676,16 @@ async function onSaveSharePoster() {
   link.click();
   document.body.removeChild(link);
   uni.showToast({ title: t("download-start"), icon: "none" });
+  // #endif
 }
 
 async function onCopySharePoster() {
   if (!state.sharePosterDataUrl) return;
-
+  // #ifdef MP-ALIPAY
+  await onSaveSharePoster();
+  return;
+  // #endif
+  // #ifndef MP-ALIPAY
   const canCopyImage =
     typeof navigator !== "undefined" &&
     typeof navigator.clipboard?.write === "function" &&
@@ -752,6 +710,7 @@ async function onCopySharePoster() {
     console.error("[AiChatPage] clipboard image copy error", error);
     uni.showToast({ title: t("copy-failed"), icon: "none" });
   }
+  // #endif
 }
 
 function startNewConversation() {
@@ -889,12 +848,13 @@ function backToWelcome() {
     userStore.setVisitorRole(null);
     userStore.setUserId("");
   }
+  // #ifdef H5
   const bridge = globalThis.AlipayJSBridge;
   if (bridge?.call) {
     bridge.call("popWindow");
     return;
   }
-
+  // #endif
   const pages = getCurrentPages();
   if (pages.length > 1) {
     uni.navigateBack({ delta: 1 });
@@ -1403,7 +1363,7 @@ async function loadAwakeningPrompt() {
   state.awakeningLoading = true;
   try {
     const result = await getTodayAwakeningPrompt();
-    userStore.setAwakeningPrompt(result?.data ?? null);
+    userStore.setAwakeningPrompt(result ?? null);
   } catch (error) {
     console.warn("[AiChatPage] failed to load awakening prompt", error);
     userStore.setAwakeningPrompt(null);
@@ -1437,8 +1397,6 @@ onShow(syncPageStage);
 onBeforeUnmount(() => {
   _cancelActiveStream();
   clearTimeout(state._finalScrollTimer);
-  clearTimeout(state._scrollToBottomOnKeyboardHideTimer);
-  clearTimeout(state._scrollToBottomOnKeyboardFocusTimer);
 });
 </script>
 
@@ -1449,12 +1407,8 @@ onBeforeUnmount(() => {
 
     <!-- 问答页 -->
     <view v-else class="ai-page__chat">
-      <!-- Background -->
-      <div class="ai-chat-bg" />
-      <!-- Decorative Glows -->
-      <div class="ai-chat-bg__glow ai-chat-bg__glow-blue" />
-      <div class="ai-chat-bg__glow ai-chat-bg__glow-red" />
-
+      <view class="ai-chat-glow ai-chat-glow--blue" />
+      <view class="ai-chat-glow ai-chat-glow--red" />
       <!-- Header -->
       <AiChatHeader
         v-model:sessions="sessions"
@@ -1484,7 +1438,6 @@ onBeforeUnmount(() => {
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
-        :keyboard-height-px="keyboardHeightPx"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         @quick-prompt="sendQuickPrompt"
@@ -1496,8 +1449,7 @@ onBeforeUnmount(() => {
         @select-toggle="onShareSelectToggle"
         @scroll-top="onScrollTop"
       />
-      <!-- 底部快捷导航与输入栏属于同一区域；键盘弹出时隐藏导航，仅保留输入栏/语音浮窗。 -->
-      <AiChatNav :visible="showQuickPrompts && keyboardHeightPx <= 0" />
+      <AiChatNav :visible="showQuickPrompts" />
 
       <view v-if="isSessionSwitching" class="session-loading">
         <view class="session-loading__spinner" />
@@ -1505,7 +1457,7 @@ onBeforeUnmount(() => {
 
       <view v-if="shareSheetVisible" class="share-sheet-modal">
         <view class="share-sheet-modal__mask" @tap="closeShareSheet" />
-        <view class="share-sheet" :style="safeAreaStyle" @tap.stop>
+        <view class="share-sheet" @tap.stop>
           <text class="share-sheet__title">
             分享到：
           </text>
@@ -1544,7 +1496,7 @@ onBeforeUnmount(() => {
       <!-- 分享图片预览/生成（Figma: 495:809） -->
       <view v-else-if="sharePosterVisible" class="share-poster-modal">
         <view class="share-poster-modal__mask" @tap="closeSharePosterModal" />
-        <view class="share-poster-modal__card" :style="safeAreaStyle" @tap.stop>
+        <view class="share-poster-modal__card" @tap.stop>
           <view class="share-poster-modal__content">
             <view v-if="sharePosterGenerating" class="share-poster-modal__loading">
               <view class="share-poster-modal__loading-content">
@@ -1566,7 +1518,7 @@ onBeforeUnmount(() => {
             </scroll-view>
           </view>
 
-          <view class="share-poster-modal__bottom" :style="safeAreaStyle">
+          <view class="share-poster-modal__bottom">
             <view class="share-poster-modal__bottom-action-wrap">
               <view class="share-poster-modal__option" @tap="onSaveSharePoster">
                 <view class="share-poster-modal__option-icon">
@@ -1576,6 +1528,7 @@ onBeforeUnmount(() => {
                   保存图片
                 </text>
               </view>
+              <!-- #ifndef MP-ALIPAY -->
               <view class="share-poster-modal__option" @tap="onCopySharePoster">
                 <view class="share-poster-modal__option-icon">
                   <image class="share-poster-modal__option-icon-img" :src="iconCopyImage" mode="aspectFit" />
@@ -1584,6 +1537,7 @@ onBeforeUnmount(() => {
                   复制图片
                 </text>
               </view>
+              <!-- #endif -->
             </view>
             <view class="share-poster-modal__divider" />
             <view class="share-poster-modal__cancel" @tap="closeSharePosterModal">
@@ -1594,10 +1548,14 @@ onBeforeUnmount(() => {
           </view>
         </view>
 
-        <!-- 离屏海报节点：用于 html2canvas 生成图片（不在界面展示） -->
+        <!-- #ifdef MP-ALIPAY -->
+        <canvas canvas-id="alipay-share-poster-canvas" class="share-poster-canvas" />
+        <!-- #endif -->
+        <!-- #ifndef MP-ALIPAY -->
         <view id="share-poster-wrap" ref="sharePosterWrap" class="share-poster-hidden">
           <ShareConversationPoster :messages="messages" :selected-indexes="shareSelectedIndexes" />
         </view>
+        <!-- #endif -->
       </view>
 
       <AiChatInput
@@ -1607,8 +1565,6 @@ onBeforeUnmount(() => {
         @send="sendMessage"
         @stop="stopGenerating"
         @toggle-quick-list="toggleQuickList"
-        @keyboard-height-change="onKeyboardHeightChange"
-        @input-focus="onInputFocus"
       />
 
       <AiBadFeedbackSheet
@@ -1694,44 +1650,35 @@ $color-white: #ffffff;
   position: relative;
 }
 
-.ai-chat-bg {
-  position: absolute;
-  inset: 0;
-  background-color: $color-bg-phone;
-  z-index: 0;
+.ai-page__chat > * {
+  position: relative;
+  z-index: 1;
 }
 
-.ai-chat-bg__glow {
+.ai-chat-glow {
   position: absolute;
-  z-index: 1;
+  z-index: 0;
   pointer-events: none;
+  border-radius: 50%;
+  filter: blur(28rpx);
 }
-.ai-chat-bg__glow-blue {
-  left: -80rpx;
-  top: -40rpx;
-  width: 560rpx;
-  height: 360rpx;
-  background: radial-gradient(
-    ellipse 80% 60% at 40% 40%,
-    rgba(123, 167, 217, 0.10) 0%,
-    rgba(123, 167, 217, 0.04) 50%,
-    rgba(123, 167, 217, 0) 70%
-  );
-  filter: blur(16rpx);
+
+.ai-chat-glow--blue {
+  top: -120rpx;
+  left: -180rpx;
+  width: 620rpx;
+  height: 420rpx;
+  background: rgba(123, 167, 217, 0.14);
 }
-.ai-chat-bg__glow-red {
-  left: 88rpx;
-  top: -40rpx;
-  width: 760rpx;
-  height: 360rpx;
-  background: radial-gradient(
-    ellipse 70% 55% at 60% 35%,
-    rgba(255, 80, 80, 0.08) 0%,
-    rgba(255, 80, 80, 0.03) 50%,
-    rgba(255, 80, 80, 0) 70%
-  );
-  filter: blur(20rpx);
+
+.ai-chat-glow--red {
+  top: -100rpx;
+  right: -240rpx;
+  width: 720rpx;
+  height: 400rpx;
+  background: rgba(255, 80, 80, 0.10);
 }
+
 .session-loading {
   position: absolute;
   left: 0;
@@ -1784,7 +1731,7 @@ $color-white: #ffffff;
   box-sizing: border-box;
   border-radius: 32rpx 32rpx 0 0;
   background: #ffffff;
-  padding: 40rpx 60rpx calc(32rpx + var(--safe-bottom, env(safe-area-inset-bottom)));
+  padding: 40rpx 60rpx 32rpx;
 }
 
 .share-sheet__title {
@@ -1896,7 +1843,7 @@ $color-white: #ffffff;
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: calc(30rpx + var(--safe-top, 0px)) 42rpx 0;
+  padding: 30rpx 42rpx 0;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -1937,7 +1884,7 @@ $color-white: #ffffff;
 }
 
 .share-poster-modal__bottom {
-  padding: 40rpx 60rpx calc(32rpx + var(--safe-bottom, 0px));
+  padding: 40rpx 60rpx 32rpx;
   background: #fff;
   box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.0601);
   display: flex;
@@ -2041,6 +1988,15 @@ $color-white: #ffffff;
   justify-content: center;
   padding-bottom: 32rpx;
 }
+.share-poster-canvas {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  width: 620px;
+  height: 4000px;
+  pointer-events: none;
+}
+
 .share-poster-hidden {
   position: fixed;
   left: 0;

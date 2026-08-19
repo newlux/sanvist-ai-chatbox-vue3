@@ -9,7 +9,7 @@ defineOptions({ name: "AiWelcomeVisitor" });
 onMounted(async () => {
   try {
     const result = await getRoleOptions();
-    const roles = result?.data?.roles ?? [];
+    const roles = result?.roles ?? [];
     if (roles.length) {
       uni.setStorageSync(VISITOR_ROLE_OPTIONS_CACHE_KEY, roles);
     }

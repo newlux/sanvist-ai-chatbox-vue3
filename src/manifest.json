@@ -64,7 +64,12 @@
     "usingComponents": true
   },
   "mp-alipay": {
-    "usingComponents": true
+    "usingComponents": true,
+    "permission": {
+      "scope.record": {
+        "desc": "用于语音输入和智能问答"
+      }
+    }
   },
   "mp-baidu": {
     "usingComponents": true

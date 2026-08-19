@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch } from "vue";
-import { useSafeArea } from "@/hooks/useSafeArea";
+// import { useSafeArea } from "@/hooks/useSafeArea";
 
 defineOptions({
   name: "AiBadFeedbackSheet",
@@ -24,7 +24,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["close", "confirm"]);
-const { safeAreaStyle } = useSafeArea({ mpaasFallbackPx: 0 });
+// const { safeAreaStyle } = useSafeArea({ mpaasFallbackPx: 0 });
 const selectedValue = ref([]);
 const supplement = ref("");
 
@@ -72,7 +72,7 @@ function onConfirm() {
 <template>
   <view v-if="visible" class="bad-feedback-sheet">
     <view class="bad-feedback-sheet__mask" @tap="onClose" />
-    <view class="bad-feedback-sheet__panel" :style="safeAreaStyle" @tap.stop>
+    <view class="bad-feedback-sheet__panel" @tap.stop>
       <view class="bad-feedback-sheet__header">
         <view class="bad-feedback-sheet__title-wrap">
           <text class="bad-feedback-sheet__title">
@@ -161,8 +161,7 @@ function onConfirm() {
   left: 0;
   box-sizing: border-box;
   height: 1200rpx;
-  padding: 40rpx 60rpx;
-  padding-bottom: calc(70rpx + var(--safe-bottom, 0px));
+  padding: 40rpx 60rpx 70rpx;
   overflow: hidden;
   border-radius: 40rpx 40rpx 0 0;
   background: #ffffff;

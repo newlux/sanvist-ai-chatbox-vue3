@@ -34,8 +34,8 @@ function onStartChat() {
   width: 100%;
   height: 100%;
   min-height: 100vh;
-  padding-top: var(--safe-top, env(safe-area-inset-top, 0px));
-  padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom, 0px));
+  padding-top: var(--safe-top-px, 0px);
+  padding-bottom: 0;
   overflow: hidden;
   color: #fff;
   background-position: center;
