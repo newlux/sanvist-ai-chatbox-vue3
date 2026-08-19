@@ -24,32 +24,6 @@ class VoiceRecorder {
     return typeof uni?.getRecorderManager === "function";
   }
 
-  async requestPermission() {
-    return new Promise((resolve) => {
-      uni.getSetting({
-        success: (result) => {
-          if (result.authSetting?.["scope.record"]) {
-            resolve({ success: true });
-            return;
-          }
-          uni.authorize({
-            scope: "scope.record",
-            success: () => resolve({ success: true }),
-            fail: error => resolve({
-              success: false,
-              error: error.errMsg || "无法访问麦克风，请检查权限设置",
-              notAllowed: true,
-            }),
-          });
-        },
-        fail: error => resolve({
-          success: false,
-          error: error.errMsg || "无法获取麦克风权限",
-        }),
-      });
-    });
-  }
-
   async start(options = {}) {
     this.hardReset();
     if (!VoiceRecorder.isSupported()) {
@@ -79,7 +53,13 @@ class VoiceRecorder {
         this.startResolve = null;
         this.phase = RECORDER_PHASE.IDLE;
         this.recorderManager = null;
-        resolve({ success: false, error: error.errMsg || "无法开始录音" });
+        const errorMessage = error.errMsg || "无法开始录音";
+        const notAllowed = /auth|permission|deny|denied|record/i.test(errorMessage);
+        resolve({
+          success: false,
+          error: notAllowed ? "请在系统设置中允许使用麦克风" : errorMessage,
+          notAllowed,
+        });
       });
       manager.start({
         duration: options.duration || 60_000,

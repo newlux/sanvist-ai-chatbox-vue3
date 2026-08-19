@@ -53,6 +53,8 @@ const sharePosterWrap = ref(null);
 const state = reactive({
   // 页面阶段: 'welcome' | 'chat'
   stage: "welcome",
+  windowHeight: 0,
+  keyboardHeight: 0,
   sessions: [],
   // 快捷提示词（后续由接口提供；这里用本地默认值兜底）
   quickPrompts: [
@@ -135,6 +137,20 @@ const {
   scrollIntoView,
   aiSessionId,
 } = toRefs(state);
+
+const chatViewportStyle = computed(() => {
+  const height = Math.max(0, state.windowHeight - state.keyboardHeight);
+  return height > 0 ? { height: `${height}px` } : {};
+});
+
+function syncWindowHeight() {
+  const info = uni.getSystemInfoSync();
+  state.windowHeight = Number(info.windowHeight) || 0;
+}
+
+function onKeyboardHeightChange(event) {
+  state.keyboardHeight = Math.max(0, Number(event?.height) || 0);
+}
 
 const shareSheetOptions = computed(() => {
   return [
@@ -1389,12 +1405,18 @@ function syncPageStage() {
 }
 
 onMounted(() => {
+  syncWindowHeight();
+  uni.onKeyboardHeightChange?.(onKeyboardHeightChange);
   syncPageStage();
   loadAwakeningPrompt();
 });
-onShow(syncPageStage);
+onShow(() => {
+  syncWindowHeight();
+  syncPageStage();
+});
 
 onBeforeUnmount(() => {
+  uni.offKeyboardHeightChange?.(onKeyboardHeightChange);
   _cancelActiveStream();
   clearTimeout(state._finalScrollTimer);
 });
@@ -1406,7 +1428,7 @@ onBeforeUnmount(() => {
     <AiWelcome v-if="stage === 'welcome'" @start-chat="goToChat" />
 
     <!-- 问答页 -->
-    <view v-else class="ai-page__chat">
+    <view v-else class="ai-page__chat" :style="chatViewportStyle">
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
       <!-- Header -->
@@ -1644,7 +1666,8 @@ $color-white: #ffffff;
 .ai-page__chat {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  min-height: 0;
+  height: 100%;
   background: #ffffff;
   overflow: hidden;
   position: relative;
