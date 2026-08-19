@@ -100,6 +100,8 @@ const state = reactive({
   _lastSendText: "",
   // 会话切换中的页面级 loading（居中展示）
   isSessionSwitching: false,
+  // 今日觉醒内容加载状态
+  awakeningLoading: false,
 
   // 滚动控制
   scrollTop: 0,
@@ -133,6 +135,7 @@ const {
   badFeedbackSheetVisible,
   isLoading,
   isSessionSwitching,
+  awakeningLoading,
   scrollTop,
   scrollIntoView,
   aiSessionId,
@@ -1199,7 +1202,6 @@ async function _sendAiFlow({ aiMsgIndex, content, hadSessionId, requestSeq, user
       if (!aiMessage) break;
       const update = applyEventToBlocks(aiMessage.blocks || [], chunk.result);
       receivedContent ||= update.receivedContent;
-      console.log("🚀 ~ _sendAiFlow ~ receivedContent:", receivedContent);
 
       if (update.conversationId) state.aiSessionId = update.conversationId;
       const nextMessage = {
@@ -1395,13 +1397,18 @@ function _scrollToBottom() {
 }
 
 async function loadAwakeningPrompt() {
+  if (!userStore.visitorRole) return;
+  // 角色选择页已预取到觉醒数据，直接展示；无需 loading
   if (userStore.awakeningPrompt) return;
+  state.awakeningLoading = true;
   try {
     const result = await getTodayAwakeningPrompt();
     userStore.setAwakeningPrompt(result?.data ?? null);
   } catch (error) {
     console.warn("[AiChatPage] failed to load awakening prompt", error);
     userStore.setAwakeningPrompt(null);
+  } finally {
+    state.awakeningLoading = false;
   }
 }
 
@@ -1479,6 +1486,7 @@ onBeforeUnmount(() => {
         :suppress-highlight="shareSuppressHighlight"
         :keyboard-height-px="keyboardHeightPx"
         :awakening="userStore.awakeningPrompt"
+        :awakening-loading="awakeningLoading"
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="sendQuickPrompt"
         @tts-click="onTtsClick"

@@ -2,9 +2,10 @@
 import type { RoleOption } from "@/api/user-role/role-options";
 import type { VisitorRole } from "@/stores";
 import { computed, onMounted, ref } from "vue";
-import { getRoleOptions } from "@/api/user-role";
+import { getRoleOptions, getTodayAwakeningPrompt } from "@/api/user-role";
 import iconBoss from "@/assets/img/icon-boss.png";
 import iconOperator from "@/assets/img/icon-operator.png";
+import { VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
 import { useUserStore } from "@/stores";
 import { isGuestRole, setGuestRole } from "@/utils/request";
 
@@ -86,38 +87,59 @@ const selectedRole = ref<VisitorRole | null>(null);
 const roles = ref<ViewRole[]>(FALLBACK_ROLES);
 const loading = ref(false);
 const loadError = ref<string | null>(null);
+const submitting = ref(false);
 
-const submitDisabled = computed(() => !selectedRole.value || loading.value);
+const submitDisabled = computed(() => !selectedRole.value || loading.value || submitting.value);
 
 function selectRole(role: VisitorRole) {
   selectedRole.value = role;
 }
 
-function startChat() {
-  if (!selectedRole.value) {
-    uni.showToast({ title: "请选择角色", icon: "none" });
-    return;
+async function startChat() {
+  if (!selectedRole.value || submitting.value) return;
+  submitting.value = true;
+  try {
+    userStore.setAwakeningPrompt(null);
+    userStore.setVisitorRole(selectedRole.value);
+    setGuestRole(selectedRole.value);
+    // 设置身份后立刻预取今日觉醒内容，进入首页即可直接展示
+    const result = await getTodayAwakeningPrompt();
+    userStore.setAwakeningPrompt(result?.data ?? null);
+    uni.redirectTo({ url: "/pages/index/index" });
+  } catch (error) {
+    console.warn("[role-select] failed to prefetch awakening prompt", error);
+    // 预取失败仍允许进入首页，首页会兜底重试
+    userStore.setAwakeningPrompt(null);
+    uni.redirectTo({ url: "/pages/index/index" });
+  } finally {
+    submitting.value = false;
   }
-  userStore.setVisitorRole(selectedRole.value);
-  setGuestRole(selectedRole.value);
-  uni.redirectTo({ url: "/pages/index/index" });
+}
+
+function applyRoleList(list: RoleOption[]) {
+  const mapped = list
+    .map(mapToViewRole)
+    .filter((role): role is ViewRole => role !== null);
+  if (mapped.length) {
+    roles.value = mapped;
+  } else {
+    loadError.value = "暂无可用身份";
+    roles.value = FALLBACK_ROLES;
+  }
 }
 
 async function loadRoleOptions() {
   loading.value = true;
   loadError.value = null;
   try {
-    const result = await getRoleOptions();
-    const list = result?.data?.roles ?? [];
-    const mapped = list
-      .map(mapToViewRole)
-      .filter((role): role is ViewRole => role !== null);
-    if (mapped.length) {
-      roles.value = mapped;
-    } else {
-      loadError.value = "暂无可用身份";
-      roles.value = FALLBACK_ROLES;
+    // 优先使用进入页面前已预取并缓存好的角色选项，避免加载闪动
+    const cached = uni.getStorageSync(VISITOR_ROLE_OPTIONS_CACHE_KEY);
+    if (Array.isArray(cached) && cached.length) {
+      applyRoleList(cached);
+      return;
     }
+    const result = await getRoleOptions();
+    applyRoleList(result?.data?.roles ?? []);
   } catch (error) {
     loadError.value = "身份选项加载失败，请稍后重试";
     roles.value = FALLBACK_ROLES;
@@ -174,7 +196,7 @@ onMounted(() => {
         :class="{ 'primary-btn--disabled': submitDisabled }"
         @tap="startChat"
       >
-        <text>{{ loading ? "加载中..." : "开始体验" }}</text>
+        <text>{{ loading || submitting ? "加载中..." : "开始体验" }}</text>
       </view>
     </view>
   </view>
