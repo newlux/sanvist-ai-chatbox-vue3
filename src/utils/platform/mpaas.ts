@@ -93,7 +93,7 @@ export class MpaasUnavailableError extends Error {
 export async function callNative<T extends BridgeResult = BridgeResult>(
   apiName: string,
   params: Record<string, unknown> = {},
-  options: { timeoutMs?: number; waitReadyMs?: number } = {},
+  options: { timeoutMs?: number; waitReadyMs?: number; silentTimeout?: boolean } = {},
 ): Promise<T> {
   const bridge = await waitForMpaas(options.waitReadyMs ?? 3000);
   if (!bridge) throw new MpaasUnavailableError(apiName);
@@ -107,7 +107,10 @@ export async function callNative<T extends BridgeResult = BridgeResult>(
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      logger.error(`${apiName} 调用超时`, { timeoutMs, params });
+      // 有些 JSAPI 在「无事可做」时压根不回调（录音相关的几个都有这毛病），
+      // 这类超时是预期内的，调用方会传 silentTimeout 降噪
+      const log = options.silentTimeout ? logger.debug : logger.error;
+      log(`${apiName} 调用超时`, { timeoutMs, params });
       reject(new Error(`${apiName} 调用超时`));
     }, timeoutMs);
 
@@ -213,7 +216,7 @@ export function permissionDeniedMessage(permission: NativePermission) {
  * 原生录音。宿主约定：
  * - microphoneStart 开录（存成 temp.m4a），出参 { success }
  * - microphoneEnd 停录并上传，出参 { success, url }
- * - microphoneCancel 停录并删除临时文件
+ * - 取消录音同样走 microphoneEnd（丢弃音频即可），不使用 microphoneCancel
  * - microphonePlay/{url}、microphonePause 播放控制
  */
 function assertNativeSuccess(result: BridgeResult, apiName: string) {
@@ -225,19 +228,6 @@ function assertNativeSuccess(result: BridgeResult, apiName: string) {
 
 export async function startNativeRecord() {
   assertNativeSuccess(await callNative("microphoneStart"), "microphoneStart");
-}
-
-/**
- * 开录前先无条件释放一次。
- * 上一轮如果异常收尾（识别失败、页面切走、end 超时），原生可能还攥着录音会话，
- * 这时直接 start 会让后续的 end 一直不回调。cancel 失败是正常的（本来就没在录），忽略。
- */
-export async function resetNativeRecord() {
-  try {
-    await callNative("microphoneCancel", {}, { timeoutMs: 3000 });
-  } catch (error) {
-    logger.debug("microphoneCancel（开录前的防御性释放）未生效，忽略", error);
-  }
 }
 
 /**
@@ -268,8 +258,20 @@ export async function stopNativeRecord() {
   };
 }
 
+/**
+ * 取消录音：走 microphoneEnd 正常收尾，只是把音频丢掉、不发识别请求。
+ *
+ * 不用 microphoneCancel —— 实测它在「本来就没在录」时不回调，
+ * 端上只能靠超时兜，要么拖慢开录，要么把正常情况误判成失败。
+ * End 是一定会回调的路径，拿到数据直接扔即可。
+ */
 export async function cancelNativeRecord() {
-  await callNative("microphoneCancel");
+  try {
+    const result = await callNative("microphoneEnd", {}, { timeoutMs: 10_000, silentTimeout: true });
+    logger.debug("录音已取消，丢弃音频", { hasData: Boolean(result?.data) });
+  } catch (error) {
+    logger.debug("microphoneEnd（取消路径）未回调，忽略", error);
+  }
 }
 
 export async function playNativeAudio(url: string) {
