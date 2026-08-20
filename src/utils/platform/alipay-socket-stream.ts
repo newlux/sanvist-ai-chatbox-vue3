@@ -28,13 +28,28 @@ export interface AlipaySocketStreamTask extends AlipayStreamTask {
 interface SocketTaskLike {
   onOpen?: (callback: () => void) => void;
   onMessage?: (callback: (result: { data: string | ArrayBuffer }) => void) => void;
-  onError?: (callback: (error: { errMsg?: string }) => void) => void;
+  onError?: (callback: (error: SocketErrorLike) => void) => void;
   onClose?: (callback: (result: { code?: number; reason?: string }) => void) => void;
   send?: (options: { data: string }) => void;
   close?: (options?: { code?: number; reason?: string }) => void;
 }
 
+/** 各端错误对象字段不统一：uni/微信给 errMsg，支付宝给 error + errorMessage */
+interface SocketErrorLike {
+  errMsg?: string;
+  error?: number | string;
+  errorMessage?: string;
+  message?: string;
+}
+
 const DEFAULT_CONNECT_TIMEOUT_MS = 8_000;
+
+function readSocketErrorMessage(error?: SocketErrorLike) {
+  const detail = error?.errMsg || error?.errorMessage || error?.message;
+  if (detail) return error?.error == null ? detail : `${detail}（error=${error.error}）`;
+  if (error?.error != null) return `WebSocket 连接异常（error=${error.error}）`;
+  return "WebSocket 连接异常";
+}
 
 export class SocketUnavailableError extends Error {
   constructor(message: string) {
@@ -152,7 +167,7 @@ export function createAlipaySocketStream(
     socket.onMessage?.(({ data }) => handleFrame(data));
 
     socket.onError?.((error) => {
-      const message = error?.errMsg || "WebSocket 连接异常";
+      const message = readSocketErrorMessage(error);
       finish(connected ? new Error(message) : new SocketUnavailableError(message));
     });
 
