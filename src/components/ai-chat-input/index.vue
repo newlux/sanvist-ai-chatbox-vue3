@@ -185,7 +185,6 @@ onBeforeUnmount(() => {
     <view
       v-if="showKeyboardMask"
       class="chat-input__keyboard-mask"
-      :style="{ bottom: keyboardOpen ? `${keyboardHeight}px` : '0' }"
       @touchstart.stop.prevent="onDismissKeyboard"
       @click.stop="onDismissKeyboard"
       @tap.stop="onMaskTap"
@@ -1199,7 +1198,10 @@ onBeforeUnmount(() => {
   background: #f8f9fc;
 }
 
-// 透明层，只负责接住「点空白收键盘」，底边贴着键盘顶沿。
+// 透明层，只负责接住「点空白收键盘」，铺满全屏。
+// 铺满是有意为之：键盘真在的时候，它盖住的那段区域触摸事件归输入法，我们收不到；
+// 一旦这段区域的点击落到遮罩上，反过来证明键盘已经收了（安卓返回键收起输入法时
+// 既不 blur 也无视口变化，只能靠这个反推）。
 // 用 touchstart + preventDefault：走 tap 的话遮罩在 touchend 时就被移除了，
 // webview 随后补发的 click 会落到下面刚归位的加号按钮上，凭空弹出附件面板。
 .chat-input__keyboard-mask {
@@ -1207,6 +1209,7 @@ onBeforeUnmount(() => {
   z-index: 1200;
   top: 0;
   right: 0;
+  bottom: 0;
   left: 0;
   background: transparent;
 }

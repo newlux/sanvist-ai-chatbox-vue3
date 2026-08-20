@@ -139,6 +139,37 @@ export async function callNative<T extends BridgeResult = BridgeResult>(
   });
 }
 
+/**
+ * 订阅原生主动推送的事件。
+ *
+ * Nebula 有两条推送通道，宿主用哪条不确定，两条都挂上：
+ * - AlipayJSBridge.on(eventName, handler)
+ * - document 上派发的同名 DOM 事件（payload 在 event.data 或 event.detail）
+ *
+ * 返回取消订阅的函数。宿主没推这个事件时，这里就是纯粹的空转，无副作用。
+ */
+export function onNativeEvent(eventName: string, handler: (payload: BridgeResult) => void) {
+  const readPayload = (event: unknown) => {
+    const source = event as { data?: BridgeResult; detail?: BridgeResult };
+    return (source?.data || source?.detail || (event as BridgeResult) || {}) as BridgeResult;
+  };
+  const domHandler = (event: Event) => handler(readPayload(event));
+
+  const bridge = readBridge() as (AlipayBridge & {
+    on?: (name: string, cb: (payload: BridgeResult) => void) => void;
+    off?: (name: string, cb: (payload: BridgeResult) => void) => void;
+  }) | undefined;
+  const bridgeHandler = (payload: BridgeResult) => handler(payload || {});
+
+  if (typeof bridge?.on === "function") bridge.on(eventName, bridgeHandler);
+  if (typeof document !== "undefined") document.addEventListener(eventName, domHandler);
+
+  return () => {
+    if (typeof bridge?.off === "function") bridge.off(eventName, bridgeHandler);
+    if (typeof document !== "undefined") document.removeEventListener(eventName, domHandler);
+  };
+}
+
 /** 发起调用但不关心结果，宿主没实现也不报错（用于纯通知类能力） */
 export function callNativeSilently(apiName: string, params: Record<string, unknown> = {}) {
   callNative(apiName, params).catch((error) => {
