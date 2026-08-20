@@ -1,9 +1,14 @@
 import type { ChatFile } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { uploadChatFile } from "@/api/chat";
 import { useUserStore } from "@/stores";
+import { createLogger } from "@/utils/logger";
+
 import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
+
+const logger = createLogger("attachments");
 
 export const MAX_ATTACHMENT_COUNT = 3;
 const MAX_LOCAL_FILE_SIZE = 50 * 1024 * 1024;
@@ -127,13 +132,14 @@ export function formatAttachmentStatus(attachment: ComposerAttachment) {
   return formatFileSize(attachment.size) || "已上传";
 }
 
-function toastLimit() {
-  uni.showToast({ title: `最多添加${MAX_ATTACHMENT_COUNT}个附件`, icon: "none" });
-}
-
 /** 输入栏的附件选择、上传与状态维护 */
 export function useComposerAttachments() {
+  const { t } = useI18n();
   const userStore = useUserStore();
+
+  function toastLimit() {
+    uni.showToast({ title: t("attachment-limit", { count: MAX_ATTACHMENT_COUNT }), icon: "none" });
+  }
   const attachments = ref<ComposerAttachment[]>([]);
 
   const hasAttachments = computed(() => attachments.value.length > 0);
@@ -166,7 +172,7 @@ export function useComposerAttachments() {
       // 上传期间用户可能已移除该附件
       const current = findAttachment(localId);
       if (!current) return;
-      if (!uploaded?.url) throw new Error("上传结果缺少文件地址");
+      if (!uploaded?.url) throw new Error(t("upload-result-missing-url"));
 
       current.url = uploaded.url;
       current.name = uploaded.name || current.name;
@@ -178,10 +184,10 @@ export function useComposerAttachments() {
     } catch (error) {
       const current = findAttachment(localId);
       if (!current) return;
-      const message = error instanceof Error ? error.message : "文件上传失败";
+      const message = error instanceof Error ? error.message : t("upload-failed");
       current.status = "failed";
       current.error = message;
-      console.error("[attachments] upload failed", error);
+      logger.error("upload failed", error);
       uni.showToast({ title: message.slice(0, 28), icon: "none", duration: 2500 });
     }
   }
@@ -198,7 +204,7 @@ export function useComposerAttachments() {
     accepted.forEach((file, index) => {
       if (!file.path) return;
       if (file.size > MAX_LOCAL_FILE_SIZE) {
-        uni.showToast({ title: `${file.name || "文件"}超过50MB`, icon: "none" });
+        uni.showToast({ title: t("attachment-oversize", { name: file.name || "文件" }), icon: "none" });
         return;
       }
 
@@ -249,7 +255,7 @@ export function useComposerAttachments() {
           mimeType: String(tempFiles[index]?.type || "image/*"),
         })));
       },
-      fail: error => console.warn("[attachments] chooseImage failed", error),
+      fail: error => logger.warn("chooseImage failed", error),
     });
   }
 
@@ -262,7 +268,7 @@ export function useComposerAttachments() {
 
     const chooseFile = (uni as { chooseFile?: (options: Record<string, unknown>) => void }).chooseFile;
     if (typeof chooseFile !== "function") {
-      uni.showToast({ title: "当前环境不支持选择文件", icon: "none" });
+      uni.showToast({ title: t("file-select-unsupported"), icon: "none" });
       return;
     }
     chooseFile({
@@ -276,7 +282,7 @@ export function useComposerAttachments() {
           mimeType: String(file.type || ""),
         })));
       },
-      fail: (error: unknown) => console.warn("[attachments] chooseFile failed", error),
+      fail: (error: unknown) => logger.warn("chooseFile failed", error),
     });
   }
   // #endif

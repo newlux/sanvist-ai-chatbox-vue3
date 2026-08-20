@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import AnswerBlock from "./AnswerBlock.vue";
 import ChartBlock from "./ChartBlock.vue";
 

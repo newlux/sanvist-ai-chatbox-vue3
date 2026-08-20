@@ -17,14 +17,16 @@ import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
-import { useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady } from "@/utils/platform/mpaas";
 
 defineOptions({ name: "AiChatPage" });
-
+const logger = createLogger("chat-page");
 const { t } = useI18n();
 const userStore = useUserStore();
-const chatStore = useChatStore();
+provideChatScope(DEFAULT_CHAT_SCOPE);
+const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
 const sessionStore = useSessionStore();
 const sharePosterWrap = ref<unknown>(null);
 const navActiveKey = ref("");
@@ -83,9 +85,11 @@ watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBo
 function startNewConversation() {
   // 已经是一轮空白会话就别再重置了，重复点击给个明确反馈
   if (!chatStore.messages.length && !chatStore.aiSessionId) {
-    uni.showToast({ title: "已是新对话", icon: "none" });
+    uni.showToast({ title: t("already-new-conversation"), icon: "none" });
     return;
   }
+  // 正在生成时切走：先掐掉在途请求，否则回包会继续往新会话里写
+  cancelActiveStream();
   chatStore.resetConversation();
   nextTick(() => chatStore.scrollToBottom(true));
 }
@@ -126,7 +130,7 @@ function goToChat() {
   try {
     uni.setStorageSync(AI_ASK_WELCOME_DONE_KEY, true);
   } catch (error) {
-    console.error("[AiChatPage] caught error", error);
+    logger.error("caught error", error);
   }
   chatStore.stage = "chat";
 }
@@ -138,7 +142,7 @@ function backToWelcome() {
   }
   // 嵌在宿主 APP 里时，返回交回 mPaaS 容器
   if (isMpaasReady()) {
-    void closeWebview().catch(error => console.warn("[AiChatPage] popWindow failed", error));
+    void closeWebview().catch(error => logger.warn("popWindow failed", error));
     return;
   }
   if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
@@ -147,15 +151,16 @@ function backToWelcome() {
 async function onSessionClick(session: { sessionId?: string | number; id?: string | number }) {
   const id = session?.sessionId || session?.id;
   if (!id || chatStore.aiSessionId === id) return;
+  cancelActiveStream();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
   chatStore.messages = [];
   sessionStore.isSessionSwitching = true;
   chatStore.aiSessionId = id;
   try {
-    await sessionStore.loadHistory(id);
+    await sessionStore.loadHistory(id, chatStore);
   } catch (error) {
-    console.error("[AiChatPage] caught error", error);
+    logger.error("caught error", error);
     uni.showToast({ title: t("load-history-failed"), icon: "none" });
   } finally {
     sessionStore.isSessionSwitching = false;
@@ -181,9 +186,9 @@ async function onSessionDelete(session: { id?: string | number }) {
   try {
     await sessionStore.removeSession(id);
     if (String(chatStore.aiSessionId) === String(id)) chatStore.resetConversation();
-    uni.showToast({ title: "删除成功", icon: "none" });
+    uni.showToast({ title: t("delete-success"), icon: "none" });
   } catch (error) {
-    console.error("[AiChatPage] caught error", error);
+    logger.error("caught error", error);
     uni.showToast({ title: t("delete-failed"), icon: "none" });
   }
 }
@@ -197,9 +202,9 @@ async function onSessionDeleteBatch(ids: Array<string | number>) {
     if (chatStore.aiSessionId && uniqueIds.includes(String(chatStore.aiSessionId))) {
       chatStore.resetConversation();
     }
-    uni.showToast({ title: "删除成功", icon: "none" });
+    uni.showToast({ title: t("delete-success"), icon: "none" });
   } catch (error) {
-    console.error("[AiChatPage] caught error", error);
+    logger.error("caught error", error);
     uni.showToast({ title: t("batch-delete-failed"), icon: "none" });
   }
 }
@@ -210,9 +215,9 @@ async function onSessionRename(session: { id?: string | number; name?: string })
   if (!id || !name) return;
   try {
     await sessionStore.renameSession(id, name);
-    uni.showToast({ title: "修改标题成功", icon: "none" });
+    uni.showToast({ title: t("rename-success"), icon: "none" });
   } catch (error) {
-    console.error("[AiChatPage] caught error", error);
+    logger.error("caught error", error);
     uni.showToast({ title: t("rename-failed"), icon: "none" });
   }
 }
@@ -223,7 +228,7 @@ async function loadAwakeningPrompt() {
   try {
     userStore.setAwakeningPrompt(await getTodayAwakeningPrompt() ?? null);
   } catch (error) {
-    console.warn("[AiChatPage] failed to load awakening prompt", error);
+    logger.warn("failed to load awakening prompt", error);
     userStore.setAwakeningPrompt(null);
   } finally {
     chatStore.awakeningLoading = false;
@@ -240,12 +245,18 @@ function syncPageStage() {
       chatStore.stage = "chat";
     }
   } catch (error) {
-    console.error("[AiChatPage] caught error", error);
+    logger.error("caught error", error);
   }
 }
 
-function onScrollTop() {
-  // 预留：加载更多历史消息
+async function onScrollTop() {
+  if (!chatStore.aiSessionId) return;
+  try {
+    await sessionStore.loadMoreHistory(chatStore);
+  } catch (error) {
+    logger.error("failed to load more history", error);
+    uni.showToast({ title: t("load-history-failed"), icon: "none" });
+  }
 }
 
 onMounted(() => {

@@ -1,9 +1,4 @@
-import {
-  cancelNativeRecord,
-  isMpaasReady,
-  startNativeRecord,
-  stopNativeRecord,
-} from "@/utils/platform/mpaas";
+import { createLogger } from "@/utils/logger";
 
 /**
  * 走 mPaaS 原生 JSAPI 的录音器（microphoneStart / microphoneEnd / microphoneCancel）。
@@ -13,6 +8,15 @@ import {
  * 个别宿主是直接回 base64（data.audioBase64），两种都透出去，
  * 由上层选「按地址识别」还是「按 base64 识别」，不用再上传一次本地文件。
  */
+
+import {
+  cancelNativeRecord,
+  isMpaasReady,
+  startNativeRecord,
+  stopNativeRecord,
+} from "@/utils/platform/mpaas";
+
+const logger = createLogger("voice");
 
 const MIN_RECORD_MS = 600;
 
@@ -54,12 +58,12 @@ class NativeVoiceRecorder {
       }
       this.recording = true;
       this.startedAt = Date.now();
-      console.info("[voice] native recorder started");
+      logger.info("native recorder started");
       return { success: true };
     } catch (error) {
       this.recording = false;
       const message = readErrorMessage(error, "录音启动失败");
-      console.warn("[voice] native recorder start failed", error);
+      logger.warn("native recorder start failed", error);
       return { success: false, error: message, notAllowed: /权限|permission|denied/i.test(message) };
     }
   }
@@ -79,14 +83,14 @@ class NativeVoiceRecorder {
       if (sessionId !== this.sessionId) {
         return { success: false, error: "录音已取消", cancelled: true };
       }
-      console.info("[voice] native recorder stopped", {
+      logger.info("native recorder stopped", {
         url: audio.audioUrl,
         base64Length: audio.audioBase64 ? audio.audioBase64.length : 0,
       });
       return { success: true, data: audio };
     } catch (error) {
       this.recording = false;
-      console.warn("[voice] native recorder stop failed", error);
+      logger.warn("native recorder stop failed", error);
       return { success: false, error: readErrorMessage(error, "录音失败") };
     }
   }

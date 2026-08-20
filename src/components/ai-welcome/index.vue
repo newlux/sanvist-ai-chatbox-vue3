@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useUserStore } from "@/stores";

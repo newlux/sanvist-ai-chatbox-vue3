@@ -1,10 +1,11 @@
-<script setup>
+<script setup lang="ts">
 import { onMounted } from "vue";
 import { getRoleOptions } from "@/api/user-role";
 import { VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
+import { createLogger } from "@/utils/logger";
 
 defineOptions({ name: "AiWelcomeVisitor" });
-
+const logger = createLogger("visitor");
 // 欢迎页挂载即预取角色选项并缓存，进入角色选择页时直接使用，避免页面加载闪动
 onMounted(async () => {
   try {
@@ -14,7 +15,7 @@ onMounted(async () => {
       uni.setStorageSync(VISITOR_ROLE_OPTIONS_CACHE_KEY, roles);
     }
   } catch (error) {
-    console.warn("[visitor] failed to prefetch role options", error);
+    logger.warn("failed to prefetch role options", error);
   }
 });
 

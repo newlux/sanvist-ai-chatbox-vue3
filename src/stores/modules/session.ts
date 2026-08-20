@@ -1,3 +1,4 @@
+import type { useChatStore } from "./chat";
 import type { Conversation, Identifier } from "@/api/chat/types";
 import type { UiChatMessage } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
@@ -10,8 +11,9 @@ import {
   getMessages,
   renameConversation,
 } from "@/api/chat";
-import { useChatStore } from "./chat";
 import { useUserStore } from "./user";
+
+type ChatStore = ReturnType<typeof useChatStore>;
 
 function mapHistoryBlocks(contents: unknown, messageId: Identifier | null): AiBlock[] {
   const items = Array.isArray(contents) ? contents : [];
@@ -67,8 +69,15 @@ export function mapHistoryMessages(
   return mapped;
 }
 
+/** 单页历史消息条数。会话页首屏只拉这一页，上翻再补 */
+const HISTORY_PAGE_SIZE = 30;
+
 export const useSessionStore = defineStore("session", () => {
   const sessions = ref<Conversation[]>([]);
+  /** 历史消息分页游标：接口按 firstId 往前翻 */
+  const historyFirstId = ref<Identifier | null>(null);
+  const historyHasMore = ref(false);
+  const historyLoading = ref(false);
   const isSessionSwitching = ref(false);
   const hasMore = ref(true);
   const lastId = ref<Identifier | null>(null);
@@ -98,18 +107,60 @@ export const useSessionStore = defineStore("session", () => {
     return { data: rows, hasMore: hasMore.value };
   }
 
-  async function loadHistory(sessionId: Identifier) {
+  /**
+   * 载入某个会话的历史消息（最近一页）。
+   * chatStore 由调用方传入：首页和智能体页面各有自己的会话域，
+   * 这里默认取一个的话就会写错页面。
+   */
+  async function loadHistory(sessionId: Identifier, chatStore: ChatStore) {
     const userStore = useUserStore();
-    const chatStore = useChatStore();
     const page = await getMessages({
       conversationId: sessionId,
       user: String(userStore.userId || ""),
-      limit: 100,
+      limit: HISTORY_PAGE_SIZE,
     });
-    chatStore.messages = mapHistoryMessages(page?.data || [], sessionId);
+    const rows = page?.data || [];
+    chatStore.messages = mapHistoryMessages(rows, sessionId);
+    // 接口按时间正序返回，最早的一条就是下一页的游标
+    historyFirstId.value = (rows[0]?.id ?? null) as Identifier | null;
+    historyHasMore.value = Boolean(page?.hasMore);
+    historyLoading.value = false;
     chatStore.showQuickPrompts = false;
     chatStore.showQuickList = false;
     chatStore.scrollToBottom(true);
+  }
+
+  /**
+   * 上翻加载更早的消息，插到列表头部。
+   * 不动滚动位置：滚到顶才会触发，内容插在上方，用户当前看的那条仍在视野里。
+   */
+  async function loadMoreHistory(chatStore: ChatStore) {
+    const sessionId = chatStore.aiSessionId;
+    if (!sessionId || !historyHasMore.value || historyLoading.value) return false;
+    if (!historyFirstId.value) return false;
+
+    historyLoading.value = true;
+    try {
+      const userStore = useUserStore();
+      const page = await getMessages({
+        conversationId: sessionId,
+        user: String(userStore.userId || ""),
+        firstId: historyFirstId.value,
+        limit: HISTORY_PAGE_SIZE,
+      });
+      const rows = page?.data || [];
+      if (!rows.length) {
+        historyHasMore.value = false;
+        return false;
+      }
+      const older = mapHistoryMessages(rows, sessionId);
+      chatStore.messages = [...older, ...chatStore.messages];
+      historyFirstId.value = (rows[0]?.id ?? null) as Identifier | null;
+      historyHasMore.value = Boolean(page?.hasMore);
+      return true;
+    } finally {
+      historyLoading.value = false;
+    }
   }
 
   async function removeSession(sessionId: Identifier) {
@@ -144,7 +195,10 @@ export const useSessionStore = defineStore("session", () => {
     isSessionSwitching,
     hasMore,
     loadSessions,
+    historyHasMore,
+    historyLoading,
     loadHistory,
+    loadMoreHistory,
     removeSession,
     removeSessions,
     renameSession,

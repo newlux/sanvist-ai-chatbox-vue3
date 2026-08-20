@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
 import { expandChartFences } from "@/utils/ai-stream";
 import AiBlockRenderer from "./AiBlockRenderer.vue";

@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 
 defineOptions({ name: "AnswerBlock" });

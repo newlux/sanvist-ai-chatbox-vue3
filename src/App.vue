@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { onLaunch } from "@dcloudio/uni-app";
+import { useI18n } from "vue-i18n";
 import { setLocale } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
+import { createLogger } from "@/utils/logger";
 import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
 import { setAuthFailureHandler, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
+const logger = createLogger("app");
 // 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
 // 否则一旦这串固定 token 泄漏或过期，线上会静默变成无鉴权请求
 const authorizationFallback = import.meta.env.DEV
@@ -17,6 +20,7 @@ interface LaunchOptions {
   query?: StartupQuery;
 }
 
+const { t } = useI18n();
 const systemStore = useSystemStore();
 const userStore = useUserStore();
 
@@ -62,12 +66,12 @@ function initializeSystem(query: StartupQuery) {
  * 只能通知宿主重新下发；拿不到 bridge 时至少让用户知道要重进。
  */
 function handleAuthFailure(_statusCode: number, message: string) {
-  console.error("[App] auth failed", message);
+  logger.error("auth failed", message);
   if (isMpaasReady()) {
     notifyTokenExpiration();
     return;
   }
-  uni.showToast({ title: "登录已失效，请重新进入", icon: "none", duration: 3000 });
+  uni.showToast({ title: t("auth-expired-reenter"), icon: "none", duration: 3000 });
 }
 
 function initializeDeviceInfo() {

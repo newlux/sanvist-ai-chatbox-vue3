@@ -1,8 +1,17 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
 import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
 import iconVox from "@/assets/img/icon-vox.svg";
+
+/** 快捷入口。subagent 随请求透传给算法侧；mode=page 另开会话页，inline 就地高亮 */
+export interface NavItem {
+  key: string;
+  title: string;
+  icon: string;
+  subagent?: string;
+  mode?: "page" | "inline";
+}
 
 defineOptions({
   name: "AiChatNav",
@@ -10,7 +19,7 @@ defineOptions({
 
 const props = defineProps({
   items: {
-    type: Array,
+    type: Array as () => NavItem[],
     default: () => [],
   },
   visible: {
@@ -47,7 +56,7 @@ const navPages = computed(() => {
   return pages;
 });
 
-function onItemTap(item) {
+function onItemTap(item: NavItem) {
   emit("item-click", item);
 }
 </script>

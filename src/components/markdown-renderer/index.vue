@@ -1,18 +1,17 @@
-<script setup>
+<script setup lang="ts">
 import MarkdownIt from "markdown-it";
 import mpHtml from "mp-html/dist/uni-app/components/mp-html/mp-html.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { createLogger } from "@/utils/logger";
 
 defineOptions({ name: "MarkdownRenderer" });
-
 const props = defineProps({
   content: { type: String, default: "" },
   // 流式阶段：合并高频更新，降低全量解析与渲染频率
   streaming: { type: Boolean, default: false },
 });
-
 const emit = defineEmits(["ready"]);
-
+const logger = createLogger("markdown");
 /**
  * 单例：一次对话里会同时存在很多气泡，每个气泡各建一个 MarkdownIt
  * 会白白吃掉内存，且规则表完全一致。
@@ -120,7 +119,7 @@ function parseMarkdown(content) {
     return markdown.render(content);
   }
   catch (error) {
-    console.error("[MarkdownRenderer] 解析失败，回退为纯文本", error);
+    logger.error("解析失败，回退为纯文本", error);
     return content;
   }
 }
@@ -136,7 +135,7 @@ function renderLatest() {
   lastRenderAt = Date.now();
 
   if (import.meta.env.DEV) {
-    console.log(
+    logger.debug(
       `[MarkdownRenderer] 正文 ${pendingContent.length} 字 → HTML ${renderedHtml.value.length} 字`,
     );
   }
@@ -180,7 +179,7 @@ function onLinkTap(e) {
 }
 
 function onParseError(e) {
-  console.warn("[MarkdownRenderer] mp-html 渲染异常", e?.detail || e);
+  logger.warn("mp-html 渲染异常", e?.detail || e);
 }
 </script>
 

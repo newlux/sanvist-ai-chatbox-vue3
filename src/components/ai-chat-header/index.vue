@@ -1,12 +1,21 @@
-<script setup>
+<script setup lang="ts">
 import { useI18n } from "vue-i18n";
 import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete.svg";
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import { useSafeArea } from "@/hooks/useSafeArea";
+import { createLogger } from "@/utils/logger";
+
+/** 历史会话条目：字段与网关 Conversation 对齐，这里只取用到的几个 */
+interface SessionItem {
+  id?: string | number;
+  sessionId?: string | number;
+  name?: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
 
 defineOptions({ name: "AiChatHeader" });
-
 const props = defineProps({
   sessions: { type: Array, default: () => [] },
   loadSessions: { type: Function, default: undefined },
@@ -28,7 +37,7 @@ const emit = defineEmits([
   "update:sessions",
   "share-select-all",
 ]);
-
+const logger = createLogger("chat-header");
 const { t } = useI18n();
 const { safeTopPx } = useSafeArea();
 const historyPopup = ref();
@@ -61,19 +70,19 @@ const filteredSessionList = computed(() => {
  * 历史会话按时间分组：今天 / 昨天 / 7 天内 / 30 天内 / 更早按月份。
  * 时间取 updatedAt，缺失时退回 createdAt；接口给的是秒级时间戳。
  */
-function readSessionTime(session) {
+function readSessionTime(session: SessionItem) {
   const raw = Number(session?.updatedAt || session?.createdAt || 0);
   if (!raw) return 0;
   return raw < 1e12 ? raw * 1000 : raw;
 }
 
-function startOfDay(date) {
+function startOfDay(date: Date | number) {
   const copy = new Date(date);
   copy.setHours(0, 0, 0, 0);
   return copy.getTime();
 }
 
-function resolveSessionGroup(time, todayStart) {
+function resolveSessionGroup(time: number, todayStart: number) {
   if (!time) return { key: "unknown", title: "更早", order: 900 };
   const dayDiff = Math.floor((todayStart - startOfDay(new Date(time))) / 86400000);
   if (dayDiff <= 0) return { key: "today", title: "今天", order: 0 };
@@ -106,7 +115,7 @@ const historyDrawerStyle = computed(() => ({
   paddingTop: `calc(${safeTopPx.value}px + 32rpx)`,
 }));
 
-function getSessionKey(session) {
+function getSessionKey(session: SessionItem) {
   return session?.id || "";
 }
 
@@ -122,12 +131,12 @@ async function openHistoryDrawer() {
   await nextTick();
   sessionPaging.value?.reload?.();
 }
-async function onSessionQuery(pageNo, pageSize) {
+async function onSessionQuery(pageNo: number, pageSize: number) {
   try {
     const result = await props.loadSessions?.(pageNo, pageSize);
     sessionPaging.value?.completeByNoMore?.(result?.data || [], !result?.hasMore);
   } catch (error) {
-    console.error("[AiChatHeader] load sessions failed", error);
+    logger.error("load sessions failed", error);
     sessionPaging.value?.complete?.(false);
   } finally {
     historyLoading.value = false;
@@ -166,7 +175,7 @@ function onSessionListScroll() {
   }, 120);
 }
 
-function onSessionLongPress(session, event) {
+function onSessionLongPress(session: SessionItem, event: any) {
   if (isSessionListScrolling.value || editingMode.value) return;
   if (renamingId.value) commitRename();
   actionSession.value = session || null;
@@ -213,7 +222,7 @@ function onHistoryPopupChange(event) {
 
 function onRenameTap() {}
 
-function onSessionTap(session) {
+function onSessionTap(session: SessionItem) {
   if (consumeLongPressReleaseTap()) return;
   if (editingMode.value) {
     const id = getSessionKey(session);
@@ -227,7 +236,7 @@ function onSessionTap(session) {
   emit("session-click", session);
   closeDrawer();
 }
-function isSelected(id) {
+function isSelected(id: string | number) {
   return selectedIds.value.includes(id);
 }
 function deleteOne() {
@@ -244,7 +253,7 @@ function renameOne() {
   renameValue.value = session.name || "";
 }
 
-function onRenameInput(event) {
+function onRenameInput(event: { detail: { value: string } }) {
   renameValue.value = String(event?.detail?.value || "");
 }
 

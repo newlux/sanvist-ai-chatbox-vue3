@@ -7,7 +7,9 @@ import { useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { buildInitialBlocks, consumeChatStream } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
-const ATTACHMENT_ONLY_QUERY = "请查看我发送的附件";
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("chat");
 
 function isAbortError(error: unknown) {
   if (!error) return false;
@@ -24,36 +26,33 @@ export function useChatSend() {
   const userStore = useUserStore();
   const { stream, cancel } = useChatStream({
     onError: (error) => {
-      if (!isAbortError(error)) console.error("[AiChatPage] stream request failed", error);
+      if (!isAbortError(error)) logger.error("stream request failed", error);
     },
   });
 
   function cancelActiveStream() {
-    const idx = Number(chatStore.activeAiMsgIndex);
-    const activeMessage = Number.isInteger(idx) && idx >= 0 ? chatStore.messages[idx] : null;
+    const activeId = String(chatStore.activeMessageId || "");
+    const index = chatStore.findMessageIndex(activeId);
+    const activeMessage = index >= 0 ? chatStore.messages[index] : null;
 
     chatStore.invalidateActiveRequest();
     try {
       cancel();
     } catch (error) {
-      console.error("[AiChatPage] failed to cancel stream", error);
+      logger.error("failed to cancel stream", error);
     }
 
     if (activeMessage?.sessionId && activeMessage?.messageId) {
       interruptChat({
         conversationId: activeMessage.sessionId,
         messageId: activeMessage.messageId,
-      }).catch(error => console.error("[AiChatPage] failed to interrupt chat", error));
+      }).catch(error => logger.error("failed to interrupt chat", error));
     }
 
     if (activeMessage?.loading) {
-      chatStore.replaceMessage(idx, {
-        ...activeMessage,
-        loading: false,
-        interrupted: true,
-      });
+      chatStore.patchMessageById(activeId, { loading: false, interrupted: true });
     }
-    chatStore.activeAiMsgIndex = -1;
+    chatStore.activeMessageId = "";
   }
 
   function stopGenerating() {
@@ -63,19 +62,19 @@ export function useChatSend() {
     chatStore.scrollToBottom();
   }
 
-  function applySnapshot(aiMsgIndex: number, userMsgIndex: number, snapshot: {
+  function applySnapshot(aiMsgId: string, userMsgId: string, snapshot: {
     blocks: ReturnType<typeof buildInitialBlocks>;
     conversationId?: Identifier;
     messageId?: Identifier;
     metadata?: { duration_ms?: number | null; status?: string };
     ended?: boolean;
   }) {
-    const aiMessage = chatStore.messages[aiMsgIndex];
-    if (!aiMessage) return;
+    const index = chatStore.findMessageIndex(aiMsgId);
+    if (index < 0) return;
+    const aiMessage = chatStore.messages[index];
 
     if (snapshot.conversationId) chatStore.aiSessionId = snapshot.conversationId;
-    chatStore.replaceMessage(aiMsgIndex, {
-      ...aiMessage,
+    chatStore.patchMessageById(aiMsgId, {
       blocks: snapshot.blocks,
       sessionId: snapshot.conversationId ?? aiMessage.sessionId,
       messageId: snapshot.messageId ?? aiMessage.messageId,
@@ -84,10 +83,8 @@ export function useChatSend() {
       interrupted: snapshot.metadata?.status === "stopped",
     });
 
-    const userMessage = chatStore.messages[userMsgIndex];
-    if (userMessage && snapshot.conversationId && snapshot.messageId) {
-      chatStore.replaceMessage(userMsgIndex, {
-        ...userMessage,
+    if (snapshot.conversationId && snapshot.messageId) {
+      chatStore.patchMessageById(userMsgId, {
         sessionId: snapshot.conversationId,
         messageId: snapshot.messageId,
       });
@@ -96,14 +93,14 @@ export function useChatSend() {
   }
 
   async function sendAiFlow(options: {
-    aiMsgIndex: number;
-    userMsgIndex: number;
+    aiMsgId: string;
+    userMsgId: string;
     content: string;
     files: ChatFile[];
     hadSessionId: boolean;
     requestSeq: number;
   }) {
-    const { aiMsgIndex, userMsgIndex, content, files, hadSessionId, requestSeq } = options;
+    const { aiMsgId, userMsgId, content, files, hadSessionId, requestSeq } = options;
     let receivedContent = false;
 
     try {
@@ -119,29 +116,28 @@ export function useChatSend() {
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
-          applySnapshot(aiMsgIndex, userMsgIndex, snapshot);
+          applySnapshot(aiMsgId, userMsgId, snapshot);
         },
       });
     } catch (error) {
-      const aiMessage = chatStore.messages[aiMsgIndex];
+      const index = chatStore.findMessageIndex(aiMsgId);
+      const aiMessage = index >= 0 ? chatStore.messages[index] : null;
       if (aiMessage && requestSeq === chatStore.activeRequestSeq && !isAbortError(error)) {
-        chatStore.replaceMessage(aiMsgIndex, {
-          ...aiMessage,
+        chatStore.patchMessageById(aiMsgId, {
           blocks: receivedContent ? aiMessage.blocks : buildInitialBlocks(),
           content: receivedContent ? aiMessage.content : t("ai-unavailable-retry-later"),
           loading: false,
         });
-        console.error("[AiChatPage] stream consumption failed", error);
+        logger.error("stream consumption failed", error);
       }
     } finally {
       if (requestSeq === chatStore.activeRequestSeq) {
-        const current = chatStore.messages[aiMsgIndex];
-        if (current) chatStore.replaceMessage(aiMsgIndex, { ...current, loading: false });
+        chatStore.patchMessageById(aiMsgId, { loading: false });
         chatStore.isLoading = false;
-        chatStore.activeAiMsgIndex = -1;
+        chatStore.activeMessageId = "";
         chatStore.scrollToBottom();
         if (!hadSessionId && chatStore.aiSessionId) {
-          sessionStore.loadSessions().catch(error => console.error("[AiChatPage] failed to refresh AI sessions", error));
+          sessionStore.loadSessions().catch(error => logger.error("failed to refresh AI sessions", error));
         }
       }
     }
@@ -159,8 +155,8 @@ export function useChatSend() {
     const files = payload?.files ?? [];
     const attachments = payload?.attachments ?? [];
     if (!text && !files.length) return;
-    // 网关要求 query 非空，只发附件时补一句中性提问；气泡里仍然只显示附件本身
-    const query = text || ATTACHMENT_ONLY_QUERY;
+    // 网关要求 query 非空，只发附件时补一句中性提问
+    const query = text || t("attachment-only-query");
 
     cancelActiveStream();
     const requestSeq = chatStore.nextRequestSeq();
@@ -171,18 +167,18 @@ export function useChatSend() {
     chatStore.inputText = "";
     chatStore.showQuickPrompts = false;
     chatStore.isLoading = true;
-    const userMsgIndex = chatStore.messages.length;
+    const userMsgId = `user-${uuid}`;
+    const aiMsgId = `ai-${uuid}`;
     chatStore.messages.push({
-      id: `user-${uuid}`,
+      id: userMsgId,
       role: "user",
       content: query,
       sessionId: conversationId,
       messageId: null,
       ...(attachments.length ? { attachments } : {}),
     });
-    const aiMsgIndex = chatStore.messages.length;
     chatStore.messages.push({
-      id: `ai-${uuid}`,
+      id: aiMsgId,
       role: "ai",
       content: "",
       blocks: buildInitialBlocks(),
@@ -192,9 +188,9 @@ export function useChatSend() {
       messageId: null,
       waitingText: query,
     });
-    chatStore.activeAiMsgIndex = aiMsgIndex;
+    chatStore.activeMessageId = aiMsgId;
     chatStore.scrollToBottom(true);
-    await sendAiFlow({ aiMsgIndex, userMsgIndex, content: query, files, hadSessionId, requestSeq });
+    await sendAiFlow({ aiMsgId, userMsgId, content: query, files, hadSessionId, requestSeq });
   }
 
   function sendQuickPrompt(text: string) {

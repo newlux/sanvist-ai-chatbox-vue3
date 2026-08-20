@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from "vue";
 
 defineOptions({ name: "SuggestionBlock" });
@@ -10,15 +10,15 @@ const emit = defineEmits(["suggestion-tap"]);
 
 const items = computed(() => Array.isArray(props.payload.items) ? props.payload.items : []);
 
-function itemKey(item, index) {
+function itemKey(item: unknown, index: number) {
   return item && item.id ? item.id : index;
 }
 
-function itemText(item) {
+function itemText(item: unknown) {
   return item && typeof item === "object" ? item.text || item.label || "" : item;
 }
 
-function onSuggestionTap(item) {
+function onSuggestionTap(item: unknown) {
   emit("suggestion-tap", itemText(item));
 }
 </script>

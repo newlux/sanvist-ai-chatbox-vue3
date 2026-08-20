@@ -1,5 +1,9 @@
 import type { PlatformRequestOptions } from "@/utils/platform/http-request";
+import { createLogger } from "@/utils/logger";
+
 import { platformRequest, PlatformRequestError, platformUploadFile } from "@/utils/platform/http-request";
+
+const logger = createLogger("request");
 
 export interface BaseResponse<T = unknown> {
   code: number;
@@ -136,7 +140,7 @@ function createUploadRequest<T>(path: string, options: UploadOptions): JsonReque
   return {
     async json() {
       const url = `${baseURL.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
-      console.info("[request] upload", {
+      logger.info("upload", {
         url,
         filePath: options.filePath,
         fileType: options.fileType,
@@ -149,7 +153,7 @@ function createUploadRequest<T>(path: string, options: UploadOptions): JsonReque
         formData: options.formData,
         headers: getRequestHeaders(),
       });
-      console.info("[request] upload success", {
+      logger.info("upload success", {
         statusCode: response.statusCode,
         data: String(response.data ?? "").slice(0, 200),
       });

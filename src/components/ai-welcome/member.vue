@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 defineOptions({ name: "AiWelcomeMember" });
 
 const emit = defineEmits(["start-chat"]);

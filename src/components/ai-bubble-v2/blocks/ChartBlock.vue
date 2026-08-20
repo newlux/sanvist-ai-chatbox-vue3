@@ -1,5 +1,4 @@
-<script setup>
-import * as echarts from "echarts";
+<script setup lang="ts">
 import {
   computed,
   nextTick,
@@ -9,15 +8,16 @@ import {
   toRaw,
   watch,
 } from "vue";
+import { clone, init } from "@/utils/echarts";
+import { createLogger } from "@/utils/logger";
 
 defineOptions({ name: "ChartBlock" });
-
 const props = defineProps({
   blockId: { type: [String, Number], required: true },
   option: { type: Object, default: null },
   embedded: { type: Boolean, default: false },
 });
-
+const logger = createLogger("chart");
 const chartEl = ref(null);
 const failed = ref(false);
 
@@ -34,9 +34,9 @@ const MAX_SIZE_RETRY = 8;
  *   避免 ECharts 内部遍历配置时访问 Proxy 触发 getter 异常。
  * - 若 itemStyle.color 是数组（如 ["#5470c6","#fac858"]），转成每个数据项各自的颜色。
  */
-function normalizeOption(raw) {
+function normalizeOption(raw: Record<string, any> | null) {
   if (!raw) return raw;
-  const option = echarts.util.clone(toRaw(raw));
+  const option = clone(toRaw(raw));
 
   const series = Array.isArray(option.series) ? option.series : [];
   const normalizedSeries = series.map((s) => {
@@ -81,7 +81,7 @@ function normalizeOption(raw) {
 const chartOption = computed(() => normalizeOption(props.option));
 
 /** 系列里可能是 5 / {value:5} / [x, y] 三种写法，统一取出可展示的数值 */
-function readSeriesValue(item) {
+function readSeriesValue(item: any) {
   if (item == null) return null;
   if (typeof item === "number" || typeof item === "string") return item;
   if (Array.isArray(item)) return item[item.length - 1];
@@ -89,26 +89,26 @@ function readSeriesValue(item) {
   return null;
 }
 
-function readSeriesLabel(item, index, categories) {
+function readSeriesLabel(item: any, index: number, categories: string[]) {
   if (item && typeof item === "object" && !Array.isArray(item) && item.name) return String(item.name);
   if (Array.isArray(item) && item.length > 1) return String(item[0]);
   return String(categories[index] ?? `#${index + 1}`);
 }
 
-function formatValue(value) {
+function formatValue(value: unknown) {
   if (value == null || value === "") return "";
   const num = Number(value);
   if (!Number.isFinite(num)) return String(value);
   return String(Math.round(num * 100) / 100);
 }
 
-function readTitle(option) {
+function readTitle(option: any) {
   const title = option?.title;
   const node = Array.isArray(title) ? title[0] : title;
   return String(node?.text || "").trim();
 }
 
-function readCategories(option) {
+function readCategories(option: any) {
   const axis = Array.isArray(option?.xAxis) ? option.xAxis[0] : option?.xAxis;
   const yAxis = Array.isArray(option?.yAxis) ? option.yAxis[0] : option?.yAxis;
   const data = Array.isArray(axis?.data) ? axis.data : (Array.isArray(yAxis?.data) ? yAxis.data : []);
@@ -145,7 +145,7 @@ const fallbackSeries = computed(() => {
 const fallbackTitle = computed(() => readTitle(chartOption.value));
 const hasFallbackData = computed(() => fallbackSeries.value.length > 0);
 
-function applyOption(target) {
+function applyOption(target: any) {
   target.setOption(chartOption.value, { notMerge: true, lazyUpdate: false, silent: true });
 }
 
@@ -163,26 +163,26 @@ function renderDomChart() {
       sizeRetry += 1;
       scheduleRenderChart();
     } else {
-      console.warn("[ChartBlock] 容器尺寸为 0，降级为数据清单");
+      logger.warn("容器尺寸为 0，降级为数据清单");
       failed.value = true;
     }
     return;
   }
   sizeRetry = 0;
   if (!chart) {
-    chart = echarts.init(element);
+    chart = init(element);
   }
   applyOption(chart);
   chart.resize();
 }
 
 async function renderChart() {
-  if (disposed || !props.option || !echarts?.init) return;
+  if (disposed || !props.option) return;
   failed.value = false;
   try {
     renderDomChart();
   } catch (error) {
-    console.error("[ChartBlock] render failed", error);
+    logger.error("render failed", error);
     failed.value = true;
     if (chart) {
       chart.dispose();

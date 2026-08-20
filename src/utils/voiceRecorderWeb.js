@@ -9,6 +9,10 @@
  * 这里的 tempFilePath 是 blob: 地址，uni.uploadFile 在 H5 上可以直接吃。
  */
 
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("voice");
+
 const MIN_RECORD_MS = 600;
 const START_TIMEOUT_MS = 8000;
 
@@ -99,13 +103,13 @@ class WebVoiceRecorder {
       this.recorder = recorder;
       this.recording = true;
       this.startedAt = Date.now();
-      console.info("[voice] web recorder started", { mimeType: recorder.mimeType });
+      logger.info("web recorder started", { mimeType: recorder.mimeType });
       return { success: true };
     } catch (error) {
       this.releaseStream();
       const message = readErrorMessage(error);
       const notAllowed = /允许|NotAllowed/i.test(message) || /NotAllowed/i.test(String(error?.name || ""));
-      console.warn("[voice] web recorder start failed", error);
+      logger.warn("web recorder start failed", error);
       return { success: false, error: message, notAllowed };
     }
   }
@@ -144,7 +148,7 @@ class WebVoiceRecorder {
         }
         // blob: 地址交给 uni.uploadFile；下一次录音开始时再回收
         this.lastObjectUrl = URL.createObjectURL(blob);
-        console.info("[voice] web recorder stopped", { size: blob.size, mimeType });
+        logger.info("web recorder stopped", { size: blob.size, mimeType });
         resolve({ success: true, data: { tempFilePath: this.lastObjectUrl } });
       };
       try {
