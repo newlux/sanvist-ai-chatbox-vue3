@@ -7,6 +7,8 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
 const props = defineProps({
   modelValue: { type: String, default: "" },
   isLoading: { type: Boolean, default: false },
+  /** 键盘是否弹起：弹起时收掉底部说明文案，让输入栏贴着键盘 */
+  keyboardOpen: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -19,6 +21,7 @@ const emit = defineEmits([
   "voice-restart",
   "toggle-quick-list",
   "input-focus",
+  "input-blur",
 ]);
 
 const VOICE_LONG_PRESS_MS = 300;
@@ -101,6 +104,12 @@ function onDraftInput(e) {
 
 function onTextareaFocus() {
   emit("input-focus");
+}
+
+function onTextareaBlur() {
+  // 失焦即键盘收起：个别基础库不会再回调高度 0，这里主动复位，
+  // 否则可视区会一直停在被压缩的高度上
+  emit("input-blur");
 }
 
 function focusVoiceTextarea() {
@@ -801,13 +810,14 @@ onBeforeUnmount(() => {
           placeholder="发消息"
           :auto-height="false"
           :adjust-position="false"
-          :cursor-spacing="0"
+          :cursor-spacing="16"
           :maxlength="-1"
           confirm-type="send"
           placeholder-class="input-bar__placeholder"
           @input="onDraftInput"
           @confirm="onTrySend"
           @focus="onTextareaFocus"
+          @blur="onTextareaBlur"
         />
       </view>
 
@@ -833,12 +843,13 @@ onBeforeUnmount(() => {
       </view>
     </view>
 
-    <!-- 输入单元下提示（Figma: 41116:6071） -->
-    <view class="chat-input__footer">
+    <!-- 输入单元下提示（Figma: 41116:6071）。键盘弹起时收起，只留一条窄间距 -->
+    <view v-if="!keyboardOpen" class="chat-input__footer">
       <text class="chat-input__footer-text">
         内容由AI生成，请核实重要信息
       </text>
     </view>
+    <view v-else class="chat-input__keyboard-gap" />
   </view>
 </template>
 
@@ -1546,6 +1557,11 @@ onBeforeUnmount(() => {
   height: 40rpx;
   background: #000;
   border-radius: 20rpx;
+}
+
+.chat-input__keyboard-gap {
+  // 键盘顶边与输入栏之间的呼吸位
+  height: 16rpx;
 }
 
 .chat-input__footer {

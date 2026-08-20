@@ -210,29 +210,6 @@ export function useComposerAttachments() {
     });
   }
 
-  // #ifdef H5
-  function chooseLocalFiles() {
-    const chooseFile = (uni as { chooseFile?: (options: Record<string, unknown>) => void }).chooseFile;
-    if (typeof chooseFile !== "function") {
-      uni.showToast({ title: "当前环境不支持选择文件", icon: "none" });
-      return;
-    }
-    chooseFile({
-      count: Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length),
-      type: "all",
-      success: (result: { tempFiles?: Array<Record<string, unknown>> }) => {
-        appendSelectedFiles((result.tempFiles || []).map(file => ({
-          path: String(file.path || ""),
-          name: String(file.name || ""),
-          size: Number(file.size) || 0,
-          mimeType: String(file.type || ""),
-        })));
-      },
-      fail: (error: unknown) => console.warn("[attachments] chooseFile failed", error),
-    });
-  }
-  // #endif
-
   /** 弹出来源选择。达到上限时只提示，不弹面板 */
   function openAttachmentPicker() {
     if (isLimitReached.value) {
@@ -240,19 +217,12 @@ export function useComposerAttachments() {
       return;
     }
 
-    const itemList = ["拍照", "从相册选择"];
-    // #ifdef H5
-    itemList.push("选择文件");
-    // #endif
-
+    // 支付宝小程序没有通用文件选择器，只能走相机与相册
     uni.showActionSheet({
-      itemList,
+      itemList: ["拍照", "从相册选择"],
       success: ({ tapIndex }) => {
         if (tapIndex === 0) chooseImages(["camera"]);
         else if (tapIndex === 1) chooseImages(["album"]);
-        // #ifdef H5
-        else if (tapIndex === 2) chooseLocalFiles();
-        // #endif
       },
       fail: () => {},
     });

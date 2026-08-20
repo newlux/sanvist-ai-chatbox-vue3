@@ -2,7 +2,6 @@
 
 interface ImportMetaEnv {
   readonly VITE_WEB_ENV: string;
-  readonly VITE_H5_OUT_DIR: number;
   readonly VITE_AI_QUESTION_BASE_URL: string;
   readonly VITE_AI_CHAT_WS_PATH: string;
   readonly VITE_STATIC_BASE_URL: string;

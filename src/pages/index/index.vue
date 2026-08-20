@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onShow } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
@@ -9,7 +9,6 @@ import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
-import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
@@ -18,7 +17,6 @@ import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { getAlipayJSBridge } from "@/utils/platform/runtime-global";
 
 defineOptions({ name: "AiChatPage" });
 
@@ -26,7 +24,6 @@ const { t } = useI18n();
 const userStore = useUserStore();
 const chatStore = useChatStore();
 const sessionStore = useSessionStore();
-const sharePosterWrap = ref<unknown>(null);
 
 const {
   stage,
@@ -37,15 +34,19 @@ const {
   showQuickPrompts,
   showQuickList,
   awakeningLoading,
-  scrollTop,
   scrollIntoView,
+  pinnedToBottom,
 } = storeToRefs(chatStore);
 const { sessions, isSessionSwitching } = storeToRefs(sessionStore);
 
-const { chatViewportStyle, syncWindowHeight } = useChatViewport();
+const {
+  chatViewportStyle,
+  isKeyboardOpen,
+  syncWindowHeight,
+  resetKeyboardHeight,
+} = useChatViewport();
 const { sendMessage, sendQuickPrompt, stopGenerating, cancelActiveStream } = useChatSend();
 const {
-  iconCopyImage,
   iconSaveImage,
   shareSheetVisible,
   shareSelectedIndexes,
@@ -65,18 +66,21 @@ const {
   onCopyMessage,
   closeSharePosterModal,
   onSaveSharePoster,
-  onCopySharePoster,
-} = useChatShare(sharePosterWrap);
+} = useChatShare();
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback();
 const { onTtsClick } = useChatTts();
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
 
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
+// 键盘弹起会把可视区压矮，最后一条消息容易被顶出去，这里跟着回到底部
+watch(isKeyboardOpen, (open) => {
+  if (open) nextTick(() => chatStore.scrollToBottom(true));
+});
 
 function startNewConversation() {
   chatStore.resetConversation();
-  nextTick(() => chatStore.scrollToBottom());
+  nextTick(() => chatStore.scrollToBottom(true));
 }
 
 function toggleQuickList(show: boolean) {
@@ -98,13 +102,6 @@ function backToWelcome() {
     userStore.setVisitorRole(null);
     userStore.setUserId("");
   }
-  // #ifdef H5
-  const bridge = getAlipayJSBridge();
-  if (bridge?.call) {
-    bridge.call("popWindow");
-    return;
-  }
-  // #endif
   if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
 }
 
@@ -253,7 +250,6 @@ onBeforeUnmount(cancelActiveStream);
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
-        :scroll-top="scrollTop"
         :scroll-into-view="scrollIntoView"
         :show-quick-list="showQuickList"
         :selected-indexes="shareSelectedIndexes"
@@ -261,6 +257,7 @@ onBeforeUnmount(cancelActiveStream);
         :suppress-highlight="shareSuppressHighlight"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
+        :pinned-to-bottom="pinnedToBottom"
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="sendQuickPrompt"
         @tts-click="onTtsClick"
@@ -269,6 +266,7 @@ onBeforeUnmount(cancelActiveStream);
         @copy-click="onCopyMessage"
         @select-toggle="onShareSelectToggle"
         @scroll-top="onScrollTop"
+        @pinned-change="chatStore.setPinnedToBottom"
       />
       <AiChatNav :visible="showQuickPrompts" />
 
@@ -349,16 +347,6 @@ onBeforeUnmount(cancelActiveStream);
                   保存图片
                 </text>
               </view>
-              <!-- #ifndef MP-ALIPAY -->
-              <view class="share-poster-modal__option" @tap="onCopySharePoster">
-                <view class="share-poster-modal__option-icon">
-                  <image class="share-poster-modal__option-icon-img" :src="iconCopyImage" mode="aspectFit" />
-                </view>
-                <text class="share-poster-modal__option-label">
-                  复制图片
-                </text>
-              </view>
-              <!-- #endif -->
             </view>
             <view class="share-poster-modal__divider" />
             <view class="share-poster-modal__cancel" @tap="closeSharePosterModal">
@@ -369,23 +357,18 @@ onBeforeUnmount(cancelActiveStream);
           </view>
         </view>
 
-        <!-- #ifdef MP-ALIPAY -->
         <canvas canvas-id="alipay-share-poster-canvas" class="share-poster-canvas" />
-        <!-- #endif -->
-        <!-- #ifndef MP-ALIPAY -->
-        <view id="share-poster-wrap" ref="sharePosterWrap" class="share-poster-hidden">
-          <ShareConversationPoster :messages="messages" :selected-indexes="shareSelectedIndexes" />
-        </view>
-        <!-- #endif -->
       </view>
 
       <AiChatInput
         v-else
         v-model="inputText"
         :is-loading="isLoading"
+        :keyboard-open="isKeyboardOpen"
         @send="sendMessage"
         @stop="stopGenerating"
         @toggle-quick-list="toggleQuickList"
+        @input-blur="resetKeyboardHeight"
       />
 
       <AiBadFeedbackSheet
@@ -817,14 +800,5 @@ $color-white: #ffffff;
   width: 620px;
   height: 4000px;
   pointer-events: none;
-}
-
-.share-poster-hidden {
-  position: fixed;
-  left: 0;
-  top: 0;
-  pointer-events: none;
-  opacity: 0;
-  visibility: visible;
 }
 </style>
