@@ -1,7 +1,8 @@
 import { createLogger } from "@/utils/logger";
 
 /**
- * 走 mPaaS 原生 JSAPI 的录音器（microphoneStart / microphoneEnd / microphoneCancel）。
+ * 走 mPaaS 原生 JSAPI 的录音器（microphoneStart / microphoneEnd）。
+ * 取消录音也走 End，只是把音频丢掉不送识别。
  *
  * 与另外两个实现（小程序 / 浏览器 MediaRecorder）接口一致，差别只在停录的返回：
  * 原生那边已经把文件处理好了，回的是音频 URL（data.audioUrl）；
@@ -12,7 +13,6 @@ import { createLogger } from "@/utils/logger";
 import {
   cancelNativeRecord,
   isMpaasReady,
-  resetNativeRecord,
   startNativeRecord,
   stopNativeRecord,
 } from "@/utils/platform/mpaas";
@@ -49,10 +49,9 @@ class NativeVoiceRecorder {
   async start() {
     this.hardReset();
     const sessionId = this.sessionId;
+    const beganAt = Date.now();
 
     try {
-      // 上一轮可能异常收尾（识别失败、end 超时），原生也许还攥着会话，先释放再开
-      await resetNativeRecord();
       await startNativeRecord();
       // 授权弹窗、启动耗时期间用户可能已经松手，这一路结果直接作废
       if (sessionId !== this.sessionId) {
@@ -61,7 +60,7 @@ class NativeVoiceRecorder {
       }
       this.recording = true;
       this.startedAt = Date.now();
-      logger.info("native recorder started");
+      logger.info("native recorder started", { readyCostMs: Date.now() - beganAt });
       return { success: true };
     } catch (error) {
       this.recording = false;
@@ -80,6 +79,7 @@ class NativeVoiceRecorder {
     if (elapsed < MIN_RECORD_MS) await sleep(MIN_RECORD_MS - elapsed);
 
     const sessionId = this.sessionId;
+    const recordedMs = Date.now() - this.startedAt;
     try {
       const audio = await stopNativeRecord();
       this.recording = false;
@@ -89,6 +89,8 @@ class NativeVoiceRecorder {
       logger.info("native recorder stopped", {
         url: audio.audioUrl,
         base64Length: audio.audioBase64 ? audio.audioBase64.length : 0,
+        // 录了多久：base64 太小时对着这个数看，就知道是没录到还是编码有问题
+        recordedMs,
       });
       return { success: true, data: audio };
     } catch (error) {
@@ -103,21 +105,27 @@ class NativeVoiceRecorder {
     return { success: true };
   }
 
+  /**
+   * 结束并丢弃当前录音。
+   * 只在【确实还在录】的时候调 —— 空转时调 End 同样等不到回调，
+   * 徒增一次超时。没在录就什么都不用做。
+   */
+  discardIfRecording() {
+    if (!this.recording) return;
+    this.recording = false;
+    this.startedAt = 0;
+    cancelNativeRecord().catch(() => {});
+  }
+
   hardReset() {
     this.sessionId += 1;
-    if (this.recording) {
-      this.recording = false;
-      // 取消是尽力而为：原生没在录时这一调用会失败，忽略即可
-      cancelNativeRecord().catch(() => {});
-    }
+    this.discardIfRecording();
     this.startedAt = 0;
   }
 
   /** 识别失败等异常路径调用：确保原生侧不会残留会话 */
   release() {
-    this.recording = false;
-    this.startedAt = 0;
-    cancelNativeRecord().catch(() => {});
+    this.discardIfRecording();
   }
 }
 
