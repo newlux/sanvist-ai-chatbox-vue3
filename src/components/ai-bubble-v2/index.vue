@@ -22,6 +22,7 @@ const props = defineProps({
   ttsLoading: { type: Boolean, default: false },
   showActions: { type: Boolean, default: false },
   waitingText: { type: String, default: "" },
+  interrupted: { type: Boolean, default: false },
   durationMs: { type: Number, default: null },
   positive: { type: Boolean, default: null },
   selected: { type: Boolean, default: false },
@@ -83,6 +84,15 @@ const isUser = computed(() => props.role === "user");
 const visibleBlocks = computed(() => props.hideSuggestion
   ? props.blocks.filter(block => block && block.type !== "suggestion")
   : props.blocks);
+
+/**
+ * 等待条：模型还没吐出内容时的占位。
+ * 被中断后不撤掉，只把状态字改成「已停止」——否则没来得及出内容的那一轮
+ * 会变成一个空气泡，用户看不出这轮发生了什么。
+ */
+const showWaiting = computed(() =>
+  Boolean(props.waitingText) && (props.loading || props.interrupted),
+);
 
 function onSelectTap() {
   if (props.selectMode && !props.disabled) emit("select-toggle");
@@ -157,17 +167,21 @@ function onNegativeFeedback() {
       </text>
 
       <template v-else>
-        <view v-if="props.waitingText" class="ai-bubble-v2__waiting">
+        <view
+          v-if="showWaiting"
+          class="ai-bubble-v2__waiting"
+          :class="{ 'ai-bubble-v2__waiting--stopped': props.interrupted }"
+        >
           <text class="ai-bubble-v2__waiting-mark">
             ✓
           </text>
           <text class="ai-bubble-v2__waiting-label">
-            等待模型响应：
+            {{ props.interrupted ? '已停止：' : '等待模型响应：' }}
           </text>
           <text class="ai-bubble-v2__waiting-query">
             {{ props.waitingText }}
           </text>
-          <text class="ai-bubble-v2__waiting-suffix">
+          <text v-if="!props.interrupted" class="ai-bubble-v2__waiting-suffix">
             努力链接中
           </text>
         </view>
@@ -272,6 +286,9 @@ function onNegativeFeedback() {
 .ai-bubble-v2__waiting { display: flex; align-items: center; flex-wrap: wrap; gap: 8rpx; margin-bottom: 24rpx; color: #a5a5a5; font-family: "PingFang SC"; font-size: 26rpx; line-height: 36rpx; }
 .ai-bubble-v2__waiting-mark { color: #a5a5a5; font-size: 24rpx; line-height: 36rpx; }
 .ai-bubble-v2__waiting-label, .ai-bubble-v2__waiting-query, .ai-bubble-v2__waiting-suffix { color: #a5a5a5; font-weight: 400; }
+// 已停止：和「等待响应」用同一行样式，只把状态字加深一点区分出来
+.ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-mark,
+.ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-label { color: #7b7b7b; }
 .ai-bubble-v2__duration { color: #bababa; font-size: 22rpx; line-height: 32rpx; white-space: nowrap; }
 .ai-bubble-v2__typing { display: flex; gap: 8rpx; align-items: center; padding: 6rpx 4rpx; }
 .ai-bubble-v2__dot { width: 12rpx; height: 12rpx; border-radius: 50%; background: #bbc0c9; animation: typing-blink 1.2s infinite; }
