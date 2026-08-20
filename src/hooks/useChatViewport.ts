@@ -1,14 +1,29 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("keyboard");
 
 /** 收起延迟：盖过键盘动画中途插进来的那一个 0 */
 const KEYBOARD_COLLAPSE_DELAY_MS = 160;
 /** 低于这个高度不算键盘：地址栏收缩、工具条变化也会让可视视口变矮 */
 const MIN_KEYBOARD_HEIGHT_PX = 80;
+/**
+ * 兜底键盘高度：部分安卓 WebView 既不支持 visualViewport，也不会缩布局视口，
+ * 高度就完全测不出来。与其让输入框被盖住，不如按屏高比例估一个。
+ */
+const FALLBACK_KEYBOARD_RATIO = 0.42;
+const FALLBACK_KEYBOARD_RANGE = { min: 260, max: 360 };
+/** 聚焦后等这么久还测不到高度，就认为这台设备测不出来，启用兜底值 */
+const FALLBACK_DELAY_MS = 450;
 
 export function useChatViewport() {
   const windowHeight = ref(0);
   const keyboardHeight = ref(0);
   let collapseTimer: ReturnType<typeof setTimeout> | null = null;
+  let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  let inputFocused = false;
+  /** 当前用的是估算值而不是实测值：失焦时要主动清 */
+  let usingFallbackHeight = false;
   /**
    * 没有键盘时的可视高度基准。
    * 安卓部分浏览器弹键盘时会把布局视口一起缩掉，此时 innerHeight 和 visualViewport.height
@@ -46,6 +61,8 @@ export function useChatViewport() {
    */
   function applyKeyboardHeight(height: unknown) {
     const next = normalizeKeyboardHeight(height);
+    // 实测值一到就接管，估算值让位
+    if (next > 0) usingFallbackHeight = false;
     if (collapseTimer) {
       clearTimeout(collapseTimer);
       collapseTimer = null;
@@ -73,9 +90,21 @@ export function useChatViewport() {
    * 键盘占掉的高度 = 布局视口高 - 可视视口高 - 可视视口相对布局视口的偏移。
    * 这是 H5 上唯一可靠的口径，iOS（键盘覆盖内容）和安卓（缩可视视口）都适用。
    */
+  /** 估一个键盘高度：屏高的 42%，夹在 260~360px 之间 */
+  function estimateKeyboardHeight() {
+    const base = windowHeight.value || window.innerHeight || 0;
+    if (!base) return FALLBACK_KEYBOARD_RANGE.min;
+    const estimated = Math.round(base * FALLBACK_KEYBOARD_RATIO);
+    return Math.min(FALLBACK_KEYBOARD_RANGE.max, Math.max(FALLBACK_KEYBOARD_RANGE.min, estimated));
+  }
+
   function readViewportKeyboardHeight() {
     const viewport = window.visualViewport;
-    if (!viewport) return 0;
+    // 没有 visualViewport（老安卓 WebView）：退而求其次，看布局视口有没有被缩掉
+    if (!viewport) {
+      const shrunk = baseViewportHeight - window.innerHeight;
+      return shrunk > MIN_KEYBOARD_HEIGHT_PX ? Math.round(shrunk) : 0;
+    }
     const layoutHeight = Math.max(window.innerHeight, baseViewportHeight);
     const occluded = layoutHeight - viewport.height - viewport.offsetTop;
     if (occluded > MIN_KEYBOARD_HEIGHT_PX) return Math.round(occluded);
@@ -109,14 +138,43 @@ export function useChatViewport() {
    * 只靠事件驱动会一直停在 0。
    */
   function onFocusIn() {
+    inputFocused = true;
     pinLayoutViewport();
     applyKeyboardHeight(readViewportKeyboardHeight());
-    [60, 260, 500].forEach((delay) => {
+    [60, 260].forEach((delay) => {
       setTimeout(() => {
         pinLayoutViewport();
         applyKeyboardHeight(readViewportKeyboardHeight());
       }, delay);
     });
+
+    // 兜底：等键盘动画结束后仍然量不到高度，说明这台设备测不出来，用估算值顶上
+    if (fallbackTimer) clearTimeout(fallbackTimer);
+    fallbackTimer = setTimeout(() => {
+      fallbackTimer = null;
+      if (!inputFocused || keyboardHeight.value > 0) return;
+      const estimated = estimateKeyboardHeight();
+      usingFallbackHeight = true;
+      keyboardHeight.value = estimated;
+      logger.warn("量不到键盘高度，启用兜底估算值", {
+        estimated,
+        windowHeight: windowHeight.value,
+        hasVisualViewport: Boolean(window.visualViewport),
+      });
+    }, FALLBACK_DELAY_MS);
+  }
+
+  /** 失焦：兜底值必须跟着清掉，否则输入栏会一直悬在半空 */
+  function onFocusOut() {
+    inputFocused = false;
+    if (fallbackTimer) {
+      clearTimeout(fallbackTimer);
+      fallbackTimer = null;
+    }
+    if (usingFallbackHeight) {
+      usingFallbackHeight = false;
+      applyKeyboardHeight(0);
+    }
   }
 
   function onWindowScroll() {
@@ -139,7 +197,9 @@ export function useChatViewport() {
     uni.onKeyboardHeightChange?.(onKeyboardHeightChange);
     if (typeof window !== "undefined") {
       window.addEventListener("scroll", onWindowScroll, { passive: true });
+      window.addEventListener("resize", onViewportChange);
       document.addEventListener("focusin", onFocusIn);
+      document.addEventListener("focusout", onFocusOut);
       window.visualViewport?.addEventListener("resize", onViewportChange);
       window.visualViewport?.addEventListener("scroll", onViewportChange);
     }
@@ -147,10 +207,13 @@ export function useChatViewport() {
 
   onBeforeUnmount(() => {
     if (collapseTimer) clearTimeout(collapseTimer);
+    if (fallbackTimer) clearTimeout(fallbackTimer);
     uni.offKeyboardHeightChange?.(onKeyboardHeightChange);
     if (typeof window !== "undefined") {
       window.removeEventListener("scroll", onWindowScroll);
+      window.removeEventListener("resize", onViewportChange);
       document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
       window.visualViewport?.removeEventListener("resize", onViewportChange);
       window.visualViewport?.removeEventListener("scroll", onViewportChange);
     }
