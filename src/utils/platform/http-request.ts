@@ -42,6 +42,36 @@ function appendQuery(url: string, data?: unknown) {
   return `${url}${url.includes("?") ? "&" : "?"}${query}`;
 }
 
+/** 请求体大小，用于排查「体积过大被容器拒掉」这类问题（base64 音频动辄几百 KB） */
+function measurePayloadSize(data: unknown) {
+  if (data == null) return 0;
+  try {
+    return typeof data === "string" ? data.length : JSON.stringify(data).length;
+  } catch {
+    return -1;
+  }
+}
+
+/** 错误对象在各容器里字段不统一，原样序列化出来，别让 request:fail 变成无信息的黑盒 */
+function describeRequestError(error: unknown) {
+  if (!error || typeof error !== "object") return String(error);
+  const raw = error as Record<string, unknown>;
+  const known = {
+    errMsg: raw.errMsg,
+    errno: raw.errno,
+    errorMessage: raw.errorMessage,
+    error: raw.error,
+    statusCode: raw.statusCode,
+  };
+  let dump = "";
+  try {
+    dump = JSON.stringify(raw);
+  } catch {
+    dump = "[unserializable]";
+  }
+  return { ...known, raw: dump.slice(0, 500) };
+}
+
 export function platformRequest<T>(
   baseURL: string,
   method: string,
@@ -52,6 +82,10 @@ export function platformRequest<T>(
   const url = normalizedMethod === "GET"
     ? appendQuery(joinUrl(baseURL, path), options.data)
     : joinUrl(baseURL, path);
+  const payloadSize = normalizedMethod === "GET" ? 0 : measurePayloadSize(options.data);
+  const startedAt = Date.now();
+
+  logger.debug("request start", { method: normalizedMethod, url, payloadSize });
 
   return new Promise((resolve, reject) => {
     const requestWithCallbacks = uni.request as unknown as (
@@ -66,10 +100,20 @@ export function platformRequest<T>(
       ...(options.responseType ? { responseType: options.responseType } : {}),
       success(response) {
         const statusCode = Number(response.statusCode) || 0;
+        const costMs = Date.now() - startedAt;
         if (statusCode < 200 || statusCode >= 300) {
+          // 非 2xx 说明请求打到了服务端，问题在接口侧：把响应体也带出来
+          logger.error("request http error", {
+            url,
+            statusCode,
+            costMs,
+            payloadSize,
+            body: String(JSON.stringify(response.data) || "").slice(0, 500),
+          });
           reject(new PlatformRequestError(`请求失败（${statusCode}）`, statusCode, response.data));
           return;
         }
+        logger.debug("request done", { url, statusCode, costMs });
         resolve({
           data: response.data as T,
           statusCode,
@@ -77,6 +121,16 @@ export function platformRequest<T>(
         });
       },
       fail(error) {
+        // 走到这里说明连响应都没拿到（网络/域名白名单/容器拦截/超时），问题在端上或链路上，
+        // 与「接口返回了错误码」是两回事，日志里必须区分开
+        logger.error("request transport failed", {
+          url,
+          method: normalizedMethod,
+          payloadSize,
+          costMs: Date.now() - startedAt,
+          timeout: options.timeout ?? 60_000,
+          detail: describeRequestError(error),
+        });
         reject(new PlatformRequestError(error.errMsg || "网络请求失败"));
       },
     });
