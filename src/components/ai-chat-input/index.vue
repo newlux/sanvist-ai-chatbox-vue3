@@ -1,5 +1,7 @@
 <script setup>
 import { recognizeSpeechByUpload } from "@/api/chat";
+import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
+import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
 const props = defineProps({
@@ -59,13 +61,43 @@ const voiceTextValue = computed(() => {
 const isVoiceConfirmationOpen = computed(() =>
   state.voicePhase === "finished" || state.voicePhase === "recognizing",
 );
+/**
+ * 输入框的本地副本。父组件清空 v-model 是异步的（发送链路里还要过一次 store），
+ * 这里保留一份本地值，发送时立即置空，保证输入框肉眼可见地被清干净。
+ */
+const draft = ref(String(props.modelValue || ""));
+watch(() => props.modelValue, (value) => {
+  const next = String(value || "");
+  if (next !== draft.value) draft.value = next;
+});
+
 const textTextareaHeight = computed(() => {
   const maxCharsPerLine = 15;
-  const lineCount = String(props.modelValue || "")
+  const lineCount = String(draft.value || "")
     .split("\n")
     .reduce((count, line) => count + Math.max(1, Math.ceil(line.length / maxCharsPerLine)), 0);
   return `${Math.min(Math.max(lineCount, 1), 4) * 40}rpx`;
 });
+
+const {
+  attachments,
+  hasAttachments,
+  hasIncompleteAttachments,
+  hasFailedAttachments,
+  openAttachmentPicker,
+  removeAttachment,
+  retryAttachment,
+  takeUploadedFiles,
+} = useComposerAttachments();
+
+const canSend = computed(() =>
+  Boolean(draft.value.trim() || hasAttachments.value) && !hasIncompleteAttachments.value,
+);
+
+function onDraftInput(e) {
+  draft.value = e.detail.value;
+  emit("update:modelValue", draft.value);
+}
 
 function onTextareaFocus() {
   emit("input-focus");
@@ -77,10 +109,41 @@ function focusVoiceTextarea() {
   });
 }
 
+/**
+ * 统一的发送出口（文本回车 / 发送按钮 / 语音识别结果确认）。
+ * 附件与文本一起提交，随后立刻清空输入框与附件栏。
+ */
+function submitMessage(rawText) {
+  if (props.isLoading) return;
+  const text = String(rawText ?? draft.value).trim();
+  if (!text && !hasAttachments.value) return;
+
+  if (hasIncompleteAttachments.value) {
+    uni.showToast({
+      title: hasFailedAttachments.value ? "请重试或移除上传失败的附件" : "请等待附件上传完成",
+      icon: "none",
+    });
+    return;
+  }
+  // 网关要求 query 非空，纯附件无法成会话
+  if (!text) {
+    uni.showToast({ title: "请输入要发送的内容", icon: "none" });
+    return;
+  }
+
+  const files = takeUploadedFiles();
+  draft.value = "";
+  emit("update:modelValue", "");
+  emit("send", { text, files });
+}
+
 function onTrySend() {
-  const text = String(props.modelValue || "").trim();
-  if (!text) return;
-  emit("send");
+  submitMessage();
+}
+
+function onOpenAttachmentPicker() {
+  if (props.isLoading) return;
+  openAttachmentPicker();
 }
 
 function _ensureRecorder() {
@@ -143,8 +206,8 @@ function onVoiceClose() {
   state._gesture.startY = 0;
   state._gesture.isRestart = false;
 }
+// 生成回答期间也允许切换输入方式：左侧按钮常驻，用户可以先把下一条消息打好
 function switchToText() {
-  if (props.isLoading) return;
   state.inputMode = "text";
   state.voicePhase = "idle";
   if (state._typingTimer) clearInterval(state._typingTimer);
@@ -152,16 +215,18 @@ function switchToText() {
 }
 
 function switchToDefaultVoice() {
-  if (props.isLoading) return;
   state.inputMode = "voice";
   state.voicePhase = "idle";
   emit("toggle-quick-list", true);
 }
 
-function onToggleQuickList() {
-  if (props.isLoading) return;
-  emit("toggle-quick-list", true);
+/** 左侧「语音 / 键盘」切换。录音或识别途中不切，避免把进行中的会话丢掉 */
+function onToggleInputMode() {
+  if (state._gesture.active || state._isRecognizing) return;
+  if (state.inputMode === "voice") switchToText();
+  else switchToDefaultVoice();
 }
+
 function onVoiceTextareaInput(e) {
   if (state.voicePhase !== "finished") return;
   state.draftText = e.detail.value;
@@ -359,10 +424,9 @@ function onVoiceSend() {
   if (state._typingTimer) clearInterval(state._typingTimer);
   state._typingTimer = null;
 
-  // 对齐父组件：更新 v-model，待父组件同步后只触发一次 send
-  emit("update:modelValue", finalPayload);
-  nextTick(onTrySend);
   emit("voice-send", finalPayload);
+  // 识别文本直接进发送出口，不再绕 v-model 回传，避免多触发一次 send
+  submitMessage(finalPayload);
   _resetVoiceText();
 }
 async function onVoiceRestartStart(e) {
@@ -690,24 +754,31 @@ onBeforeUnmount(() => {
         </view>
       </view>
     </view>
+    <!-- 附件预览栏：选中的文件在输入栏上方排开 -->
+    <AiChatAttachments
+      v-if="attachments.length"
+      :attachments="attachments"
+      @remove="removeAttachment"
+      @retry="retryAttachment"
+    />
+
     <!-- 底部输入栏：默认语音、键盘文本、发送和生成中状态 -->
     <view
       class="input-bar"
       :class="{ 'input-bar--text': inputMode === 'text' }"
     >
+      <!-- 左侧语音/键盘切换常驻：生成回答时也不隐藏，否则发送后入口会消失 -->
       <view
-        v-if="inputMode === 'voice' && !isLoading"
-        class="input-bar__keyboard"
-        @tap="switchToText"
+        class="input-bar__mode"
+        :class="{ 'input-bar__mode--disabled': state._gesture.active || state._isRecognizing }"
+        @tap="onToggleInputMode"
       >
-        <image src="@/assets/img/icon-keyboard.svg" mode="aspectFit" />
-      </view>
-      <view
-        v-else-if="!isLoading && !modelValue"
-        class="input-bar__microphone"
-        @tap="switchToDefaultVoice"
-      >
-        <image src="@/assets/img/icon-voice.svg" mode="aspectFit" />
+        <image
+          v-if="inputMode === 'voice'"
+          src="@/assets/img/icon-keyboard.svg"
+          mode="aspectFit"
+        />
+        <image v-else src="@/assets/img/icon-voice.svg" mode="aspectFit" />
       </view>
 
       <view
@@ -725,7 +796,7 @@ onBeforeUnmount(() => {
       <view v-else class="input-bar__text-field">
         <textarea
           class="input-bar__textarea"
-          :value="modelValue"
+          :value="draft"
           :style="{ height: textTextareaHeight }"
           placeholder="发消息"
           :auto-height="false"
@@ -734,21 +805,31 @@ onBeforeUnmount(() => {
           :maxlength="-1"
           confirm-type="send"
           placeholder-class="input-bar__placeholder"
-          @input="emit('update:modelValue', $event.detail.value)"
+          @input="onDraftInput"
           @confirm="onTrySend"
           @focus="onTextareaFocus"
         />
       </view>
 
-      <view class="input-bar__plus" @tap="onToggleQuickList">
+      <view
+        class="input-bar__plus"
+        :class="{ 'input-bar__plus--disabled': isLoading }"
+        @tap="onOpenAttachmentPicker"
+      >
         <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
       </view>
 
-      <view v-if="inputMode === 'text' && modelValue" class="input-bar__send" @tap="onTrySend">
-        <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
-      </view>
-      <view v-else-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
+      <!-- 生成中固定为停止按钮，其余时刻是发送按钮：有内容才高亮可点 -->
+      <view v-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
         <image src="@/assets/img/icon-stop.svg" mode="aspectFit" />
+      </view>
+      <view
+        v-else
+        class="input-bar__send"
+        :class="{ 'input-bar__send--disabled': !canSend }"
+        @tap="onTrySend"
+      >
+        <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
       </view>
     </view>
 
@@ -1360,14 +1441,17 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
-.input-bar__keyboard,
-.input-bar__microphone {
+.input-bar__mode {
   width: 56rpx; // 28px
   height: 56rpx;
   flex: 0 0 56rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.input-bar__mode--disabled {
+  opacity: 0.4;
 }
 
 .input-bar__voice-pill,
@@ -1435,8 +1519,13 @@ onBeforeUnmount(() => {
   height: 54rpx;
 }
 
-.input-bar__keyboard:active,
-.input-bar__microphone:active,
+// 没内容时保持占位但不高亮，避免发送按钮出现/消失导致输入栏跳动
+.input-bar__send--disabled,
+.input-bar__plus--disabled {
+  opacity: 0.35;
+}
+
+.input-bar__mode:active,
 .input-bar__voice-pill:active,
 .input-bar__plus:active,
 .input-bar__send:active,

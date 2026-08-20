@@ -1,4 +1,4 @@
-import type { Identifier } from "@/api/chat/types";
+import type { ChatFile, Identifier } from "@/api/chat/types";
 import { useI18n } from "vue-i18n";
 import { interruptChat } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
@@ -95,10 +95,11 @@ export function useChatSend() {
     aiMsgIndex: number;
     userMsgIndex: number;
     content: string;
+    files: ChatFile[];
     hadSessionId: boolean;
     requestSeq: number;
   }) {
-    const { aiMsgIndex, userMsgIndex, content, hadSessionId, requestSeq } = options;
+    const { aiMsgIndex, userMsgIndex, content, files, hadSessionId, requestSeq } = options;
     let receivedContent = false;
 
     try {
@@ -107,6 +108,7 @@ export function useChatSend() {
           query: content,
           user: String(userStore.userId || ""),
           conversationId: chatStore.aiSessionId,
+          ...(files.length ? { files } : {}),
         }, { idleTimeoutMs: 60_000 }),
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
@@ -139,8 +141,12 @@ export function useChatSend() {
     }
   }
 
-  async function sendMessage() {
-    const text = chatStore.inputText.trim();
+  /**
+   * 输入栏会把文本和附件一起交上来；快捷提问等旧调用不传参，仍从 store 取草稿。
+   */
+  async function sendMessage(payload?: { text?: string; files?: ChatFile[] }) {
+    const text = String(payload?.text ?? chatStore.inputText).trim();
+    const files = payload?.files ?? [];
     if (!text) return;
 
     cancelActiveStream();
@@ -174,7 +180,7 @@ export function useChatSend() {
     });
     chatStore.activeAiMsgIndex = aiMsgIndex;
     chatStore.scrollToBottom();
-    await sendAiFlow({ aiMsgIndex, userMsgIndex, content: text, hadSessionId, requestSeq });
+    await sendAiFlow({ aiMsgIndex, userMsgIndex, content: text, files, hadSessionId, requestSeq });
   }
 
   function sendQuickPrompt(text: string) {

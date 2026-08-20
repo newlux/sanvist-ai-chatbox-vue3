@@ -2,6 +2,7 @@ import type {
   BatchDeleteConversationsParams,
   BatchDeleteResult,
   CancelFeedbackParams,
+  ChatFileUploadResult,
   ChatMessage,
   Conversation,
   CursorPage,
@@ -15,6 +16,7 @@ import type {
   SpeechRecognitionResult,
   SubmitFeedbackParams,
   TextToSpeechResult,
+  UploadChatFileParams,
 } from "./types";
 import { request } from "@/utils/request";
 
@@ -72,6 +74,20 @@ export function cancelFeedback(messageId: Identifier, params: CancelFeedbackPara
  */
 export function getTextToSpeech(conversationId: Identifier, messageId: Identifier) {
   return request.get<TextToSpeechResult>(`/chat/tts/${conversationId}/${messageId}`).json();
+}
+
+/**
+ * 对话附件上传。契约：multipart 字段名固定为 `file`，`user` 走表单字段且不能为空。
+ * 返回的 url 直接作为 /chat/send 的 files[].url（transferMethod=remote_url）。
+ */
+export function uploadChatFile(params: UploadChatFileParams) {
+  return request.upload<ChatFileUploadResult>("/files/upload", {
+    filePath: params.filePath,
+    name: "file",
+    fileType: params.fileType || "image",
+    formData: { user: params.user },
+    timeout: params.timeout,
+  }).json();
 }
 
 export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {
