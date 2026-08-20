@@ -107,5 +107,11 @@ uni-app {
 
 body {
   margin: 0;
+  // iOS 聚焦输入框时会把整个布局视口往上推，页面必须彻底「不可滚动」它才推不动；
+  // 只有 overflow:hidden 挡不住，position:fixed 才能真正锁死
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
 }
 </style>

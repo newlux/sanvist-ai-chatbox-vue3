@@ -100,13 +100,13 @@ const {
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
 
 /**
- * 支付宝不认 textarea 的 adjust-position，键盘弹起时页面不会自己让位，
- * 只能由输入栏和语音面板整体上移到键盘上沿。页面高度不参与，避免消息列表重排。
+ * 键盘弹起：输入栏整块切成 fixed，bottom 顶到键盘上沿，悬在消息列表之上；
+ * 键盘收起：切回 relative，回到页面正常流里的原位。
+ * 不用 transform 上推，位置由布局本身决定，收起时天然复位。
  */
-const keyboardLiftStyle = computed(() => ({
-  transform: keyboardOpen.value ? `translateY(-${props.keyboardHeight}px)` : "translateY(0)",
-  transition: "transform 0.2s ease-out",
-}));
+const keyboardLiftStyle = computed(() =>
+  (keyboardOpen.value ? { bottom: `${props.keyboardHeight}px` } : {}),
+);
 
 /**
  * 收键盘后遮罩多留一会儿：键盘落下的过程中输入栏会跟着往下移动，
@@ -683,13 +683,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <view class="chat-input">
+  <view class="chat-input" :class="{ 'chat-input--keyboard-open': keyboardOpen }">
     <!-- 键盘弹起时的空白区兜底：点一下收键盘，否则编辑识别结果时没有退出口 -->
     <view
       v-if="showKeyboardMask"
       class="chat-input__keyboard-mask"
       :style="{ bottom: keyboardOpen ? `${keyboardHeight}px` : '0' }"
       @touchstart.stop.prevent="onDismissKeyboard"
+      @click.stop="onDismissKeyboard"
       @tap.stop="onMaskTap"
     />
 
@@ -832,7 +833,12 @@ onBeforeUnmount(() => {
         </view>
       </view>
     </view>
-    <view class="chat-input__dock" :style="keyboardLiftStyle">
+    <!-- 键盘弹起时切 fixed 悬浮在消息列表之上，收起时回到正常布局 -->
+    <view
+      class="chat-input__dock"
+      :class="{ 'chat-input__dock--floating': keyboardOpen }"
+      :style="keyboardLiftStyle"
+    >
       <!-- 附件预览栏：选中的文件在输入栏上方排开 -->
       <AiChatAttachments
         v-if="attachments.length"
@@ -917,13 +923,12 @@ onBeforeUnmount(() => {
         </view>
       </view>
 
-      <!-- 输入单元下提示（Figma: 41116:6071）。键盘弹起时收起，只留一条窄间距 -->
-      <view v-if="!keyboardOpen" class="chat-input__footer">
+      <!-- 输入单元下提示（Figma: 41116:6071）。跟着输入栏一起上移，键盘弹起时同样要看得见 -->
+      <view class="chat-input__footer">
         <text class="chat-input__footer-text">
           内容由AI生成，请核实重要信息
         </text>
       </view>
-      <view v-else class="chat-input__keyboard-gap" />
     </view>
   </view>
 </template>
@@ -935,6 +940,7 @@ onBeforeUnmount(() => {
   // 底部安全区：home indicator / 手势条区域不放内容
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
+  transition: padding-bottom 0.2s ease-out;
   box-sizing: border-box;
   position: relative;
   uni-image {
@@ -947,8 +953,10 @@ onBeforeUnmount(() => {
   position: fixed;
   z-index: 1300;
   right: 0;
+  // 键盘弹起时由内联样式抬到键盘上沿
   bottom: 0;
   left: 0;
+  transition: bottom 0.2s ease-out;
   height: min(540rpx, var(--voice-sheet-h, calc(100dvh - 412rpx)));
   min-height: 420rpx;
   display: flex;
@@ -1674,11 +1682,24 @@ onBeforeUnmount(() => {
   border-radius: 20rpx;
 }
 
+// 键盘挡住了 home indicator，这段安全区留白让给键盘
+.chat-input--keyboard-open {
+  padding-bottom: 0;
+}
+
 .chat-input__dock {
+  // 键盘收起：留在文档流里，跟着页面正常排版
   position: relative;
   // 必须高于收键盘遮罩，否则键盘弹起后点输入栏会被遮罩吃掉
   z-index: 1250;
-  will-change: transform;
+}
+
+// 键盘弹起：脱离文档流吸到键盘上沿（bottom 由内联样式给），盖住下方的消息列表
+.chat-input__dock--floating {
+  position: fixed;
+  right: 0;
+  left: 0;
+  background: #f8f9fc;
 }
 
 // 透明层，只负责接住「点空白收键盘」，底边贴着键盘顶沿。
@@ -1691,11 +1712,6 @@ onBeforeUnmount(() => {
   right: 0;
   left: 0;
   background: transparent;
-}
-
-.chat-input__keyboard-gap {
-  // 键盘顶边与输入栏之间的呼吸位
-  height: 16rpx;
 }
 
 .chat-input__footer {
