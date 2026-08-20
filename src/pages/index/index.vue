@@ -27,6 +27,7 @@ const userStore = useUserStore();
 const chatStore = useChatStore();
 const sessionStore = useSessionStore();
 const sharePosterWrap = ref<unknown>(null);
+const navActiveKey = ref("");
 
 const {
   stage,
@@ -80,8 +81,33 @@ const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => 
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
 
 function startNewConversation() {
+  // 已经是一轮空白会话就别再重置了，重复点击给个明确反馈
+  if (!chatStore.messages.length && !chatStore.aiSessionId) {
+    uni.showToast({ title: "已是新对话", icon: "none" });
+    return;
+  }
   chatStore.resetConversation();
   nextTick(() => chatStore.scrollToBottom(true));
+}
+
+/**
+ * 快捷入口：听汇报 / 任务协同各自另开一个会话页，
+ * 作业指导不跳转，就地高亮，之后的提问都带上它的 subagent。
+ */
+function onNavItemClick(item: { key?: string; title?: string; subagent?: string; mode?: string }) {
+  const subagent = String(item?.subagent || "");
+  if (!subagent) return;
+
+  if (item?.mode === "inline") {
+    const nextKey = navActiveKey.value === item.key ? "" : String(item.key || "");
+    navActiveKey.value = nextKey;
+    chatStore.setSubagent(nextKey ? subagent : "");
+    return;
+  }
+
+  uni.navigateTo({
+    url: `/pages/chat/index?subagent=${encodeURIComponent(subagent)}&title=${encodeURIComponent(item?.title || "")}`,
+  });
 }
 
 /**
@@ -155,6 +181,7 @@ async function onSessionDelete(session: { id?: string | number }) {
   try {
     await sessionStore.removeSession(id);
     if (String(chatStore.aiSessionId) === String(id)) chatStore.resetConversation();
+    uni.showToast({ title: "删除成功", icon: "none" });
   } catch (error) {
     console.error("[AiChatPage] caught error", error);
     uni.showToast({ title: t("delete-failed"), icon: "none" });
@@ -170,6 +197,7 @@ async function onSessionDeleteBatch(ids: Array<string | number>) {
     if (chatStore.aiSessionId && uniqueIds.includes(String(chatStore.aiSessionId))) {
       chatStore.resetConversation();
     }
+    uni.showToast({ title: "删除成功", icon: "none" });
   } catch (error) {
     console.error("[AiChatPage] caught error", error);
     uni.showToast({ title: t("batch-delete-failed"), icon: "none" });
@@ -182,6 +210,7 @@ async function onSessionRename(session: { id?: string | number; name?: string })
   if (!id || !name) return;
   try {
     await sessionStore.renameSession(id, name);
+    uni.showToast({ title: "修改标题成功", icon: "none" });
   } catch (error) {
     console.error("[AiChatPage] caught error", error);
     uni.showToast({ title: t("rename-failed"), icon: "none" });
@@ -282,7 +311,11 @@ onBeforeUnmount(cancelActiveStream);
         @scroll-top="onScrollTop"
         @pinned-change="chatStore.setPinnedToBottom"
       />
-      <AiChatNav :visible="showQuickPrompts" />
+      <AiChatNav
+        :visible="showQuickPrompts"
+        :active-key="navActiveKey"
+        @item-click="onNavItemClick"
+      />
 
       <view v-if="isSessionSwitching" class="session-loading">
         <view class="session-loading__spinner" />

@@ -17,6 +17,11 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  /** 当前高亮的智能体（作业指导这类不跳转、就地选中的入口） */
+  activeKey: {
+    type: String,
+    default: "",
+  },
 });
 
 const emit = defineEmits(["item-click"]);
@@ -26,10 +31,11 @@ const navItems = computed(() => {
     return props.items;
   }
 
+  // subagent 随 inputs 透传给算法侧；mode=page 的入口另开会话页，inline 的就地高亮
   return [
-    { key: "vox-core", title: "听汇报", icon: iconVox },
-    { key: "fix-master-ai", title: "作业指导", icon: iconHelp },
-    { key: "ai-form", title: "任务协同", icon: iconForm },
+    { key: "vox-core", title: "听汇报", icon: iconVox, subagent: "report", mode: "page" },
+    { key: "fix-master-ai", title: "作业指导", icon: iconHelp, subagent: "guide", mode: "inline" },
+    { key: "ai-form", title: "任务协同", icon: iconForm, subagent: "task", mode: "page" },
   ];
 });
 
@@ -60,6 +66,7 @@ function onItemTap(item) {
             v-for="item in page"
             :key="item.key"
             class="ai-chat-nav__chip"
+            :class="{ 'ai-chat-nav__chip--active': item.key === activeKey }"
             @tap="onItemTap(item)"
           >
             <image class="ai-chat-nav__icon" :src="item.icon" mode="aspectFit" />
@@ -113,6 +120,17 @@ function onItemTap(item) {
   border-radius: 32rpx;
   background: #fff;
   white-space: nowrap;
+}
+
+// 就地选中的智能体（作业指导）：选中后本轮提问都带它的 subagent
+.ai-chat-nav__chip--active {
+  border-color: #fe0000;
+  background: #fff2f3;
+}
+
+.ai-chat-nav__chip--active .ai-chat-nav__title {
+  color: #fe0000;
+  font-weight: 600;
 }
 
 .ai-chat-nav__icon {

@@ -108,6 +108,8 @@ export function useChatSend() {
           query: content,
           user: String(userStore.userId || ""),
           conversationId: chatStore.aiSessionId,
+          // 智能体分身通过 inputs 透传给算法侧
+          ...(chatStore.subagent ? { inputs: { subagent: chatStore.subagent } } : {}),
           ...(files.length ? { files } : {}),
         }, { idleTimeoutMs: 60_000 }),
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
