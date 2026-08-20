@@ -12,6 +12,7 @@ import { createLogger } from "@/utils/logger";
 import {
   cancelNativeRecord,
   isMpaasReady,
+  resetNativeRecord,
   startNativeRecord,
   stopNativeRecord,
 } from "@/utils/platform/mpaas";
@@ -50,6 +51,8 @@ class NativeVoiceRecorder {
     const sessionId = this.sessionId;
 
     try {
+      // 上一轮可能异常收尾（识别失败、end 超时），原生也许还攥着会话，先释放再开
+      await resetNativeRecord();
       await startNativeRecord();
       // 授权弹窗、启动耗时期间用户可能已经松手，这一路结果直接作废
       if (sessionId !== this.sessionId) {
@@ -108,6 +111,13 @@ class NativeVoiceRecorder {
       cancelNativeRecord().catch(() => {});
     }
     this.startedAt = 0;
+  }
+
+  /** 识别失败等异常路径调用：确保原生侧不会残留会话 */
+  release() {
+    this.recording = false;
+    this.startedAt = 0;
+    cancelNativeRecord().catch(() => {});
   }
 }
 

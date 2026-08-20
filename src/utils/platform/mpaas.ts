@@ -67,6 +67,18 @@ export function waitForMpaas(timeoutMs = 3000): Promise<AlipayBridge | null> {
   });
 }
 
+/** 原样打印原生回参，但把 base64 这类大字段压成长度，避免刷屏 */
+function summarizeResult(result: BridgeResult | undefined) {
+  if (!result || typeof result !== "object") return result;
+  const out: Record<string, unknown> = {};
+  Object.entries(result).forEach(([key, value]) => {
+    out[key] = typeof value === "string" && value.length > 120
+      ? `<${value.length} chars>`
+      : value;
+  });
+  return out;
+}
+
 export class MpaasUnavailableError extends Error {
   constructor(apiName: string) {
     super(`mPaaS 能力不可用：${apiName}`);
@@ -86,23 +98,30 @@ export async function callNative<T extends BridgeResult = BridgeResult>(
   const bridge = await waitForMpaas(options.waitReadyMs ?? 3000);
   if (!bridge) throw new MpaasUnavailableError(apiName);
 
+  const timeoutMs = options.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
+  const startedAt = Date.now();
+  logger.debug(`call ${apiName}`, params);
+
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      logger.error(`${apiName} 调用超时`, { timeoutMs, params });
       reject(new Error(`${apiName} 调用超时`));
-    }, options.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS);
+    }, timeoutMs);
 
     try {
       bridge.call(apiName, params, (result) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        logger.debug(`${apiName} result`, summarizeResult(result), { costMs: Date.now() - startedAt });
         // mPaaS 的失败约定不统一，error/errorCode 非 0 都按失败处理
         const errorCode = Number(result?.error ?? result?.errorCode ?? 0);
         if (errorCode) {
           const message = String(result?.errorMessage || result?.message || `${apiName} 调用失败`);
+          logger.error(`${apiName} 调用失败`, summarizeResult(result));
           reject(new Error(`${message}（${errorCode}）`));
           return;
         }
@@ -209,11 +228,28 @@ export async function startNativeRecord() {
 }
 
 /**
+ * 开录前先无条件释放一次。
+ * 上一轮如果异常收尾（识别失败、页面切走、end 超时），原生可能还攥着录音会话，
+ * 这时直接 start 会让后续的 end 一直不回调。cancel 失败是正常的（本来就没在录），忽略。
+ */
+export async function resetNativeRecord() {
+  try {
+    await callNative("microphoneCancel", {}, { timeoutMs: 3000 });
+  } catch (error) {
+    logger.debug("microphoneCancel（开录前的防御性释放）未生效，忽略", error);
+  }
+}
+
+/**
  * 停止录音。宿主约定：出参 { success, data }，data 就是音频的 base64。
  * 早期版本回的是上传后的地址（url），这里一并兼容，谁在就用谁。
  */
 export async function stopNativeRecord() {
-  const result = assertNativeSuccess(await callNative("microphoneEnd"), "microphoneEnd");
+  // end 在原生侧要停录 + 编码（早期版本还含上传），10 秒不够，给到 30 秒
+  const result = assertNativeSuccess(
+    await callNative("microphoneEnd", {}, { timeoutMs: 30_000 }),
+    "microphoneEnd",
+  );
   const audioUrl = String(result?.url || result?.audioUrl || "");
   const audioBase64 = String(
     (typeof result?.data === "string" ? result.data : "")

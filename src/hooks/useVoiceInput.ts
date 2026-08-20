@@ -144,7 +144,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
 
   function cancelRecorder() {
     try {
-      recorder?.cancel?.();
+      (recorder?.release ?? recorder?.cancel)?.call(recorder);
     } catch (error) {
       logger.warn("cancel recorder failed", error);
     }
@@ -373,8 +373,15 @@ export function useVoiceInput(options: VoiceInputOptions) {
     setRecognizing(true);
     try {
       if (jobId !== state.jobSeq) return;
-      logger.debug("ASR start", { filePath, audioUrl, hasBase64: Boolean(audioBase64) });
+      logger.info("ASR start", {
+        via: audioUrl ? "url" : audioBase64 ? "base64" : "upload",
+        filePath,
+        audioUrl,
+        base64Length: audioBase64?.length || 0,
+        mimeType,
+      });
       const result = await withTimeout(requestRecognition({ filePath, audioUrl, audioBase64, mimeType }));
+      logger.info("ASR done", { textLength: String(result?.text || "").length });
       if (jobId !== state.jobSeq) return;
 
       const text = String(result?.text || "").trim();
@@ -396,7 +403,16 @@ export function useVoiceInput(options: VoiceInputOptions) {
       state.voicePhase = "finished";
       state.inputMode = "voice";
     } catch (error) {
-      logger.error("ASR failed", error);
+      // 这条要自带上下文：线上默认只打 warn/error，前面那些 debug 是看不到的
+      logger.error("ASR failed", {
+        via: audioUrl ? "url" : audioBase64 ? "base64" : "upload",
+        base64Length: audioBase64?.length || 0,
+        mimeType,
+        message: (error as Error)?.message,
+        error,
+      });
+      // 识别失败也要把录音器归位，否则原生可能还留着上一轮的会话，下次 end 一直不回调
+      cancelRecorder();
       if (jobId !== state.jobSeq) return;
       state.recognizedText = prevText;
       state.draftText = prevText;
