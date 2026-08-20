@@ -3,6 +3,16 @@ import type { AiBlock } from "@/utils/ai-stream";
 
 export type ChatRole = "user" | "ai";
 
+/** 用户消息里随行展示的附件 */
+export interface ChatMessageAttachment {
+  url: string;
+  name: string;
+  /** image / audio / video / document */
+  type: string;
+  size?: number;
+  mimeType?: string;
+}
+
 export interface UiChatMessage {
   id?: string;
   role: ChatRole;
@@ -21,6 +31,7 @@ export interface UiChatMessage {
   ttsEnabled?: boolean;
   ttsLoading?: boolean;
   rawSseText?: string;
+  attachments?: ChatMessageAttachment[];
 }
 
 export interface ShareRound {

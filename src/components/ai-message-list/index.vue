@@ -245,6 +245,7 @@ function onCopyClick(index, message) {
             :tts-loading="!!msg.ttsLoading"
             :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted"
             :waiting-text="msg.waitingText"
+            :attachments="msg.attachments || []"
             :interrupted="!!msg.interrupted"
             :duration-ms="msg.durationMs"
             :positive="resolvePositive(msg)"

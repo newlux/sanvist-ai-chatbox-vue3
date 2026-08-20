@@ -9,6 +9,7 @@ import iconBad from "@/assets/img/icon-bad.svg";
 import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
 
+import { formatFileSize } from "@/hooks/useComposerAttachments";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
@@ -22,6 +23,8 @@ const props = defineProps({
   ttsLoading: { type: Boolean, default: false },
   showActions: { type: Boolean, default: false },
   waitingText: { type: String, default: "" },
+  /** 用户消息随行的附件：图片直接出图，其它文件出卡片 */
+  attachments: { type: Array, default: () => [] },
   interrupted: { type: Boolean, default: false },
   durationMs: { type: Number, default: null },
   positive: { type: Boolean, default: null },
@@ -74,6 +77,15 @@ async function copyText(text) {
   }
 
   return false;
+}
+
+/** 点开大图。同一条消息里的图片一起进预览，可以左右翻 */
+function onPreviewImage(url) {
+  const urls = props.attachments
+    .filter(item => item?.type === "image" && item?.url)
+    .map(item => item.url);
+  if (!urls.length) return;
+  uni.previewImage({ current: url, urls });
 }
 
 function onUserLongpress() {
@@ -164,16 +176,41 @@ function onNegativeFeedback() {
       />
     </view>
 
-    <view class="ai-bubble-v2__body">
-      <text
-        v-if="isUser"
-        class="ai-bubble-v2__user-content"
-        :selectable="false"
-        :user-select="false"
-        @longpress="onUserLongpress"
-      >
-        {{ props.content }}
-      </text>
+    <!-- 附件独立成条，不塞进文字气泡里 -->
+    <view v-if="isUser && props.attachments.length" class="ai-bubble-v2__files">
+      <template v-for="(file, fileIndex) in props.attachments" :key="fileIndex">
+        <image
+          v-if="file.type === 'image'"
+          class="ai-bubble-v2__file-image"
+          mode="aspectFill"
+          :src="file.url"
+          @tap.stop="onPreviewImage(file.url)"
+        />
+        <view v-else class="ai-bubble-v2__file-card">
+          <image class="ai-bubble-v2__file-icon" src="@/assets/img/icon-form.svg" mode="aspectFit" />
+          <view class="ai-bubble-v2__file-info">
+            <text class="ai-bubble-v2__file-name">
+              {{ file.name || '附件' }}
+            </text>
+            <text v-if="formatFileSize(file.size)" class="ai-bubble-v2__file-size">
+              {{ formatFileSize(file.size) }}
+            </text>
+          </view>
+        </view>
+      </template>
+    </view>
+
+    <view v-if="!isUser || props.content" class="ai-bubble-v2__body">
+      <template v-if="isUser">
+        <text
+          class="ai-bubble-v2__user-content"
+          :selectable="true"
+          :user-select="true"
+          @longpress="onUserLongpress"
+        >
+          {{ props.content }}
+        </text>
+      </template>
 
       <template v-else>
         <view
@@ -249,10 +286,28 @@ function onNegativeFeedback() {
 }
 
 .ai-bubble-v2--selected { justify-content: space-between; }
-.ai-bubble-v2--user { justify-content: flex-end; }
+.ai-bubble-v2--user {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
 .ai-bubble-v2__check { width: 40rpx; padding-left: 32rpx; display: flex; align-items: center; flex-shrink: 0; }
 .ai-bubble-v2__check-img { width: 32rpx; height: 32rpx; }
-.ai-bubble-v2__body { flex: 1; min-width: 0; overflow: hidden; box-sizing: border-box; }
+.ai-bubble-v2__body {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  // 气泡内所有文字都可以划词复制：表格、指标、图表降级清单里的 text 也一并放开
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.ai-bubble-v2__body text,
+.ai-bubble-v2__body uni-text {
+  -webkit-user-select: text;
+  user-select: text;
+}
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
   padding: 40rpx;
   border: 1rpx solid #eeeeee;
@@ -280,9 +335,9 @@ function onNegativeFeedback() {
   color: #ffffff;
   white-space: pre-wrap;
   word-break: break-word;
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
+  // 允许划词选中复制；长按仍走整条复制
+  -webkit-user-select: text;
+  user-select: text;
 }
 .ai-bubble-v2__ai-content {
   display: block;
@@ -292,6 +347,69 @@ function onNegativeFeedback() {
   white-space: pre-wrap;
   word-break: break-word;
 }
+.ai-bubble-v2__files {
+  max-width: calc(100% - 64rpx);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12rpx;
+  // 与下方文字气泡之间的间距；没有文字时这条留白也不碍事
+  margin-bottom: 16rpx;
+}
+
+.ai-bubble-v2__file-image {
+  width: 320rpx;
+  height: 320rpx;
+  border-radius: 20rpx;
+  background: #f1f2f4;
+}
+
+.ai-bubble-v2__file-card {
+  max-width: 460rpx;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 20rpx 24rpx;
+  border: 1rpx solid #eeeeee;
+  border-radius: 20rpx;
+  background: #ffffff;
+  box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
+}
+
+.ai-bubble-v2__file-icon {
+  width: 44rpx;
+  height: 44rpx;
+  flex-shrink: 0;
+}
+
+.ai-bubble-v2__file-info {
+  min-width: 0;
+  margin-left: 16rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-bubble-v2__file-name,
+.ai-bubble-v2__file-size {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ai-bubble-v2__file-name {
+  color: #1a1a1a;
+  font-size: 26rpx;
+  line-height: 36rpx;
+}
+
+.ai-bubble-v2__file-size {
+  margin-top: 2rpx;
+  color: #999999;
+  font-size: 22rpx;
+  line-height: 30rpx;
+}
+
 .ai-bubble-v2__waiting { display: flex; align-items: center; flex-wrap: wrap; gap: 8rpx; margin-bottom: 24rpx; color: #a5a5a5; font-family: "PingFang SC"; font-size: 26rpx; line-height: 36rpx; }
 .ai-bubble-v2__waiting-mark { color: #a5a5a5; font-size: 24rpx; line-height: 36rpx; }
 .ai-bubble-v2__waiting-label, .ai-bubble-v2__waiting-query, .ai-bubble-v2__waiting-suffix { color: #a5a5a5; font-weight: 400; }

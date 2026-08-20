@@ -1,4 +1,5 @@
 import type { ChatFile } from "@/api/chat/types";
+import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { computed, ref } from "vue";
 import { uploadChatFile } from "@/api/chat";
 import { useUserStore } from "@/stores";
@@ -32,24 +33,35 @@ interface LocalSelectedFile {
   mimeType?: string;
 }
 
-const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "heic"]);
-const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "wav", "webm", "aac", "amr"]);
-const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "mpeg", "avi"]);
+/**
+ * 归类口径对齐服务端 files.type 的枚举：image / document / audio / video / custom。
+ * 认不出的一律给 custom —— 这是协议里的合法取值，不要硬塞成 document，
+ * 否则后端会拿一个非文档的文件去做文档解析。
+ */
+const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "heic", "heif"]);
+const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "wav", "webm", "amr", "mpga", "aac", "ogg", "opus", "flac"]);
+const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "mpeg", "mpg", "avi", "mkv", "3gp"]);
 const DOCUMENT_EXTENSIONS = new Set([
   "txt",
   "md",
   "markdown",
+  "mdx",
   "pdf",
   "html",
+  "htm",
   "xlsx",
   "xls",
   "doc",
   "docx",
   "csv",
+  "eml",
+  "msg",
   "ppt",
   "pptx",
   "xml",
-  "json",
+  "epub",
+  "vtt",
+  "properties",
 ]);
 
 function createAttachmentLocalId() {
@@ -62,12 +74,35 @@ function getFileExtension(name: string, path = "") {
   return String(matched?.[1] || "").trim().toLowerCase();
 }
 
+const DOCUMENT_MIME_HINTS = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument",
+  "application/vnd.ms-excel",
+  "application/vnd.ms-powerpoint",
+  "application/epub",
+  "application/xml",
+  "message/rfc822",
+];
+
+/**
+ * 判定优先级：扩展名 > MIME。
+ * 扩展名是文件真实身份最稳的线索；相册/文件选择器给的 MIME 经常是
+ * application/octet-stream 这种笼统值，先看它会把 docx、xlsx 全归成 custom。
+ */
 function inferAttachmentKind(extension: string, mimeType = ""): AttachmentKind {
-  const mime = mimeType.toLowerCase();
-  if (mime.startsWith("image/") || IMAGE_EXTENSIONS.has(extension)) return "image";
-  if (mime.startsWith("audio/") || AUDIO_EXTENSIONS.has(extension)) return "audio";
-  if (mime.startsWith("video/") || VIDEO_EXTENSIONS.has(extension)) return "video";
+  if (IMAGE_EXTENSIONS.has(extension)) return "image";
+  if (AUDIO_EXTENSIONS.has(extension)) return "audio";
+  if (VIDEO_EXTENSIONS.has(extension)) return "video";
   if (DOCUMENT_EXTENSIONS.has(extension)) return "document";
+
+  const mime = mimeType.toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("text/") || DOCUMENT_MIME_HINTS.some(hint => mime.startsWith(hint))) {
+    return "document";
+  }
   return "custom";
 }
 
@@ -284,17 +319,29 @@ export function useComposerAttachments() {
     attachments.value = [];
   }
 
-  /** 取出可提交的附件（已上传成功的），并清空输入栏 */
-  function takeUploadedFiles(): ChatFile[] {
-    const files = attachments.value
-      .filter(item => item.status === "uploaded" && item.url)
-      .map(item => ({
-        type: item.type === "custom" ? "document" : item.type,
-        transferMethod: "remote_url" as const,
-        url: item.url,
-      }));
+  /**
+   * 取出可提交的附件并清空输入栏。
+   * files 按网关的 SendFile 契约（type/transferMethod/url）；
+   * meta 多带名称体积，用于消息气泡展示和 inputs 透传。
+   */
+  function takeUploadedFiles(): { files: ChatFile[]; meta: ChatMessageAttachment[] } {
+    const uploaded = attachments.value.filter(item => item.status === "uploaded" && item.url);
+    // type 直接用归类结果（含 custom），transferMethod 固定 remote_url——
+    // 文件已经由 /files/upload 传过一次，这里给的是可访问地址
+    const files = uploaded.map(item => ({
+      type: item.type,
+      transferMethod: "remote_url" as const,
+      url: item.url,
+    }));
+    const meta = uploaded.map(item => ({
+      url: item.url,
+      name: item.name,
+      type: item.type,
+      size: item.size,
+      mimeType: item.mimeType,
+    }));
     clearAttachments();
-    return files;
+    return { files, meta };
   }
 
   return {

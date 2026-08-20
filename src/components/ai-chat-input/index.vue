@@ -25,6 +25,8 @@ const emit = defineEmits([
   "input-blur",
 ]);
 
+// 键盘上沿再往上垫一点：部分机型算出来的键盘高度偏小，贴着放仍会压住底部文字
+const KEYBOARD_EXTRA_GAP_PX = 20;
 const VOICE_LONG_PRESS_MS = 300;
 const VOICE_CANCEL_SWIPE_PX = 60;
 const VOICE_ASR_TIMEOUT_MS = 30000;
@@ -106,7 +108,7 @@ const keyboardOpen = computed(() => props.keyboardHeight > 0);
  * 不用 transform 上推，位置由布局本身决定，收起时天然复位。
  */
 const keyboardLiftStyle = computed(() =>
-  (keyboardOpen.value ? { bottom: `${props.keyboardHeight}px` } : {}),
+  (keyboardOpen.value ? { bottom: `${props.keyboardHeight + KEYBOARD_EXTRA_GAP_PX}px` } : {}),
 );
 
 /**
@@ -132,9 +134,9 @@ function onDismissKeyboard() {
 /** 遮罩上的 tap 只做拦截，避免透传到下面的按钮 */
 function onMaskTap() {}
 
-const canSend = computed(() =>
-  Boolean(draft.value.trim() || hasAttachments.value) && !hasIncompleteAttachments.value,
-);
+// 有内容就亮起。附件没传完不在这儿拦——拦在点击时给明确提示，
+// 否则附件卡在上传中/失败，输入了文字按钮也始终是暗的，用户不知道该干嘛
+const canSend = computed(() => Boolean(draft.value.trim() || hasAttachments.value));
 
 /** 有东西可发才显示发送按钮，此时让位给它的是语音/键盘切换按钮 */
 const showSendButton = computed(() => !props.isLoading && canSend.value);
@@ -176,16 +178,10 @@ function submitMessage(rawText) {
     });
     return;
   }
-  // 网关要求 query 非空，纯附件无法成会话
-  if (!text) {
-    uni.showToast({ title: "请输入要发送的内容", icon: "none" });
-    return;
-  }
-
-  const files = takeUploadedFiles();
+  const { files, meta } = takeUploadedFiles();
   draft.value = "";
   emit("update:modelValue", "");
-  emit("send", { text, files });
+  emit("send", { text, files, attachments: meta });
 }
 
 function onTrySend() {
