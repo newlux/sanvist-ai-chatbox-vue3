@@ -1,9 +1,13 @@
 import type { ChatFile, Identifier } from "@/api/chat/types";
+import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { useI18n } from "vue-i18n";
 import { interruptChat } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { buildInitialBlocks, consumeChatStream } from "@/utils/ai-stream";
+
+/** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
+const ATTACHMENT_ONLY_QUERY = "请查看我发送的附件";
 
 function isAbortError(error: unknown) {
   if (!error) return false;
@@ -108,7 +112,7 @@ export function useChatSend() {
           query: content,
           user: String(userStore.userId || ""),
           conversationId: chatStore.aiSessionId,
-          // 智能体分身通过 inputs 透传给算法侧
+          // 智能体分身通过 inputs 透传；附件只走 files，不再往 inputs 里塞一份
           ...(chatStore.subagent ? { inputs: { subagent: chatStore.subagent } } : {}),
           ...(files.length ? { files } : {}),
         }, { idleTimeoutMs: 60_000 }),
@@ -146,10 +150,17 @@ export function useChatSend() {
   /**
    * 输入栏会把文本和附件一起交上来；快捷提问等旧调用不传参，仍从 store 取草稿。
    */
-  async function sendMessage(payload?: { text?: string; files?: ChatFile[] }) {
+  async function sendMessage(payload?: {
+    text?: string;
+    files?: ChatFile[];
+    attachments?: ChatMessageAttachment[];
+  }) {
     const text = String(payload?.text ?? chatStore.inputText).trim();
     const files = payload?.files ?? [];
-    if (!text) return;
+    const attachments = payload?.attachments ?? [];
+    if (!text && !files.length) return;
+    // 网关要求 query 非空，只发附件时补一句中性提问；气泡里仍然只显示附件本身
+    const query = text || ATTACHMENT_ONLY_QUERY;
 
     cancelActiveStream();
     const requestSeq = chatStore.nextRequestSeq();
@@ -164,9 +175,10 @@ export function useChatSend() {
     chatStore.messages.push({
       id: `user-${uuid}`,
       role: "user",
-      content: text,
+      content: query,
       sessionId: conversationId,
       messageId: null,
+      ...(attachments.length ? { attachments } : {}),
     });
     const aiMsgIndex = chatStore.messages.length;
     chatStore.messages.push({
@@ -178,11 +190,11 @@ export function useChatSend() {
       interrupted: false,
       sessionId: conversationId,
       messageId: null,
-      waitingText: text,
+      waitingText: query,
     });
     chatStore.activeAiMsgIndex = aiMsgIndex;
     chatStore.scrollToBottom(true);
-    await sendAiFlow({ aiMsgIndex, userMsgIndex, content: text, files, hadSessionId, requestSeq });
+    await sendAiFlow({ aiMsgIndex, userMsgIndex, content: query, files, hadSessionId, requestSeq });
   }
 
   function sendQuickPrompt(text: string) {
