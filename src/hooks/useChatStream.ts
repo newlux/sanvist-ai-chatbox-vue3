@@ -138,7 +138,7 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
         const canFallback = !finished && !receivedEvent && normalized.name !== "AbortError";
         if (canFallback) {
           console.warn(
-            `[useChatStream] WebSocket 通道不可用（已建连=${socketTask.isConnected()}），回落 HTTP：`,
+            `[useChatStream] WebSocket 通道不可用（已建连=${socketTask.isConnected()}，凭证=${socketUrl.replace(/=([^&]{0,4})[^&]*/g, "=$1***")}），回落 HTTP：`,
             normalized.message,
           );
           // 先确保连接彻底关掉，避免服务端还在为这条僵尸连接生成回答

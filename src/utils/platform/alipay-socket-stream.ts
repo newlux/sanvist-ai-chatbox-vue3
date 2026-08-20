@@ -48,7 +48,15 @@ function readSocketErrorMessage(error?: SocketErrorLike) {
   const detail = error?.errMsg || error?.errorMessage || error?.message;
   if (detail) return error?.error == null ? detail : `${detail}（error=${error.error}）`;
   if (error?.error != null) return `WebSocket 连接异常（error=${error.error}）`;
-  return "WebSocket 连接异常";
+  // 各端字段不统一，原样带上负载，否则「连接异常」四个字无法区分握手 401 和域名未加白
+  let raw = "";
+  try {
+    raw = JSON.stringify(error);
+  }
+  catch {
+    raw = String(error);
+  }
+  return `WebSocket 连接异常（raw=${raw}）`;
 }
 
 export class SocketUnavailableError extends Error {
