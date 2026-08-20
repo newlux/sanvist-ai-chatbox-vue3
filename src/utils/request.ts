@@ -1,5 +1,5 @@
-import type { PlatformRequestOptions } from "@/utils/platform/alipay-request";
-import { alipayRequest, alipayUploadFile, PlatformRequestError } from "@/utils/platform/alipay-request";
+import type { PlatformRequestOptions } from "@/utils/platform/http-request";
+import { platformRequest, PlatformRequestError, platformUploadFile } from "@/utils/platform/http-request";
 
 export interface BaseResponse<T = unknown> {
   code: number;
@@ -28,7 +28,6 @@ interface UploadOptions {
 let authorization = "";
 let guestRole = "";
 let baseURL = import.meta.env.VITE_AI_QUESTION_BASE_URL;
-const chatSocketPath = import.meta.env.VITE_AI_CHAT_WS_PATH || "";
 
 export function setRequestAuth(value: string) {
   authorization = value;
@@ -40,27 +39,6 @@ export function setRequestBaseURL(value: string) {
 
 export function getRequestBaseURL() {
   return baseURL;
-}
-
-/**
- * 对话 WebSocket 地址。留空表示未开通，调用方走 HTTP 通道。
- * 支付宝小程序的 my.request 不支持分块响应，只有 WebSocket 能做到真流式。
- *
- * 鉴权凭证走 query 而不是 header：浏览器的 WebSocket API 根本不支持自定义请求头，
- * 支付宝 my.connectSocket 的 header 在真机上也会被丢掉，握手到网关就是 401，
- * 端上只能静默回落 HTTP 整包。网关对 /chat/ws 单独支持从 query 读凭证。
- */
-export function getChatSocketURL() {
-  if (!chatSocketPath) return "";
-  const base = /^wss?:\/\//i.test(chatSocketPath)
-    ? chatSocketPath
-    : `${baseURL.replace(/\/$/, "").replace(/^http/i, "ws")}/${chatSocketPath.replace(/^\//, "")}`;
-  const query: string[] = [];
-  // 与 getRequestHeaders 同口径：游客态带 guestRole，登录态带 authorization
-  if (authorization) query.push(`authorization=${encodeURIComponent(authorization)}`);
-  if (guestRole) query.push(`guestRole=${encodeURIComponent(guestRole)}`);
-  if (!query.length) return base;
-  return `${base}${base.includes("?") ? "&" : "?"}${query.join("&")}`;
 }
 
 export function getRequestHeaders(headers: Record<string, string> = {}) {
@@ -163,7 +141,7 @@ function createUploadRequest<T>(path: string, options: UploadOptions): JsonReque
         filePath: options.filePath,
         fileType: options.fileType,
       });
-      const response = await alipayUploadFile({
+      const response = await platformUploadFile({
         url,
         filePath: options.filePath,
         name: options.name || "file",
@@ -194,7 +172,7 @@ function createJsonRequest<T>(
 ): JsonRequest<T> {
   return {
     async json() {
-      const response = await alipayRequest<BaseResponse<T> | T>(baseURL, method, path, {
+      const response = await platformRequest<BaseResponse<T> | T>(baseURL, method, path, {
         ...options,
         data: options.data ?? data,
         headers: getRequestHeaders(options.headers),

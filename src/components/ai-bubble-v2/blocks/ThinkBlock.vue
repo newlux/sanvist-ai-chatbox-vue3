@@ -41,7 +41,9 @@ function toggleExpanded() {
     <view class="think-block__header" @tap="toggleExpanded">
       <view class="think-block__heading">
         <view class="think-block__pulse" :class="{ 'think-block__pulse--complete': complete }" />
-        <text class="think-block__title"> 深度思考 </text>
+        <text class="think-block__title">
+          深度思考
+        </text>
       </view>
       <view
         class="think-block__toggle-icon"
@@ -54,7 +56,9 @@ function toggleExpanded() {
         :key="`${step.node}-${index}`"
         class="think-block__step"
       >
-        <text class="think-block__node"> {{ step.node }}： </text>
+        <text class="think-block__node">
+          {{ step.node }}：
+        </text>
         <text class="think-block__message">
           {{ step.message }}
         </text>

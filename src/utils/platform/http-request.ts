@@ -38,7 +38,7 @@ function appendQuery(url: string, data?: unknown) {
   return `${url}${url.includes("?") ? "&" : "?"}${query}`;
 }
 
-export function alipayRequest<T>(
+export function platformRequest<T>(
   baseURL: string,
   method: string,
   path: string,
@@ -93,11 +93,8 @@ function readUploadFailMessage(error: { errMsg?: string; errorMessage?: string; 
   return error.errorMessage || error.errMsg || `文件上传失败${error.error ? `（${error.error}）` : ""}`;
 }
 
-/**
- * 支付宝老版本会强制校验 fileType，但只认 image（video/audio 会直接「无效参数」）。
- * 官方说明：这个字段对实际上传类型没有意义，任意文件传 image 即可兼容。
- */
-function toAlipayFileType(fileType?: "image" | "video" | "audio") {
+/** 老容器会强制校验 fileType，但只认 image；这个字段对实际上传类型没有意义 */
+function toUploadFileType(fileType?: "image" | "video" | "audio") {
   return fileType === "video" ? "video" : "image";
 }
 
@@ -106,18 +103,9 @@ function getUserDataPath() {
 }
 
 /** 录音/选图产生的是本地临时文件，uploadFile 只接受缓存文件和用户文件 */
-function shouldPersistUploadFile(filePath: string, fileType?: "image" | "video" | "audio") {
-  // #ifndef MP-ALIPAY
-  // 浏览器里拿到的是 blob:/http: 地址，没有也不需要 saveFile
+/** 浏览器里拿到的是 blob:/http: 地址，没有也不需要 saveFile */
+function shouldPersistUploadFile() {
   return false;
-  // #endif
-  // #ifdef MP-ALIPAY
-  const userDir = getUserDataPath();
-  if (userDir && filePath.startsWith(userDir)) return false;
-  if (/^https:\/\/usr\//i.test(filePath)) return false;
-  if (/^https:\/\/resource\//i.test(filePath)) return true;
-  return fileType === "audio";
-  // #endif
 }
 
 function guessFileExt(filePath: string, fileType?: "image" | "video" | "audio") {
@@ -193,24 +181,10 @@ function pickPlainHeaders(headers?: Record<string, string>) {
  * 本项目自己从不调用 showLoading，误关不了别人的。
  */
 function suppressNativeUploadLoading() {
-  // #ifndef MP-ALIPAY
   return () => {};
-  // #endif
-  // #ifdef MP-ALIPAY
-  const hide = () => {
-    try {
-      uni.hideLoading();
-    } catch {
-      // 没有 loading 时部分基础库会报错，忽略
-    }
-  };
-  hide();
-  const timer = setInterval(hide, 120);
-  return () => clearInterval(timer);
-  // #endif
 }
 
-export async function alipayUploadFile(
+export async function platformUploadFile(
   options: PlatformUploadOptions,
 ): Promise<{ statusCode: number; data: unknown }> {
   const sourcePath = String(options.filePath || "");
@@ -219,7 +193,7 @@ export async function alipayUploadFile(
   }
 
   let stopLoadingSuppressor: (() => void) | undefined;
-  const persisted = shouldPersistUploadFile(sourcePath, options.fileType);
+  const persisted = shouldPersistUploadFile();
   const filePath = persisted
     ? await persistTempFile(sourcePath, options.fileType)
     : sourcePath;
@@ -230,7 +204,7 @@ export async function alipayUploadFile(
         url: options.url,
         filePath,
         name: options.name || "file",
-        fileType: toAlipayFileType(options.fileType),
+        fileType: toUploadFileType(options.fileType),
         success(response) {
           resolve({
             statusCode: Number(response.statusCode) || 0,

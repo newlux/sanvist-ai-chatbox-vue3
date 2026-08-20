@@ -64,7 +64,6 @@ async function copyText(text) {
     // 回退到浏览器剪贴板 API
   }
 
-  // #ifndef MP-ALIPAY
   try {
     if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
       await navigator.clipboard.writeText(value);
@@ -73,7 +72,6 @@ async function copyText(text) {
   } catch {
     // 忽略
   }
-  // #endif
 
   return false;
 }

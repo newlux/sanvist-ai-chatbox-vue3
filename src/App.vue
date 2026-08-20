@@ -2,7 +2,7 @@
 import { onLaunch } from "@dcloudio/uni-app";
 import { setLocale } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
-import { getAlipayJSBridge } from "@/utils/platform/runtime-global";
+import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
 import { setAuthFailureHandler, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
 // 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
@@ -63,9 +63,8 @@ function initializeSystem(query: StartupQuery) {
  */
 function handleAuthFailure(_statusCode: number, message: string) {
   console.error("[App] auth failed", message);
-  const bridge = getAlipayJSBridge();
-  if (bridge?.call) {
-    bridge.call("tokenExpiration", {}, () => {});
+  if (isMpaasReady()) {
+    notifyTokenExpiration();
     return;
   }
   uni.showToast({ title: "登录已失效，请重新进入", icon: "none", duration: 3000 });

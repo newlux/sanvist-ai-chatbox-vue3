@@ -135,6 +135,9 @@ const canSend = computed(() =>
   Boolean(draft.value.trim() || hasAttachments.value) && !hasIncompleteAttachments.value,
 );
 
+/** 有东西可发才显示发送按钮，此时让位给它的是语音/键盘切换按钮 */
+const showSendButton = computed(() => !props.isLoading && canSend.value);
+
 function onDraftInput(e) {
   draft.value = e.detail.value;
   emit("update:modelValue", draft.value);
@@ -843,30 +846,26 @@ onBeforeUnmount(() => {
         class="input-bar"
         :class="{ 'input-bar--text': inputMode === 'text' }"
       >
-        <!-- 左侧语音/键盘切换常驻：生成回答时也不隐藏，否则发送后入口会消失 -->
+        <!-- 左侧：附件入口 -->
         <view
-          class="input-bar__mode"
-          :class="{ 'input-bar__mode--disabled': state._gesture.active || state._isRecognizing }"
-          @tap="onToggleInputMode"
+          class="input-bar__plus"
+          :class="{ 'input-bar__plus--disabled': isLoading }"
+          @tap="onOpenAttachmentPicker"
         >
-          <image
-            v-if="inputMode === 'voice'"
-            src="@/assets/img/icon-keyboard.svg"
-            mode="aspectFit"
-          />
-          <image v-else src="@/assets/img/icon-voice.svg" mode="aspectFit" />
+          <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
         </view>
 
         <view
           v-if="inputMode === 'voice'"
           class="input-bar__voice-pill"
+          :class="{ 'input-bar__voice-pill--disabled': isLoading }"
           @touchstart.stop.prevent="onVoicePillTouchStart"
           @touchmove.stop.prevent="updateVoiceGesture"
           @touchend.stop.prevent="onVoicePillTouchEnd"
           @touchcancel.stop.prevent="onVoicePillTouchCancel"
         >
           <text class="input-bar__voice-hint">
-            按住 说话
+            {{ isLoading ? '回答生成中...' : '按住 说话' }}
           </text>
         </view>
         <view v-else class="input-bar__text-field">
@@ -875,6 +874,7 @@ onBeforeUnmount(() => {
             :value="draft"
             :style="{ height: textTextareaHeight }"
             placeholder="发消息"
+            :disabled="isLoading"
             :auto-height="false"
             :adjust-position="false"
             :cursor-spacing="16"
@@ -888,22 +888,29 @@ onBeforeUnmount(() => {
           />
         </view>
 
+        <!-- 语音/键盘切换与发送互斥：没有可发内容时才占这个位置。
+             生成回答期间同样保留，用户可以先把下一条消息的输入方式切好 -->
         <view
-          class="input-bar__plus"
-          :class="{ 'input-bar__plus--disabled': isLoading }"
-          @tap="onOpenAttachmentPicker"
+          v-if="!showSendButton"
+          class="input-bar__mode"
+          :class="{ 'input-bar__mode--disabled': state._gesture.active || state._isRecognizing }"
+          @tap="onToggleInputMode"
         >
-          <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
+          <image
+            v-if="inputMode === 'voice'"
+            src="@/assets/img/icon-keyboard.svg"
+            mode="aspectFit"
+          />
+          <image v-else src="@/assets/img/icon-voice.svg" mode="aspectFit" />
         </view>
 
-        <!-- 生成中固定为停止按钮，其余时刻是发送按钮：有内容才高亮可点 -->
+        <!-- 生成中只给停止按钮，不给发送 -->
         <view v-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
           <image src="@/assets/img/icon-stop.svg" mode="aspectFit" />
         </view>
         <view
-          v-else
+          v-else-if="showSendButton"
           class="input-bar__send"
-          :class="{ 'input-bar__send--disabled': !canSend }"
           @tap="onTrySend"
         >
           <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
@@ -924,6 +931,7 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .chat-input {
   background: transparent;
+  padding-top: 16rpx;
   // 底部安全区：home indicator / 手势条区域不放内容
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
@@ -1518,19 +1526,22 @@ onBeforeUnmount(() => {
   opacity: 0.6;
 }
 
+ // 整条输入栏就是那颗胶囊：加号、语音、发送都收在里面
 .input-bar {
   display: flex;
   align-items: center;
-  gap: 20rpx; // 10px
-  min-height: 128rpx; // 64px
-  padding: 0 40rpx; // 20px
+  gap: 16rpx;
+  min-height: 112rpx;
+  margin: 0 32rpx 12rpx;
+  padding: 10rpx 12rpx;
   box-sizing: border-box;
+  border-radius: 56rpx;
+  background: #ffffff;
+  box-shadow: 0 8rpx 28rpx rgba(32, 42, 60, 0.08);
 }
 
 .input-bar__mode {
-  width: 56rpx; // 28px
-  height: 56rpx;
-  flex: 0 0 56rpx;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1544,9 +1555,9 @@ onBeforeUnmount(() => {
 .input-bar__text-field {
   flex: 1;
   min-width: 0;
-  min-height: 88rpx; // 44px
-  border-radius: 44rpx;
-  background: #f5f5f5;
+  min-height: 76rpx;
+  // 背景交给外层胶囊，这里只负责排版
+  background: transparent;
   box-sizing: border-box;
 }
 
@@ -1554,6 +1565,10 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.input-bar__voice-pill--disabled {
+  opacity: 0.6;
 }
 
 .input-bar__voice-hint {
@@ -1567,7 +1582,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   min-width: 0;
-  padding: 12rpx 24rpx;
+  padding: 12rpx 8rpx;
   overflow: hidden;
 }
 
@@ -1588,25 +1603,50 @@ onBeforeUnmount(() => {
   color: #bababa;
 }
 
+ // 胶囊内的两颗圆按钮
 .input-bar__plus,
+.input-bar__mode {
+  width: 76rpx;
+  height: 76rpx;
+  flex: 0 0 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+// 加号图标自带灰底圆，直接铺满按钮，不再叠 CSS 背景
+.input-bar__plus {
+  background: transparent;
+}
+
+// 语音/键盘是纯图标，底色由 CSS 给，留出内边距
+.input-bar__mode {
+  padding: 18rpx;
+  background: #f1f2f4;
+}
+
+// 发送与停止本身就是实心图标，不再加底色
 .input-bar__send,
 .input-bar__stop {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.input-bar__plus,
+
 .input-bar__send {
-  width: 64rpx; // 32px
-  height: 64rpx;
-}
-.input-bar__stop {
-  width: 54rpx;
-  height: 54rpx;
+  width: 68rpx;
+  height: 68rpx;
 }
 
-// 没内容时保持占位但不高亮，避免发送按钮出现/消失导致输入栏跳动
-.input-bar__send--disabled,
+.input-bar__stop {
+  width: 58rpx;
+  height: 58rpx;
+  margin-right: 8rpx;
+}
+
 .input-bar__plus--disabled {
   opacity: 0.35;
 }
@@ -1659,7 +1699,7 @@ onBeforeUnmount(() => {
 }
 
 .chat-input__footer {
-  padding-top: 4rpx;
+  padding-top: 8rpx;
   display: flex;
   flex-direction: column;
   align-items: center;

@@ -2,7 +2,6 @@
 import * as echarts from "echarts";
 import {
   computed,
-  getCurrentInstance,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -10,11 +9,6 @@ import {
   toRaw,
   watch,
 } from "vue";
-import {
-  dispatchAlipayChartTouch,
-  initAlipayEcharts,
-  queryAlipayChartCanvas,
-} from "@/utils/platform/alipay-echarts";
 
 defineOptions({ name: "ChartBlock" });
 
@@ -24,10 +18,8 @@ const props = defineProps({
   embedded: { type: Boolean, default: false },
 });
 
-const instance = getCurrentInstance();
 const chartEl = ref(null);
 const failed = ref(false);
-const canvasId = computed(() => `c-${String(props.blockId).replace(/[^\w-]/g, "-")}`);
 
 let chart = null;
 let renderTimer = null;
@@ -157,29 +149,6 @@ function applyOption(target) {
   target.setOption(chartOption.value, { notMerge: true, lazyUpdate: false, silent: true });
 }
 
-async function renderMiniChart() {
-  if (chart) {
-    applyOption(chart);
-    return;
-  }
-  const queried = await queryAlipayChartCanvas(canvasId.value, instance);
-  if (disposed) return;
-  if (!queried) {
-    if (sizeRetry < MAX_SIZE_RETRY) {
-      sizeRetry += 1;
-      scheduleRenderChart();
-    } else {
-      console.warn("[ChartBlock] 取不到 canvas 节点，降级为数据清单", canvasId.value);
-      failed.value = true;
-    }
-    return;
-  }
-  sizeRetry = 0;
-  chart = initAlipayEcharts(queried.canvas, queried.width, queried.height, queried.dpr);
-  applyOption(chart);
-}
-
-// #ifndef MP-ALIPAY
 function renderDomChart() {
   const element = chartEl.value;
   if (!element) {
@@ -206,19 +175,12 @@ function renderDomChart() {
   applyOption(chart);
   chart.resize();
 }
-// #endif
 
 async function renderChart() {
   if (disposed || !props.option || !echarts?.init) return;
   failed.value = false;
   try {
-    // #ifdef MP-ALIPAY
-    await renderMiniChart();
-    return;
-    // #endif
-    // #ifndef MP-ALIPAY
     renderDomChart();
-    // #endif
   } catch (error) {
     console.error("[ChartBlock] render failed", error);
     failed.value = true;
@@ -256,51 +218,21 @@ function disposeChart() {
   }
 }
 
-function onCanvasTouchStart(event) {
-  if (chart) dispatchAlipayChartTouch(chart, "mousedown", event);
-}
-
-function onCanvasTouchMove(event) {
-  if (chart) dispatchAlipayChartTouch(chart, "mousemove", event);
-}
-
-function onCanvasTouchEnd(event) {
-  if (!chart) return;
-  dispatchAlipayChartTouch(chart, "mouseup", event);
-  dispatchAlipayChartTouch(chart, "click", event);
-}
-
 watch(() => props.option, scheduleRenderChart, { deep: true });
 onMounted(() => {
   disposed = false;
   scheduleRenderChart();
-  // #ifndef MP-ALIPAY
   if (typeof ResizeObserver !== "undefined") {
     resizeObserver = new ResizeObserver(scheduleRenderChart);
     if (chartEl.value) resizeObserver.observe(chartEl.value);
   }
-  // #endif
 });
 onBeforeUnmount(disposeChart);
 </script>
 
 <template>
   <view class="chart-block" :class="[{ 'chart-block--embedded': embedded }]">
-    <!-- #ifdef MP-ALIPAY -->
-    <canvas
-      v-show="!failed"
-      :id="canvasId"
-      type="2d"
-      :canvas-id="canvasId"
-      class="chart-block__canvas"
-      @touchstart="onCanvasTouchStart"
-      @touchmove="onCanvasTouchMove"
-      @touchend="onCanvasTouchEnd"
-    />
-    <!-- #endif -->
-    <!-- #ifndef MP-ALIPAY -->
     <view v-show="!failed" ref="chartEl" class="chart-block__canvas" />
-    <!-- #endif -->
     <!-- 画布不可用时不留一句空提示，直接把 option 里的数据摊出来 -->
     <view v-if="failed && hasFallbackData" class="chart-block__data">
       <text v-if="fallbackTitle" class="chart-block__data-title">

@@ -18,7 +18,7 @@ import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { getAlipayJSBridge } from "@/utils/platform/runtime-global";
+import { closeWebview, isMpaasReady } from "@/utils/platform/mpaas";
 
 defineOptions({ name: "AiChatPage" });
 
@@ -84,6 +84,13 @@ function startNewConversation() {
   nextTick(() => chatStore.scrollToBottom(true));
 }
 
+/**
+ * 历史抽屉分页取数。z-paging 每翻一页回调一次，实现落在 sessionStore 里。
+ */
+function getAISessionList(pageNo = 1, pageSize = 20) {
+  return sessionStore.loadSessions(pageNo, pageSize);
+}
+
 function toggleQuickList(show: boolean) {
   if (chatStore.messages.length > 0 && show) return;
   chatStore.showQuickList = show;
@@ -103,14 +110,11 @@ function backToWelcome() {
     userStore.setVisitorRole(null);
     userStore.setUserId("");
   }
-  // #ifdef H5
-  // H5 跑在支付宝 App 的 webview 里，返回要交回宿主
-  const bridge = getAlipayJSBridge();
-  if (bridge?.call) {
-    bridge.call("popWindow");
+  // 嵌在宿主 APP 里时，返回交回 mPaaS 容器
+  if (isMpaasReady()) {
+    void closeWebview().catch(error => console.warn("[AiChatPage] popWindow failed", error));
     return;
   }
-  // #endif
   if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
 }
 
@@ -357,7 +361,6 @@ onBeforeUnmount(cancelActiveStream);
                   保存图片
                 </text>
               </view>
-              <!-- #ifndef MP-ALIPAY -->
               <view class="share-poster-modal__option" @tap="onCopySharePoster">
                 <view class="share-poster-modal__option-icon">
                   <image class="share-poster-modal__option-icon-img" :src="iconCopyImage" mode="aspectFit" />
@@ -366,7 +369,6 @@ onBeforeUnmount(cancelActiveStream);
                   复制图片
                 </text>
               </view>
-              <!-- #endif -->
             </view>
             <view class="share-poster-modal__divider" />
             <view class="share-poster-modal__cancel" @tap="closeSharePosterModal">
@@ -377,14 +379,9 @@ onBeforeUnmount(cancelActiveStream);
           </view>
         </view>
 
-        <!-- #ifdef MP-ALIPAY -->
-        <canvas canvas-id="alipay-share-poster-canvas" class="share-poster-canvas" />
-        <!-- #endif -->
-        <!-- #ifndef MP-ALIPAY -->
         <view id="share-poster-wrap" ref="sharePosterWrap" class="share-poster-hidden">
           <ShareConversationPoster :messages="messages" :selected-indexes="shareSelectedIndexes" />
         </view>
-        <!-- #endif -->
       </view>
 
       <AiChatInput
@@ -832,15 +829,6 @@ $color-white: #ffffff;
   top: 0;
   left: -9999px;
   width: 620px;
-  pointer-events: none;
-}
-
-.share-poster-canvas {
-  position: fixed;
-  left: -9999px;
-  top: -9999px;
-  width: 620px;
-  height: 4000px;
   pointer-events: none;
 }
 </style>

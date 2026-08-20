@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from "vue";
+import { expandChartFences } from "@/utils/ai-stream";
 import AiBlockRenderer from "./AiBlockRenderer.vue";
 import AnswerGroupBlock from "./blocks/AnswerGroupBlock.vue";
 
@@ -25,10 +26,13 @@ const props = defineProps({
 
 const emit = defineEmits(["suggestion-tap"]);
 
+// 正文里内联的 ```echarts 围栏在这里展开成 chart 块，与后端单独推的 chart 事件同路渲染
+const normalizedBlocks = computed(() => expandChartFences(props.blocks || []));
+
 const renderItems = computed(() => {
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
   // 避免展示「输出结果」标题和分隔线；chart 内容本身仍由 AiBlockRenderer 渲染
-  if (props.noAnswerGroup) return props.blocks || [];
+  if (props.noAnswerGroup) return normalizedBlocks.value;
 
   const items = [];
   let group = [];
@@ -43,7 +47,7 @@ const renderItems = computed(() => {
     group = [];
   }
 
-  props.blocks.forEach((block) => {
+  normalizedBlocks.value.forEach((block) => {
     if (block.type === "answer" || block.type === "chart") {
       group.push(block);
       return;

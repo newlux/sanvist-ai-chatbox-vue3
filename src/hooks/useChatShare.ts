@@ -9,10 +9,7 @@ import iconLink from "@/assets/img/icon-share-link.svg";
 import iconQQ from "@/assets/img/icon-share-qq.svg";
 import iconWechat from "@/assets/img/icon-share-wechat.svg";
 import { useChatStore } from "@/stores";
-import {
-  createAlipayConversationPoster,
-  savePosterToAlbum,
-} from "@/utils/platform/alipay-poster";
+import { isMpaasReady, saveImageToAlbum } from "@/utils/platform/mpaas";
 
 function toPlainText(markdown: string) {
   const source = String(markdown || "");
@@ -55,7 +52,6 @@ async function copyTextToClipboard(text: string) {
   } catch (error) {
     console.error("[AiChatPage] uni clipboard error", error);
   }
-  // #ifndef MP-ALIPAY
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(safeText);
@@ -64,7 +60,6 @@ async function copyTextToClipboard(text: string) {
   } catch (error) {
     console.error("[AiChatPage] navigator clipboard error", error);
   }
-  // #endif
   return false;
 }
 
@@ -202,14 +197,6 @@ export function useChatShare(posterEl: Ref<unknown>) {
   }
 
   async function generateSharePoster() {
-    // #ifdef MP-ALIPAY
-    const selectedMessages = shareSelectedIndexes.value
-      .map(index => chatStore.messages[index])
-      .filter(Boolean);
-    sharePosterDataUrl.value = await createAlipayConversationPoster(selectedMessages);
-    return;
-    // #endif
-    // #ifndef MP-ALIPAY
     const { default: html2canvas } = await import("html2canvas");
     const elFromDom = typeof document !== "undefined" ? document.getElementById("share-poster-wrap") : null;
     const el = (elFromDom || posterEl.value) as HTMLElement | null;
@@ -220,7 +207,6 @@ export function useChatShare(posterEl: Ref<unknown>) {
       allowTaint: true,
       scale: 2,
     })).toDataURL("image/png");
-    // #endif
   }
 
   function openSharePoster() {
@@ -269,17 +255,18 @@ export function useChatShare(posterEl: Ref<unknown>) {
 
   async function onSaveSharePoster() {
     if (!sharePosterDataUrl.value) return;
-    // #ifdef MP-ALIPAY
-    try {
-      await savePosterToAlbum(sharePosterDataUrl.value);
-      uni.showToast({ title: t("save-success"), icon: "none" });
-    } catch (error) {
-      console.error("[AiChatPage] save poster failed", error);
-      uni.showToast({ title: t("save-not-supported"), icon: "none" });
+
+    // 嵌在宿主 APP 里优先走原生存相册；宿主没实现再退回浏览器下载
+    if (isMpaasReady()) {
+      try {
+        await saveImageToAlbum(sharePosterDataUrl.value);
+        uni.showToast({ title: t("save-success"), icon: "none" });
+        return;
+      } catch (error) {
+        console.warn("[AiChatPage] 原生保存图片失败，回退浏览器下载", error);
+      }
     }
-    return;
-    // #endif
-    // #ifndef MP-ALIPAY
+
     const link = document.createElement("a");
     link.href = sharePosterDataUrl.value;
     link.download = "share-conversation.png";
@@ -287,15 +274,10 @@ export function useChatShare(posterEl: Ref<unknown>) {
     link.click();
     document.body.removeChild(link);
     uni.showToast({ title: t("download-start"), icon: "none" });
-    // #endif
   }
 
   async function onCopySharePoster() {
     if (!sharePosterDataUrl.value) return;
-    // #ifdef MP-ALIPAY
-    await onSaveSharePoster();
-    // #endif
-    // #ifndef MP-ALIPAY
     const canCopyImage = typeof navigator !== "undefined"
       && typeof navigator.clipboard?.write === "function"
       && typeof ClipboardItem !== "undefined";
@@ -312,7 +294,6 @@ export function useChatShare(posterEl: Ref<unknown>) {
       console.error("[AiChatPage] clipboard image copy error", error);
       uni.showToast({ title: t("copy-failed"), icon: "none" });
     }
-    // #endif
   }
 
   return {

@@ -1,4 +1,6 @@
+export { expandChartFences } from "./chartFence";
 export type { AiBlock, AiBlockType, StreamBlockUpdate } from "./chatStreamParser";
+
 export { applyEventToBlocks, buildInitialBlocks } from "./chatStreamParser";
 
 export type { ChunkData, ChunkDecoder } from "./chunkDecoder";
