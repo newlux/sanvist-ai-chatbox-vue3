@@ -11,7 +11,9 @@ import type {
   InterruptChatParams,
   ListConversationsParams,
   ListMessagesParams,
+  RecognizeSpeechByBase64Params,
   RecognizeSpeechByUploadParams,
+  RecognizeSpeechByUrlParams,
   RenameConversationParams,
   SpeechRecognitionResult,
   SubmitFeedbackParams,
@@ -88,6 +90,29 @@ export function uploadChatFile(params: UploadChatFileParams) {
     formData: { user: params.user },
     timeout: params.timeout,
   }).json();
+}
+
+/**
+ * 按音频地址识别。原生录音（microphoneEnd）已经把文件传好了，只会给回一个 URL，
+ * 这时候没有本地文件可传，走这个接口。
+ */
+export function recognizeSpeechByUrl(params: RecognizeSpeechByUrlParams) {
+  return request.post<SpeechRecognitionResult>("/speech/asr", {
+    audioUrl: params.audioUrl,
+    ...(params.language ? { language: params.language } : {}),
+  }, jsonOptions).json();
+}
+
+/**
+ * 按 base64 识别。宿主原生录音直接回传音频内容（而不是地址）时走这条。
+ * 纯 base64 必须带 mimeType，Data URL 形式则可省略。
+ */
+export function recognizeSpeechByBase64(params: RecognizeSpeechByBase64Params) {
+  return request.post<SpeechRecognitionResult>("/speech/asr/base64", {
+    audioBase64: params.audioBase64,
+    ...(params.mimeType ? { mimeType: params.mimeType } : {}),
+    ...(params.language ? { language: params.language } : {}),
+  }, jsonOptions).json();
 }
 
 export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {

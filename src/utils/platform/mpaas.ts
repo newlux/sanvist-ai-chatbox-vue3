@@ -130,9 +130,106 @@ export async function closeWebview() {
   await callNative("popWindow");
 }
 
-/** 保存图片到系统相册。dataUrl 为 base64 图片 */
+/**
+ * 保存图片到系统相册。
+ * 宿主约定：入参 { base64 }（不带 data:image/...;base64, 前缀），
+ * 出参 { success: true|false, code }。失败时 success 为 false，抛出去让调用方降级。
+ */
 export async function saveImageToAlbum(dataUrl: string) {
-  await callNative("saveImage", { url: dataUrl, imageUrl: dataUrl });
+  const base64 = String(dataUrl || "").replace(/^data:[^;]*;base64,/, "");
+  if (!base64) throw new Error("图片数据为空");
+
+  const result = await callNative("saveImageToAlbum", { base64 });
+  if (result?.success === false || String(result?.success) === "false") {
+    throw new Error(`保存失败（code=${result?.code ?? "unknown"}）`);
+  }
+}
+
+/** 宿主支持动态申请的系统权限 */
+export type NativePermission = "photo" | "camera" | "record_audio";
+
+const PERMISSION_LABELS: Record<NativePermission, string> = {
+  photo: "相册",
+  camera: "相机",
+  record_audio: "麦克风",
+};
+
+function isPermissionGranted(result: BridgeResult) {
+  // 文档给的出参是 { result: "1|0" }，示例代码里又用了 status: "granted"，两种都认
+  const value = String(result?.result ?? result?.status ?? "").toLowerCase();
+  return value === "1" || value === "granted" || value === "true";
+}
+
+/**
+ * 向宿主申请系统权限。
+ *
+ * 返回 true 表示「可以继续」：拿到授权，或者压根不在容器里（此时交给浏览器自己弹权限框）。
+ * 只有宿主明确回了未授权才返回 false。
+ */
+export async function ensureNativePermission(permission: NativePermission) {
+  if (!isMpaasReady()) return true;
+
+  try {
+    const result = await callNative("requestPermission", { permissions: permission });
+    if (isPermissionGranted(result)) return true;
+    console.warn(`[mpaas] ${permission} 权限未授予`, result);
+    return false;
+  } catch (error) {
+    // JSAPI 没注册、调用超时都不该把功能卡死，继续走 Web 链路
+    console.warn(`[mpaas] requestPermission(${permission}) 调用失败，按未接入处理`, error);
+    return true;
+  }
+}
+
+/** 权限被拒时的统一提示文案 */
+export function permissionDeniedMessage(permission: NativePermission) {
+  return `请在系统设置中允许使用${PERMISSION_LABELS[permission]}`;
+}
+
+/**
+ * 原生录音。宿主约定：
+ * - microphoneStart 开录（存成 temp.m4a），出参 { success }
+ * - microphoneEnd 停录并上传，出参 { success, url }
+ * - microphoneCancel 停录并删除临时文件
+ * - microphonePlay/{url}、microphonePause 播放控制
+ */
+function assertNativeSuccess(result: BridgeResult, apiName: string) {
+  if (result?.success === false || String(result?.success) === "false") {
+    throw new Error(`${apiName} 失败（code=${result?.code ?? "unknown"}）`);
+  }
+  return result;
+}
+
+export async function startNativeRecord() {
+  assertNativeSuccess(await callNative("microphoneStart"), "microphoneStart");
+}
+
+/**
+ * 停止录音。宿主约定回的是上传后的地址（url），
+ * 但也兼容直接回音频内容（base64 / audioBase64）的实现。
+ */
+export async function stopNativeRecord() {
+  const result = assertNativeSuccess(await callNative("microphoneEnd"), "microphoneEnd");
+  const audioUrl = String(result?.url || result?.audioUrl || "");
+  const audioBase64 = String(result?.base64 || result?.audioBase64 || "");
+  if (!audioUrl && !audioBase64) throw new Error("microphoneEnd 未返回音频数据");
+  return {
+    audioUrl,
+    audioBase64,
+    mimeType: String(result?.mimeType || (audioBase64 ? "audio/m4a" : "")),
+  };
+}
+
+export async function cancelNativeRecord() {
+  await callNative("microphoneCancel");
+}
+
+export async function playNativeAudio(url: string) {
+  assertNativeSuccess(await callNative("microphonePlay", { url }), "microphonePlay");
+}
+
+export async function pauseNativeAudio() {
+  await callNative("microphonePause");
 }
 
 /** 设置 webview 标题栏文案 */

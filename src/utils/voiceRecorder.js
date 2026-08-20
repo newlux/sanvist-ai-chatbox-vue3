@@ -1,5 +1,6 @@
 /* global uni */
 
+import NativeVoiceRecorder from "./voiceRecorderNative";
 import WebVoiceRecorder from "./voiceRecorderWeb";
 
 export const RECORDER_PHASE = {
@@ -250,8 +251,26 @@ class VoiceRecorder {
 }
 
 /**
- * 按运行环境挑实现，两者对外方法与返回结构一致。
- * 判断顺序是「先看浏览器能力」：H5 上 uni.getRecorderManager 也存在，
- * 但只是个会报「暂不支持」的空壳，拿它做判据会误选到小程序实现。
+ * 按运行环境挑实现，三者对外方法与返回结构一致：
+ * 1. 嵌在 mPaaS 容器里 → 走原生 JSAPI，权限、编码、上传都交给宿主；
+ * 2. 普通浏览器 → MediaRecorder；
+ * 3. 其余（小程序 / App）→ uni 的录音管理器。
+ *
+ * 注意判断放在「实例化时」而不是模块加载时：AlipayJSBridge 是异步注入的，
+ * 模块加载那一刻通常还没就绪，提前判定会永远选不到原生实现。
  */
-export default WebVoiceRecorder.isSupported() ? WebVoiceRecorder : VoiceRecorder;
+function pickRecorderImplementation() {
+  if (NativeVoiceRecorder.isSupported()) return NativeVoiceRecorder;
+  if (WebVoiceRecorder.isSupported()) return WebVoiceRecorder;
+  return VoiceRecorder;
+}
+
+class VoiceRecorderProxy {
+  constructor() {
+    const Implementation = pickRecorderImplementation();
+    // 构造函数返回别的对象是合法的：调用方拿到的就是选中的那个实现
+    return new Implementation();
+  }
+}
+
+export default VoiceRecorderProxy;
