@@ -3,6 +3,10 @@ import { useI18n } from "vue-i18n";
 import { getTextToSpeech } from "@/api/chat";
 import { useChatStore } from "@/stores";
 
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("tts");
+
 function guessAudioMime(base64: string) {
   if (base64.startsWith("UklGR")) return "audio/wav";
   return "audio/mpeg";
@@ -21,7 +25,7 @@ export function useChatTts() {
       audio.stop();
       audio.destroy?.();
     } catch (error) {
-      console.error("[AiChatPage] release audio failed", error);
+      logger.error("release audio failed", error);
     }
   }
 
@@ -56,7 +60,7 @@ export function useChatTts() {
 
     audio.autoplay = true;
     audio.onError((error) => {
-      console.error("[AiChatPage] tts audio error", error);
+      logger.error("tts audio error", error);
       uni.showToast({ title: t("audio-play-failed"), icon: "none" });
     });
   }
@@ -70,7 +74,7 @@ export function useChatTts() {
       const resp = await getTextToSpeech(aiMsg.sessionId, aiMsg.messageId);
       await playBase64Audio(resp?.audioBase64 || "");
     } catch (error) {
-      console.error("[AiChatPage] tts failed", error);
+      logger.error("tts failed", error);
       uni.showToast({ title: t("tts-play-failed"), icon: "none" });
     } finally {
       const latest = chatStore.messages[messageIndex] || {};

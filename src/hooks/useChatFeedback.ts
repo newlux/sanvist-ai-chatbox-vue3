@@ -4,6 +4,10 @@ import { useI18n } from "vue-i18n";
 import { cancelFeedback, submitFeedback } from "@/api/chat";
 import { useChatStore, useUserStore } from "@/stores";
 
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("feedback");
+
 interface FeedbackContext {
   index: number;
   conversationId: Identifier;
@@ -51,7 +55,7 @@ export function useChatFeedback() {
       try {
         await cancelFeedback(messageId, { conversationId, user, messageId });
       } catch (error) {
-        console.error("[AiChatPage] caught error", error);
+        logger.error("caught error", error);
         chatStore.replaceMessage(index, { ...prev });
         uni.showToast({ title: t("feedback-failed"), icon: "none" });
       }
@@ -63,7 +67,7 @@ export function useChatFeedback() {
       try {
         await submitFeedback(messageId, { conversationId, user, messageId, rating: "like" });
       } catch (error) {
-        console.error("[AiChatPage] caught error", error);
+        logger.error("caught error", error);
         chatStore.replaceMessage(index, { ...prev });
         uni.showToast({ title: t("feedback-failed"), icon: "none" });
       }
@@ -95,14 +99,14 @@ export function useChatFeedback() {
         rating: "dislike",
         content: remark,
       });
-      uni.showToast({ title: "感谢反馈", icon: "none", duration: 1500 });
+      uni.showToast({ title: t("feedback-thanks"), icon: "none", duration: 1500 });
       clearCloseTimer();
       closeTimer = setTimeout(() => {
         context.value = null;
         sheetVisible.value = false;
       }, 1500);
     } catch (error) {
-      console.error("[AiChatPage] caught error", error);
+      logger.error("caught error", error);
       chatStore.replaceMessage(ctx.index, {
         ...prev,
         positive: prev.positive ?? null,

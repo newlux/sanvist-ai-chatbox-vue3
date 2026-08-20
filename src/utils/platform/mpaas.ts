@@ -11,6 +11,10 @@
  *   不能因为拿不到 bridge 就把功能卡死。
  */
 
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("mpaas");
+
 type BridgeResult = Record<string, unknown>;
 
 interface AlipayBridge {
@@ -116,7 +120,7 @@ export async function callNative<T extends BridgeResult = BridgeResult>(
 /** 发起调用但不关心结果，宿主没实现也不报错（用于纯通知类能力） */
 export function callNativeSilently(apiName: string, params: Record<string, unknown> = {}) {
   callNative(apiName, params).catch((error) => {
-    console.warn(`[mpaas] ${apiName} 调用失败`, error);
+    logger.warn(`[mpaas] ${apiName} 调用失败`, error);
   });
 }
 
@@ -172,11 +176,11 @@ export async function ensureNativePermission(permission: NativePermission) {
   try {
     const result = await callNative("requestPermission", { permissions: permission });
     if (isPermissionGranted(result)) return true;
-    console.warn(`[mpaas] ${permission} 权限未授予`, result);
+    logger.warn(`[mpaas] ${permission} 权限未授予`, result);
     return false;
   } catch (error) {
     // JSAPI 没注册、调用超时都不该把功能卡死，继续走 Web 链路
-    console.warn(`[mpaas] requestPermission(${permission}) 调用失败，按未接入处理`, error);
+    logger.warn(`[mpaas] requestPermission(${permission}) 调用失败，按未接入处理`, error);
     return true;
   }
 }

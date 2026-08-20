@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, watch } from "vue";
 // import { useSafeArea } from "@/hooks/useSafeArea";
 
@@ -42,7 +42,7 @@ function onClose() {
   emit("close");
 }
 
-function onOptionTap(value) {
+function onOptionTap(value: string) {
   selectedValue.value = [value];
   const option = props.options.find(item => item.value === value);
   emit("confirm", {
@@ -51,7 +51,7 @@ function onOptionTap(value) {
   });
 }
 
-function onSupplementInput(event) {
+function onSupplementInput(event: { detail: { value: string } }) {
   supplement.value = event?.detail?.value || "";
 }
 

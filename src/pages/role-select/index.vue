@@ -7,10 +7,11 @@ import iconBoss from "@/assets/img/icon-boss.png";
 import iconOperator from "@/assets/img/icon-operator.png";
 import { VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
 import { useUserStore } from "@/stores";
+import { createLogger } from "@/utils/logger";
 import { isGuestRole, setGuestRole } from "@/utils/request";
 
 defineOptions({ name: "RoleSelectPage" });
-
+const logger = createLogger("role-select");
 interface ViewRole extends RoleOption {
   value: VisitorRole;
   description: string;
@@ -107,7 +108,7 @@ async function startChat() {
     userStore.setAwakeningPrompt(result ?? null);
     uni.redirectTo({ url: "/pages/index/index" });
   } catch (error) {
-    console.warn("[role-select] failed to prefetch awakening prompt", error);
+    logger.warn("failed to prefetch awakening prompt", error);
     // 预取失败仍允许进入首页，首页会兜底重试
     userStore.setAwakeningPrompt(null);
     uni.redirectTo({ url: "/pages/index/index" });
@@ -143,7 +144,7 @@ async function loadRoleOptions() {
   } catch (error) {
     loadError.value = "身份选项加载失败，请稍后重试";
     roles.value = FALLBACK_ROLES;
-    console.warn("[role-select] failed to load role options", error);
+    logger.warn("failed to load role options", error);
   } finally {
     loading.value = false;
   }

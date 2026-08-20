@@ -10,7 +10,7 @@ import { useChatSend } from "@/hooks/useChatSend";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useChatStore, useUserStore } from "@/stores";
+import { provideChatScope, useChatStore, useUserStore } from "@/stores";
 
 /**
  * 智能体会话页（听汇报 / 任务协同）。
@@ -21,7 +21,9 @@ import { useChatStore, useUserStore } from "@/stores";
 defineOptions({ name: "SubagentChatPage" });
 
 const { t } = useI18n();
-const chatStore = useChatStore();
+// 智能体会话独立成域：与首页各持一份消息，来回切换互不干扰
+const chatScope = provideChatScope("subagent");
+const chatStore = useChatStore(chatScope);
 const userStore = useUserStore();
 
 const {
@@ -48,7 +50,7 @@ watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBo
 onLoad((query?: Record<string, string>) => {
   syncWindowHeight();
   pageTitle.value = String(query?.title || "AI 助手");
-  // 每次进来都是全新一轮：不要把首页那轮对话带进来
+  // 每次进来都是全新一轮
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
@@ -57,9 +59,7 @@ onLoad((query?: Record<string, string>) => {
 
 onUnload(() => {
   cancelActiveStream();
-  // 退出时把分身身份摘掉，否则回到首页继续提问会串到这个智能体上
   chatStore.setSubagent("");
-  chatStore.resetConversation();
 });
 
 onBeforeUnmount(cancelActiveStream);

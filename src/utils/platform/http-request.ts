@@ -1,3 +1,7 @@
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("request");
+
 export interface PlatformRequestOptions {
   data?: unknown;
   headers?: Record<string, string>;
@@ -98,69 +102,6 @@ function toUploadFileType(fileType?: "image" | "video" | "audio") {
   return fileType === "video" ? "video" : "image";
 }
 
-function getUserDataPath() {
-  return (uni as { env?: { USER_DATA_PATH?: string } }).env?.USER_DATA_PATH || "";
-}
-
-/** 录音/选图产生的是本地临时文件，uploadFile 只接受缓存文件和用户文件 */
-/** 浏览器里拿到的是 blob:/http: 地址，没有也不需要 saveFile */
-function shouldPersistUploadFile() {
-  return false;
-}
-
-function guessFileExt(filePath: string, fileType?: "image" | "video" | "audio") {
-  const matched = /\.[a-z0-9]+$/i.exec(filePath.split("?")[0] || "");
-  if (matched) return matched[0];
-  if (fileType === "audio") return ".aac";
-  if (fileType === "video") return ".mp4";
-  return ".png";
-}
-
-function persistTempFile(tempFilePath: string, fileType?: "image" | "video" | "audio"): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const fail = (error?: { errMsg?: string }) => {
-      reject(new PlatformRequestError(error?.errMsg || "临时文件保存失败"));
-    };
-    const finish = (saved?: string) => {
-      if (!saved) fail();
-      else resolve(saved);
-    };
-    const fs = typeof uni.getFileSystemManager === "function" ? uni.getFileSystemManager() : null;
-    const baseDir = getUserDataPath();
-    const destPath = baseDir ? `${baseDir}/upload_${Date.now()}${guessFileExt(tempFilePath, fileType)}` : "";
-
-    if (fs && typeof fs.saveFile === "function") {
-      fs.saveFile({
-        tempFilePath,
-        ...(destPath ? { filePath: destPath } : {}),
-        success: (res: { savedFilePath?: string; apFilePath?: string }) => {
-          finish(res.savedFilePath || res.apFilePath || destPath);
-        },
-        fail,
-      });
-      return;
-    }
-
-    uni.saveFile({
-      tempFilePath,
-      success: res => finish(res.savedFilePath),
-      fail,
-    });
-  });
-}
-
-function removePersistedFile(filePath: string) {
-  try {
-    uni.removeSavedFile({ filePath });
-  } catch {
-    try {
-      uni.getFileSystemManager()?.unlink?.({ filePath });
-    } catch {
-      // 清理失败不影响识别结果
-    }
-  }
-}
-
 function pickPlainHeaders(headers?: Record<string, string>) {
   if (!headers) return undefined;
   const result: Record<string, string> = {};
@@ -193,16 +134,12 @@ export async function platformUploadFile(
   }
 
   let stopLoadingSuppressor: (() => void) | undefined;
-  const persisted = shouldPersistUploadFile();
-  const filePath = persisted
-    ? await persistTempFile(sourcePath, options.fileType)
-    : sourcePath;
 
   try {
     return await new Promise((resolve, reject) => {
       const payload: UniApp.UploadFileOption = {
         url: options.url,
-        filePath,
+        filePath: sourcePath,
         name: options.name || "file",
         fileType: toUploadFileType(options.fileType),
         success(response) {
@@ -220,11 +157,9 @@ export async function platformUploadFile(
       if (options.formData && Object.keys(options.formData).length > 0) {
         payload.formData = options.formData;
       }
-      console.info("[request] uploadFile", {
+      logger.debug("uploadFile", {
         url: payload.url,
         filePath: payload.filePath,
-        sourcePath,
-        persisted,
         name: payload.name,
         fileType: payload.fileType,
       });
@@ -233,8 +168,5 @@ export async function platformUploadFile(
     });
   } finally {
     stopLoadingSuppressor?.();
-    if (persisted && filePath && filePath !== sourcePath) {
-      removePersistedFile(filePath);
-    }
   }
 }

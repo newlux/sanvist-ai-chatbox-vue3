@@ -1,271 +1,29 @@
-/* global uni */
-
+import { createLogger } from "@/utils/logger";
 import NativeVoiceRecorder from "./voiceRecorderNative";
 import WebVoiceRecorder from "./voiceRecorderWeb";
 
-export const RECORDER_PHASE = {
-  IDLE: "idle",
-  STARTING: "starting",
-  RECORDING: "recording",
-  STOPPING: "stopping",
-};
-
-/** 支付宝：录音不足 1s 时 onStop 不会触发，只会 onError(error: 7) */
-const MIN_RECORD_MS = 1100;
-const START_TIMEOUT_MS = 8000;
-const STOP_TIMEOUT_MS = 8000;
-
-function readErrorMessage(error) {
-  if (!error) return "录音失败";
-  if (typeof error === "string") return error;
-  const code = error.error ?? error.errCode ?? error.code;
-  if (Number(code) === 7) return "说话时间太短";
-  if (Number(code) === 10) return "请在系统设置中允许使用麦克风";
-  return error.errorMessage || error.errMsg || error.message || "录音失败";
-}
-
-function readFilePath(result) {
-  return result?.tempFilePath || result?.apFilePath || result?.filePath || "";
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-class VoiceRecorder {
-  constructor() {
-    this.phase = RECORDER_PHASE.IDLE;
-    this.sessionId = 0;
-    this.recorderManager = null;
-    this.startPromise = null;
-    this.startResolve = null;
-    this.stopResolve = null;
-    this.startedAt = 0;
-    this.startTimer = null;
-    this.stopTimer = null;
-  }
-
-  get isRecording() {
-    return this.phase === RECORDER_PHASE.RECORDING;
-  }
-
-  static isSupported() {
-    if (typeof uni?.getRecorderManager !== "function") return false;
-    try {
-      // H5 上这个 API 存在，但只是个「暂不支持」的空壳，调用返回 undefined
-      const manager = uni.getRecorderManager();
-      return typeof manager?.start === "function" && typeof manager?.onStart === "function";
-    } catch {
-      return false;
-    }
-  }
-
-  async start(options = {}) {
-    this.hardReset();
-    if (!VoiceRecorder.isSupported()) {
-      return { success: false, error: "当前环境不支持录音功能" };
-    }
-
-    const sessionId = this.sessionId;
-    const manager = uni.getRecorderManager();
-    if (!manager || typeof manager.onStart !== "function") {
-      return { success: false, error: "当前环境不支持录音功能" };
-    }
-    this.recorderManager = manager;
-    this.phase = RECORDER_PHASE.STARTING;
-
-    this.startPromise = new Promise((resolve) => {
-      this.startResolve = resolve;
-      const finish = (result) => {
-        this.clearStartTimer();
-        this.startResolve = null;
-        if (this.sessionId !== sessionId) {
-          resolve({ success: false, error: "录音已取消", cancelled: true });
-          return;
-        }
-        resolve(result);
-      };
-
-      try {
-        manager.offStart?.();
-        manager.offError?.();
-        manager.onStart(() => {
-          if (this.sessionId !== sessionId) return;
-          this.phase = RECORDER_PHASE.RECORDING;
-          this.startedAt = Date.now();
-          console.info("[voice] recorder started");
-          finish({ success: true });
-        });
-        manager.onError((error) => {
-          if (this.sessionId !== sessionId) return;
-          this.phase = RECORDER_PHASE.IDLE;
-          this.recorderManager = null;
-          const errorMessage = readErrorMessage(error);
-          const notAllowed = Number(error?.error) === 10
-            || /auth|permission|deny|denied|麦克风/i.test(errorMessage);
-          console.warn("[voice] recorder start error", error);
-          finish({
-            success: false,
-            error: notAllowed ? "请在系统设置中允许使用麦克风" : errorMessage,
-            notAllowed,
-          });
-        });
-        this.startTimer = setTimeout(() => {
-          finish({ success: false, error: "录音启动超时" });
-        }, START_TIMEOUT_MS);
-        manager.start({
-          duration: options.duration || 60_000,
-          sampleRate: options.sampleRate || 16_000,
-          numberOfChannels: 1,
-          encodeBitRate: options.encodeBitRate || 48_000,
-          format: options.format || "mp3",
-          hideTips: true,
-        });
-      } catch (error) {
-        finish({ success: false, error: readErrorMessage(error) });
-      }
-    });
-
-    return this.startPromise;
-  }
-
-  async stop() {
-    if (this.phase === RECORDER_PHASE.STARTING && this.startPromise) {
-      const startResult = await this.startPromise;
-      if (!startResult?.success) return startResult;
-    }
-
-    if (this.phase !== RECORDER_PHASE.RECORDING || !this.recorderManager) {
-      return { success: false, error: "当前没有正在进行的录音" };
-    }
-
-    const elapsed = Date.now() - this.startedAt;
-    if (elapsed < MIN_RECORD_MS) {
-      await sleep(MIN_RECORD_MS - elapsed);
-      if (this.phase !== RECORDER_PHASE.RECORDING || !this.recorderManager) {
-        return { success: false, error: "录音已取消", cancelled: true };
-      }
-    }
-
-    const sessionId = this.sessionId;
-    const manager = this.recorderManager;
-    this.phase = RECORDER_PHASE.STOPPING;
-
-    return new Promise((resolve) => {
-      this.stopResolve = resolve;
-      const finish = (result) => {
-        this.clearStopTimer();
-        this.stopResolve = null;
-        this.resetState();
-        resolve(result);
-      };
-
-      try {
-        manager.offStop?.();
-        manager.offError?.();
-        manager.onStop((result) => {
-          if (this.sessionId !== sessionId) return;
-          const tempFilePath = readFilePath(result);
-          console.info("[voice] recorder stopped", {
-            tempFilePath,
-            duration: result?.duration,
-            fileSize: result?.fileSize,
-            raw: result,
-          });
-          if (!tempFilePath) {
-            finish({ success: false, error: "未录制到音频内容" });
-            return;
-          }
-          finish({ success: true, data: { tempFilePath } });
-        });
-        manager.onError((error) => {
-          if (this.sessionId !== sessionId) return;
-          console.warn("[voice] recorder stop error", error);
-          finish({ success: false, error: readErrorMessage(error) });
-        });
-        this.stopTimer = setTimeout(() => {
-          finish({ success: false, error: "停止录音超时" });
-        }, STOP_TIMEOUT_MS);
-        manager.stop();
-      } catch (error) {
-        finish({ success: false, error: readErrorMessage(error) });
-      }
-    });
-  }
-
-  cancel() {
-    this.abortCurrent("录音已取消");
-    return { success: true };
-  }
-
-  hardReset() {
-    this.abortCurrent("录音已重置");
-  }
-
-  abortCurrent(reason) {
-    const manager = this.recorderManager;
-    const startResolve = this.startResolve;
-    const stopResolve = this.stopResolve;
-    this.startResolve = null;
-    this.stopResolve = null;
-    this.sessionId += 1;
-    this.clearTimers();
-    this.resetState();
-    startResolve?.({ success: false, error: reason, cancelled: true });
-    stopResolve?.({ success: false, error: reason, cancelled: true });
-    try {
-      manager?.stop();
-    } catch {
-      // 录音尚未真正开始时，停止操作可安全忽略。
-    }
-  }
-
-  clearStartTimer() {
-    if (this.startTimer) {
-      clearTimeout(this.startTimer);
-      this.startTimer = null;
-    }
-  }
-
-  clearStopTimer() {
-    if (this.stopTimer) {
-      clearTimeout(this.stopTimer);
-      this.stopTimer = null;
-    }
-  }
-
-  clearTimers() {
-    this.clearStartTimer();
-    this.clearStopTimer();
-  }
-
-  resetState() {
-    this.phase = RECORDER_PHASE.IDLE;
-    this.recorderManager = null;
-    this.startedAt = 0;
-    this.startPromise = null;
-    this.startResolve = null;
-    this.stopResolve = null;
-    this.clearTimers();
-  }
-}
+const logger = createLogger("voice");
 
 /**
- * 按运行环境挑实现，三者对外方法与返回结构一致：
- * 1. 嵌在 mPaaS 容器里 → 走原生 JSAPI，权限、编码、上传都交给宿主；
- * 2. 普通浏览器 → MediaRecorder；
- * 3. 其余（小程序 / App）→ uni 的录音管理器。
+ * 录音入口。真正的实现有两个：
+ * - NativeVoiceRecorder：嵌在 mPaaS 容器里，权限、编码、上传都交给宿主；
+ * - WebVoiceRecorder：普通浏览器，getUserMedia + MediaRecorder。
  *
- * 注意判断放在「实例化时」而不是模块加载时：AlipayJSBridge 是异步注入的，
- * 模块加载那一刻通常还没就绪，提前判定会永远选不到原生实现。
+ * 两者对外方法与返回结构一致（start / stop / cancel / hardReset），
+ * 调用方不需要知道自己跑在哪。
  */
 function pickRecorderImplementation() {
   if (NativeVoiceRecorder.isSupported()) return NativeVoiceRecorder;
   if (WebVoiceRecorder.isSupported()) return WebVoiceRecorder;
-  return VoiceRecorder;
+  logger.warn("当前环境不支持录音，回退到浏览器实现（调用时会给出提示）");
+  return WebVoiceRecorder;
 }
 
-class VoiceRecorderProxy {
+/**
+ * 判断放在「实例化时」而不是模块加载时：AlipayJSBridge 是异步注入的，
+ * 模块加载那一刻通常还没就绪，提前判定会永远选不到原生实现。
+ */
+class VoiceRecorder {
   constructor() {
     const Implementation = pickRecorderImplementation();
     // 构造函数返回别的对象是合法的：调用方拿到的就是选中的那个实现
@@ -273,4 +31,4 @@ class VoiceRecorderProxy {
   }
 }
 
-export default VoiceRecorderProxy;
+export default VoiceRecorder;

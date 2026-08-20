@@ -9,7 +9,11 @@ import iconLink from "@/assets/img/icon-share-link.svg";
 import iconQQ from "@/assets/img/icon-share-qq.svg";
 import iconWechat from "@/assets/img/icon-share-wechat.svg";
 import { useChatStore } from "@/stores";
+import { createLogger } from "@/utils/logger";
+
 import { isMpaasReady, saveImageToAlbum } from "@/utils/platform/mpaas";
+
+const logger = createLogger("share");
 
 function toPlainText(markdown: string) {
   const source = String(markdown || "");
@@ -50,7 +54,7 @@ async function copyTextToClipboard(text: string) {
     });
     return true;
   } catch (error) {
-    console.error("[AiChatPage] uni clipboard error", error);
+    logger.error("uni clipboard error", error);
   }
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -58,7 +62,7 @@ async function copyTextToClipboard(text: string) {
       return true;
     }
   } catch (error) {
-    console.error("[AiChatPage] navigator clipboard error", error);
+    logger.error("navigator clipboard error", error);
   }
   return false;
 }
@@ -189,11 +193,11 @@ export function useChatShare(posterEl: Ref<unknown>) {
   async function onCopyMessage({ msg }: { msg: UiChatMessage }) {
     const content = getCopyableMessageContent(msg);
     if (!content) {
-      uni.showToast({ title: "复制失败，请手动复制", icon: "none" });
+      uni.showToast({ title: t("copy-failed-please-manually-copy"), icon: "none" });
       return;
     }
     const copied = await copyTextToClipboard(content);
-    uni.showToast({ title: copied ? t("copy-success") : "复制失败，请手动复制", icon: "none" });
+    uni.showToast({ title: copied ? t("copy-success") : t("copy-failed-please-manually-copy"), icon: "none" });
   }
 
   async function generateSharePoster() {
@@ -219,7 +223,7 @@ export function useChatShare(posterEl: Ref<unknown>) {
       try {
         await generateSharePoster();
       } catch (error) {
-        console.error("[AiChatPage] caught error", error);
+        logger.error("caught error", error);
         uni.showToast({ title: t("share-poster-generate-failed"), icon: "none" });
       } finally {
         sharePosterGenerating.value = false;
@@ -238,7 +242,7 @@ export function useChatShare(posterEl: Ref<unknown>) {
     closeShareSheet(false);
     if (item?.key === "copy-link") {
       const ok = await copyTextToClipboard("https://portal.sanygroup.com/appDownload/");
-      uni.showToast({ title: ok ? t("copy-success") : t("copy-failed-please-manually-copy"), icon: "none" });
+      uni.showToast({ title: ok ? t("link-copied") : t("copy-failed-please-manually-copy"), icon: "none" });
       closeShareSheet(true);
       return;
     }
@@ -248,7 +252,7 @@ export function useChatShare(posterEl: Ref<unknown>) {
       return;
     }
     if (item?.key === "wechat" || item?.key === "qq") {
-      uni.showToast({ title: "暂不支持此分享方式", icon: "none" });
+      uni.showToast({ title: t("share-not-supported"), icon: "none" });
     }
     closeShareSheet(true);
   }
@@ -263,7 +267,7 @@ export function useChatShare(posterEl: Ref<unknown>) {
         uni.showToast({ title: t("save-success"), icon: "none" });
         return;
       } catch (error) {
-        console.warn("[AiChatPage] 原生保存图片失败，回退浏览器下载", error);
+        logger.warn("原生保存图片失败，回退浏览器下载", error);
       }
     }
 
@@ -291,7 +295,7 @@ export function useChatShare(posterEl: Ref<unknown>) {
       await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
       uni.showToast({ title: t("copy-success"), icon: "none" });
     } catch (error) {
-      console.error("[AiChatPage] clipboard image copy error", error);
+      logger.error("clipboard image copy error", error);
       uni.showToast({ title: t("copy-failed"), icon: "none" });
     }
   }

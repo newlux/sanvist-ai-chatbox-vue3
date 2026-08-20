@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import AnswerBlock from "./blocks/AnswerBlock.vue";
 import ChartBlock from "./blocks/ChartBlock.vue";
 import ErrorBlock from "./blocks/ErrorBlock.vue";
@@ -26,7 +26,7 @@ defineProps({
 
 const emit = defineEmits(["suggestion-tap"]);
 
-function onSuggestionTap(suggestion) {
+function onSuggestionTap(suggestion: unknown) {
   emit("suggestion-tap", suggestion);
 }
 </script>
