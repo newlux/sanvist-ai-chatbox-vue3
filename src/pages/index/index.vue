@@ -239,6 +239,7 @@ onBeforeUnmount(cancelActiveStream);
       <!-- Header -->
       <AiChatHeader
         v-model:sessions="sessions"
+        class="ai-page__header"
         :load-sessions="getAISessionList"
         :selected-session-id="aiSessionId"
         :generating="isLoading"
@@ -484,6 +485,12 @@ $color-white: #ffffff;
 .ai-page__chat > * {
   position: relative;
   z-index: 1;
+}
+
+// 头部要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
+// 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）
+.ai-page__chat > .ai-page__header {
+  z-index: 30;
 }
 
 .ai-chat-glow {

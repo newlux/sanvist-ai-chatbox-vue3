@@ -528,7 +528,10 @@ onBeforeUnmount(() => {
 }
 
 .chat-header__statusbar {
-  min-height: 0;
+  // 内嵌 APP 的 webview 里 uni 拿不到 statusBarHeight（H5 恒为 0），
+  // 刘海高度只能靠 CSS 环境变量兜底，两者取大的那个
+  min-height: constant(safe-area-inset-top);
+  min-height: env(safe-area-inset-top);
 }
 
 .chat-header__bar {
