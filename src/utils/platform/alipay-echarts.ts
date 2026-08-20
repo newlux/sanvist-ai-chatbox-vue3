@@ -46,31 +46,110 @@ function createScopedQuery(instance: ComponentInternalInstance | null) {
   return instance?.proxy ? query.in(instance.proxy) : query;
 }
 
+interface NodeQueryResult {
+  node?: MiniProgramCanvas;
+  width?: number;
+  height?: number;
+}
+
+/** SelectorQuery.fields({node:true})：微信同款写法，支付宝新基础库也支持 */
 function execFieldsQuery(canvasId: string, instance: ComponentInternalInstance | null) {
-  return new Promise<{ node?: MiniProgramCanvas; width?: number; height?: number } | null>((resolve) => {
-    createScopedQuery(instance)
-      .select(`#${canvasId}`)
-      .fields({ node: true, size: true })
-      .exec((result) => {
-        const info = Array.isArray(result) ? result[0] : result;
-        resolve(info || null);
+  return new Promise<NodeQueryResult | null>((resolve) => {
+    try {
+      createScopedQuery(instance)
+        .select(`#${canvasId}`)
+        .fields({ node: true, size: true })
+        .exec((result) => {
+          const info = Array.isArray(result) ? result[0] : result;
+          resolve((info || null) as NodeQueryResult | null);
+        });
+    } catch (error) {
+      console.warn("[chart] fields({node}) 查询失败", error);
+      resolve(null);
+    }
+  });
+}
+
+/** 只取尺寸。node 走 my.createCanvas 时用它补上宽高 */
+function execRectQuery(canvasId: string, instance: ComponentInternalInstance | null) {
+  return new Promise<{ width?: number; height?: number } | null>((resolve) => {
+    try {
+      createScopedQuery(instance)
+        .select(`#${canvasId}`)
+        .boundingClientRect((rect) => {
+          resolve((Array.isArray(rect) ? rect[0] : rect) as { width?: number; height?: number } | null);
+        })
+        .exec();
+    } catch (error) {
+      console.warn("[chart] boundingClientRect 查询失败", error);
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * my.createCanvas：老基础库上 SelectorQuery 不认 node:true，
+ * 只有这个接口能拿到真正的 canvas 对象。
+ */
+function createCanvasByApi(canvasId: string) {
+  return new Promise<MiniProgramCanvas | null>((resolve) => {
+    const api = (typeof my !== "undefined" ? my : null) as {
+      createCanvas?: (options: {
+        id: string;
+        success?: (canvas: MiniProgramCanvas) => void;
+        fail?: (error: unknown) => void;
+      }) => void;
+    } | null;
+    if (typeof api?.createCanvas !== "function") {
+      resolve(null);
+      return;
+    }
+    try {
+      api.createCanvas({
+        id: canvasId,
+        success: canvas => resolve(canvas || null),
+        fail: (error) => {
+          console.warn("[chart] my.createCanvas 失败", error);
+          resolve(null);
+        },
       });
+    } catch (error) {
+      console.warn("[chart] my.createCanvas 抛错", error);
+      resolve(null);
+    }
   });
 }
 
 /**
  * 支付宝 canvas 2d：拿到真实节点后交给 echarts.init。
- * 拿不到节点就返回 null，由调用方决定重试或降级。
+ * 基础库版本差异较大，这里按 fields({node}) → my.createCanvas 依次尝试，
+ * 都拿不到就返回 null，由调用方重试或降级成数据清单。
  */
 export async function queryAlipayChartCanvas(
   canvasId: string,
   instance: ComponentInternalInstance | null,
 ): Promise<CanvasQueryResult | null> {
   const info = await execFieldsQuery(canvasId, instance);
-  const canvas = info?.node;
-  const width = Number(info?.width) || 0;
-  const height = Number(info?.height) || 0;
-  if (!canvas || width <= 0 || height <= 0) return null;
+  let canvas = info?.node || null;
+  let width = Number(info?.width) || 0;
+  let height = Number(info?.height) || 0;
+
+  if (!canvas) {
+    canvas = await createCanvasByApi(canvasId);
+    if (canvas) console.info("[chart] canvas 由 my.createCanvas 获取");
+  }
+  if (!canvas) return null;
+
+  if (width <= 0 || height <= 0) {
+    const rect = await execRectQuery(canvasId, instance);
+    width = Number(rect?.width) || width;
+    height = Number(rect?.height) || height;
+  }
+  if (width <= 0 || height <= 0) return null;
+  if (typeof canvas.getContext !== "function") {
+    console.warn("[chart] canvas 节点不支持 getContext，放弃渲染");
+    return null;
+  }
 
   const dpr = getPixelRatio();
   patchCanvasNode(canvas, width, height, dpr);

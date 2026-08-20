@@ -86,6 +86,71 @@ function normalizeOption(raw) {
 
 const chartOption = computed(() => normalizeOption(props.option));
 
+/** 系列里可能是 5 / {value:5} / [x, y] 三种写法，统一取出可展示的数值 */
+function readSeriesValue(item) {
+  if (item == null) return null;
+  if (typeof item === "number" || typeof item === "string") return item;
+  if (Array.isArray(item)) return item[item.length - 1];
+  if (typeof item === "object") return item.value ?? null;
+  return null;
+}
+
+function readSeriesLabel(item, index, categories) {
+  if (item && typeof item === "object" && !Array.isArray(item) && item.name) return String(item.name);
+  if (Array.isArray(item) && item.length > 1) return String(item[0]);
+  return String(categories[index] ?? `#${index + 1}`);
+}
+
+function formatValue(value) {
+  if (value == null || value === "") return "";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value);
+  return String(Math.round(num * 100) / 100);
+}
+
+function readTitle(option) {
+  const title = option?.title;
+  const node = Array.isArray(title) ? title[0] : title;
+  return String(node?.text || "").trim();
+}
+
+function readCategories(option) {
+  const axis = Array.isArray(option?.xAxis) ? option.xAxis[0] : option?.xAxis;
+  const yAxis = Array.isArray(option?.yAxis) ? option.yAxis[0] : option?.yAxis;
+  const data = Array.isArray(axis?.data) ? axis.data : (Array.isArray(yAxis?.data) ? yAxis.data : []);
+  return data.map(item => String(item?.value ?? item ?? ""));
+}
+
+/**
+ * 画布拿不到时的降级视图：把 option 直接摊成「系列 - 分类 - 数值」清单。
+ * 图表是锦上添花，数据本身不能因为渲染环境而丢掉。
+ */
+const fallbackSeries = computed(() => {
+  const option = chartOption.value;
+  if (!option) return [];
+  const categories = readCategories(option);
+  const series = Array.isArray(option.series) ? option.series : [];
+  return series
+    .map((item, seriesIndex) => {
+      const data = Array.isArray(item?.data) ? item.data : [];
+      const rows = data
+        .map((point, index) => ({
+          label: readSeriesLabel(point, index, categories),
+          value: formatValue(readSeriesValue(point)),
+        }))
+        .filter(row => row.value !== "");
+      return {
+        id: `series-${seriesIndex}`,
+        name: String(item?.name || "").trim(),
+        rows,
+      };
+    })
+    .filter(item => item.rows.length);
+});
+
+const fallbackTitle = computed(() => readTitle(chartOption.value));
+const hasFallbackData = computed(() => fallbackSeries.value.length > 0);
+
 function applyOption(target) {
   target.setOption(chartOption.value, { notMerge: true, lazyUpdate: false, silent: true });
 }
@@ -102,6 +167,7 @@ async function renderMiniChart() {
       sizeRetry += 1;
       scheduleRenderChart();
     } else {
+      console.warn("[ChartBlock] 取不到 canvas 节点，降级为数据清单", canvasId.value);
       failed.value = true;
     }
     return;
@@ -183,7 +249,26 @@ onBeforeUnmount(disposeChart);
       @touchmove="onCanvasTouchMove"
       @touchend="onCanvasTouchEnd"
     />
-    <text v-if="failed" class="chart-block__fallback">
+    <!-- 画布不可用时不留一句空提示，直接把 option 里的数据摊出来 -->
+    <view v-if="failed && hasFallbackData" class="chart-block__data">
+      <text v-if="fallbackTitle" class="chart-block__data-title">
+        {{ fallbackTitle }}
+      </text>
+      <view v-for="series in fallbackSeries" :key="series.id" class="chart-block__data-series">
+        <text v-if="series.name" class="chart-block__data-series-name">
+          {{ series.name }}
+        </text>
+        <view v-for="(row, rowIndex) in series.rows" :key="rowIndex" class="chart-block__data-row">
+          <text class="chart-block__data-label">
+            {{ row.label }}
+          </text>
+          <text class="chart-block__data-value">
+            {{ row.value }}
+          </text>
+        </view>
+      </view>
+    </view>
+    <text v-else-if="failed" class="chart-block__fallback">
       图表暂无法展示
     </text>
   </view>
@@ -194,4 +279,12 @@ onBeforeUnmount(disposeChart);
 .chart-block--embedded { padding: 0; border-radius: 0; background: transparent; }
 .chart-block__canvas { width: 100%; overflow: hidden; height: 420rpx; }
 .chart-block__fallback { display: block; padding: 48rpx 0; color: #8a8f99; font-size: 26rpx; text-align: center; }
+.chart-block__data { display: flex; flex-direction: column; padding: 8rpx 0; }
+.chart-block__data-title { display: block; margin-bottom: 12rpx; color: #1a1a1a; font-size: 28rpx; font-weight: 600; line-height: 40rpx; }
+.chart-block__data-series { display: flex; flex-direction: column; margin-bottom: 8rpx; }
+.chart-block__data-series-name { display: block; margin: 8rpx 0 4rpx; color: #8a8f99; font-size: 24rpx; line-height: 34rpx; }
+.chart-block__data-row { display: flex; align-items: center; justify-content: space-between; padding: 10rpx 0; border-bottom: 1rpx solid #f0f1f3; }
+.chart-block__data-row:last-child { border-bottom: none; }
+.chart-block__data-label { flex: 1; min-width: 0; color: #4a4f57; font-size: 26rpx; line-height: 36rpx; }
+.chart-block__data-value { margin-left: 24rpx; color: #1a1a1a; font-size: 26rpx; font-weight: 600; line-height: 36rpx; }
 </style>
