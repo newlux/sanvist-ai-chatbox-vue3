@@ -49,7 +49,14 @@ class VoiceRecorder {
   }
 
   static isSupported() {
-    return typeof uni?.getRecorderManager === "function";
+    if (typeof uni?.getRecorderManager !== "function") return false;
+    try {
+      // H5 上这个 API 存在，但只是个「暂不支持」的空壳，调用返回 undefined
+      const manager = uni.getRecorderManager();
+      return typeof manager?.start === "function" && typeof manager?.onStart === "function";
+    } catch {
+      return false;
+    }
   }
 
   async start(options = {}) {
@@ -60,6 +67,9 @@ class VoiceRecorder {
 
     const sessionId = this.sessionId;
     const manager = uni.getRecorderManager();
+    if (!manager || typeof manager.onStart !== "function") {
+      return { success: false, error: "当前环境不支持录音功能" };
+    }
     this.recorderManager = manager;
     this.phase = RECORDER_PHASE.STARTING;
 

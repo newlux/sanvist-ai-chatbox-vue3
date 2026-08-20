@@ -54,16 +54,25 @@ class WebVoiceRecorder {
     return this.recording;
   }
 
+  /**
+   * 只判断「是不是浏览器环境」。
+   * getUserMedia 在非安全上下文（http 局域网地址）下会整个缺失，
+   * 但那时也不该退回小程序实现——uni 在 H5 上的 getRecorderManager 只是个返回
+   * undefined 的空壳，用了必崩。缺能力的情况留到 start 里给明确提示。
+   */
   static isSupported() {
-    return typeof MediaRecorder !== "undefined"
-      && typeof navigator !== "undefined"
-      && Boolean(navigator.mediaDevices?.getUserMedia);
+    return typeof MediaRecorder !== "undefined" && typeof navigator !== "undefined";
   }
 
   async start() {
     this.hardReset();
     if (!WebVoiceRecorder.isSupported()) {
       return { success: false, error: "当前浏览器不支持录音" };
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      // http 打开的页面拿不到 mediaDevices，浏览器的安全限制，换 HTTPS 或 localhost 才行
+      return { success: false, error: "请用 HTTPS 打开页面后再录音", notAllowed: true };
     }
 
     const sessionId = this.sessionId;

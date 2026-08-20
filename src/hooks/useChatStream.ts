@@ -1,8 +1,6 @@
 import type { ChatStreamEvent, SendChatMessageParams } from "@/api/chat/types";
 import { createSseSession } from "@/utils/ai-stream/sseSession";
-import { createAlipaySocketStream } from "@/utils/platform/alipay-socket-stream";
-import { createAlipaySseRequest } from "@/utils/platform/alipay-stream";
-import { getChatSocketURL, getRequestBaseURL, getRequestHeaders } from "@/utils/request";
+import { getRequestBaseURL, getRequestHeaders } from "@/utils/request";
 
 export interface StreamChunk<T> {
   result: T | null;
@@ -107,54 +105,6 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
       queue.push({ result: payload as ChatStreamEvent });
     }
 
-    // #ifdef MP-ALIPAY
-    function startHttpTransport() {
-      const task = createAlipaySseRequest({
-        url,
-        data: body,
-        headers: getRequestHeaders(),
-        timeout: requestTimeoutMs,
-        onMessage: pushEvent,
-      });
-      abortActiveRequest = task.abort;
-      armIdleTimer();
-      task.done.then(succeed).catch((error: unknown) => fail(toError(error)));
-    }
-
-    const socketUrl = getChatSocketURL();
-    if (socketUrl) {
-      const socketTask = createAlipaySocketStream({
-        url: socketUrl,
-        data: body,
-        headers: getRequestHeaders(),
-        onMessage: pushEvent,
-      });
-      abortActiveRequest = socketTask.abort;
-      armIdleTimer();
-      socketTask.done.then(succeed).catch((error: unknown) => {
-        const normalized = toError(error);
-        // 一个事件都没收到才回落：此时界面上还没有任何内容，整包重放不会重复。
-        // 已经开始输出后再断，只能报错，否则会出现两段拼接的回答。
-        const canFallback = !finished && !receivedEvent && normalized.name !== "AbortError";
-        if (canFallback) {
-          console.warn(
-            `[useChatStream] WebSocket 通道不可用（已建连=${socketTask.isConnected()}，凭证=${socketUrl.replace(/=[^&]*/g, match => `=${match.slice(1, 5)}***`)}），回落 HTTP：`,
-            normalized.message,
-          );
-          // 先确保连接彻底关掉，避免服务端还在为这条僵尸连接生成回答
-          socketTask.abort();
-          startHttpTransport();
-          return;
-        }
-        fail(normalized);
-      });
-    }
-    else {
-      startHttpTransport();
-    }
-    // #endif
-
-    // #ifndef MP-ALIPAY
     // 浏览器环境：fetch 原生支持分块读取，直接消费 SSE，不需要 WebSocket 通道
     const controller = new AbortController();
     abortActiveRequest = () => controller.abort();
@@ -203,7 +153,6 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
         fail(toError(error));
       }
     })();
-    // #endif
 
     try {
       while (true) {

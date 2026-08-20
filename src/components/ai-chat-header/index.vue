@@ -57,6 +57,48 @@ const filteredSessionList = computed(() => {
   return sessionList.value.filter(session => String(session?.name || "").toLowerCase().includes(keyword));
 });
 
+/**
+ * 历史会话按时间分组：今天 / 昨天 / 7 天内 / 30 天内 / 更早按月份。
+ * 时间取 updatedAt，缺失时退回 createdAt；接口给的是秒级时间戳。
+ */
+function readSessionTime(session) {
+  const raw = Number(session?.updatedAt || session?.createdAt || 0);
+  if (!raw) return 0;
+  return raw < 1e12 ? raw * 1000 : raw;
+}
+
+function startOfDay(date) {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy.getTime();
+}
+
+function resolveSessionGroup(time, todayStart) {
+  if (!time) return { key: "unknown", title: "更早", order: 900 };
+  const dayDiff = Math.floor((todayStart - startOfDay(new Date(time))) / 86400000);
+  if (dayDiff <= 0) return { key: "today", title: "今天", order: 0 };
+  if (dayDiff === 1) return { key: "yesterday", title: "昨天", order: 1 };
+  if (dayDiff < 7) return { key: "week", title: "7 天内", order: 2 };
+  if (dayDiff < 30) return { key: "month", title: "30 天内", order: 3 };
+  const date = new Date(time);
+  const label = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  // 月份分组按时间倒序排在固定分组之后
+  return { key: `m-${label}`, title: label, order: 1000 - (date.getFullYear() * 12 + date.getMonth()) };
+}
+
+const groupedSessionList = computed(() => {
+  const todayStart = startOfDay(new Date());
+  const groups = new Map();
+  filteredSessionList.value.forEach((session) => {
+    const group = resolveSessionGroup(readSessionTime(session), todayStart);
+    if (!groups.has(group.key)) {
+      groups.set(group.key, { key: group.key, title: group.title, order: group.order, sessions: [] });
+    }
+    groups.get(group.key).sessions.push(session);
+  });
+  return [...groups.values()].sort((a, b) => a.order - b.order);
+});
+
 const statusbarStyle = computed(() => ({
   height: `${safeTopPx.value}px`,
 }));
@@ -387,51 +429,62 @@ onBeforeUnmount(() => {
             </view>
             <view v-else class="history-drawer__list">
               <view
-                v-for="session in filteredSessionList"
-                :key="getSessionKey(session)"
-                class="history-drawer__row"
-                :class="{ 'history-drawer__row--editing': editingMode }"
-                @longpress.stop="onSessionLongPress(session, $event)"
-                @tap.stop="onSessionTap(session)"
+                v-for="group in groupedSessionList"
+                :key="group.key"
+                class="history-drawer__group"
               >
-                <input
-                  v-if="renamingId === getSessionKey(session)"
-                  class="history-drawer__rename-input"
-                  :value="renameValue"
-                  :focus="true"
-                  :maxlength="80"
-                  confirm-type="send"
-                  @tap.stop="onRenameTap"
-                  @input="onRenameInput"
-                  @confirm="commitRename"
-                  @blur="onRenameBlur"
-                >
-                <view
-                  v-else
-                  class="history-drawer_item"
-                  :class="{
-                    'history-drawer_item_current':
-                      !editingMode && String(getSessionKey(session)) === String(selectedSessionId),
-                    'history-drawer_item_active': editingMode && isSelected(getSessionKey(session)),
-                  }"
-                >
-                  <text class="history-drawer_item-label">
-                    {{ session.name || "新对话" }}
+                <view class="history-drawer__group-title">
+                  <text class="history-drawer__group-title-text">
+                    {{ group.title }}
                   </text>
                 </view>
-                <view v-if="editingMode" class="history-drawer__check">
-                  <image
-                    v-if="isSelected(getSessionKey(session))"
-                    src="@/assets/img/icon-checked.svg"
-                    alt=""
-                    class="history-drawer__check-img"
-                  />
-                  <image
+                <view
+                  v-for="session in group.sessions"
+                  :key="getSessionKey(session)"
+                  class="history-drawer__row"
+                  :class="{ 'history-drawer__row--editing': editingMode }"
+                  @longpress.stop="onSessionLongPress(session, $event)"
+                  @tap.stop="onSessionTap(session)"
+                >
+                  <input
+                    v-if="renamingId === getSessionKey(session)"
+                    class="history-drawer__rename-input"
+                    :value="renameValue"
+                    :focus="true"
+                    :maxlength="80"
+                    confirm-type="send"
+                    @tap.stop="onRenameTap"
+                    @input="onRenameInput"
+                    @confirm="commitRename"
+                    @blur="onRenameBlur"
+                  >
+                  <view
                     v-else
-                    src="@/assets/img/icon-check.svg"
-                    alt=""
-                    class="history-drawer__check-img"
-                  />
+                    class="history-drawer_item"
+                    :class="{
+                      'history-drawer_item_current':
+                        !editingMode && String(getSessionKey(session)) === String(selectedSessionId),
+                      'history-drawer_item_active': editingMode && isSelected(getSessionKey(session)),
+                    }"
+                  >
+                    <text class="history-drawer_item-label">
+                      {{ session.name || "新对话" }}
+                    </text>
+                  </view>
+                  <view v-if="editingMode" class="history-drawer__check">
+                    <image
+                      v-if="isSelected(getSessionKey(session))"
+                      src="@/assets/img/icon-checked.svg"
+                      alt=""
+                      class="history-drawer__check-img"
+                    />
+                    <image
+                      v-else
+                      src="@/assets/img/icon-check.svg"
+                      alt=""
+                      class="history-drawer__check-img"
+                    />
+                  </view>
                 </view>
               </view>
             </view>
@@ -774,6 +827,26 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 4rpx;
   padding: 0;
+}
+
+.history-drawer__group {
+  display: flex;
+  flex-direction: column;
+}
+
+// 分组标题滚动到顶时吸住，盖住下方划过的会话
+.history-drawer__group-title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 20rpx 0 12rpx;
+  background: #ffffff;
+}
+
+.history-drawer__group-title-text {
+  font-size: 24rpx;
+  line-height: 34rpx;
+  color: #9aa0aa;
 }
 
 .history-drawer__empty {
