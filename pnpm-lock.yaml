@@ -77,6 +77,9 @@ importers:
       pinia:
         specifier: ^2.2.6
         version: 2.2.6(typescript@4.9.4)(vue@3.5.41(typescript@4.9.4))
+      vconsole:
+        specifier: ^3.15.1
+        version: 3.15.1
       vue:
         specifier: ^3.4.21
         version: 3.5.41(typescript@4.9.4)
@@ -2974,6 +2977,10 @@ packages:
     resolution: {integrity: sha512-U71cyTamuh1CRNCfpGY6to28lxvNwPG4Guz/EVjgf3Jmzv0vlDp1atT9eS5dDjMYHucpHbWns6Lwf3BKz6svdw==}
     engines: {node: '>= 0.6'}
 
+  copy-text-to-clipboard@3.2.2:
+    resolution: {integrity: sha512-T6SqyLd1iLuqPA90J5N4cTalrtovCySh58iiZDGJ6FGznbclKh4UI+FGacQSgFzwKG77W7XT5gwbVEbd9cIH1A==}
+    engines: {node: '>=12'}
+
   core-js-compat@3.50.0:
     resolution: {integrity: sha512-XGpFGbMLHwSt74YLTKho7Ib242qi6O8MSX+sRokV4oz7iKXvQWGYZthjIhjRGMxjzVkAubBO512dKGYcefmX3Q==}
     engines: {node: '>=6.4.0'}
@@ -4844,6 +4851,9 @@ packages:
   muggle-string@0.1.0:
     resolution: {integrity: sha512-Tr1knR3d2mKvvWthlk7202rywKbiOm4rVFLsfAaSIhJ6dt9o47W4S+JMtWhd/PW9Wrdew2/S2fSvhz3E2gkfEg==}
 
+  mutation-observer@1.0.3:
+    resolution: {integrity: sha512-M/O/4rF2h776hV7qGMZUH3utZLO/jK7p8rnNgGkjKUw8zCGjRQPxB8z6+5l8+VjRUQ3dNYu4vjqXYLr+U8ZVNA==}
+
   nanoid@3.3.18:
     resolution: {integrity: sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -6239,6 +6249,9 @@ packages:
   vary@1.1.2:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
+
+  vconsole@3.15.1:
+    resolution: {integrity: sha512-KH8XLdrq9T5YHJO/ixrjivHfmF2PC2CdVoK6RWZB4yftMykYIaXY1mxZYAic70vADM54kpMQF+dYmvl5NRNy1g==}
 
   vite-plugin-env-typed@0.0.2:
     resolution: {integrity: sha512-IloScAeDfhG81diZuvoozs73LvELSG7h3q5Eim035TUbFpou4FanMLpVZqD0lZNH2oMMHILbzx6udmkg3/NFbA==}
@@ -10255,6 +10268,8 @@ snapshots:
 
   cookie@0.6.0: {}
 
+  copy-text-to-clipboard@3.2.2: {}
+
   core-js-compat@3.50.0:
     dependencies:
       browserslist: 4.28.8
@@ -12598,6 +12613,8 @@ snapshots:
 
   muggle-string@0.1.0: {}
 
+  mutation-observer@1.0.3: {}
+
   nanoid@3.3.18: {}
 
   natural-compare@1.4.0: {}
@@ -14027,6 +14044,13 @@ snapshots:
   varint@6.0.0: {}
 
   vary@1.1.2: {}
+
+  vconsole@3.15.1:
+    dependencies:
+      '@babel/runtime': 7.29.7
+      copy-text-to-clipboard: 3.2.2
+      core-js: 3.50.0
+      mutation-observer: 1.0.3
 
   vite-plugin-env-typed@0.0.2(vite@5.2.8(@types/node@26.2.0)(sass@1.102.0)(terser@5.50.0)):
     dependencies:

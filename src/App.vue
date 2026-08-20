@@ -3,6 +3,7 @@ import { onLaunch } from "@dcloudio/uni-app";
 import { useI18n } from "vue-i18n";
 import { setLocale } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
+import { setupDebugConsole } from "@/utils/debug-console";
 import { createLogger } from "@/utils/logger";
 import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
 import { setAuthFailureHandler, setRequestAuth, setRequestBaseURL } from "@/utils/request";
@@ -29,6 +30,9 @@ function getLaunchQuery(options?: LaunchOptions): StartupQuery {
 }
 
 function initializeSystem(query: StartupQuery) {
+  // 调试面板尽早开：后面初始化里的日志也要能收进去
+  setupDebugConsole(query);
+
   const authorization = query?.Authorization || authorizationFallback;
   const lang = String(query.Lang || "zh_CN");
   const country = String(query.country || "");
@@ -55,6 +59,8 @@ function initializeSystem(query: StartupQuery) {
   systemStore.setBaseUrl(baseUrl);
   systemStore.setGridCountry(country);
   systemStore.setAppVersion(version);
+  // 宿主注入的状态栏高度最准，H5 自己是取不到的
+  systemStore.setStatusBarHeight(Number(query.statusBarHeight || query.StatusBarHeight) || 0);
   userStore.setUsername(username);
   uni.setStorageSync("prevPageName", String(query.pageName || ""));
 

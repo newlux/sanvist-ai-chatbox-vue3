@@ -70,7 +70,8 @@ export const useSystemStore = defineStore("system", () => {
   }
 
   function setStatusBarHeight(value: number) {
-    statusBarHeight.value = value;
+    // 0 视为「没拿到」，不要用它覆盖已有的有效值
+    if (Number(value) > 0) statusBarHeight.value = Number(value);
   }
 
   function setTabbarHeight(value: number) {
