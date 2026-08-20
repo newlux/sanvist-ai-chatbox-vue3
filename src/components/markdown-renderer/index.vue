@@ -1,7 +1,7 @@
 <script setup>
 import MarkdownIt from "markdown-it";
 import mpHtml from "mp-html/dist/uni-app/components/mp-html/mp-html.vue";
-import { onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 defineOptions({ name: "MarkdownRenderer" });
 
@@ -27,8 +27,35 @@ const markdown = new MarkdownIt({
   typographer: false,
 });
 
+/**
+ * tagStyle 里的 rpx 得自己折成 px，而且必须跟其它 UI 用同一把尺子。
+ *
+ * mp-html 内部一律按 `值 * windowWidth / 750` 换算，用的是
+ * getSystemInfoSync().windowWidth；而 H5 的样式表里，rpx 是编译成 rem 的
+ * （24rpx → 0.75rem，即 1rpx = 1/32 rem），跟着 uni 设的根字号走。
+ * 内嵌 webview 里这两个基准会对不上（宿主把 windowWidth 按物理像素报出来时正好差一倍），
+ * 正文就会比周围文字大一圈。所以 H5 直接照根字号折算，小程序仍走 upx2px。
+ */
+const RPX_PER_REM = 32;
+
+function getRpxToPx() {
+  // #ifdef H5
+  const rootFontSize = Number.parseFloat(
+    getComputedStyle(document.documentElement).fontSize,
+  ) || 16;
+  return rootFontSize / RPX_PER_REM;
+  // #endif
+  // #ifndef H5
+  return uni.upx2px(100) / 100;
+  // #endif
+}
+
+function rpx2px(style, ratio) {
+  return style.replace(/([0-9.]+)rpx/g, (_, value) => `${Math.round(Number(value) * ratio * 100) / 100}px`);
+}
+
 // mp-html 用行内样式渲染节点，scoped 样式无法作用到内部节点，排版一律走 tagStyle
-const tagStyle = {
+const rawTagStyle = {
   h1: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 40rpx; font-weight: 600; line-height: 1.4;",
   h2: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 36rpx; font-weight: 600; line-height: 1.4;",
   h3: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 32rpx; font-weight: 600; line-height: 1.4;",
@@ -51,6 +78,14 @@ const tagStyle = {
   th: "padding: 10rpx 12rpx; border: 1px solid #e4e9f0; font-weight: 600; text-align: left; vertical-align: top;",
   td: "padding: 10rpx 12rpx; border: 1px solid #e4e9f0; text-align: left; vertical-align: top;",
 };
+
+// 首次渲染时才计算：根字号是 uni 启动后设的，模块加载期取到的可能还是浏览器默认值
+const tagStyle = computed(() => {
+  const ratio = getRpxToPx();
+  return Object.fromEntries(
+    Object.entries(rawTagStyle).map(([tag, style]) => [tag, rpx2px(style, ratio)]),
+  );
+});
 
 /**
  * markdown-it 没有增量解析能力，未闭合的代码块、表格、列表只有拿完整上下文

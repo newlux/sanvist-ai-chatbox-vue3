@@ -222,6 +222,12 @@ $color-text-warning: #a31717;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  // 内嵌 APP：上下各让出一段安全区
+  padding-top: constant(safe-area-inset-top);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+  box-sizing: border-box;
 }
 
 .phone-bg {

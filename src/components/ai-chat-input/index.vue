@@ -924,7 +924,9 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .chat-input {
   background: transparent;
-  padding-bottom: 0;
+  // 底部安全区：home indicator / 手势条区域不放内容
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
   box-sizing: border-box;
   position: relative;
   uni-image {
