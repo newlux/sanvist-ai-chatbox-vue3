@@ -19,7 +19,9 @@ export interface StreamOptions {
   requestTimeoutMs?: number;
 }
 
-const DEFAULT_IDLE_TIMEOUT_MS = 60_000;
+// 必须大于网关的 algorithm.idle-timeout-ms(120s)：端上先判超时会 abort 连接，
+// 而 WebSocket 断开在网关等同于一次主动中断，长任务（图表等）会被误杀
+const DEFAULT_IDLE_TIMEOUT_MS = 130_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 function createAsyncQueue<T>() {
