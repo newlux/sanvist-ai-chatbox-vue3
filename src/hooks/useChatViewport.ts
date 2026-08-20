@@ -1,5 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { createLogger } from "@/utils/logger";
+import { onNativeEvent } from "@/utils/platform/mpaas";
 
 const logger = createLogger("keyboard");
 
@@ -24,6 +25,9 @@ export function useChatViewport() {
   let inputFocused = false;
   /** 当前用的是估算值而不是实测值：失焦时要主动清 */
   let usingFallbackHeight = false;
+  /** 宿主推过键盘高度：推过就以它为准，不再启用估算值 */
+  let nativeKeyboardSupported = false;
+  let disposeNativeKeyboard: (() => void) | null = null;
   /**
    * 没有键盘时的可视高度基准。
    * 安卓部分浏览器弹键盘时会把布局视口一起缩掉，此时 innerHeight 和 visualViewport.height
@@ -152,7 +156,7 @@ export function useChatViewport() {
     if (fallbackTimer) clearTimeout(fallbackTimer);
     fallbackTimer = setTimeout(() => {
       fallbackTimer = null;
-      if (!inputFocused || keyboardHeight.value > 0) return;
+      if (!inputFocused || keyboardHeight.value > 0 || nativeKeyboardSupported) return;
       const estimated = estimateKeyboardHeight();
       usingFallbackHeight = true;
       keyboardHeight.value = estimated;
@@ -181,6 +185,57 @@ export function useChatViewport() {
     if (keyboardHeight.value > 0) pinLayoutViewport();
   }
 
+  /**
+   * 主动收起：把焦点也一起摘掉，否则输入框还持有焦点，
+   * 下次点它不会再触发 focusin，输入栏就浮不起来了。
+   */
+  function forceCollapse(reason: string) {
+    if (keyboardHeight.value <= 0) return;
+    logger.info("收起键盘", { reason, keyboardHeight: keyboardHeight.value });
+    usingFallbackHeight = false;
+    inputFocused = false;
+    keyboardHeight.value = 0;
+    try {
+      uni.hideKeyboard();
+      (document.activeElement as HTMLElement | null)?.blur?.();
+    } catch {
+      // 个别容器没有 activeElement，忽略
+    }
+  }
+
+  /**
+   * 「键盘区域收到了触摸」＝ 键盘其实已经不在了。
+   *
+   * 安卓用返回键收起输入法时既不触发 blur，也没有任何视口变化，端上完全无感知。
+   * 但有一点是确定的：键盘真盖在那儿的时候，那块区域的触摸事件归输入法，
+   * WebView 收不到。所以只要我们认为「键盘占着」的那段高度里冒出了 touch，
+   * 就说明它已经收了 —— 据此把状态归位。
+   */
+  function onDocumentTouchStart(event: TouchEvent) {
+    if (keyboardHeight.value <= 0) return;
+    const touch = event.touches?.[0] || event.changedTouches?.[0];
+    if (!touch) return;
+    const keyboardTop = window.innerHeight - keyboardHeight.value;
+    if (touch.clientY > keyboardTop) forceCollapse("touch-in-keyboard-zone");
+  }
+
+  /**
+   * 宿主如果主动推键盘高度，一律以它为准 —— 这是唯一能精确拿到高度、
+   * 也是唯一能感知「返回键收起输入法」的通道。约定：事件名 keyboardHeightChange，
+   * payload 形如 { height: 0 | 正数 }（单位 px）。宿主没推就是空转。
+   */
+  function onNativeKeyboardHeight(payload: { height?: number | string }) {
+    const height = Number(payload?.height);
+    if (!Number.isFinite(height)) return;
+    logger.info("收到宿主推送的键盘高度", { height });
+    nativeKeyboardSupported = true;
+    if (height <= 0) {
+      forceCollapse("native-event");
+      return;
+    }
+    applyKeyboardHeight(height);
+  }
+
   // 小程序 / App 走平台回调；H5 上这个 API 是空实现，不会触发
   function onKeyboardHeightChange(event: { height?: number }) {
     applyKeyboardHeight(event?.height);
@@ -200,9 +255,11 @@ export function useChatViewport() {
       window.addEventListener("resize", onViewportChange);
       document.addEventListener("focusin", onFocusIn);
       document.addEventListener("focusout", onFocusOut);
+      document.addEventListener("touchstart", onDocumentTouchStart, { passive: true });
       window.visualViewport?.addEventListener("resize", onViewportChange);
       window.visualViewport?.addEventListener("scroll", onViewportChange);
     }
+    disposeNativeKeyboard = onNativeEvent("keyboardHeightChange", onNativeKeyboardHeight);
   });
 
   onBeforeUnmount(() => {
@@ -214,9 +271,12 @@ export function useChatViewport() {
       window.removeEventListener("resize", onViewportChange);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", onFocusOut);
+      document.removeEventListener("touchstart", onDocumentTouchStart);
       window.visualViewport?.removeEventListener("resize", onViewportChange);
       window.visualViewport?.removeEventListener("scroll", onViewportChange);
     }
+    disposeNativeKeyboard?.();
+    disposeNativeKeyboard = null;
   });
 
   return {
