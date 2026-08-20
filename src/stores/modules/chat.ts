@@ -12,6 +12,8 @@ export const useChatStore = defineStore("chat", () => {
   const showQuickPrompts = ref(true);
   const showQuickList = ref(true);
   const awakeningLoading = ref(false);
+  /** 智能体分身：report(听汇报) / task(任务协同) / guide(作业指导)，空表示普通问答 */
+  const subagent = ref("");
   const scrollIntoView = ref("");
   /** 用户是否还贴着底：上翻看历史时暂停自动滚动，回到底部后恢复 */
   const pinnedToBottom = ref(true);
@@ -52,6 +54,10 @@ export const useChatStore = defineStore("chat", () => {
     aiSessionId.value = null;
     activeAiMsgIndex.value = -1;
     pinnedToBottom.value = true;
+  }
+
+  function setSubagent(value: string) {
+    subagent.value = value || "";
   }
 
   function jumpToAnchor() {
@@ -96,6 +102,7 @@ export const useChatStore = defineStore("chat", () => {
     showQuickPrompts,
     showQuickList,
     awakeningLoading,
+    subagent,
     scrollIntoView,
     pinnedToBottom,
     requestSeq,
@@ -106,6 +113,7 @@ export const useChatStore = defineStore("chat", () => {
     nextRequestSeq,
     invalidateActiveRequest,
     resetConversation,
+    setSubagent,
     scrollToBottom,
     setPinnedToBottom,
   };
