@@ -25,13 +25,11 @@ const props = defineProps({
 });
 
 const instance = getCurrentInstance();
-const chartEl = ref(null);
 const failed = ref(false);
 const canvasId = computed(() => `c-${String(props.blockId).replace(/[^\w-]/g, "-")}`);
 
 let chart = null;
 let renderTimer = null;
-let resizeObserver = null;
 let sizeRetry = 0;
 let disposed = false;
 const MAX_SIZE_RETRY = 8;
@@ -113,41 +111,11 @@ async function renderMiniChart() {
   applyOption(chart);
 }
 
-function renderDomChart() {
-  const element = chartEl.value;
-  if (!element) {
-    if (sizeRetry < MAX_SIZE_RETRY) {
-      sizeRetry += 1;
-      scheduleRenderChart();
-    }
-    return;
-  }
-  if (!element.clientWidth || !element.clientHeight) {
-    if (sizeRetry < MAX_SIZE_RETRY) {
-      sizeRetry += 1;
-      scheduleRenderChart();
-    } else {
-      failed.value = true;
-    }
-    return;
-  }
-  sizeRetry = 0;
-  if (!chart) {
-    chart = echarts.init(element);
-  }
-  applyOption(chart);
-  chart.resize();
-}
-
 async function renderChart() {
   if (disposed || !props.option || !echarts?.init) return;
   failed.value = false;
   try {
-    // #ifdef MP-ALIPAY
     await renderMiniChart();
-    return;
-    // #endif
-    renderDomChart();
   } catch (error) {
     console.error("[ChartBlock] render failed", error);
     failed.value = true;
@@ -175,10 +143,6 @@ function disposeChart() {
     clearTimeout(renderTimer);
     renderTimer = null;
   }
-  if (resizeObserver) {
-    resizeObserver.disconnect();
-    resizeObserver = null;
-  }
   if (chart) {
     chart.dispose();
     chart = null;
@@ -203,19 +167,12 @@ watch(() => props.option, scheduleRenderChart, { deep: true });
 onMounted(() => {
   disposed = false;
   scheduleRenderChart();
-  // #ifndef MP-ALIPAY
-  if (typeof ResizeObserver !== "undefined") {
-    resizeObserver = new ResizeObserver(scheduleRenderChart);
-    if (chartEl.value) resizeObserver.observe(chartEl.value);
-  }
-  // #endif
 });
 onBeforeUnmount(disposeChart);
 </script>
 
 <template>
   <view class="chart-block" :class="[{ 'chart-block--embedded': embedded }]">
-    <!-- #ifdef MP-ALIPAY -->
     <canvas
       v-show="!failed"
       :id="canvasId"
@@ -229,13 +186,6 @@ onBeforeUnmount(disposeChart);
     <text v-if="failed" class="chart-block__fallback">
       图表暂无法展示
     </text>
-    <!-- #endif -->
-    <!-- #ifndef MP-ALIPAY -->
-    <view v-show="!failed" ref="chartEl" class="chart-block__canvas" />
-    <text v-if="failed" class="chart-block__fallback">
-      图表暂无法展示
-    </text>
-    <!-- #endif -->
   </view>
 </template>
 

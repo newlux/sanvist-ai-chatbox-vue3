@@ -109,7 +109,7 @@ export const useSessionStore = defineStore("session", () => {
     chatStore.messages = mapHistoryMessages(page?.data || [], sessionId);
     chatStore.showQuickPrompts = false;
     chatStore.showQuickList = false;
-    chatStore.scrollToBottom();
+    chatStore.scrollToBottom(true);
   }
 
   async function removeSession(sessionId: Identifier) {

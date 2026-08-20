@@ -11,10 +11,6 @@ const props = defineProps({
     type: Array as () => UiChatMessage[],
     default: () => [],
   },
-  scrollTop: {
-    type: Number,
-    default: 0,
-  },
   scrollIntoView: {
     type: String,
     default: "",
@@ -51,10 +47,16 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /** 外部（发送、切会话）强制回到底部时会置回 true，组件内的跟随状态要跟着复位 */
+  pinnedToBottom: {
+    type: Boolean,
+    default: true,
+  },
 });
 
 const emit = defineEmits([
   "scroll-top",
+  "pinned-change",
   "quick-prompt",
   "suggestion-tap",
   "tts-click",
@@ -102,6 +104,27 @@ function findConversationGroup(aiIndex) {
   }
   return group;
 }
+// 用滚动方向而不是高度差判断是否贴底：
+// 流式追加时列表高度一直在变，量高度既要额外查询节点，又容易误判。
+// 向上滑一定距离即视为用户在看历史，滚到底（scrolltolower）再恢复跟随。
+const UNPIN_SCROLL_UP_PX = 12;
+let lastScrollTop = 0;
+
+function setPinned(pinned: boolean) {
+  if (pinned === props.pinnedToBottom) return;
+  emit("pinned-change", pinned);
+}
+
+function onScroll(e: { detail?: { scrollTop?: number } }) {
+  const scrollTop = Number(e?.detail?.scrollTop) || 0;
+  if (scrollTop < lastScrollTop - UNPIN_SCROLL_UP_PX) setPinned(false);
+  lastScrollTop = scrollTop;
+}
+
+function onScrollToLower() {
+  setPinned(true);
+}
+
 function onScrollTop() {
   emit("scroll-top");
 }
@@ -154,9 +177,10 @@ function onCopyClick(index, message) {
     <scroll-view
       class="msg-list"
       scroll-y
-      :scroll-top="scrollTop"
       :scroll-into-view="scrollIntoView"
       :scroll-with-animation="false"
+      @scroll="onScroll"
+      @scrolltolower="onScrollToLower"
       @scrolltoupper="onScrollTop"
     >
       <view v-if="showQuickPrompts" class="business-overview">

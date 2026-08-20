@@ -179,7 +179,7 @@ export function useChatSend() {
       waitingText: text,
     });
     chatStore.activeAiMsgIndex = aiMsgIndex;
-    chatStore.scrollToBottom();
+    chatStore.scrollToBottom(true);
     await sendAiFlow({ aiMsgIndex, userMsgIndex, content: text, files, hadSessionId, requestSeq });
   }
 
