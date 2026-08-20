@@ -202,6 +202,26 @@ export interface RecognizeSpeechByUploadParams {
   timeout?: number;
 }
 
+export interface UploadChatFileParams {
+  filePath: string;
+  /** 网关要求非空，游客态没有真实用户 ID 时由调用方兜底 */
+  user: string;
+  fileType?: "image" | "video" | "audio";
+  timeout?: number;
+}
+
+/** 与网关 FileUploadResponse 对齐 */
+export interface ChatFileUploadResult {
+  fileId: string;
+  name: string;
+  size: number;
+  extension: string;
+  mimeType: string;
+  createdBy?: string;
+  createdAt?: number;
+  url: string;
+}
+
 export interface TextToSpeechResult {
   audioBase64?: string;
   format?: string;
