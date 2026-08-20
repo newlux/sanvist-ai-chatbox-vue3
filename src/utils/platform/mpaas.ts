@@ -205,18 +205,26 @@ export async function startNativeRecord() {
 }
 
 /**
- * 停止录音。宿主约定回的是上传后的地址（url），
- * 但也兼容直接回音频内容（base64 / audioBase64）的实现。
+ * 停止录音。宿主约定：出参 { success, data }，data 就是音频的 base64。
+ * 早期版本回的是上传后的地址（url），这里一并兼容，谁在就用谁。
  */
 export async function stopNativeRecord() {
   const result = assertNativeSuccess(await callNative("microphoneEnd"), "microphoneEnd");
   const audioUrl = String(result?.url || result?.audioUrl || "");
-  const audioBase64 = String(result?.base64 || result?.audioBase64 || "");
+  const audioBase64 = String(
+    (typeof result?.data === "string" ? result.data : "")
+    || result?.base64
+    || result?.audioBase64
+    || "",
+  );
   if (!audioUrl && !audioBase64) throw new Error("microphoneEnd 未返回音频数据");
+
+  // Data URL 自带类型，纯 base64 才需要补 mimeType（原生录的是 temp.m4a）
+  const isDataUrl = /^data:[^;]*;base64,/i.test(audioBase64);
   return {
     audioUrl,
     audioBase64,
-    mimeType: String(result?.mimeType || (audioBase64 ? "audio/m4a" : "")),
+    mimeType: isDataUrl ? "" : String(result?.mimeType || (audioBase64 ? "audio/m4a" : "")),
   };
 }
 
