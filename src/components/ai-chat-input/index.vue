@@ -7,8 +7,8 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
 const props = defineProps({
   modelValue: { type: String, default: "" },
   isLoading: { type: Boolean, default: false },
-  /** 键盘是否弹起：弹起时收掉底部说明文案，让输入栏贴着键盘 */
-  keyboardOpen: { type: Boolean, default: false },
+  /** 键盘高度(px)。输入栏与语音面板按它整体上移，页面本身不缩放 */
+  keyboardHeight: { type: Number, default: 0 },
 });
 
 const emit = defineEmits([
@@ -47,6 +47,8 @@ const state = reactive({
   _micPermissionRequesting: false,
   // 上划取消手势：模板依赖 _voiceGestureCancelling，保留；其余手势状态收敛进 _gesture
   _voiceGestureCancelling: false,
+  // 「再次识别」进行中：确认面板不卸载，靠这个标记切按钮样式
+  _restartRecording: false,
   _gesture: { active: false, startY: 0, isRestart: false },
 });
 const { inputMode, voicePhase } = toRefs(state);
@@ -56,6 +58,8 @@ let currentJob = null;
 
 const voiceTextareaRef = ref(null);
 const voiceTextValue = computed(() => {
+  // 重录期间草稿被清空了，先显示上一轮的识别结果，别让文本框突然空掉
+  if (state._restartRecording) return state.recognizedText;
   if (state.voicePhase === "finished") {
     return state.draftText;
   }
@@ -92,6 +96,40 @@ const {
   retryAttachment,
   takeUploadedFiles,
 } = useComposerAttachments();
+
+const keyboardOpen = computed(() => props.keyboardHeight > 0);
+
+/**
+ * 支付宝不认 textarea 的 adjust-position，键盘弹起时页面不会自己让位，
+ * 只能由输入栏和语音面板整体上移到键盘上沿。页面高度不参与，避免消息列表重排。
+ */
+const keyboardLiftStyle = computed(() => ({
+  transform: keyboardOpen.value ? `translateY(-${props.keyboardHeight}px)` : "translateY(0)",
+  transition: "transform 0.2s ease-out",
+}));
+
+/**
+ * 收键盘后遮罩多留一会儿：键盘落下的过程中输入栏会跟着往下移动，
+ * 遮罩要是立刻消失，这一次触摸的 tap 会落到刚好移过来的加号上，凭空弹出附件面板。
+ */
+const maskLingering = ref(false);
+let maskLingerTimer = null;
+const showKeyboardMask = computed(() => keyboardOpen.value || maskLingering.value);
+
+/** 点击面板以外的区域收起键盘：识别结果编辑态下这是唯一的退出口 */
+function onDismissKeyboard() {
+  uni.hideKeyboard();
+  emit("input-blur");
+  maskLingering.value = true;
+  if (maskLingerTimer) clearTimeout(maskLingerTimer);
+  maskLingerTimer = setTimeout(() => {
+    maskLingerTimer = null;
+    maskLingering.value = false;
+  }, 400);
+}
+
+/** 遮罩上的 tap 只做拦截，避免透传到下面的按钮 */
+function onMaskTap() {}
 
 const canSend = computed(() =>
   Boolean(draft.value.trim() || hasAttachments.value) && !hasIncompleteAttachments.value,
@@ -183,6 +221,7 @@ function setRecognizing(on) {
   }, VOICE_RECOGNIZE_WATCHDOG_MS);
 }
 function _resetVoiceText() {
+  state._restartRecording = false;
   state.recognizedText = "";
   state.draftText = "";
   state._keepOldRecognizedText = false;
@@ -271,6 +310,7 @@ function resetVoiceGestureState() {
  */
 function cancelVoiceRecording({ keepText = false } = {}) {
   const existingText = state.recognizedText || state.draftText;
+  state._restartRecording = false;
   _invalidateJob();
 
   if (keepText && existingText) {
@@ -300,7 +340,11 @@ function beginVoiceRecording({ restart = false } = {}) {
   state.draftText = existingText;
   state._keepOldRecognizedText = Boolean(existingText);
   state.inputMode = "voice";
-  state.voicePhase = "recording";
+  // 「再次识别」是长在确认面板上的按钮：切到 recording 会让面板连同按钮一起卸载，
+  // 手指还没松开，touchend 就没有接收者了，录音会一直停不下来。
+  // 所以重录期间保持 finished 面板，只用 _restartRecording 标记录音态。
+  state._restartRecording = restart;
+  state.voicePhase = restart ? "finished" : "recording";
   state._gesture.active = true;
   state._gesture.isRestart = restart;
   state._voicePressStartedAt = Date.now();
@@ -328,6 +372,7 @@ async function endVoiceRecording({ cancel = false } = {}) {
   }
   resetVoiceGestureState();
   state._gesture.active = false;
+  state._restartRecording = false;
   await finishVoiceGesture({ keepTextOnCancel: isRestart });
 }
 async function finishVoiceGesture({ keepTextOnCancel = false } = {}) {
@@ -424,14 +469,15 @@ async function onVoiceTouchCancel() {
   await endVoiceRecording({ cancel: true });
 }
 function onVoiceSend() {
-  // 键盘视口逻辑暂时关闭
   const payload = state.voicePhase === "finished" ? state.draftText : state.recognizedText;
   const finalPayload = String(payload || "").trim();
   if (!finalPayload) return;
   state.voicePhase = "idle";
-  state.inputMode = "text";
+  // 语音发完仍停在语音态：用户下一句大概率还是说，不该被切回键盘
+  state.inputMode = "voice";
   if (state._typingTimer) clearInterval(state._typingTimer);
   state._typingTimer = null;
+  onDismissKeyboard();
 
   emit("voice-send", finalPayload);
   // 识别文本直接进发送出口，不再绕 v-model 回传，避免多触发一次 send
@@ -620,6 +666,7 @@ function withVoiceTimeout(promise, message = "语音识别超时") {
 }
 
 onBeforeUnmount(() => {
+  if (maskLingerTimer) clearTimeout(maskLingerTimer);
   _invalidateJob();
   state._voiceGestureCancelling = false;
   state._gesture.active = false;
@@ -634,10 +681,20 @@ onBeforeUnmount(() => {
 
 <template>
   <view class="chat-input">
+    <!-- 键盘弹起时的空白区兜底：点一下收键盘，否则编辑识别结果时没有退出口 -->
+    <view
+      v-if="showKeyboardMask"
+      class="chat-input__keyboard-mask"
+      :style="{ bottom: keyboardOpen ? `${keyboardHeight}px` : '0' }"
+      @touchstart.stop.prevent="onDismissKeyboard"
+      @tap.stop="onMaskTap"
+    />
+
     <!-- 语音模式：悬浮在当前对话内容上的面板 -->
     <view
       v-if="inputMode === 'voice' && voicePhase !== 'idle'"
       class="voice-sheet"
+      :style="keyboardLiftStyle"
     >
       <view
         v-if="!isVoiceConfirmationOpen"
@@ -683,6 +740,9 @@ onBeforeUnmount(() => {
             :disabled="state._isRecognizing"
             placeholder=""
             confirm-type="send"
+            :adjust-position="false"
+            :cursor-spacing="16"
+            :show-confirm-bar="false"
             @input="onVoiceTextareaInput"
             @confirm="onVoiceSend"
             @focus="onTextareaFocus"
@@ -692,6 +752,11 @@ onBeforeUnmount(() => {
             <view class="voice-recognizing__spinner" />
             <text class="voice-recognizing__text">
               语音识别中...
+            </text>
+          </view>
+          <view v-else-if="state._restartRecording" class="voice-recognizing" aria-label="正在录音">
+            <text class="voice-recognizing__text">
+              {{ state._voiceGestureCancelling ? '松开取消' : '正在录音，松开识别' }}
             </text>
           </view>
         </view>
@@ -731,6 +796,7 @@ onBeforeUnmount(() => {
 
               <view
                 class="voice-actions__btn voice-actions__btn--gray"
+                :class="{ 'voice-actions__btn--recording': state._restartRecording }"
                 @touchstart.stop.prevent="onVoiceRestartStart"
                 @touchmove.stop.prevent="updateVoiceGesture"
                 @touchend.stop.prevent="onVoiceRestartEnd"
@@ -763,93 +829,95 @@ onBeforeUnmount(() => {
         </view>
       </view>
     </view>
-    <!-- 附件预览栏：选中的文件在输入栏上方排开 -->
-    <AiChatAttachments
-      v-if="attachments.length"
-      :attachments="attachments"
-      @remove="removeAttachment"
-      @retry="retryAttachment"
-    />
+    <view class="chat-input__dock" :style="keyboardLiftStyle">
+      <!-- 附件预览栏：选中的文件在输入栏上方排开 -->
+      <AiChatAttachments
+        v-if="attachments.length"
+        :attachments="attachments"
+        @remove="removeAttachment"
+        @retry="retryAttachment"
+      />
 
-    <!-- 底部输入栏：默认语音、键盘文本、发送和生成中状态 -->
-    <view
-      class="input-bar"
-      :class="{ 'input-bar--text': inputMode === 'text' }"
-    >
-      <!-- 左侧语音/键盘切换常驻：生成回答时也不隐藏，否则发送后入口会消失 -->
+      <!-- 底部输入栏：默认语音、键盘文本、发送和生成中状态 -->
       <view
-        class="input-bar__mode"
-        :class="{ 'input-bar__mode--disabled': state._gesture.active || state._isRecognizing }"
-        @tap="onToggleInputMode"
+        class="input-bar"
+        :class="{ 'input-bar--text': inputMode === 'text' }"
       >
-        <image
+        <!-- 左侧语音/键盘切换常驻：生成回答时也不隐藏，否则发送后入口会消失 -->
+        <view
+          class="input-bar__mode"
+          :class="{ 'input-bar__mode--disabled': state._gesture.active || state._isRecognizing }"
+          @tap="onToggleInputMode"
+        >
+          <image
+            v-if="inputMode === 'voice'"
+            src="@/assets/img/icon-keyboard.svg"
+            mode="aspectFit"
+          />
+          <image v-else src="@/assets/img/icon-voice.svg" mode="aspectFit" />
+        </view>
+
+        <view
           v-if="inputMode === 'voice'"
-          src="@/assets/img/icon-keyboard.svg"
-          mode="aspectFit"
-        />
-        <image v-else src="@/assets/img/icon-voice.svg" mode="aspectFit" />
+          class="input-bar__voice-pill"
+          @touchstart.stop.prevent="onVoicePillTouchStart"
+          @touchmove.stop.prevent="updateVoiceGesture"
+          @touchend.stop.prevent="onVoicePillTouchEnd"
+          @touchcancel.stop.prevent="onVoicePillTouchCancel"
+        >
+          <text class="input-bar__voice-hint">
+            按住 说话
+          </text>
+        </view>
+        <view v-else class="input-bar__text-field">
+          <textarea
+            class="input-bar__textarea"
+            :value="draft"
+            :style="{ height: textTextareaHeight }"
+            placeholder="发消息"
+            :auto-height="false"
+            :adjust-position="false"
+            :cursor-spacing="16"
+            :maxlength="-1"
+            confirm-type="send"
+            placeholder-class="input-bar__placeholder"
+            @input="onDraftInput"
+            @confirm="onTrySend"
+            @focus="onTextareaFocus"
+            @blur="onTextareaBlur"
+          />
+        </view>
+
+        <view
+          class="input-bar__plus"
+          :class="{ 'input-bar__plus--disabled': isLoading }"
+          @tap="onOpenAttachmentPicker"
+        >
+          <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
+        </view>
+
+        <!-- 生成中固定为停止按钮，其余时刻是发送按钮：有内容才高亮可点 -->
+        <view v-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
+          <image src="@/assets/img/icon-stop.svg" mode="aspectFit" />
+        </view>
+        <view
+          v-else
+          class="input-bar__send"
+          :class="{ 'input-bar__send--disabled': !canSend }"
+          @tap="onTrySend"
+        >
+          <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
+        </view>
       </view>
 
-      <view
-        v-if="inputMode === 'voice'"
-        class="input-bar__voice-pill"
-        @touchstart.stop.prevent="onVoicePillTouchStart"
-        @touchmove.stop.prevent="updateVoiceGesture"
-        @touchend.stop.prevent="onVoicePillTouchEnd"
-        @touchcancel.stop.prevent="onVoicePillTouchCancel"
-      >
-        <text class="input-bar__voice-hint">
-          按住 说话
+      <!-- 输入单元下提示（Figma: 41116:6071）。键盘弹起时收起，只留一条窄间距 -->
+      <view v-if="!keyboardOpen" class="chat-input__footer">
+        <text class="chat-input__footer-text">
+          内容由AI生成，请核实重要信息
         </text>
       </view>
-      <view v-else class="input-bar__text-field">
-        <textarea
-          class="input-bar__textarea"
-          :value="draft"
-          :style="{ height: textTextareaHeight }"
-          placeholder="发消息"
-          :auto-height="false"
-          :adjust-position="false"
-          :cursor-spacing="16"
-          :maxlength="-1"
-          confirm-type="send"
-          placeholder-class="input-bar__placeholder"
-          @input="onDraftInput"
-          @confirm="onTrySend"
-          @focus="onTextareaFocus"
-          @blur="onTextareaBlur"
-        />
-      </view>
-
-      <view
-        class="input-bar__plus"
-        :class="{ 'input-bar__plus--disabled': isLoading }"
-        @tap="onOpenAttachmentPicker"
-      >
-        <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
-      </view>
-
-      <!-- 生成中固定为停止按钮，其余时刻是发送按钮：有内容才高亮可点 -->
-      <view v-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
-        <image src="@/assets/img/icon-stop.svg" mode="aspectFit" />
-      </view>
-      <view
-        v-else
-        class="input-bar__send"
-        :class="{ 'input-bar__send--disabled': !canSend }"
-        @tap="onTrySend"
-      >
-        <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
-      </view>
+      <view v-else class="chat-input__keyboard-gap" />
     </view>
-
-    <!-- 输入单元下提示（Figma: 41116:6071）。键盘弹起时收起，只留一条窄间距 -->
-    <view v-if="!keyboardOpen" class="chat-input__footer">
-      <text class="chat-input__footer-text">
-        内容由AI生成，请核实重要信息
-      </text>
-    </view>
-    <view v-else class="chat-input__keyboard-gap" />
   </view>
 </template>
 
@@ -1443,6 +1511,11 @@ onBeforeUnmount(() => {
   color: #ffffff;
 }
 
+// 重录进行中：按钮给个按住反馈，面板本身保持不动
+.voice-actions__btn--recording {
+  opacity: 0.6;
+}
+
 .input-bar {
   display: flex;
   align-items: center;
@@ -1557,6 +1630,25 @@ onBeforeUnmount(() => {
   height: 40rpx;
   background: #000;
   border-radius: 20rpx;
+}
+
+.chat-input__dock {
+  position: relative;
+  // 必须高于收键盘遮罩，否则键盘弹起后点输入栏会被遮罩吃掉
+  z-index: 1250;
+  will-change: transform;
+}
+
+// 透明层，只负责接住「点空白收键盘」，底边贴着键盘顶沿。
+// 用 touchstart + preventDefault：走 tap 的话遮罩在 touchend 时就被移除了，
+// webview 随后补发的 click 会落到下面刚归位的加号按钮上，凭空弹出附件面板。
+.chat-input__keyboard-mask {
+  position: fixed;
+  z-index: 1200;
+  top: 0;
+  right: 0;
+  left: 0;
+  background: transparent;
 }
 
 .chat-input__keyboard-gap {

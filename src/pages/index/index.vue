@@ -9,6 +9,7 @@ import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
+import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
@@ -17,6 +18,7 @@ import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { getAlipayJSBridge } from "@/utils/platform/runtime-global";
 
 defineOptions({ name: "AiChatPage" });
 
@@ -24,6 +26,7 @@ const { t } = useI18n();
 const userStore = useUserStore();
 const chatStore = useChatStore();
 const sessionStore = useSessionStore();
+const sharePosterWrap = ref<unknown>(null);
 
 const {
   stage,
@@ -41,12 +44,13 @@ const { sessions, isSessionSwitching } = storeToRefs(sessionStore);
 
 const {
   chatViewportStyle,
-  isKeyboardOpen,
+  keyboardHeight,
   syncWindowHeight,
   resetKeyboardHeight,
 } = useChatViewport();
 const { sendMessage, sendQuickPrompt, stopGenerating, cancelActiveStream } = useChatSend();
 const {
+  iconCopyImage,
   iconSaveImage,
   shareSheetVisible,
   shareSelectedIndexes,
@@ -66,17 +70,14 @@ const {
   onCopyMessage,
   closeSharePosterModal,
   onSaveSharePoster,
-} = useChatShare();
+  onCopySharePoster,
+} = useChatShare(sharePosterWrap);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback();
 const { onTtsClick } = useChatTts();
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
 
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
-// 键盘弹起会把可视区压矮，最后一条消息容易被顶出去，这里跟着回到底部
-watch(isKeyboardOpen, (open) => {
-  if (open) nextTick(() => chatStore.scrollToBottom(true));
-});
 
 function startNewConversation() {
   chatStore.resetConversation();
@@ -102,6 +103,14 @@ function backToWelcome() {
     userStore.setVisitorRole(null);
     userStore.setUserId("");
   }
+  // #ifdef H5
+  // H5 跑在支付宝 App 的 webview 里，返回要交回宿主
+  const bridge = getAlipayJSBridge();
+  if (bridge?.call) {
+    bridge.call("popWindow");
+    return;
+  }
+  // #endif
   if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
 }
 
@@ -347,6 +356,16 @@ onBeforeUnmount(cancelActiveStream);
                   保存图片
                 </text>
               </view>
+              <!-- #ifndef MP-ALIPAY -->
+              <view class="share-poster-modal__option" @tap="onCopySharePoster">
+                <view class="share-poster-modal__option-icon">
+                  <image class="share-poster-modal__option-icon-img" :src="iconCopyImage" mode="aspectFit" />
+                </view>
+                <text class="share-poster-modal__option-label">
+                  复制图片
+                </text>
+              </view>
+              <!-- #endif -->
             </view>
             <view class="share-poster-modal__divider" />
             <view class="share-poster-modal__cancel" @tap="closeSharePosterModal">
@@ -357,14 +376,21 @@ onBeforeUnmount(cancelActiveStream);
           </view>
         </view>
 
+        <!-- #ifdef MP-ALIPAY -->
         <canvas canvas-id="alipay-share-poster-canvas" class="share-poster-canvas" />
+        <!-- #endif -->
+        <!-- #ifndef MP-ALIPAY -->
+        <view id="share-poster-wrap" ref="sharePosterWrap" class="share-poster-hidden">
+          <ShareConversationPoster :messages="messages" :selected-indexes="shareSelectedIndexes" />
+        </view>
+        <!-- #endif -->
       </view>
 
       <AiChatInput
         v-else
         v-model="inputText"
         :is-loading="isLoading"
-        :keyboard-open="isKeyboardOpen"
+        :keyboard-height="keyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
         @toggle-quick-list="toggleQuickList"
@@ -793,6 +819,15 @@ $color-white: #ffffff;
   justify-content: center;
   padding-bottom: 32rpx;
 }
+.share-poster-hidden {
+  position: fixed;
+  z-index: -1;
+  top: 0;
+  left: -9999px;
+  width: 620px;
+  pointer-events: none;
+}
+
 .share-poster-canvas {
   position: fixed;
   left: -9999px;

@@ -61,8 +61,19 @@ async function copyText(text) {
       return true;
     }
   } catch {
-    // 忽略，走下方失败返回
+    // 回退到浏览器剪贴板 API
   }
+
+  // #ifndef MP-ALIPAY
+  try {
+    if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // 忽略
+  }
+  // #endif
 
   return false;
 }

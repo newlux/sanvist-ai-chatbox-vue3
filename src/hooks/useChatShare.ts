@@ -1,6 +1,8 @@
+import type { Ref } from "vue";
 import type { ShareRound, UiChatMessage } from "@/stores/chat-types";
 import { computed, nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import iconCopyImage from "@/assets/img/icon-copy-image.svg";
 import iconSaveImage from "@/assets/img/icon-save-image.svg";
 import iconImage from "@/assets/img/icon-share-image.svg";
 import iconLink from "@/assets/img/icon-share-link.svg";
@@ -53,10 +55,20 @@ async function copyTextToClipboard(text: string) {
   } catch (error) {
     console.error("[AiChatPage] uni clipboard error", error);
   }
+  // #ifndef MP-ALIPAY
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(safeText);
+      return true;
+    }
+  } catch (error) {
+    console.error("[AiChatPage] navigator clipboard error", error);
+  }
+  // #endif
   return false;
 }
 
-export function useChatShare() {
+export function useChatShare(posterEl: Ref<unknown>) {
   const { t } = useI18n();
   const chatStore = useChatStore();
   const shareSheetVisible = ref(false);
@@ -190,10 +202,25 @@ export function useChatShare() {
   }
 
   async function generateSharePoster() {
+    // #ifdef MP-ALIPAY
     const selectedMessages = shareSelectedIndexes.value
       .map(index => chatStore.messages[index])
       .filter(Boolean);
     sharePosterDataUrl.value = await createAlipayConversationPoster(selectedMessages);
+    return;
+    // #endif
+    // #ifndef MP-ALIPAY
+    const { default: html2canvas } = await import("html2canvas");
+    const elFromDom = typeof document !== "undefined" ? document.getElementById("share-poster-wrap") : null;
+    const el = (elFromDom || posterEl.value) as HTMLElement | null;
+    if (!el) throw new Error("poster-element-missing");
+    sharePosterDataUrl.value = (await html2canvas(el, {
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      allowTaint: true,
+      scale: 2,
+    })).toDataURL("image/png");
+    // #endif
   }
 
   function openSharePoster() {
@@ -242,6 +269,7 @@ export function useChatShare() {
 
   async function onSaveSharePoster() {
     if (!sharePosterDataUrl.value) return;
+    // #ifdef MP-ALIPAY
     try {
       await savePosterToAlbum(sharePosterDataUrl.value);
       uni.showToast({ title: t("save-success"), icon: "none" });
@@ -249,9 +277,46 @@ export function useChatShare() {
       console.error("[AiChatPage] save poster failed", error);
       uni.showToast({ title: t("save-not-supported"), icon: "none" });
     }
+    return;
+    // #endif
+    // #ifndef MP-ALIPAY
+    const link = document.createElement("a");
+    link.href = sharePosterDataUrl.value;
+    link.download = "share-conversation.png";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    uni.showToast({ title: t("download-start"), icon: "none" });
+    // #endif
+  }
+
+  async function onCopySharePoster() {
+    if (!sharePosterDataUrl.value) return;
+    // #ifdef MP-ALIPAY
+    await onSaveSharePoster();
+    // #endif
+    // #ifndef MP-ALIPAY
+    const canCopyImage = typeof navigator !== "undefined"
+      && typeof navigator.clipboard?.write === "function"
+      && typeof ClipboardItem !== "undefined";
+    if (!canCopyImage) {
+      uni.showToast({ title: t("copy-failed-browser-not-supported"), icon: "none" });
+      return;
+    }
+    try {
+      const response = await fetch(sharePosterDataUrl.value);
+      const blob = await response.blob();
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
+      uni.showToast({ title: t("copy-success"), icon: "none" });
+    } catch (error) {
+      console.error("[AiChatPage] clipboard image copy error", error);
+      uni.showToast({ title: t("copy-failed"), icon: "none" });
+    }
+    // #endif
   }
 
   return {
+    iconCopyImage,
     iconSaveImage,
     shareSheetVisible,
     shareSelectedIndexes,
@@ -271,5 +336,6 @@ export function useChatShare() {
     onCopyMessage,
     closeSharePosterModal,
     onSaveSharePoster,
+    onCopySharePoster,
   };
 }
