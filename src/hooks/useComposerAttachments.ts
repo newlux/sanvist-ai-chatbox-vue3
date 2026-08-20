@@ -2,6 +2,7 @@ import type { ChatFile } from "@/api/chat/types";
 import { computed, ref } from "vue";
 import { uploadChatFile } from "@/api/chat";
 import { useUserStore } from "@/stores";
+import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
 
 export const MAX_ATTACHMENT_COUNT = 3;
 const MAX_LOCAL_FILE_SIZE = 50 * 1024 * 1024;
@@ -188,7 +189,14 @@ export function useComposerAttachments() {
     });
   }
 
-  function chooseImages(sourceType: Array<"album" | "camera">) {
+  async function chooseImages(sourceType: Array<"album" | "camera">) {
+    // 容器里先向原生要权限：安卓 WebView 不先授权的话，选图/拍照会被静默拒绝
+    const permission = sourceType.includes("camera") ? "camera" : "photo";
+    if (!await ensureNativePermission(permission)) {
+      uni.showToast({ title: permissionDeniedMessage(permission), icon: "none" });
+      return;
+    }
+
     const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
     uni.chooseImage({
       count,
@@ -211,7 +219,12 @@ export function useComposerAttachments() {
   }
 
   // #ifdef H5
-  function chooseLocalFiles() {
+  async function chooseLocalFiles() {
+    if (!await ensureNativePermission("photo")) {
+      uni.showToast({ title: permissionDeniedMessage("photo"), icon: "none" });
+      return;
+    }
+
     const chooseFile = (uni as { chooseFile?: (options: Record<string, unknown>) => void }).chooseFile;
     if (typeof chooseFile !== "function") {
       uni.showToast({ title: "当前环境不支持选择文件", icon: "none" });
@@ -249,10 +262,10 @@ export function useComposerAttachments() {
     uni.showActionSheet({
       itemList,
       success: ({ tapIndex }) => {
-        if (tapIndex === 0) chooseImages(["camera"]);
-        else if (tapIndex === 1) chooseImages(["album"]);
+        if (tapIndex === 0) void chooseImages(["camera"]);
+        else if (tapIndex === 1) void chooseImages(["album"]);
         // #ifdef H5
-        else if (tapIndex === 2) chooseLocalFiles();
+        else if (tapIndex === 2) void chooseLocalFiles();
         // #endif
       },
       fail: () => {},

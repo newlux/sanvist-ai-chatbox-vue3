@@ -1,7 +1,8 @@
 <script setup>
-import { recognizeSpeechByUpload } from "@/api/chat";
+import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
+import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
 const props = defineProps({
@@ -194,6 +195,24 @@ function onTrySend() {
 function onOpenAttachmentPicker() {
   if (props.isLoading) return;
   openAttachmentPicker();
+}
+
+/**
+ * 麦克风权限只在本次会话里问一次：拿到授权后缓存，之后连续按住说话不再重复弹窗。
+ * 被拒时不缓存，用户去系统设置里开了还能再试。
+ */
+async function ensureMicPermission() {
+  if (state._micPermissionReady) return true;
+  if (state._micPermissionRequesting) return false;
+
+  state._micPermissionRequesting = true;
+  try {
+    const granted = await ensureNativePermission("record_audio");
+    state._micPermissionReady = granted;
+    return granted;
+  } finally {
+    state._micPermissionRequesting = false;
+  }
 }
 
 function _ensureRecorder() {
@@ -533,7 +552,10 @@ async function _startVoiceRecorder(jobSeq) {
   const keepText = state._keepOldRecognizedText;
   state._keepOldRecognizedText = false;
 
-  const result = await recorder.start({ sampleRate: 16000, timeSlice: 1000 });
+  // 容器里要先向原生申请麦克风权限，拿到授权浏览器那层才不会被静默拒绝
+  const result = await ensureMicPermission()
+    ? await recorder.start({ sampleRate: 16000, timeSlice: 1000 })
+    : { success: false, error: permissionDeniedMessage("record_audio"), notAllowed: true };
   if (jobSeq !== state._jobSeq) return { success: false, error: "任务已失效" };
   if (result?.success) return result;
 
@@ -589,17 +611,34 @@ async function _stopVoiceRecorderAndRecognize(jobSeq) {
     return;
   }
   const filePath = result.data?.tempFilePath;
-  console.info("[voice] ready to upload", { filePath, jobSeq });
-  await _recognizeFromRecording(filePath, jobSeq);
+  const audioUrl = result.data?.audioUrl;
+  const audioBase64 = result.data?.audioBase64;
+  console.info("[voice] ready to recognize", {
+    filePath,
+    audioUrl,
+    base64Length: audioBase64 ? String(audioBase64).length : 0,
+    jobSeq,
+  });
+  await _recognizeFromRecording({ filePath, audioUrl, audioBase64, mimeType: result.data?.mimeType }, jobSeq);
+}
+
+/** 按拿到的音频形态选识别接口 */
+function _requestRecognition({ filePath, audioUrl, audioBase64, mimeType }) {
+  if (audioUrl) return recognizeSpeechByUrl({ audioUrl });
+  if (audioBase64) return recognizeSpeechByBase64({ audioBase64, mimeType });
+  return recognizeSpeechByUpload({ filePath, timeout: VOICE_ASR_TIMEOUT_MS });
 }
 
 /**
- * 录音文件直传后端识别。不再走 base64：整段音频转 base64 会多占约 1/3 体积，
- * 还要先把整个文件读进内存，长录音在小程序里很容易顶到请求体上限。
+ * 送去识别。三条来源，按拿到什么就走什么：
+ * - audioUrl：原生录音（mPaaS）已经把文件上传好了，只给回地址 → 按地址识别；
+ * - audioBase64：宿主直接回传音频内容 → 按 base64 识别；
+ * - filePath：浏览器/小程序录到的本地文件 → 直传 multipart，
+ *   这条不转 base64，整段音频转出来要多占约 1/3 体积，还得先整个读进内存。
  */
-async function _recognizeFromRecording(tempFilePath, jobId) {
+async function _recognizeFromRecording({ filePath, audioUrl, audioBase64, mimeType } = {}, jobId) {
   if (jobId !== state._jobSeq) return;
-  if (!tempFilePath) {
+  if (!filePath && !audioUrl && !audioBase64) {
     resetVoiceInput();
     uni.showToast({ title: "未录制到音频内容", icon: "none" });
     return;
@@ -610,12 +649,14 @@ async function _recognizeFromRecording(tempFilePath, jobId) {
   setRecognizing(true);
   try {
     if (jobId !== state._jobSeq) return;
-    console.info("[voice] ASR upload start", { tempFilePath });
-    const result = await withVoiceTimeout(recognizeSpeechByUpload({
-      filePath: tempFilePath,
-      timeout: VOICE_ASR_TIMEOUT_MS,
+    console.info("[voice] ASR start", { filePath, audioUrl, hasBase64: Boolean(audioBase64) });
+    const result = await withVoiceTimeout(_requestRecognition({
+      filePath,
+      audioUrl,
+      audioBase64,
+      mimeType,
     }));
-    console.info("[voice] ASR upload done", result);
+    console.info("[voice] ASR done", result);
     if (jobId !== state._jobSeq) return;
     const text = String(result?.text || "").trim();
     if (!text) {
@@ -639,7 +680,7 @@ async function _recognizeFromRecording(tempFilePath, jobId) {
     state.voicePhase = "finished";
     state.inputMode = "voice";
   } catch (error) {
-    console.error("[voice] ASR upload failed", error);
+    console.error("[voice] ASR failed", error);
     if (jobId !== state._jobSeq) return;
     state.recognizedText = prevText;
     state.draftText = prevText;

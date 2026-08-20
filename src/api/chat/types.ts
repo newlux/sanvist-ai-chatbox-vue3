@@ -202,6 +202,19 @@ export interface RecognizeSpeechByUploadParams {
   timeout?: number;
 }
 
+export interface RecognizeSpeechByUrlParams {
+  /** 宿主原生录音上传后返回的音频地址 */
+  audioUrl: string;
+  language?: string;
+}
+
+export interface RecognizeSpeechByBase64Params {
+  /** Data URL（data:audio/m4a;base64,...）或纯 base64；后者必须同时给 mimeType */
+  audioBase64: string;
+  mimeType?: string;
+  language?: string;
+}
+
 export interface UploadChatFileParams {
   filePath: string;
   /** 网关要求非空，游客态没有真实用户 ID 时由调用方兜底 */
