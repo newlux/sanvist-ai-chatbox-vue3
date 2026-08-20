@@ -1,5 +1,7 @@
 /* global uni */
 
+import WebVoiceRecorder from "./voiceRecorderWeb";
+
 export const RECORDER_PHASE = {
   IDLE: "idle",
   STARTING: "starting",
@@ -237,4 +239,9 @@ class VoiceRecorder {
   }
 }
 
-export default VoiceRecorder;
+/**
+ * 按运行环境挑实现，两者对外方法与返回结构一致。
+ * 判断顺序是「先看浏览器能力」：H5 上 uni.getRecorderManager 也存在，
+ * 但只是个会报「暂不支持」的空壳，拿它做判据会误选到小程序实现。
+ */
+export default WebVoiceRecorder.isSupported() ? WebVoiceRecorder : VoiceRecorder;

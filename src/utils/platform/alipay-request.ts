@@ -107,11 +107,17 @@ function getUserDataPath() {
 
 /** 录音/选图产生的是本地临时文件，uploadFile 只接受缓存文件和用户文件 */
 function shouldPersistUploadFile(filePath: string, fileType?: "image" | "video" | "audio") {
+  // #ifndef MP-ALIPAY
+  // 浏览器里拿到的是 blob:/http: 地址，没有也不需要 saveFile
+  return false;
+  // #endif
+  // #ifdef MP-ALIPAY
   const userDir = getUserDataPath();
   if (userDir && filePath.startsWith(userDir)) return false;
   if (/^https:\/\/usr\//i.test(filePath)) return false;
   if (/^https:\/\/resource\//i.test(filePath)) return true;
   return fileType === "audio";
+  // #endif
 }
 
 function guessFileExt(filePath: string, fileType?: "image" | "video" | "audio") {
@@ -180,6 +186,30 @@ function pickPlainHeaders(headers?: Record<string, string>) {
 /**
  * 走 uni.uploadFile。录音临时路径必须先 saveFile，否则真机报「无效参数」。
  */
+/**
+ * 支付宝的 my.uploadFile 会自己弹一个「上传中」的系统 loading，官方没给开关。
+ * 它出现的时机跟传输快慢有关（小文件可能一闪而过，语音这种秒级上传必现），
+ * 所以不能只在开头补几刀，得在整个上传期间持续压制，由调用方在 finally 里停。
+ * 本项目自己从不调用 showLoading，误关不了别人的。
+ */
+function suppressNativeUploadLoading() {
+  // #ifndef MP-ALIPAY
+  return () => {};
+  // #endif
+  // #ifdef MP-ALIPAY
+  const hide = () => {
+    try {
+      uni.hideLoading();
+    } catch {
+      // 没有 loading 时部分基础库会报错，忽略
+    }
+  };
+  hide();
+  const timer = setInterval(hide, 120);
+  return () => clearInterval(timer);
+  // #endif
+}
+
 export async function alipayUploadFile(
   options: PlatformUploadOptions,
 ): Promise<{ statusCode: number; data: unknown }> {
@@ -188,6 +218,7 @@ export async function alipayUploadFile(
     throw new PlatformRequestError("缺少上传文件路径");
   }
 
+  let stopLoadingSuppressor: (() => void) | undefined;
   const persisted = shouldPersistUploadFile(sourcePath, options.fileType);
   const filePath = persisted
     ? await persistTempFile(sourcePath, options.fileType)
@@ -224,8 +255,10 @@ export async function alipayUploadFile(
         fileType: payload.fileType,
       });
       uni.uploadFile(payload);
+      stopLoadingSuppressor = suppressNativeUploadLoading();
     });
   } finally {
+    stopLoadingSuppressor?.();
     if (persisted && filePath && filePath !== sourcePath) {
       removePersistedFile(filePath);
     }

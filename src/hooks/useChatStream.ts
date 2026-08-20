@@ -1,4 +1,5 @@
 import type { ChatStreamEvent, SendChatMessageParams } from "@/api/chat/types";
+import { createSseSession } from "@/utils/ai-stream/sseSession";
 import { createAlipaySocketStream } from "@/utils/platform/alipay-socket-stream";
 import { createAlipaySseRequest } from "@/utils/platform/alipay-stream";
 import { getChatSocketURL, getRequestBaseURL, getRequestHeaders } from "@/utils/request";
@@ -106,6 +107,7 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
       queue.push({ result: payload as ChatStreamEvent });
     }
 
+    // #ifdef MP-ALIPAY
     function startHttpTransport() {
       const task = createAlipaySseRequest({
         url,
@@ -150,6 +152,58 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
     else {
       startHttpTransport();
     }
+    // #endif
+
+    // #ifndef MP-ALIPAY
+    // 浏览器环境：fetch 原生支持分块读取，直接消费 SSE，不需要 WebSocket 通道
+    const controller = new AbortController();
+    abortActiveRequest = () => controller.abort();
+    const session = createSseSession({
+      onEvent: pushEvent,
+      isAborted: () => finished,
+    });
+    armIdleTimer();
+    void (async () => {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: getRequestHeaders({
+            Accept: "text/event-stream",
+            "Content-Type": "application/json",
+          }),
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`流式请求失败（${response.status}）`);
+        if (!response.body) {
+          // 个别 WebView 不暴露 ReadableStream，退化成一次性读取整包再解析
+          session.finalize(await response.text());
+          succeed();
+          return;
+        }
+
+        const reader = response.body.getReader();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) session.consumeChunk(value);
+        }
+        session.finalize();
+        succeed();
+      }
+      catch (error) {
+        // 浏览器抛的是 DOMException，name 是只读 getter，改不得，
+        // 中止场景直接换一个自己的 Error 往下传
+        if (controller.signal.aborted) {
+          const aborted = new Error("请求已取消");
+          aborted.name = "AbortError";
+          fail(aborted);
+          return;
+        }
+        fail(toError(error));
+      }
+    })();
+    // #endif
 
     try {
       while (true) {
