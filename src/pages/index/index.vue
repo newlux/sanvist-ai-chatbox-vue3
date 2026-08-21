@@ -30,6 +30,7 @@ const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
 const sessionStore = useSessionStore();
 const sharePosterWrap = ref<unknown>(null);
 const navActiveKey = ref("");
+const shareSheetBottomInset = ref("");
 
 const {
   stage,
@@ -81,6 +82,22 @@ const { onTtsClick } = useChatTts();
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
 
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
+
+watch(shareSheetVisible, async (visible) => {
+  if (!visible) {
+    shareSheetBottomInset.value = "";
+    return;
+  }
+
+  await nextTick();
+  uni.createSelectorQuery()
+    .select(".share-sheet")
+    .boundingClientRect((rect) => {
+      const height = Array.isArray(rect) ? rect[0]?.height : rect?.height;
+      shareSheetBottomInset.value = height ? `${height}px` : "";
+    })
+    .exec();
+});
 
 function startNewConversation() {
   // 已经是一轮空白会话就别再重置了，重复点击给个明确反馈
@@ -309,6 +326,7 @@ onBeforeUnmount(cancelActiveStream);
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
+        :bottom-inset="shareSheetBottomInset"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"
@@ -333,7 +351,6 @@ onBeforeUnmount(cancelActiveStream);
       </view>
 
       <view v-if="shareSheetVisible" class="share-sheet-modal">
-        <view class="share-sheet-modal__mask" @tap="closeShareSheet" />
         <view class="share-sheet" @tap.stop>
           <text class="share-sheet__title">
             分享到：
@@ -507,7 +524,7 @@ $color-white: #ffffff;
   min-height: 100vh;
   height: 100%;
   box-sizing: border-box;
-  background: #f2f4f8;
+  background: #fafafa;
   font-family: PingFang SC;
   overflow: hidden;
   overscroll-behavior: none;
@@ -518,7 +535,7 @@ $color-white: #ffffff;
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: #ffffff;
+  background: #fafafa;
   overflow: hidden;
   position: relative;
 }
@@ -538,24 +555,32 @@ $color-white: #ffffff;
   position: absolute;
   z-index: 0;
   pointer-events: none;
-  border-radius: 50%;
-  filter: blur(28rpx);
+  border-radius: 0;
+  filter: none;
 }
 
 .ai-chat-glow--blue {
-  top: -120rpx;
-  left: -180rpx;
-  width: 620rpx;
-  height: 420rpx;
-  background: rgba(123, 167, 217, 0.14);
+  top: 0;
+  left: 0;
+  width: 392rpx;
+  height: 234rpx;
+  background: radial-gradient(
+    ellipse 196rpx 117rpx at 0 0,
+    rgba(123, 167, 217, 0.12) 0%,
+    rgba(123, 167, 217, 0) 100%
+  );
 }
 
 .ai-chat-glow--red {
-  top: -100rpx;
-  right: -240rpx;
-  width: 720rpx;
-  height: 400rpx;
-  background: rgba(255, 80, 80, 0.10);
+  top: 0;
+  right: 0;
+  width: 602rpx;
+  height: 234rpx;
+  background: radial-gradient(
+    ellipse 301rpx 117rpx at 100% 0,
+    rgba(254, 0, 0, 0.1) 0%,
+    rgba(254, 0, 0, 0) 100%
+  );
 }
 
 .session-loading {
@@ -594,22 +619,20 @@ $color-white: #ffffff;
   position: fixed;
   inset: 0;
   z-index: 50;
-}
-
-.share-sheet-modal__mask {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  pointer-events: none;
 }
 
 .share-sheet {
   position: absolute;
+  pointer-events: auto;
   right: 0;
   bottom: 0;
   left: 0;
   box-sizing: border-box;
+  border-top: 2rpx solid #eeeeee;
   border-radius: 32rpx 32rpx 0 0;
   background: #ffffff;
+  box-shadow: 0 -12rpx 32rpx rgba(0, 0, 0, 0.1);
   padding: 40rpx 60rpx 32rpx;
 }
 
@@ -843,7 +866,8 @@ $color-white: #ffffff;
 }
 
 .share-poster-modal__img {
-  width: 584rpx;
+  width: 100%;
+  max-width: 656rpx;
   height: auto;
   display: block;
   margin: 0 auto;
@@ -863,16 +887,17 @@ $color-white: #ffffff;
 
 .share-poster-modal__img-center {
   display: flex;
-  align-items: flex-start;
+  min-height: 100%;
+  box-sizing: border-box;
+  align-items: center;
   justify-content: center;
-  padding-bottom: 32rpx;
+  padding: 32rpx 0;
 }
 .share-poster-hidden {
   position: fixed;
   z-index: -1;
   top: 0;
   left: -9999px;
-  width: 620px;
   pointer-events: none;
 }
 </style>

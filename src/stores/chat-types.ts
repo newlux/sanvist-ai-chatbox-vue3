@@ -30,6 +30,7 @@ export interface UiChatMessage {
   feedbackRemark?: string;
   ttsEnabled?: boolean;
   ttsLoading?: boolean;
+  ttsPlaying?: boolean;
   rawSseText?: string;
   attachments?: ChatMessageAttachment[];
 }

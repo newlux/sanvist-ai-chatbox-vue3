@@ -65,7 +65,9 @@ export function useSafeArea() {
       // 宿主通过启动参数注入的最准，其次才是 uni 自己报的
       top = normalizeInset(systemStore.statusBarHeight) || normalizeInset(info.statusBarHeight);
       if (top > 0) source = "host";
-      bottom = safeAreaInsetBottom || Math.max(0, screenHeight - safeAreaBottom);
+      bottom = normalizeInset(systemStore.tabbarHeight)
+        || safeAreaInsetBottom
+        || Math.max(0, screenHeight - safeAreaBottom);
     } catch (error) {
       logger.warn("读取系统信息失败，改用 CSS 环境变量", error);
     }

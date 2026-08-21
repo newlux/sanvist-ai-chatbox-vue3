@@ -3,6 +3,8 @@ import type { AiBlock } from "@/utils/ai-stream";
 import { computed } from "vue";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
+import iconRadioOff from "@/assets/img/icon-action-radio-off.svg";
+import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconShare from "@/assets/img/icon-action-share.svg";
 import iconBadFilled from "@/assets/img/icon-bad-fill.svg";
 import iconBad from "@/assets/img/icon-bad.svg";
@@ -21,6 +23,7 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   ttsEnabled: { type: Boolean, default: false },
   ttsLoading: { type: Boolean, default: false },
+  ttsPlaying: { type: Boolean, default: false },
   showActions: { type: Boolean, default: false },
   waitingText: { type: String, default: "" },
   /** 用户消息随行的附件：图片直接出图，其它文件出卡片 */
@@ -102,17 +105,19 @@ function onUserLongpress() {
 }
 
 const isUser = computed(() => props.role === "user");
-const visibleBlocks = computed(() => props.hideSuggestion
-  ? props.blocks.filter(block => block && block.type !== "suggestion")
-  : props.blocks);
+const visibleBlocks = computed(() =>
+  props.hideSuggestion
+    ? props.blocks.filter(block => block && block.type !== "suggestion")
+    : props.blocks,
+);
 
 /**
  * 等待条：模型还没吐出内容时的占位。
  * 被中断后不撤掉，只把状态字改成「已停止」——否则没来得及出内容的那一轮
  * 会变成一个空气泡，用户看不出这轮发生了什么。
  */
-const showWaiting = computed(() =>
-  Boolean(props.waitingText) && (props.loading || props.interrupted),
+const showWaiting = computed(
+  () => Boolean(props.waitingText) && (props.loading || props.interrupted),
 );
 
 function onSelectTap() {
@@ -129,6 +134,11 @@ function onShareTap() {
 
 function onCopyTap() {
   emit("copy-click");
+}
+
+function onTtsTap() {
+  if (!props.ttsEnabled || props.ttsLoading) return;
+  emit("tts-click");
 }
 
 function onFeedbackChange(value) {
@@ -187,10 +197,14 @@ function onNegativeFeedback() {
           @tap.stop="onPreviewImage(file.url)"
         />
         <view v-else class="ai-bubble-v2__file-card">
-          <image class="ai-bubble-v2__file-icon" src="@/assets/img/icon-form.svg" mode="aspectFit" />
+          <image
+            class="ai-bubble-v2__file-icon"
+            src="@/assets/img/icon-form.svg"
+            mode="aspectFit"
+          />
           <view class="ai-bubble-v2__file-info">
             <text class="ai-bubble-v2__file-name">
-              {{ file.name || '附件' }}
+              {{ file.name || "附件" }}
             </text>
             <text v-if="formatFileSize(file.size)" class="ai-bubble-v2__file-size">
               {{ formatFileSize(file.size) }}
@@ -222,7 +236,7 @@ function onNegativeFeedback() {
             ✓
           </text>
           <text class="ai-bubble-v2__waiting-label">
-            {{ props.interrupted ? '已停止：' : '等待模型响应：' }}
+            {{ props.interrupted ? "已停止：" : "等待模型响应：" }}
           </text>
           <text class="ai-bubble-v2__waiting-query">
             {{ props.waitingText }}
@@ -242,6 +256,18 @@ function onNegativeFeedback() {
           @suggestion-tap="onSuggestionTap"
         />
         <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
+          <view
+            v-if="props.ttsEnabled"
+            class="ai-bubble-v2__action-btn"
+            :class="{ 'ai-bubble-v2__action-btn--disabled': props.ttsLoading }"
+            @tap.stop="onTtsTap"
+          >
+            <image
+              :src="props.ttsPlaying ? iconRadioOff : iconRadioOn"
+              mode="aspectFit"
+              class="ai-bubble-v2__action-icon"
+            />
+          </view>
           <view class="ai-bubble-v2__action-btn" @tap.stop="onCopyTap">
             <image :src="iconCopy" mode="aspectFit" class="ai-bubble-v2__action-icon" />
           </view>
@@ -283,16 +309,33 @@ function onNegativeFeedback() {
 .ai-bubble-v2 {
   display: flex;
   margin-bottom: 40rpx;
+  gap: 16rpx;
 }
 
-.ai-bubble-v2--selected { justify-content: space-between; }
+.ai-bubble-v2--selected {
+  justify-content: space-between;
+}
 .ai-bubble-v2--user {
   flex-direction: column;
   align-items: flex-end;
   justify-content: flex-end;
 }
-.ai-bubble-v2__check { width: 40rpx; padding-left: 32rpx; display: flex; align-items: center; flex-shrink: 0; }
-.ai-bubble-v2__check-img { width: 32rpx; height: 32rpx; }
+.ai-bubble-v2--user.ai-bubble-v2--selected {
+  flex-direction: row;
+  align-items: center;
+}
+.ai-bubble-v2__check {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.ai-bubble-v2--user.ai-bubble-v2--selected .ai-bubble-v2__check {
+  order: 1;
+}
+.ai-bubble-v2__check-img {
+  width: 32rpx;
+  height: 32rpx;
+}
 .ai-bubble-v2__body {
   flex: 1;
   min-width: 0;
@@ -328,7 +371,9 @@ function onNegativeFeedback() {
   border-radius: 28rpx;
   background: #c8201e;
 }
-.ai-bubble-v2__body--highlighted { background: rgba(248, 49, 94, .06); }
+.ai-bubble-v2__body--highlighted {
+  background: rgba(248, 49, 94, 0.06);
+}
 .ai-bubble-v2--user .ai-bubble-v2__user-content {
   font-size: 28rpx;
   line-height: 40rpx;
@@ -410,18 +455,61 @@ function onNegativeFeedback() {
   line-height: 30rpx;
 }
 
-.ai-bubble-v2__waiting { display: flex; align-items: center; flex-wrap: wrap; gap: 8rpx; margin-bottom: 24rpx; color: #a5a5a5; font-family: "PingFang SC"; font-size: 26rpx; line-height: 36rpx; }
-.ai-bubble-v2__waiting-mark { color: #a5a5a5; font-size: 24rpx; line-height: 36rpx; }
-.ai-bubble-v2__waiting-label, .ai-bubble-v2__waiting-query, .ai-bubble-v2__waiting-suffix { color: #a5a5a5; font-weight: 400; }
+.ai-bubble-v2__waiting {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8rpx;
+  margin-bottom: 24rpx;
+  color: #a5a5a5;
+  font-family: "PingFang SC";
+  font-size: 26rpx;
+  line-height: 36rpx;
+}
+.ai-bubble-v2__waiting-mark {
+  color: #a5a5a5;
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+.ai-bubble-v2__waiting-label,
+.ai-bubble-v2__waiting-query,
+.ai-bubble-v2__waiting-suffix {
+  color: #a5a5a5;
+  font-weight: 400;
+}
 // 已停止：和「等待响应」用同一行样式，只把状态字加深一点区分出来
 .ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-mark,
-.ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-label { color: #7b7b7b; }
-.ai-bubble-v2__duration { color: #bababa; font-size: 22rpx; line-height: 32rpx; white-space: nowrap; }
-.ai-bubble-v2__typing { display: flex; gap: 8rpx; align-items: center; padding: 6rpx 4rpx; }
-.ai-bubble-v2__dot { width: 12rpx; height: 12rpx; border-radius: 50%; background: #bbc0c9; animation: typing-blink 1.2s infinite; }
-.ai-bubble-v2__dot:nth-child(2) { animation-delay: .2s; }
-.ai-bubble-v2__dot:nth-child(3) { animation-delay: .4s; }
-.ai-bubble-v2__streaming { padding-top: 24rpx; }
+.ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-label {
+  color: #7b7b7b;
+}
+.ai-bubble-v2__duration {
+  color: #bababa;
+  font-size: 22rpx;
+  line-height: 32rpx;
+  white-space: nowrap;
+}
+.ai-bubble-v2__typing {
+  display: flex;
+  gap: 8rpx;
+  align-items: center;
+  padding: 6rpx 4rpx;
+}
+.ai-bubble-v2__dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: #bbc0c9;
+  animation: typing-blink 1.2s infinite;
+}
+.ai-bubble-v2__dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.ai-bubble-v2__dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+.ai-bubble-v2__streaming {
+  padding-top: 24rpx;
+}
 .ai-bubble-v2__actions {
   display: flex;
   align-items: center;
@@ -431,10 +519,34 @@ function onNegativeFeedback() {
   padding-top: 28rpx;
   border-top: 2rpx solid #f0f0f2;
 }
-.ai-bubble-v2__action-btn { width: 32rpx; height: 32rpx; display: flex; align-items: center; justify-content: center; }
-.ai-bubble-v2__action-btn--disabled { opacity: .6; }
-.ai-bubble-v2__action-icon { width: 32rpx; height: 32rpx; }
-.ai-bubble-v2__duration { margin-left: 8rpx; }
+.ai-bubble-v2__action-btn {
+  width: 32rpx;
+  height: 32rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ai-bubble-v2__action-btn--disabled {
+  opacity: 0.6;
+}
+.ai-bubble-v2__action-icon {
+  width: 32rpx;
+  height: 32rpx;
+}
+.ai-bubble-v2__duration {
+  margin-left: 8rpx;
+}
 
-@keyframes typing-blink { 0%, 80%, 100% { opacity: .2; transform: scale(.8); } 40% { opacity: 1; transform: scale(1); } }
+@keyframes typing-blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 </style>

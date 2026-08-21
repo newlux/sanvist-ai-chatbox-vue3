@@ -388,7 +388,12 @@ onBeforeUnmount(() => {
         :is-mask-click="true"
         @change="onHistoryPopupChange"
       >
-        <view class="history-drawer" :style="historyDrawerStyle" @tap="onDrawerTap">
+        <view
+          class="history-drawer"
+          :class="{ 'history-drawer--batch-delete': editingMode }"
+          :style="historyDrawerStyle"
+          @tap="onDrawerTap"
+        >
           <view class="history-drawer__search">
             <image src="@/assets/img/icon-history-search.svg" mode="aspectFit" class="history-drawer__search-icon" />
             <input
@@ -569,6 +574,7 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .ai-chat-header {
   position: relative;
+  flex: 0 0 auto;
 }
 
 :deep(.uni-popup) {
@@ -834,13 +840,13 @@ onBeforeUnmount(() => {
 .history-drawer__list {
   display: flex;
   flex-direction: column;
-  gap: 4rpx;
   padding: 0;
 }
 
 .history-drawer__group {
   display: flex;
   flex-direction: column;
+  gap: 8rpx;
 }
 
 // 分组标题滚动到顶时吸住，盖住下方划过的会话
@@ -848,7 +854,7 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 2;
-  padding: 20rpx 0 12rpx;
+  padding: 8rpx 0 8rpx;
   background: #ffffff;
 }
 
@@ -987,7 +993,6 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   background: transparent;
   font-size: 28rpx;
-  font-weight: 500;
   color: #1a1a1a;
   line-height: 40rpx;
 }
@@ -996,6 +1001,10 @@ onBeforeUnmount(() => {
 }
 .history-drawer__new-conversation {
   padding: 0;
+}
+.history-drawer--batch-delete .history-drawer__search,
+.history-drawer--batch-delete .history-drawer__new-conversation {
+  display: none;
 }
 .history-drawer__new-conversation-item {
   display: flex;
@@ -1018,6 +1027,9 @@ onBeforeUnmount(() => {
 .history-drawer__session-history {
   padding: 32rpx 0;
   margin: 0;
+}
+.history-drawer--batch-delete .history-drawer__session-history {
+  padding-top: 0;
 }
 .history-drawer__session-history-label {
   font-size: 28rpx;

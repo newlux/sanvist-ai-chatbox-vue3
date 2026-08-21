@@ -58,6 +58,9 @@ export function mapHistoryMessages(
         content: "",
         blocks,
         loading: false,
+        ttsEnabled: Boolean(sessionId && messageId),
+        ttsLoading: false,
+        ttsPlaying: false,
         sessionId,
         messageId,
         positive: feedback?.rating === "like" ? true : feedback?.rating === "dislike" ? false : null,
@@ -179,9 +182,7 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   async function renameSession(sessionId: Identifier, name: string) {
-    const userStore = useUserStore();
     await renameConversation(sessionId, {
-      user: String(userStore.userId || ""),
       name: name.slice(0, 200),
     });
     sessions.value = sessions.value.map(item => (
