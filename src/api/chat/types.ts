@@ -140,7 +140,6 @@ export interface BatchDeleteResult {
 }
 
 export interface RenameConversationParams {
-  user?: string;
   name: string;
 }
 
@@ -236,6 +235,7 @@ export interface ChatFileUploadResult {
 }
 
 export interface TextToSpeechResult {
+  audioUrl?: string;
   audioBase64?: string;
   format?: string;
 }

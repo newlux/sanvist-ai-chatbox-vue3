@@ -202,6 +202,39 @@ export async function saveImageToAlbum(dataUrl: string) {
   }
 }
 
+export interface NativeSelectedFile {
+  url: string;
+  name?: string;
+  size?: number;
+  mimeType?: string;
+}
+
+/**
+ * 调起宿主原生图片/文件选择器。
+ * showFile=true 时由原生同时提供图片和文件入口；返回值兼容字符串路径和 { url } 对象。
+ */
+export async function chooseNativeFiles(count: number): Promise<NativeSelectedFile[]> {
+  const result = await callNative("imageChoose", {
+    count: Math.max(1, count),
+    showFile: true,
+  });
+  if (result?.success === false || String(result?.success) === "false") {
+    throw new Error(`imageChoose 失败（code=${result?.code ?? "unknown"}）`);
+  }
+
+  const paths = Array.isArray(result?.tempFilePaths) ? result.tempFilePaths : [];
+  return paths.map((item) => {
+    if (typeof item === "string") return { url: item };
+    const file = item as Record<string, unknown>;
+    return {
+      url: String(file.url || file.path || ""),
+      name: String(file.name || file.fileName || ""),
+      size: Number(file.size || 0),
+      mimeType: String(file.mimeType || file.type || ""),
+    };
+  }).filter(file => file.url);
+}
+
 /** 宿主支持动态申请的系统权限 */
 export type NativePermission = "photo" | "camera" | "record_audio";
 

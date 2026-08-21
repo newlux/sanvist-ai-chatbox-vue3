@@ -62,13 +62,17 @@ export function useChatSend() {
     chatStore.scrollToBottom();
   }
 
-  function applySnapshot(aiMsgId: string, userMsgId: string, snapshot: {
-    blocks: ReturnType<typeof buildInitialBlocks>;
-    conversationId?: Identifier;
-    messageId?: Identifier;
-    metadata?: { duration_ms?: number | null; status?: string };
-    ended?: boolean;
-  }) {
+  function applySnapshot(
+    aiMsgId: string,
+    userMsgId: string,
+    snapshot: {
+      blocks: ReturnType<typeof buildInitialBlocks>;
+      conversationId?: Identifier;
+      messageId?: Identifier;
+      metadata?: { duration_ms?: number | null; status?: string };
+      ended?: boolean;
+    },
+  ) {
     const index = chatStore.findMessageIndex(aiMsgId);
     if (index < 0) return;
     const aiMessage = chatStore.messages[index];
@@ -81,6 +85,13 @@ export function useChatSend() {
       durationMs: snapshot.metadata?.duration_ms ?? aiMessage.durationMs,
       loading: !snapshot.ended,
       interrupted: snapshot.metadata?.status === "stopped",
+      ttsEnabled: Boolean(
+        snapshot.ended
+        && snapshot.metadata?.status !== "stopped"
+        && (snapshot.conversationId ?? aiMessage.sessionId)
+        && (snapshot.messageId ?? aiMessage.messageId),
+      ),
+      ttsPlaying: false,
     });
 
     if (snapshot.conversationId && snapshot.messageId) {
@@ -105,14 +116,19 @@ export function useChatSend() {
 
     try {
       await consumeChatStream({
-        source: stream({
-          query: content,
-          user: String(userStore.userId || ""),
-          conversationId: chatStore.aiSessionId,
-          // 智能体分身通过 inputs 透传；附件只走 files，不再往 inputs 里塞一份
-          ...(chatStore.subagent ? { inputs: { subagent: chatStore.subagent } } : {}),
-          ...(files.length ? { files } : {}),
-        }, { idleTimeoutMs: 60_000 }),
+        source: stream(
+          {
+            query: content,
+            user: String(userStore.userId || ""),
+            conversationId: chatStore.aiSessionId,
+            // 智能体分身通过 inputs 透传；附件只走 files，不再往 inputs 里塞一份
+            ...(chatStore.subagent
+              ? { inputs: { subagent: chatStore.subagent, scene: "knowledgeGuide" } }
+              : {}),
+            ...(files.length ? { files } : {}),
+          },
+          { idleTimeoutMs: 60_000 },
+        ),
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
@@ -137,7 +153,9 @@ export function useChatSend() {
         chatStore.activeMessageId = "";
         chatStore.scrollToBottom();
         if (!hadSessionId && chatStore.aiSessionId) {
-          sessionStore.loadSessions().catch(error => logger.error("failed to refresh AI sessions", error));
+          sessionStore
+            .loadSessions()
+            .catch(error => logger.error("failed to refresh AI sessions", error));
         }
       }
     }

@@ -1,6 +1,13 @@
 <script setup lang="ts">
+import type { PropType } from "vue";
 import { ref, watch } from "vue";
 // import { useSafeArea } from "@/hooks/useSafeArea";
+
+interface FeedbackOption {
+  value: string;
+  label?: string;
+  labelKey?: string;
+}
 
 defineOptions({
   name: "AiBadFeedbackSheet",
@@ -12,7 +19,7 @@ const props = defineProps({
     default: false,
   },
   options: {
-    type: Array,
+    type: Array as PropType<FeedbackOption[]>,
     default: () => [
       { value: "data_inaccurate", label: "数据不准确" },
       { value: "data_incomplete", label: "数据不完整" },
@@ -25,7 +32,7 @@ const props = defineProps({
 
 const emit = defineEmits(["close", "confirm"]);
 // const { safeAreaStyle } = useSafeArea({ mpaasFallbackPx: 0 });
-const selectedValue = ref([]);
+const selectedValue = ref<string[]>([]);
 const supplement = ref("");
 
 watch(
@@ -43,12 +50,9 @@ function onClose() {
 }
 
 function onOptionTap(value: string) {
-  selectedValue.value = [value];
-  const option = props.options.find(item => item.value === value);
-  emit("confirm", {
-    remark: option?.label || option?.labelKey || value,
-    immediate: true,
-  });
+  selectedValue.value = selectedValue.value.includes(value)
+    ? selectedValue.value.filter(item => item !== value)
+    : [...selectedValue.value, value];
 }
 
 function onSupplementInput(event: { detail: { value: string } }) {

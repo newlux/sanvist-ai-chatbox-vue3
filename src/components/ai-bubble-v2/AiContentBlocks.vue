@@ -77,6 +77,7 @@ function onSuggestionTap(suggestion) {
         v-else
         :block="item"
         :force-thinking-expanded="forceThinkingExpanded"
+        :embedded="noAnswerGroup"
         @suggestion-tap="onSuggestionTap"
       />
     </template>

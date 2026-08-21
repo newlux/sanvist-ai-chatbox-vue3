@@ -18,7 +18,7 @@ const props = defineProps({
   embedded: { type: Boolean, default: false },
 });
 const logger = createLogger("chart");
-const chartEl = ref(null);
+const chartEl = ref<unknown>(null);
 const failed = ref(false);
 
 let chart = null;
@@ -54,26 +54,32 @@ function normalizeOption(raw: Record<string, any> | null) {
     };
   });
 
-  const next = { ...option, series: normalizedSeries };
+  const next: Record<string, any> = { ...option, series: normalizedSeries };
 
   if (!props.embedded) return next;
 
-  const hasPie = normalizedSeries.some(s => s && s.type === "pie");
+  const hasVisibleTitle = (Array.isArray(option.title) ? option.title : [option.title])
+    .some(item => item?.show !== false && String(item?.text || "").trim());
+  const hasNamedSeries = normalizedSeries.some(s => String(s?.name || "").trim());
+  const legends = option.legend == null
+    ? []
+    : Array.isArray(option.legend)
+      ? option.legend
+      : [option.legend];
+  const hasVisibleLegend = legends
+    .some(item => item?.show !== false && (Array.isArray(item?.data) ? item.data.length > 0 : hasNamedSeries));
   const hasCartesian = normalizedSeries.some(s => s && (s.type === "bar" || s.type === "line"));
-  if (hasPie) {
-    next.series = normalizedSeries.map(s => (s && s.type === "pie"
-      ? { ...s, center: ["50%", "58%"], radius: ["29%", "48%"] }
-      : s));
-  }
   if (hasCartesian) {
-    next.grid = {
-      ...(option.grid && !Array.isArray(option.grid) ? option.grid : {}),
-      top: 76,
-      right: 12,
-      bottom: 30,
-      left: 12,
-      containLabel: true,
-    };
+    const sourceGrid = option.grid && !Array.isArray(option.grid) ? option.grid : {};
+    next.grid = hasVisibleTitle || hasVisibleLegend
+      ? { ...sourceGrid, containLabel: true }
+      : {
+          top: "4%",
+          right: "4%",
+          bottom: "4%",
+          left: "4%",
+          containLabel: true,
+        };
   }
   return next;
 }
@@ -149,8 +155,16 @@ function applyOption(target: any) {
   target.setOption(chartOption.value, { notMerge: true, lazyUpdate: false, silent: true });
 }
 
+function getChartElement(): HTMLElement | null {
+  const target = chartEl.value as { $el?: unknown } | null;
+  const element = target?.$el ?? target;
+  return typeof HTMLElement !== "undefined" && element instanceof HTMLElement
+    ? element
+    : null;
+}
+
 function renderDomChart() {
-  const element = chartEl.value;
+  const element = getChartElement();
   if (!element) {
     if (sizeRetry < MAX_SIZE_RETRY) {
       sizeRetry += 1;
@@ -219,13 +233,15 @@ function disposeChart() {
 }
 
 watch(() => props.option, scheduleRenderChart, { deep: true });
-onMounted(() => {
+onMounted(async () => {
   disposed = false;
-  scheduleRenderChart();
-  if (typeof ResizeObserver !== "undefined") {
+  await nextTick();
+  const element = getChartElement();
+  if (typeof ResizeObserver !== "undefined" && element) {
     resizeObserver = new ResizeObserver(scheduleRenderChart);
-    if (chartEl.value) resizeObserver.observe(chartEl.value);
+    resizeObserver.observe(element);
   }
+  scheduleRenderChart();
 });
 onBeforeUnmount(disposeChart);
 </script>
@@ -261,7 +277,8 @@ onBeforeUnmount(disposeChart);
 <style lang="scss" scoped>
 .chart-block { width: 100%; padding: 32rpx; box-sizing: border-box; border-radius: 20rpx; background: #fff; }
 .chart-block--embedded { padding: 0; border-radius: 0; background: transparent; }
-.chart-block__canvas { width: 100%; overflow: hidden; height: 420rpx; }
+.chart-block__canvas { width: 100%; overflow: hidden; aspect-ratio: 3 / 2; }
+.chart-block--embedded .chart-block__canvas { aspect-ratio: 293 / 180; }
 .chart-block__fallback { display: block; padding: 48rpx 0; color: #8a8f99; font-size: 26rpx; text-align: center; }
 .chart-block__data { display: flex; flex-direction: column; padding: 8rpx 0; }
 .chart-block__data-title { display: block; margin-bottom: 12rpx; color: #1a1a1a; font-size: 28rpx; font-weight: 600; line-height: 40rpx; }

@@ -1,5 +1,6 @@
 import type { Ref } from "vue";
 import type { ShareRound, UiChatMessage } from "@/stores/chat-types";
+import html2canvas from "html2canvas";
 import { computed, nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import iconCopyImage from "@/assets/img/icon-copy-image.svg";
@@ -201,11 +202,11 @@ export function useChatShare(posterEl: Ref<unknown>) {
   }
 
   async function generateSharePoster() {
-    const { default: html2canvas } = await import("html2canvas");
-    const elFromDom = typeof document !== "undefined" ? document.getElementById("share-poster-wrap") : null;
-    const el = (elFromDom || posterEl.value) as HTMLElement | null;
-    if (!el) throw new Error("poster-element-missing");
-    sharePosterDataUrl.value = (await html2canvas(el, {
+    const wrapFromDom = typeof document !== "undefined" ? document.getElementById("share-poster-wrap") : null;
+    const wrap = (wrapFromDom || posterEl.value) as HTMLElement | null;
+    const poster = wrap?.firstElementChild as HTMLElement | null;
+    if (!poster) throw new Error("poster-element-missing");
+    sharePosterDataUrl.value = (await html2canvas(poster, {
       backgroundColor: "#ffffff",
       useCORS: true,
       allowTaint: true,

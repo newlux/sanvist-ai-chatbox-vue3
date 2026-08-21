@@ -6,7 +6,12 @@ import { uploadChatFile } from "@/api/chat";
 import { useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 
-import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
+import {
+  chooseNativeFiles,
+  ensureNativePermission,
+  isMpaasReady,
+  permissionDeniedMessage,
+} from "@/utils/platform/mpaas";
 
 const logger = createLogger("attachments");
 
@@ -287,6 +292,21 @@ export function useComposerAttachments() {
   }
   // #endif
 
+  async function chooseFilesFromNative() {
+    try {
+      const files = await chooseNativeFiles(MAX_ATTACHMENT_COUNT - attachments.value.length);
+      appendSelectedFiles(files.map(file => ({
+        path: file.url,
+        name: file.name || "",
+        size: Number(file.size) || 0,
+        mimeType: file.mimeType || "",
+      })));
+    } catch (error) {
+      logger.warn("imageChoose failed", error);
+      uni.showToast({ title: "文件选择失败", icon: "none" });
+    }
+  }
+
   /** 弹出来源选择。达到上限时只提示，不弹面板 */
   function openAttachmentPicker() {
     if (isLimitReached.value) {
@@ -294,7 +314,12 @@ export function useComposerAttachments() {
       return;
     }
 
-    // 支付宝小程序没有通用文件选择器，只能走相机与相册；H5 多给一个文件入口
+    if (isMpaasReady()) {
+      void chooseFilesFromNative();
+      return;
+    }
+
+    // 支付宝小程序没有通用文件选择器，只能走相机与相册；普通 H5 多给一个文件入口
     const itemList = ["拍照", "从相册选择"];
     // #ifdef H5
     itemList.push("选择文件");

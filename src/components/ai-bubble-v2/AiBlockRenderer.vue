@@ -22,6 +22,10 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  embedded: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(["suggestion-tap"]);
@@ -36,6 +40,7 @@ function onSuggestionTap(suggestion: unknown) {
     v-if="block.type === 'answer'"
     :content="block.payload.content || ''"
     :streaming="!block.complete"
+    :embedded="embedded"
   />
   <ThinkBlock
     v-else-if="block.type === 'think'"
@@ -46,7 +51,12 @@ function onSuggestionTap(suggestion: unknown) {
   />
   <StatusBlock v-else-if="block.type === 'status'" :payload="block.payload" />
   <ToolCallBlock v-else-if="block.type === 'tool_call'" :payload="block.payload" :complete="block.complete" />
-  <ChartBlock v-else-if="block.type === 'chart'" :block-id="block.id" :option="block.payload.option" />
+  <ChartBlock
+    v-else-if="block.type === 'chart'"
+    :block-id="block.id"
+    :option="block.payload.option"
+    :embedded="embedded"
+  />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
   <ErrorBlock v-else-if="block.type === 'error'" :payload="block.payload" />

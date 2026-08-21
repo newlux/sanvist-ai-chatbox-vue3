@@ -39,6 +39,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  bottomInset: {
+    type: String,
+    default: "",
+  },
   awakening: {
     type: Object,
     default: null,
@@ -243,6 +247,7 @@ function onCopyClick(index, message) {
             :loading="msg.loading"
             :tts-enabled="!!msg.ttsEnabled"
             :tts-loading="!!msg.ttsLoading"
+            :tts-playing="!!msg.ttsPlaying"
             :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted"
             :waiting-text="msg.waitingText"
             :attachments="msg.attachments || []"
@@ -263,6 +268,7 @@ function onCopyClick(index, message) {
           />
         </view>
       </view>
+      <view v-if="bottomInset" :style="{ height: bottomInset }" />
       <!-- 底部锚点用于流式输出时触发滚动到底部，不额外制造底部间距 -->
       <view id="msg-bottom-anchor-a" style="height: 1px" />
       <view id="msg-bottom-anchor-b" style="height: 1px" />
@@ -326,14 +332,17 @@ function onCopyClick(index, message) {
   margin-top: 24rpx;
   color: #6b6b6b;
   font-size: 28rpx;
+  line-height: 44rpx;
 }
 
 .business-overview__report {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 40rpx;
-  padding: 24rpx 32rpx;
+  height: 120rpx;
+  margin-top: 48rpx;
+  padding: 0 32rpx;
+  box-sizing: border-box;
   background: #fff;
   border: 1px solid #efefef;
   border-radius: 32rpx;
@@ -364,7 +373,7 @@ function onCopyClick(index, message) {
   align-items: center;
   flex: 1;
   margin-left: 32rpx;
-  gap: 28rpx;
+  gap: 36rpx;
 }
 
 .business-overview__report-title {
