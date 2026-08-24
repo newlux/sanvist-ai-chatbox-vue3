@@ -167,7 +167,7 @@ function onCopyTap() {
 }
 
 function onTtsTap() {
-  if (!props.ttsEnabled || props.ttsLoading) return;
+  if (!props.ttsEnabled) return;
   emit("tts-click");
 }
 
@@ -309,10 +309,11 @@ function onNegativeFeedback() {
           <view
             v-if="props.ttsEnabled"
             class="ai-bubble-v2__action-btn"
-            :class="{ 'ai-bubble-v2__action-btn--disabled': props.ttsLoading }"
             @tap.stop="onTtsTap"
           >
+            <view v-if="props.ttsLoading" class="ai-bubble-v2__tts-spinner" />
             <image
+              v-else
               :src="props.ttsPlaying ? iconRadioOff : iconRadioOn"
               mode="aspectFit"
               class="ai-bubble-v2__action-icon"
@@ -622,15 +623,27 @@ function onNegativeFeedback() {
   align-items: center;
   justify-content: center;
 }
-.ai-bubble-v2__action-btn--disabled {
-  opacity: 0.6;
-}
 .ai-bubble-v2__action-icon {
   width: 32rpx;
   height: 32rpx;
 }
+.ai-bubble-v2__tts-spinner {
+  width: 24rpx;
+  height: 24rpx;
+  box-sizing: border-box;
+  border: 3rpx solid rgba(136, 136, 136, 0.22);
+  border-top-color: #888888;
+  border-radius: 50%;
+  animation: ai-bubble-tts-spin 0.8s linear infinite;
+}
 .ai-bubble-v2__duration {
   margin-left: 8rpx;
+}
+
+@keyframes ai-bubble-tts-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes typing-blink {

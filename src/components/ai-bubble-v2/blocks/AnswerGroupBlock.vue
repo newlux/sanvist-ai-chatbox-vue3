@@ -26,6 +26,7 @@ defineProps({
         v-else-if="block.type === 'chart'"
         :block-id="block.id"
         :option="block.payload.option"
+        :layout="block.payload.layout"
         embedded
       />
     </template>

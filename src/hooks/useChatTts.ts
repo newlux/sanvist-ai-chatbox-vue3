@@ -1,4 +1,4 @@
-import { onBeforeUnmount } from "vue";
+import { onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { getTextToSpeech } from "@/api/chat";
 import { useChatStore } from "@/stores";
@@ -15,8 +15,8 @@ function guessAudioMime(base64: string) {
 export function useChatTts() {
   const { t } = useI18n();
   const chatStore = useChatStore();
+  const activeMessageId = ref<string | number | null>(null);
   let audioCtx: ReturnType<typeof uni.createInnerAudioContext> | null = null;
-  let playingMessageId: string | number | null = null;
   let requestSequence = 0;
 
   function patchMessageByMessageId(messageId: string | number, patch: { ttsLoading?: boolean; ttsPlaying?: boolean }) {
@@ -27,11 +27,11 @@ export function useChatTts() {
 
   function releaseAudio() {
     requestSequence += 1;
-    const messageId = playingMessageId;
+    const messageId = activeMessageId.value;
     const audio = audioCtx;
-    playingMessageId = null;
+    activeMessageId.value = null;
     audioCtx = null;
-    if (messageId !== null) patchMessageByMessageId(messageId, { ttsPlaying: false });
+    if (messageId !== null) patchMessageByMessageId(messageId, { ttsLoading: false, ttsPlaying: false });
     if (!audio) return;
     try {
       audio.stop();
@@ -50,12 +50,12 @@ export function useChatTts() {
     const mime = cleaned ? guessAudioMime(cleaned) : "audio/mpeg";
     const audio = uni.createInnerAudioContext();
     audioCtx = audio;
-    playingMessageId = messageId;
+    activeMessageId.value = messageId;
 
     const finish = () => {
       if (audioCtx !== audio) return;
       audioCtx = null;
-      playingMessageId = null;
+      activeMessageId.value = null;
       patchMessageByMessageId(messageId, { ttsPlaying: false });
       audio.destroy?.();
     };
@@ -94,28 +94,44 @@ export function useChatTts() {
     audio.autoplay = true;
   }
 
-  async function onTtsClick(messageIndex: number) {
+  /**
+   * 播放 /chat/tts 整段音频。
+   * 返回 true 表示已接管播放（含“再点一次停止”）；返回 false 表示整段尚未合成好
+   * （无音频数据），由调用方决定是否回退到 tts/stream。
+   */
+  async function onTtsClick(messageIndex: number): Promise<boolean> {
     const aiMsg = chatStore.messages[messageIndex];
-    if (!aiMsg?.ttsEnabled || aiMsg.ttsLoading || !aiMsg.sessionId || !aiMsg.messageId) return;
+    if (!aiMsg?.ttsEnabled || aiMsg.ttsLoading || !aiMsg.sessionId || !aiMsg.messageId) return false;
 
-    if (playingMessageId === aiMsg.messageId) {
+    if (activeMessageId.value === aiMsg.messageId) {
       releaseAudio();
-      return;
+      return true;
     }
 
     releaseAudio();
     const sequence = requestSequence;
     const messageId = aiMsg.messageId;
+    activeMessageId.value = messageId;
     patchMessageByMessageId(messageId, { ttsLoading: true });
     try {
       const resp = await getTextToSpeech(aiMsg.sessionId, messageId);
-      if (sequence !== requestSequence) return;
+      if (sequence !== requestSequence) return false;
+
+      // 整段还没合成好（audioUrl/audioBase64 都为空）：不提示，交给调用方走流式兜底
+      if (!resp?.audioUrl && !resp?.audioBase64) {
+        activeMessageId.value = null;
+        return false;
+      }
+
       await playAudio(resp?.audioUrl || "", resp?.audioBase64 || "", messageId);
+      return true;
     } catch (error) {
       if (sequence === requestSequence) {
+        activeMessageId.value = null;
         logger.error("tts failed", error);
-        uni.showToast({ title: t("tts-play-failed"), icon: "none" });
+        // uni.showToast({ title: t("tts-play-failed"), icon: "none" });
       }
+      return false;
     } finally {
       patchMessageByMessageId(messageId, { ttsLoading: false });
     }
@@ -126,5 +142,6 @@ export function useChatTts() {
   return {
     onTtsClick,
     releaseAudio,
+    activeMessageId,
   };
 }

@@ -17,6 +17,7 @@ import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
+import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady } from "@/utils/platform/mpaas";
@@ -52,7 +53,7 @@ const {
   voiceKeyboardHeight,
   keyboardOverlaysViewport,
   syncWindowHeight,
-  resetKeyboardHeight,
+  setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
 const { sendMessage, sendQuickPrompt, stopGenerating, cancelActiveStream } = useChatSend();
@@ -80,7 +81,32 @@ const {
   onCopySharePoster,
 } = useChatShare(sharePosterWrap);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback();
-const { onTtsClick } = useChatTts();
+const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts();
+const realtimeTts = useRealtimeTts();
+
+/**
+ * TTS 播放：先统一走 GET /chat/tts/{conversationId}/{messageId}，有音频则直接播整段；
+ * 整段还没合成好（无音频）时回退到 /speech/tts/stream。
+ */
+async function onTtsClick(index: number) {
+  const msg = chatStore.messages[index];
+  const messageId = msg?.messageId;
+  if (messageId == null || msg?.sessionId == null) return;
+
+  if (realtimeTts.playingMessageId.value === messageId) {
+    realtimeTts.stop();
+    return;
+  }
+  if (historyTtsMessageId.value === messageId) {
+    stopHistoryTts();
+    return;
+  }
+
+  realtimeTts.stop();
+  stopHistoryTts();
+  const playedWhole = await onHistoryTtsClick(index);
+  if (!playedWhole && historyTtsMessageId.value == null) void realtimeTts.togglePlay(msg);
+}
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
 
@@ -458,7 +484,8 @@ onBeforeUnmount(cancelActiveStream);
         @send="sendMessage"
         @stop="stopGenerating"
         @toggle-quick-list="toggleQuickList"
-        @input-blur="resetKeyboardHeight"
+        @input-focus="setTextInputFocused(true)"
+        @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
       />

@@ -21,10 +21,17 @@ function isEchartsOption(value: unknown): value is Record<string, unknown> {
   return Boolean(option.xAxis || option.yAxis || option.radar || option.polar);
 }
 
-function parseOption(raw: string) {
+function parseChartPayload(raw: string) {
   try {
     const parsed = JSON.parse(raw.trim());
-    return isEchartsOption(parsed) ? parsed : null;
+    if (isEchartsOption(parsed)) return { option: parsed };
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const payload = parsed as Record<string, unknown>;
+    if (!isEchartsOption(payload.option)) return null;
+    return {
+      option: payload.option,
+      layout: payload.layout && typeof payload.layout === "object" ? payload.layout : undefined,
+    };
   } catch {
     return null;
   }
@@ -47,16 +54,16 @@ function expandAnswerBlock(block: AiBlock): AiBlock[] {
   FENCE_PATTERN.lastIndex = 0;
 
   for (let matched = FENCE_PATTERN.exec(content); matched; matched = FENCE_PATTERN.exec(content)) {
-    const option = parseOption(matched[2]);
+    const chartPayload = parseChartPayload(matched[2]);
     // ```json 里也可能是普通 JSON，认不出 option 就留在正文里当代码块
-    if (!option) continue;
+    if (!chartPayload) continue;
 
     const before = content.slice(lastIndex, matched.index).trim();
     if (before) pieces.push(answerBlock(`${block.id}-text-${pieces.length}`, before, true));
     pieces.push({
       id: `${block.id}-chart-${chartIndex += 1}`,
       type: "chart",
-      payload: { option },
+      payload: chartPayload,
       complete: true,
     });
     lastIndex = matched.index + matched[0].length;

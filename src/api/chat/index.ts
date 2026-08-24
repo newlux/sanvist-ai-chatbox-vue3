@@ -22,6 +22,9 @@ import type {
 } from "./types";
 import { request } from "@/utils/request";
 
+export { consumeTextToSpeechStream } from "./tts-stream";
+export type { TtsStreamHandle } from "./tts-stream";
+
 const jsonOptions = {
   headers: {
     "Content-Type": "application/json",
@@ -56,6 +59,14 @@ export function renameConversation(conversationId: Identifier, params: RenameCon
 
 export function getMessages(params: ListMessagesParams) {
   return request.get<CursorPage<ChatMessage>>("/messages", params).json();
+}
+
+/**
+ * 消息详情：返回单条消息对象（不带分页壳），query 的 conversationId 必填。
+ * 用于实时 TTS 从服务端取权威 answer 文本。
+ */
+export function getMessage(messageId: Identifier, params: { conversationId: Identifier }) {
+  return request.get<ChatMessage>(`/messages/${messageId}`, params).json();
 }
 
 export function submitFeedback(messageId: Identifier, params: SubmitFeedbackParams) {

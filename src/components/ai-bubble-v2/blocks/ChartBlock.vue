@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { EChartsType } from "echarts/core";
 import {
   computed,
   nextTick,
@@ -12,81 +13,275 @@ import { clone, init } from "@/utils/echarts";
 import { createLogger } from "@/utils/logger";
 
 defineOptions({ name: "ChartBlock" });
+
 const props = defineProps({
   blockId: { type: [String, Number], required: true },
   option: { type: Object, default: null },
+  layout: { type: Object, default: null },
   embedded: { type: Boolean, default: false },
 });
+
 const logger = createLogger("chart");
 const chartEl = ref<unknown>(null);
 const failed = ref(false);
 
-let chart = null;
-let renderTimer = null;
-let resizeObserver = null;
+let chart: EChartsType | null = null;
+let renderTimer: ReturnType<typeof setTimeout> | null = null;
+let resizeObserver: ResizeObserver | null = null;
+let windowResizeHandler: (() => void) | null = null;
 let sizeRetry = 0;
 let disposed = false;
+let textMeasureContext: CanvasRenderingContext2D | null | undefined;
+
 const MAX_SIZE_RETRY = 8;
+const MIN_CATEGORY_WIDTH = 64;
+const CATEGORY_HORIZONTAL_PADDING = 32;
+const DEFAULT_FONT_SIZE = 12;
+const DEFAULT_FONT_FAMILY = "sans-serif";
+const DEFAULT_GRID_SIDE = 16;
+const DEFAULT_GRID_TOP = 16;
+const DEFAULT_GRID_BOTTOM = 24;
+const DEFAULT_AXIS_NAME_GAP = 32;
+const TITLE_SPACE = 36;
+const LEGEND_SPACE = 32;
+const EMBEDDED_MIN_HEIGHT = "240px";
+
+interface ChartLayout {
+  minHeight?: string;
+  categoryWidth?: number;
+}
+
+function toArray<T>(value: T | T[] | null | undefined): T[] {
+  if (value == null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function textOf(value: any) {
+  return String(value?.value ?? value ?? "");
+}
+
+function estimateTextWidth(text: unknown, fontSize = DEFAULT_FONT_SIZE, fontFamily = DEFAULT_FONT_FAMILY, fontWeight: string | number = "normal") {
+  const content = String(text ?? "");
+  if (typeof document !== "undefined") {
+    if (textMeasureContext === undefined) textMeasureContext = document.createElement("canvas").getContext("2d");
+    if (textMeasureContext) {
+      textMeasureContext.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+      return textMeasureContext.measureText(content).width;
+    }
+  }
+  return [...content].reduce((width, char) => {
+    return width + (char.charCodeAt(0) > 0xFF ? fontSize : fontSize * 0.58);
+  }, 0);
+}
+
+function longestLineWidth(text: unknown, textStyle: Record<string, any> = {}) {
+  const fontSize = Number(textStyle.fontSize) || DEFAULT_FONT_SIZE;
+  const fontFamily = textStyle.fontFamily || DEFAULT_FONT_FAMILY;
+  const fontWeight = textStyle.fontWeight || "normal";
+  return Math.max(0, ...String(text ?? "").split("\n").map(line => estimateTextWidth(line, fontSize, fontFamily, fontWeight)));
+}
+
+function normalizeSeries(series: any[]) {
+  return series.map((item) => {
+    if (!item || typeof item !== "object") return item;
+    const colors = Array.isArray(item.itemStyle?.color) ? [...item.itemStyle.color] : null;
+    if (!colors?.length) return item;
+
+    const data = Array.isArray(item.data) ? item.data : [];
+    return {
+      ...item,
+      itemStyle: { ...item.itemStyle, color: undefined },
+      data: data.map((point: any, index: number) => {
+        const pointStyle = point && typeof point === "object" && !Array.isArray(point)
+          ? point.itemStyle
+          : null;
+        const itemStyle = { ...pointStyle, color: colors[index % colors.length] };
+        return point && typeof point === "object" && !Array.isArray(point)
+          ? { ...point, itemStyle }
+          : { value: point, itemStyle };
+      }),
+    };
+  });
+}
+
+function normalizeTitle(title: any) {
+  return toArray(title).map(item => ({
+    ...item,
+    left: item?.left ?? "center",
+    textStyle: {
+      overflow: "break",
+      ...item?.textStyle,
+    },
+    subtextStyle: {
+      overflow: "break",
+      ...item?.subtextStyle,
+    },
+  }));
+}
+
+function normalizeLegend(legend: any) {
+  return toArray(legend).map(item => ({
+    ...item,
+    left: item?.left ?? "center",
+    top: item?.top ?? 12,
+    type: item?.type ?? "scroll",
+    textStyle: {
+      overflow: "break",
+      ...item?.textStyle,
+    },
+  }));
+}
+
+function normalizeCategoryAxis(axis: any) {
+  if (!Array.isArray(axis?.data)) return axis;
+
+  return {
+    ...axis,
+    axisLabel: {
+      interval: 0,
+      hideOverlap: false,
+      overflow: "break",
+      ...axis.axisLabel,
+      rotate: 0,
+    },
+  };
+}
+
+function isCategoryAxis(axis: any) {
+  return axis?.type === "category" || Array.isArray(axis?.data);
+}
+
+function axisLabelExtent(axis: any) {
+  const labels = Array.isArray(axis?.data) ? axis.data.map(textOf) : [];
+  if (!labels.length) return 0;
+  return Math.max(...labels.map(label => longestLineWidth(label, axis.axisLabel)));
+}
+
+function axisBottomSpace(axis: any) {
+  const labels = Array.isArray(axis?.data) ? axis.data.map(textOf) : [];
+  const fontSize = Number(axis?.axisLabel?.fontSize) || DEFAULT_FONT_SIZE;
+  const labelHeight = fontSize * Math.max(1, ...labels.map(label => label.split("\n").length));
+  const axisNameSpace = String(axis?.name || "").trim()
+    ? Number(axis?.nameGap) || DEFAULT_AXIS_NAME_GAP
+    : 0;
+  return Math.ceil(labelHeight + axisNameSpace + 12);
+}
+
+function isVisibleTitle(title: any) {
+  return toArray(title).some(item => item?.show !== false && String(item?.text || "").trim());
+}
+
+function isVisibleLegend(legend: any, series: any[]) {
+  const hasNamedSeries = series.some(item => String(item?.name || "").trim());
+  return toArray(legend).some(item => item?.show !== false && (Array.isArray(item?.data) ? item.data.length > 0 : hasNamedSeries));
+}
+
+function createDefaultGrid(option: any, xAxes: any[], yAxes: any[], series: any[]) {
+  const leftAxes = yAxes.filter(axis => axis?.position !== "right");
+  const rightAxes = yAxes.filter(axis => axis?.position === "right");
+  const bottomAxes = xAxes.filter(axis => axis?.position !== "top");
+  const topAxes = xAxes.filter(axis => axis?.position === "top");
+
+  const requiredLeft = Math.max(DEFAULT_GRID_SIDE, ...leftAxes.map(axis => axisLabelExtent(axis) + (axis?.name ? DEFAULT_AXIS_NAME_GAP : 0) + 12));
+  const requiredRight = Math.max(DEFAULT_GRID_SIDE, ...rightAxes.map(axis => axisLabelExtent(axis) + (axis?.name ? DEFAULT_AXIS_NAME_GAP : 0) + 12));
+  const horizontalInset = Math.ceil(Math.max(requiredLeft, requiredRight));
+  const titleSpace = isVisibleTitle(option.title) ? TITLE_SPACE : 0;
+  const legendSpace = isVisibleLegend(option.legend, series) ? LEGEND_SPACE : 0;
+  const topAxisSpace = Math.max(0, ...topAxes.map(axisBottomSpace));
+  const bottom = Math.max(DEFAULT_GRID_BOTTOM, ...bottomAxes.map(axisBottomSpace));
+
+  return {
+    top: Math.max(DEFAULT_GRID_TOP + titleSpace + legendSpace, topAxisSpace),
+    right: horizontalInset,
+    bottom,
+    left: horizontalInset,
+    containLabel: false,
+  };
+}
+
+function centerPolarSeries(series: any[]) {
+  return series.map((item) => {
+    if (!item || typeof item !== "object") return item;
+    if (item.type !== "pie") return item;
+    return { ...item, center: item.center ?? ["50%", "55%"] };
+  });
+}
 
 /**
- * 将后端透传的 option 转换为 ECharts 可直接消费的纯净对象。
- * - 用 Vue 的 toRaw 剥离响应式 Proxy，再借助 ECharts 官方的 clone 深拷贝，
- *   避免 ECharts 内部遍历配置时访问 Proxy 触发 getter 异常。
- * - 若 itemStyle.color 是数组（如 ["#5470c6","#fac858"]），转成每个数据项各自的颜色。
+ * 将后端 option 转为稳定的展示配置：业务样式原样保留，仅补齐缺失的布局规则。
+ * 默认内容以画布中线为基准；分类标签保持横向，通过画布宽度和动态边距完整展示。
  */
 function normalizeOption(raw: Record<string, any> | null) {
   if (!raw) return raw;
   const option = clone(toRaw(raw));
+  const sourceSeries = Array.isArray(option.series) ? option.series : [];
+  const sourceXAxes = toArray(option.xAxis);
+  const sourceYAxes = toArray(option.yAxis);
+  const xAxes = sourceXAxes.map(normalizeCategoryAxis);
+  const yAxes = sourceYAxes.map(normalizeCategoryAxis);
+  const series = centerPolarSeries(normalizeSeries(sourceSeries));
 
-  const series = Array.isArray(option.series) ? option.series : [];
-  const normalizedSeries = series.map((s) => {
-    if (!s || typeof s !== "object") return s;
-    const colors = Array.isArray(s.itemStyle?.color) ? [...s.itemStyle.color] : null;
-    if (!colors) return s;
-    const data = Array.isArray(s.data) ? s.data : [];
-    return {
-      ...s,
-      itemStyle: { ...s.itemStyle, color: undefined },
-      data: data.map((item, index) => ({
-        value: item,
-        itemStyle: { color: colors[index % colors.length] },
-      })),
-    };
-  });
+  const next: Record<string, any> = { ...option, series };
 
-  const next: Record<string, any> = { ...option, series: normalizedSeries };
-
-  if (!props.embedded) return next;
-
-  const hasVisibleTitle = (Array.isArray(option.title) ? option.title : [option.title])
-    .some(item => item?.show !== false && String(item?.text || "").trim());
-  const hasNamedSeries = normalizedSeries.some(s => String(s?.name || "").trim());
-  const legends = option.legend == null
-    ? []
-    : Array.isArray(option.legend)
-      ? option.legend
-      : [option.legend];
-  const hasVisibleLegend = legends
-    .some(item => item?.show !== false && (Array.isArray(item?.data) ? item.data.length > 0 : hasNamedSeries));
-  const hasCartesian = normalizedSeries.some(s => s && (s.type === "bar" || s.type === "line"));
-  if (hasCartesian) {
-    const sourceGrid = option.grid && !Array.isArray(option.grid) ? option.grid : {};
-    next.grid = hasVisibleTitle || hasVisibleLegend
-      ? { ...sourceGrid, containLabel: true }
-      : {
-          top: "4%",
-          right: "4%",
-          bottom: "4%",
-          left: "4%",
-          containLabel: true,
-        };
+  if (option.title) {
+    const title = normalizeTitle(option.title);
+    next.title = Array.isArray(option.title) ? title : title[0];
   }
+  if (option.legend) {
+    const legend = normalizeLegend(option.legend);
+    next.legend = Array.isArray(option.legend) ? legend : legend[0];
+  }
+  if (option.xAxis) next.xAxis = Array.isArray(option.xAxis) ? xAxes : xAxes[0];
+  if (option.yAxis) next.yAxis = Array.isArray(option.yAxis) ? yAxes : yAxes[0];
+  if (!option.grid && (option.xAxis || option.yAxis)) next.grid = createDefaultGrid(option, xAxes, yAxes, series);
+
+  if (option.radar) {
+    const radar = toArray(option.radar).map(item => ({
+      ...item,
+      center: item?.center ?? ["50%", "55%"],
+      axisName: {
+        overflow: "break",
+        ...item?.axisName,
+      },
+    }));
+    next.radar = Array.isArray(option.radar) ? radar : radar[0];
+  }
+
   return next;
 }
 
 const chartOption = computed(() => normalizeOption(props.option));
+const chartLayout = computed(() => props.layout as ChartLayout | null);
+const chartMinHeight = computed(() => chartLayout.value?.minHeight || (props.embedded ? EMBEDDED_MIN_HEIGHT : undefined));
 
-/** 系列里可能是 5 / {value:5} / [x, y] 三种写法，统一取出可展示的数值 */
+function categoryAxis(option: any) {
+  return toArray(option?.xAxis).find(isCategoryAxis)
+    ?? toArray(option?.yAxis).find(isCategoryAxis);
+}
+
+function horizontalCategoryAxis(option: any) {
+  return toArray(option?.xAxis).find(isCategoryAxis);
+}
+
+const chartMinWidth = computed(() => {
+  const option = chartOption.value;
+  const axis = horizontalCategoryAxis(option);
+  const categories = Array.isArray(axis?.data) ? axis.data : [];
+  if (!categories.length) return undefined;
+
+  const categoryWidth = Math.max(MIN_CATEGORY_WIDTH, Number(chartLayout.value?.categoryWidth) || 0);
+  const labelWidths = categories.map((category: any) => longestLineWidth(textOf(category), axis.axisLabel));
+  const slotsWidth = labelWidths.reduce((total: number, textWidth: number) => {
+    return total + Math.max(categoryWidth, Math.ceil(textWidth) + CATEGORY_HORIZONTAL_PADDING);
+  }, 0);
+  const grid = option?.grid && !Array.isArray(option.grid) ? option.grid : {};
+  const gridLeft = typeof grid.left === "number" ? grid.left : DEFAULT_GRID_SIDE;
+  const gridRight = typeof grid.right === "number" ? grid.right : DEFAULT_GRID_SIDE;
+  const edgeSpace = Math.ceil((labelWidths[0] || 0) / 2 + (labelWidths[labelWidths.length - 1] || 0) / 2);
+
+  return `${Math.ceil(gridLeft + slotsWidth + gridRight + edgeSpace)}px`;
+});
+
 function readSeriesValue(item: any) {
   if (item == null) return null;
   if (typeof item === "number" || typeof item === "string") return item;
@@ -109,58 +304,45 @@ function formatValue(value: unknown) {
 }
 
 function readTitle(option: any) {
-  const title = option?.title;
-  const node = Array.isArray(title) ? title[0] : title;
+  const node = toArray(option?.title)[0];
   return String(node?.text || "").trim();
 }
 
 function readCategories(option: any) {
-  const axis = Array.isArray(option?.xAxis) ? option.xAxis[0] : option?.xAxis;
-  const yAxis = Array.isArray(option?.yAxis) ? option.yAxis[0] : option?.yAxis;
-  const data = Array.isArray(axis?.data) ? axis.data : (Array.isArray(yAxis?.data) ? yAxis.data : []);
-  return data.map(item => String(item?.value ?? item ?? ""));
+  const axis = categoryAxis(option);
+  return toArray(axis?.data).map(textOf);
 }
 
-/**
- * 画布拿不到时的降级视图：把 option 直接摊成「系列 - 分类 - 数值」清单。
- * 图表是锦上添花，数据本身不能因为渲染环境而丢掉。
- */
 const fallbackSeries = computed(() => {
   const option = chartOption.value;
   if (!option) return [];
   const categories = readCategories(option);
   const series = Array.isArray(option.series) ? option.series : [];
   return series
-    .map((item, seriesIndex) => {
+    .map((item: any, seriesIndex: number) => {
       const data = Array.isArray(item?.data) ? item.data : [];
       const rows = data
-        .map((point, index) => ({
+        .map((point: any, index: number) => ({
           label: readSeriesLabel(point, index, categories),
           value: formatValue(readSeriesValue(point)),
         }))
-        .filter(row => row.value !== "");
+        .filter((row: { value: string }) => row.value !== "");
       return {
         id: `series-${seriesIndex}`,
         name: String(item?.name || "").trim(),
         rows,
       };
     })
-    .filter(item => item.rows.length);
+    .filter((item: { rows: unknown[] }) => item.rows.length);
 });
 
 const fallbackTitle = computed(() => readTitle(chartOption.value));
 const hasFallbackData = computed(() => fallbackSeries.value.length > 0);
 
-function applyOption(target: any) {
-  target.setOption(chartOption.value, { notMerge: true, lazyUpdate: false, silent: true });
-}
-
 function getChartElement(): HTMLElement | null {
   const target = chartEl.value as { $el?: unknown } | null;
   const element = target?.$el ?? target;
-  return typeof HTMLElement !== "undefined" && element instanceof HTMLElement
-    ? element
-    : null;
+  return typeof HTMLElement !== "undefined" && element instanceof HTMLElement ? element : null;
 }
 
 function renderDomChart() {
@@ -172,36 +354,36 @@ function renderDomChart() {
     }
     return;
   }
+
   if (!element.clientWidth || !element.clientHeight) {
     if (sizeRetry < MAX_SIZE_RETRY) {
       sizeRetry += 1;
       scheduleRenderChart();
-    } else {
+    }
+    else {
       logger.warn("容器尺寸为 0，降级为数据清单");
       failed.value = true;
     }
     return;
   }
+
   sizeRetry = 0;
-  if (!chart) {
-    chart = init(element);
-  }
-  applyOption(chart);
+  if (!chart) chart = init(element);
+  chart.setOption(chartOption.value, { notMerge: true, lazyUpdate: false, silent: true });
   chart.resize();
 }
 
-async function renderChart() {
+function renderChart() {
   if (disposed || !props.option) return;
   failed.value = false;
   try {
     renderDomChart();
-  } catch (error) {
+  }
+  catch (error) {
     logger.error("render failed", error);
     failed.value = true;
-    if (chart) {
-      chart.dispose();
-      chart = null;
-    }
+    chart?.dispose();
+    chart = null;
   }
 }
 
@@ -209,6 +391,7 @@ function scheduleRenderChart() {
   if (disposed) return;
   if (renderTimer) clearTimeout(renderTimer);
   void nextTick(() => {
+    if (disposed) return;
     renderTimer = setTimeout(() => {
       renderTimer = null;
       renderChart();
@@ -218,21 +401,18 @@ function scheduleRenderChart() {
 
 function disposeChart() {
   disposed = true;
-  if (renderTimer) {
-    clearTimeout(renderTimer);
-    renderTimer = null;
-  }
-  if (resizeObserver) {
-    resizeObserver.disconnect();
-    resizeObserver = null;
-  }
-  if (chart) {
-    chart.dispose();
-    chart = null;
-  }
+  if (renderTimer) clearTimeout(renderTimer);
+  renderTimer = null;
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  if (windowResizeHandler) window.removeEventListener("resize", windowResizeHandler);
+  windowResizeHandler = null;
+  chart?.dispose();
+  chart = null;
 }
 
 watch(() => props.option, scheduleRenderChart, { deep: true });
+
 onMounted(async () => {
   disposed = false;
   await nextTick();
@@ -241,15 +421,21 @@ onMounted(async () => {
     resizeObserver = new ResizeObserver(scheduleRenderChart);
     resizeObserver.observe(element);
   }
+  else if (typeof window !== "undefined") {
+    windowResizeHandler = scheduleRenderChart;
+    window.addEventListener("resize", windowResizeHandler);
+  }
   scheduleRenderChart();
 });
+
 onBeforeUnmount(disposeChart);
 </script>
 
 <template>
   <view class="chart-block" :class="[{ 'chart-block--embedded': embedded }]">
-    <view v-show="!failed" ref="chartEl" class="chart-block__canvas" />
-    <!-- 画布不可用时不留一句空提示，直接把 option 里的数据摊出来 -->
+    <view v-show="!failed" class="chart-block__scroll" :style="{ minHeight: chartMinHeight }">
+      <view ref="chartEl" class="chart-block__canvas" :style="{ minWidth: chartMinWidth, minHeight: chartMinHeight }" />
+    </view>
     <view v-if="failed && hasFallbackData" class="chart-block__data">
       <text v-if="fallbackTitle" class="chart-block__data-title">
         {{ fallbackTitle }}
@@ -277,8 +463,10 @@ onBeforeUnmount(disposeChart);
 <style lang="scss" scoped>
 .chart-block { width: 100%; padding: 32rpx; box-sizing: border-box; border-radius: 20rpx; background: #fff; }
 .chart-block--embedded { padding: 0; border-radius: 0; background: transparent; }
+.chart-block__scroll { width: 100%; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
 .chart-block__canvas { width: 100%; overflow: hidden; aspect-ratio: 3 / 2; }
-.chart-block--embedded .chart-block__canvas { aspect-ratio: 293 / 180; }
+.chart-block--embedded .chart-block__scroll { aspect-ratio: 4 / 3; }
+.chart-block--embedded .chart-block__canvas { height: 100%; min-height: inherit; aspect-ratio: auto; }
 .chart-block__fallback { display: block; padding: 48rpx 0; color: #8a8f99; font-size: 26rpx; text-align: center; }
 .chart-block__data { display: flex; flex-direction: column; padding: 8rpx 0; }
 .chart-block__data-title { display: block; margin-bottom: 12rpx; color: #1a1a1a; font-size: 28rpx; font-weight: 600; line-height: 40rpx; }

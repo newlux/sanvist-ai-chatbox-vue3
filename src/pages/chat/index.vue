@@ -9,6 +9,7 @@ import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
+import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useUserStore } from "@/stores";
 
@@ -41,12 +42,34 @@ const {
   voiceKeyboardHeight,
   keyboardOverlaysViewport,
   syncWindowHeight,
-  resetKeyboardHeight,
+  setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
 const { sendMessage, sendQuickPrompt, stopGenerating, cancelActiveStream } = useChatSend();
 const { onFeedbackChange } = useChatFeedback();
-const { onTtsClick } = useChatTts();
+const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts();
+const realtimeTts = useRealtimeTts();
+
+/** TTS 播放：先走 GET /chat/tts 整段；整段未就绪时回退到 /speech/tts/stream。 */
+async function onTtsClick(index: number) {
+  const msg = chatStore.messages[index];
+  const messageId = msg?.messageId;
+  if (messageId == null || msg?.sessionId == null) return;
+
+  if (realtimeTts.playingMessageId.value === messageId) {
+    realtimeTts.stop();
+    return;
+  }
+  if (historyTtsMessageId.value === messageId) {
+    stopHistoryTts();
+    return;
+  }
+
+  realtimeTts.stop();
+  stopHistoryTts();
+  const playedWhole = await onHistoryTtsClick(index);
+  if (!playedWhole && historyTtsMessageId.value == null) void realtimeTts.togglePlay(msg);
+}
 const { safeTopPx } = useSafeArea();
 
 const pageTitle = ref("");
@@ -121,7 +144,8 @@ function onScrollTop() {
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
-        @input-blur="resetKeyboardHeight"
+        @input-focus="setTextInputFocused(true)"
+        @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
       />

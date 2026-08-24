@@ -154,19 +154,40 @@ export function onNativeEvent(eventName: string, handler: (payload: BridgeResult
     return (source?.data || source?.detail || (event as BridgeResult) || {}) as BridgeResult;
   };
   const domHandler = (event: Event) => handler(readPayload(event));
-
-  const bridge = readBridge() as (AlipayBridge & {
+  const bridgeHandler = (payload: BridgeResult) => handler(payload || {});
+  type EventBridge = AlipayBridge & {
     on?: (name: string, cb: (payload: BridgeResult) => void) => void;
     off?: (name: string, cb: (payload: BridgeResult) => void) => void;
-  }) | undefined;
-  const bridgeHandler = (payload: BridgeResult) => handler(payload || {});
+  };
 
-  if (typeof bridge?.on === "function") bridge.on(eventName, bridgeHandler);
-  if (typeof document !== "undefined") document.addEventListener(eventName, domHandler);
+  let disposed = false;
+  let subscribedBridge: EventBridge | undefined;
+
+  function bindBridgeEvent() {
+    if (disposed) return;
+    const bridge = readBridge() as EventBridge | undefined;
+    if (!bridge || bridge === subscribedBridge || typeof bridge.on !== "function") return;
+    if (typeof subscribedBridge?.off === "function") {
+      subscribedBridge.off(eventName, bridgeHandler);
+    }
+    subscribedBridge = bridge;
+    bridge.on(eventName, bridgeHandler);
+  }
+
+  bindBridgeEvent();
+  if (typeof document !== "undefined") {
+    document.addEventListener(eventName, domHandler);
+    document.addEventListener(BRIDGE_READY_EVENT, bindBridgeEvent);
+  }
 
   return () => {
-    if (typeof bridge?.off === "function") bridge.off(eventName, bridgeHandler);
-    if (typeof document !== "undefined") document.removeEventListener(eventName, domHandler);
+    disposed = true;
+    if (typeof subscribedBridge?.off === "function") subscribedBridge.off(eventName, bridgeHandler);
+    if (typeof document !== "undefined") {
+      document.removeEventListener(eventName, domHandler);
+      document.removeEventListener(BRIDGE_READY_EVENT, bindBridgeEvent);
+    }
+    subscribedBridge = undefined;
   };
 }
 
