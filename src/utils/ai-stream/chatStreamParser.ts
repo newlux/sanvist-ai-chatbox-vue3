@@ -112,11 +112,12 @@ export function applyEventToBlocks(
       const chartData = event.data || {};
       const option = chartData.option;
       if (!option || typeof option !== "object") return base;
+      const layout = chartData.layout && typeof chartData.layout === "object" ? chartData.layout : undefined;
       const chartIndex = blocks.filter(block => block.type === "chart").length;
       const chartId = `chart-${chartIndex}`;
       return {
         ...base,
-        blocks: upsertBlock(blocks, chartId, "chart", { option }),
+        blocks: upsertBlock(blocks, chartId, "chart", { option, layout }),
         receivedContent: true,
       };
     }

@@ -30,6 +30,7 @@ export interface UiChatMessage {
   feedbackRemark?: string;
   ttsEnabled?: boolean;
   ttsLoading?: boolean;
+  /** 语音播放中（整段 /chat/tts 或流式 /speech/tts/stream，二者互斥） */
   ttsPlaying?: boolean;
   rawSseText?: string;
   attachments?: ChatMessageAttachment[];

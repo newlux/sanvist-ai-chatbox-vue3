@@ -67,7 +67,7 @@ const canSend = computed(() => Boolean(draft.value.trim() || hasAttachments.valu
 const showSendButton = computed(() => !props.isLoading && canSend.value);
 
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
-const dockFloating = computed(() => keyboardOpen.value && props.keyboardOverlaysViewport);
+const dockFloating = computed(() => keyboardOpen.value);
 const voiceKeyboardOpen = computed(() => props.voiceKeyboardHeight > 0);
 const voiceKeyboardLiftStyle = computed(() =>
   (voiceKeyboardOpen.value && props.keyboardOverlaysViewport
@@ -76,11 +76,13 @@ const voiceKeyboardLiftStyle = computed(() =>
 );
 
 /**
- * 键盘弹起：输入栏整块切成 fixed，bottom 顶到键盘上沿，悬在消息列表之上；
- * 键盘收起：切回 relative，回到页面正常流里的原位。
+ * 键盘弹起后输入栏固定覆盖在消息区上方，不参与 flex 重排。
+ * mPaaS resize 模式使用 bottom=0；只有 overlay 模式才额外补偿键盘高度。
  */
 const keyboardLiftStyle = computed(() =>
-  (dockFloating.value ? { bottom: `${props.keyboardHeight}px` } : {}),
+  (dockFloating.value
+    ? { bottom: props.keyboardOverlaysViewport ? `${props.keyboardHeight}px` : "0px" }
+    : {}),
 );
 
 /**
@@ -367,10 +369,7 @@ onBeforeUnmount(() => {
     <view
       v-if="!voiceKeyboardOpen"
       class="chat-input__dock"
-      :class="{
-        'chat-input__dock--floating': dockFloating,
-        'chat-input__dock--resized-keyboard': keyboardOpen && !dockFloating,
-      }"
+      :class="{ 'chat-input__dock--floating': dockFloating }"
       :style="keyboardLiftStyle"
     >
       <!-- 附件预览栏：选中的文件在输入栏上方排开 -->
@@ -911,11 +910,6 @@ onBeforeUnmount(() => {
   position: relative;
   // 必须高于收键盘遮罩，否则键盘弹起后点输入栏会被遮罩吃掉
   z-index: 1250;
-}
-
-// resize 模式下 dock 已在缩小后的视口底部，留一段纯视觉间距，不参与键盘高度计算
-.chat-input__dock--resized-keyboard {
-  margin-bottom: 12px;
 }
 
 // 键盘弹起：脱离文档流吸到键盘上沿（bottom 由内联样式给），盖住下方的消息列表

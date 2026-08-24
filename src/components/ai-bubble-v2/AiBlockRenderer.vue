@@ -55,6 +55,7 @@ function onSuggestionTap(suggestion: unknown) {
     v-else-if="block.type === 'chart'"
     :block-id="block.id"
     :option="block.payload.option"
+    :layout="block.payload.layout"
     :embedded="embedded"
   />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />

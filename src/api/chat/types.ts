@@ -173,6 +173,7 @@ export interface ChatMessage {
   feedback: Feedback | null;
   retrieverResources: Record<string, unknown>[];
   createdAt: number;
+  status?: string;
 }
 
 export interface GetFeedbackParams {
@@ -238,6 +239,24 @@ export interface TextToSpeechResult {
   audioUrl?: string;
   audioBase64?: string;
   format?: string;
+}
+
+/** 分句并发合成的实时 TTS 请求。text 传整段回答，后端自行按句切分并并发合成。 */
+export interface RealtimeTtsParams {
+  text: string;
+  language?: string;
+}
+
+/**
+ * /speech/tts/stream 的 SSE 帧。audio_chunk 的 data 带 seq；done 的 data 形如 { event: "done" }。
+ * 某句失败时后端会推占位帧，audioBase64/dataUrl 为 null，前端应跳过该 seq 继续播下一句。
+ */
+export interface RealtimeTtsChunk {
+  seq?: number;
+  format?: string | null;
+  audioBase64?: string | null;
+  dataUrl?: string | null;
+  event?: "done";
 }
 
 export interface InterruptChatParams {
