@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AiBlock } from "@/utils/ai-stream";
-import { computed } from "vue";
+import { computed, nextTick, ref } from "vue";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOff from "@/assets/img/icon-action-radio-off.svg";
@@ -91,17 +91,47 @@ function onPreviewImage(url) {
   uni.previewImage({ current: url, urls });
 }
 
-function onUserLongpress() {
+const USER_MENU_GAP_PX = 12;
+const showUserMenu = ref(false);
+const userMenuRef = ref<HTMLElement | { $el?: HTMLElement } | null>(null);
+const userMenuPos = ref({ left: USER_MENU_GAP_PX, top: USER_MENU_GAP_PX });
+
+function clampUserMenuPosition(x: number, y: number, width: number, height: number) {
+  const maxLeft = Math.max(USER_MENU_GAP_PX, window.innerWidth - width - USER_MENU_GAP_PX);
+  const maxTop = Math.max(USER_MENU_GAP_PX, window.innerHeight - height - USER_MENU_GAP_PX);
+  userMenuPos.value = {
+    left: Math.max(USER_MENU_GAP_PX, Math.min(x, maxLeft)),
+    top: Math.max(USER_MENU_GAP_PX, Math.min(y, maxTop)),
+  };
+}
+
+async function onUserLongpress(event: any) {
   if (props.selectMode || props.disabled) return;
 
-  copyText(props.content).then((copied) => {
-    if (typeof uni !== "undefined" && typeof uni.showToast === "function") {
-      uni.showToast({
-        title: copied ? "已复制" : "复制失败",
-        icon: "none",
-      });
-    }
-  });
+  const touch = event?.changedTouches?.[0] || event?.touches?.[0] || event?.detail;
+  const x = Number(touch?.clientX ?? touch?.pageX ?? USER_MENU_GAP_PX);
+  const y = Number(touch?.clientY ?? touch?.pageY ?? USER_MENU_GAP_PX);
+  showUserMenu.value = true;
+  await nextTick();
+  const menuRef = userMenuRef.value;
+  const menuEl = menuRef instanceof HTMLElement ? menuRef : menuRef?.$el;
+  const rect = menuEl?.getBoundingClientRect();
+  clampUserMenuPosition(x, y, rect?.width || 100, rect?.height || 56);
+}
+
+function closeUserMenu() {
+  showUserMenu.value = false;
+}
+
+async function onUserMenuCopy() {
+  const copied = await copyText(props.content);
+  if (typeof uni !== "undefined" && typeof uni.showToast === "function") {
+    uni.showToast({
+      title: copied ? "已复制" : "复制失败",
+      icon: "none",
+    });
+  }
+  closeUserMenu();
 }
 
 const isUser = computed(() => props.role === "user");
@@ -165,6 +195,26 @@ function onNegativeFeedback() {
     }"
     @tap="onSelectTap"
   >
+    <!-- 长按用户消息弹出的跟随菜单（复制，后续可扩展删除） -->
+    <Teleport to="body">
+      <view v-if="showUserMenu" class="ai-bubble-v2-menu-mask" @tap="closeUserMenu" />
+      <view
+        v-if="showUserMenu"
+        ref="userMenuRef"
+        class="ai-bubble-v2-menu"
+        :style="{ left: `${userMenuPos.left}px`, top: `${userMenuPos.top}px` }"
+        @tap.stop
+      >
+        <view class="ai-bubble-v2-menu__item" @tap="onUserMenuCopy">
+          <view class="ai-bubble-v2-menu__icon">
+            <image :src="iconCopy" mode="aspectFit" class="ai-bubble-v2-menu__icon-img" />
+          </view>
+          <text class="ai-bubble-v2-menu__text">
+            复制
+          </text>
+        </view>
+      </view>
+    </Teleport>
     <view v-if="props.selectMode" class="ai-bubble-v2__check">
       <image
         v-if="props.disabled"
@@ -383,6 +433,52 @@ function onNegativeFeedback() {
   // 允许划词选中复制；长按仍走整条复制
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* 长按用户消息弹出的跟随菜单 */
+.ai-bubble-v2-menu-mask {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2000;
+}
+.ai-bubble-v2-menu {
+  position: fixed;
+  z-index: 2001;
+  display: flex;
+  flex-direction: column;
+  min-width: 200rpx;
+  padding: 12rpx 0;
+  border-radius: 20rpx;
+  background: #ffffff;
+  box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.12);
+}
+.ai-bubble-v2-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  height: 88rpx;
+  padding: 0 28rpx;
+}
+.ai-bubble-v2-menu__item:active {
+  background: #f5f5f5;
+}
+.ai-bubble-v2-menu__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36rpx;
+  height: 36rpx;
+}
+.ai-bubble-v2-menu__icon-img {
+  width: 36rpx;
+  height: 36rpx;
+}
+.ai-bubble-v2-menu__text {
+  font-size: 28rpx;
+  color: #333333;
 }
 .ai-bubble-v2__ai-content {
   display: block;

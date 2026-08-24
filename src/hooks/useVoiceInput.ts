@@ -243,6 +243,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
    * 因此这里不存在任何可能把 UI 锁住的 await。
    */
   function cancelVoiceRecording({ keepText = false } = {}) {
+    removeRestartWindowListeners();
     const existingText = state.recognizedText || state.draftText;
     state.restartRecording = false;
     invalidateJob();
@@ -302,11 +303,9 @@ export function useVoiceInput(options: VoiceInputOptions) {
     state.draftText = existingText;
     state.keepOldRecognizedText = Boolean(existingText);
     state.inputMode = "voice";
-    // 「再次识别」是长在确认面板上的按钮：切到 recording 会让面板连同按钮一起卸载，
-    // 手指还没松开，touchend 就没有接收者了，录音会一直停不下来。
-    // 所以重录期间保持 finished 面板，只用 restartRecording 标记录音态。
+    // 重录同样进入全屏监听态（设计稿统一为「正在听」），由窗口级松手兜底结束录音。
     state.restartRecording = restart;
-    state.voicePhase = restart ? "finished" : "recording";
+    state.voicePhase = "recording";
     state.gesture.active = true;
     state.gesture.isRestart = restart;
     state.pressStartedAt = Date.now();
@@ -362,7 +361,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
    */
   async function recognizeFromRecording(audio: RecorderResult["data"], jobId: number) {
     if (jobId !== state.jobSeq) return;
-    const { filePath, audioUrl, audioBase64, mimeType } = audio || {};
+    const { tempFilePath: filePath, audioUrl, audioBase64, mimeType } = audio || {};
     if (!filePath && !audioUrl && !audioBase64) {
       resetVoiceInput();
       uni.showToast({ title: t("no-audio-recorded"), icon: "none" });
@@ -483,7 +482,27 @@ export function useVoiceInput(options: VoiceInputOptions) {
   }
 
   /** 统一结束一次录音会话（正常松手 / 上划取消 / 短按） */
+  /** 重录按钮在 touchstart 后随面板卸载，元素 touchend 会丢；用窗口级兜底收尾一次 */
+  function removeRestartWindowListeners() {
+    if (typeof window === "undefined") return;
+    window.removeEventListener("touchend", onRestartWindowEnd);
+    window.removeEventListener("touchcancel", onRestartWindowCancel);
+  }
+
+  async function onRestartWindowEnd() {
+    removeRestartWindowListeners();
+    if (!state.gesture.active) return;
+    await endVoiceRecording({ cancel: state.cancelling });
+  }
+
+  async function onRestartWindowCancel() {
+    removeRestartWindowListeners();
+    if (!state.gesture.active) return;
+    await endVoiceRecording({ cancel: true });
+  }
+
   async function endVoiceRecording({ cancel = false } = {}) {
+    removeRestartWindowListeners();
     if (!state.gesture.active) return;
     const isRestart = state.gesture.isRestart;
     if (cancel) {
@@ -544,6 +563,10 @@ export function useVoiceInput(options: VoiceInputOptions) {
     preventDefaultSafely(e);
     beginGesture(e, true);
     beginVoiceRecording({ restart: true });
+    if (typeof window !== "undefined") {
+      window.addEventListener("touchend", onRestartWindowEnd, { passive: false });
+      window.addEventListener("touchcancel", onRestartWindowCancel, { passive: false });
+    }
   }
 
   async function onVoiceRestartEnd(e: unknown) {
@@ -573,6 +596,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
   }
 
   onBeforeUnmount(() => {
+    removeRestartWindowListeners();
     invalidateJob();
     resetGestureState();
     state.gesture.active = false;

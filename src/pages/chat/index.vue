@@ -35,7 +35,15 @@ const {
   pinnedToBottom,
 } = storeToRefs(chatStore);
 
-const { chatViewportStyle, keyboardHeight, syncWindowHeight, resetKeyboardHeight } = useChatViewport();
+const {
+  chatViewportStyle,
+  keyboardHeight,
+  voiceKeyboardHeight,
+  keyboardOverlaysViewport,
+  syncWindowHeight,
+  resetKeyboardHeight,
+  setVoiceInputFocused,
+} = useChatViewport();
 const { sendMessage, sendQuickPrompt, stopGenerating, cancelActiveStream } = useChatSend();
 const { onFeedbackChange } = useChatFeedback();
 const { onTtsClick } = useChatTts();
@@ -109,9 +117,13 @@ function onScrollTop() {
         v-model="inputText"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
+        :keyboard-overlays-viewport="keyboardOverlaysViewport"
+        :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
         @input-blur="resetKeyboardHeight"
+        @voice-input-focus="setVoiceInputFocused(true)"
+        @voice-input-blur="setVoiceInputFocused(false)"
       />
     </view>
   </view>

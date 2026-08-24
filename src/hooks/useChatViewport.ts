@@ -16,33 +16,50 @@ const FALLBACK_KEYBOARD_RATIO = 0.42;
 const FALLBACK_KEYBOARD_RANGE = { min: 260, max: 360 };
 /** 聚焦后等这么久还测不到高度，就认为这台设备测不出来，启用兜底值 */
 const FALLBACK_DELAY_MS = 450;
+/** 聚焦启动窗口内原生常先推一次 0；这不是收起事件。 */
+const VOICE_FOCUS_SETTLE_MS = 700;
 
 export function useChatViewport() {
   const windowHeight = ref(0);
   const keyboardHeight = ref(0);
+  const voiceKeyboardHeight = ref(0);
+  /** WebView 未随键盘缩小时为覆盖模式，需要由输入栏 fixed 上移。 */
+  const keyboardOverlaysViewport = ref(true);
   let collapseTimer: ReturnType<typeof setTimeout> | null = null;
+  let voiceCollapseTimer: ReturnType<typeof setTimeout> | null = null;
   let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  let voiceFallbackTimer: ReturnType<typeof setTimeout> | null = null;
   let inputFocused = false;
+  /** 语音确认框使用真实键盘编辑，但不能驱动普通 chat-input 的浮动布局。 */
+  let ignoreKeyboardLayout = false;
+  /** 组件显式声明当前处于语音编辑（经 touchstart 提前置位，避免 DOM 判定不可靠）。 */
+  let voiceEditingActive = false;
   /** 当前用的是估算值而不是实测值：失焦时要主动清 */
   let usingFallbackHeight = false;
+  /** 语音编辑同样可能只能估算键盘高度；此时不能用视口 0 误判为收起。 */
+  let usingVoiceFallbackHeight = false;
+  /** 本轮语音编辑是否已经收到过一次可信的正键盘高度。 */
+  let voicePositiveHeightObserved = false;
+  /** 本轮语音编辑开始时间，过滤聚焦动画起步阶段的零高度事件。 */
+  let voiceFocusStartedAt = 0;
   /** 宿主推过键盘高度：推过就以它为准，不再启用估算值 */
   let nativeKeyboardSupported = false;
   let disposeNativeKeyboard: (() => void) | null = null;
-  /**
-   * 没有键盘时的可视高度基准。
-   * 安卓部分浏览器弹键盘时会把布局视口一起缩掉，此时 innerHeight 和 visualViewport.height
-   * 一样高，差值恒为 0，键盘就被算成「没弹」。记一个基准值才能算出真实占用高度。
-   */
-  let baseViewportHeight = 0;
+  /** 无键盘时的布局/可视视口基准，必须分开记录，不能混用两种口径。 */
+  let baseLayoutHeight = 0;
+  let baseVisualHeight = 0;
 
   /**
-   * 页面高度始终占满窗口，不随键盘压缩。
-   * 键盘弹起由输入栏自己 translateY 上移（见 ai-chat-input），
-   * 整页缩放会让消息列表跟着重排，长列表上一次抖动很明显。
+   * resize 模式下跟随宿主缩小后的布局视口；overlay 模式仍保持初始窗口高度，
+   * 由输入栏 fixed 到键盘上沿。两种模式不能同时补偿，否则输入栏会被重复抬高。
    */
-  const chatViewportStyle = computed(() =>
-    windowHeight.value > 0 ? { height: `${windowHeight.value}px` } : {},
-  );
+  const chatViewportStyle = computed(() => {
+    if (windowHeight.value <= 0) return {};
+    if (!keyboardOverlaysViewport.value && typeof window !== "undefined") {
+      return { height: `${window.innerHeight}px` };
+    }
+    return { height: `${windowHeight.value}px` };
+  });
 
   const isKeyboardOpen = computed(() => keyboardHeight.value > 0);
 
@@ -57,12 +74,67 @@ export function useChatViewport() {
     return limit > 0 && raw > limit ? limit : raw;
   }
 
+  function collapseVoiceKeyboard(reason: string) {
+    if (!voiceEditingActive && voiceKeyboardHeight.value <= 0) return;
+    logger.info("收起语音编辑键盘", { reason, voiceKeyboardHeight: voiceKeyboardHeight.value });
+    voiceEditingActive = false;
+    ignoreKeyboardLayout = false;
+    inputFocused = false;
+    usingVoiceFallbackHeight = false;
+    voicePositiveHeightObserved = false;
+    voiceFocusStartedAt = 0;
+    voiceKeyboardHeight.value = 0;
+    try {
+      uni.hideKeyboard();
+      (document.activeElement as HTMLElement | null)?.blur?.();
+    } catch {
+      // 个别容器没有 activeElement，忽略
+    }
+  }
+
   /**
    * 键盘动画期间会连着回调好几次，中间还会夹一个 0（尤其是焦点从一个输入框切到另一个时）。
    * 直接照单全收，输入栏就会跟着上下弹。
    * 规则：抬起立即跟手，落下延后 160ms 确认，期间只要来了正值就作废这次收起；
    * 几像素的抖动直接忽略。
    */
+  function canCollapseVoiceFromZeroHeight() {
+    const focusSettled = voiceFocusStartedAt > 0
+      && Date.now() - voiceFocusStartedAt >= VOICE_FOCUS_SETTLE_MS;
+    return voicePositiveHeightObserved && focusSettled && !usingVoiceFallbackHeight;
+  }
+
+  function applyVoiceKeyboardHeight(height: unknown) {
+    const next = normalizeKeyboardHeight(height);
+    if (next > 0) {
+      // 一旦拿到实测高度，估算值立即让位，后续 0 才可以参与真实收起判定。
+      usingVoiceFallbackHeight = false;
+      voicePositiveHeightObserved = true;
+      if (voiceCollapseTimer) {
+        clearTimeout(voiceCollapseTimer);
+        voiceCollapseTimer = null;
+      }
+      if (Math.abs(next - voiceKeyboardHeight.value) >= 4) voiceKeyboardHeight.value = next;
+      return;
+    }
+    if (!ignoreKeyboardLayout) {
+      usingVoiceFallbackHeight = false;
+      voiceKeyboardHeight.value = 0;
+      return;
+    }
+    // 聚焦启动期的 0，以及从未观察到正高度的 0，都不能证明键盘已收起。
+    // 完全量不到高度的设备会走 fallback；它们同样不能靠 0 判断收起。
+    if (!canCollapseVoiceFromZeroHeight()) return;
+    // Android 返回键只会收键盘，不一定触发 textarea blur。延迟复核一次，
+    // 排除键盘动画中间态的 0；确认已收起后主动摘掉焦点，复用现有 blur 链路。
+    if (voiceKeyboardHeight.value <= 0 || voiceCollapseTimer) return;
+    voiceCollapseTimer = setTimeout(() => {
+      voiceCollapseTimer = null;
+      if (!voiceEditingActive || readViewportKeyboardHeight() > 0) return;
+      collapseVoiceKeyboard("viewport-zero");
+    }, KEYBOARD_COLLAPSE_DELAY_MS);
+  }
+
   function applyKeyboardHeight(height: unknown) {
     const next = normalizeKeyboardHeight(height);
     // 实测值一到就接管，估算值让位
@@ -84,6 +156,10 @@ export function useChatViewport() {
       // blur 不等于键盘真的收了：焦点在两个输入框之间转移时键盘一直在，
       // 这时候归零，之后又等不到新的 visualViewport 回调，输入栏就再也浮不起来了。
       // 落听之前以实际视口为准复核一次。
+      if (ignoreKeyboardLayout) {
+        keyboardHeight.value = 0;
+        return;
+      }
       const live = readViewportKeyboardHeight();
       keyboardHeight.value = live > 0 ? live : 0;
     }, KEYBOARD_COLLAPSE_DELAY_MS);
@@ -104,16 +180,28 @@ export function useChatViewport() {
 
   function readViewportKeyboardHeight() {
     const viewport = window.visualViewport;
+    const layoutShrink = baseLayoutHeight - window.innerHeight;
+
     // 没有 visualViewport（老安卓 WebView）：退而求其次，看布局视口有没有被缩掉
     if (!viewport) {
-      const shrunk = baseViewportHeight - window.innerHeight;
-      return shrunk > MIN_KEYBOARD_HEIGHT_PX ? Math.round(shrunk) : 0;
+      keyboardOverlaysViewport.value = layoutShrink <= MIN_KEYBOARD_HEIGHT_PX;
+      return layoutShrink > MIN_KEYBOARD_HEIGHT_PX ? Math.round(layoutShrink) : 0;
     }
-    const layoutHeight = Math.max(window.innerHeight, baseViewportHeight);
-    const occluded = layoutHeight - viewport.height - viewport.offsetTop;
-    if (occluded > MIN_KEYBOARD_HEIGHT_PX) return Math.round(occluded);
-    // 判定为无键盘时顺带校准基准，覆盖旋转屏、地址栏收缩等情况
-    baseViewportHeight = Math.max(baseViewportHeight, viewport.height);
+
+    const visualShrink = baseVisualHeight - viewport.height - viewport.offsetTop;
+    const height = Math.max(layoutShrink, visualShrink);
+    // 只要布局视口或可视视口已经缩小，就由 WebView 自己承接键盘位移。
+    // 此时再给 fixed 面板加 bottom=键盘高度，会出现一整段重复补偿空白。
+    keyboardOverlaysViewport.value = height <= MIN_KEYBOARD_HEIGHT_PX;
+    if (height > MIN_KEYBOARD_HEIGHT_PX) return Math.round(height);
+
+    // 只有没有任何输入焦点和键盘占位时才能校准基准。键盘动画刚开始时会短暂
+    // 报很小的高度甚至 0；此时重置基准会把正常弹起误判为收起。
+    if (!inputFocused && !voiceEditingActive && keyboardHeight.value <= 0 && voiceKeyboardHeight.value <= 0) {
+      baseLayoutHeight = window.innerHeight;
+      baseVisualHeight = viewport.height;
+      keyboardOverlaysViewport.value = true;
+    }
     return 0;
   }
 
@@ -133,6 +221,10 @@ export function useChatViewport() {
   function onViewportChange() {
     const height = readViewportKeyboardHeight();
     if (height > 0) pinLayoutViewport();
+    if (ignoreKeyboardLayout) {
+      applyVoiceKeyboardHeight(height);
+      return;
+    }
     applyKeyboardHeight(height);
   }
 
@@ -141,12 +233,31 @@ export function useChatViewport() {
    * 同时主动读一次实际高度：键盘本来就没收起来的情况下不会再有 resize 事件，
    * 只靠事件驱动会一直停在 0。
    */
-  function onFocusIn() {
-    inputFocused = true;
+  function onFocusIn(event: FocusEvent) {
+    const target = event.target as HTMLElement | null;
+    const domVoice = Boolean(target?.closest?.("[data-voice-confirm-input=\"true\"]"));
+    if (domVoice && !voiceEditingActive) {
+      voiceEditingActive = true;
+      voicePositiveHeightObserved = false;
+      voiceFocusStartedAt = Date.now();
+    }
+    ignoreKeyboardLayout = voiceEditingActive || domVoice;
+    inputFocused = !ignoreKeyboardLayout;
     pinLayoutViewport();
+    if (ignoreKeyboardLayout) {
+      if (collapseTimer) {
+        clearTimeout(collapseTimer);
+        collapseTimer = null;
+      }
+      keyboardHeight.value = 0;
+      applyVoiceKeyboardHeight(readViewportKeyboardHeight());
+      return;
+    }
+    voiceKeyboardHeight.value = 0;
     applyKeyboardHeight(readViewportKeyboardHeight());
     [60, 260].forEach((delay) => {
       setTimeout(() => {
+        if (!inputFocused || ignoreKeyboardLayout) return;
         pinLayoutViewport();
         applyKeyboardHeight(readViewportKeyboardHeight());
       }, delay);
@@ -168,9 +279,64 @@ export function useChatViewport() {
     }, FALLBACK_DELAY_MS);
   }
 
+  /**
+   * uni-app 的 textarea 会包一层自定义元素，原生 focusin 目标在部分 WebView 中无法可靠识别。
+   * 组件通过该入口显式声明语音编辑焦点，并独立测量/兜底键盘高度。
+   */
+  function setVoiceInputFocused(focused: boolean) {
+    const startingVoiceEdit = focused && !voiceEditingActive;
+    if (voiceFallbackTimer) {
+      clearTimeout(voiceFallbackTimer);
+      voiceFallbackTimer = null;
+    }
+    if (!focused && voiceCollapseTimer) {
+      clearTimeout(voiceCollapseTimer);
+      voiceCollapseTimer = null;
+    }
+    voiceEditingActive = focused;
+    ignoreKeyboardLayout = focused;
+    inputFocused = false;
+    if (!focused) {
+      if (voiceFallbackTimer) {
+        clearTimeout(voiceFallbackTimer);
+        voiceFallbackTimer = null;
+      }
+      usingVoiceFallbackHeight = false;
+      voicePositiveHeightObserved = false;
+      voiceFocusStartedAt = 0;
+      voiceKeyboardHeight.value = 0;
+      return;
+    }
+    if (startingVoiceEdit) {
+      voicePositiveHeightObserved = false;
+      voiceFocusStartedAt = Date.now();
+    }
+    if (collapseTimer) {
+      clearTimeout(collapseTimer);
+      collapseTimer = null;
+    }
+    keyboardHeight.value = 0;
+
+    [0, 60, 260].forEach((delay) => {
+      setTimeout(() => {
+        if (!ignoreKeyboardLayout) return;
+        pinLayoutViewport();
+        applyVoiceKeyboardHeight(readViewportKeyboardHeight());
+      }, delay);
+    });
+
+    voiceFallbackTimer = setTimeout(() => {
+      voiceFallbackTimer = null;
+      if (!ignoreKeyboardLayout || voiceKeyboardHeight.value > 0) return;
+      usingVoiceFallbackHeight = true;
+      voiceKeyboardHeight.value = estimateKeyboardHeight();
+    }, FALLBACK_DELAY_MS);
+  }
+
   /** 失焦：兜底值必须跟着清掉，否则输入栏会一直悬在半空 */
   function onFocusOut() {
     inputFocused = false;
+    if (!ignoreKeyboardLayout) voiceKeyboardHeight.value = 0;
     if (fallbackTimer) {
       clearTimeout(fallbackTimer);
       fallbackTimer = null;
@@ -212,11 +378,15 @@ export function useChatViewport() {
    * 就说明它已经收了 —— 据此把状态归位。
    */
   function onDocumentTouchStart(event: TouchEvent) {
-    if (keyboardHeight.value <= 0) return;
+    const activeHeight = voiceEditingActive ? voiceKeyboardHeight.value : keyboardHeight.value;
+    if (activeHeight <= 0) return;
     const touch = event.touches?.[0] || event.changedTouches?.[0];
     if (!touch) return;
-    const keyboardTop = window.innerHeight - keyboardHeight.value;
-    if (touch.clientY > keyboardTop) forceCollapse("touch-in-keyboard-zone");
+    const viewportBase = baseLayoutHeight || window.innerHeight;
+    const keyboardTop = viewportBase - activeHeight;
+    if (touch.clientY <= keyboardTop) return;
+    if (voiceEditingActive) collapseVoiceKeyboard("touch-in-keyboard-zone");
+    else forceCollapse("touch-in-keyboard-zone");
   }
 
   /**
@@ -227,6 +397,16 @@ export function useChatViewport() {
   function onNativeKeyboardHeight(payload: { height?: number | string }) {
     const height = Number(payload?.height);
     if (!Number.isFinite(height)) return;
+    if (ignoreKeyboardLayout) {
+      if (height <= 0) {
+        if (canCollapseVoiceFromZeroHeight()) collapseVoiceKeyboard("native-event");
+      } else {
+        // 原生事件可能先于 resize 到达；主动读一次视口只用于判断是否需要手动抬升。
+        readViewportKeyboardHeight();
+        applyVoiceKeyboardHeight(height);
+      }
+      return;
+    }
     logger.info("收到宿主推送的键盘高度", { height });
     nativeKeyboardSupported = true;
     if (height <= 0) {
@@ -236,11 +416,6 @@ export function useChatViewport() {
     applyKeyboardHeight(height);
   }
 
-  // 小程序 / App 走平台回调；H5 上这个 API 是空实现，不会触发
-  function onKeyboardHeightChange(event: { height?: number }) {
-    applyKeyboardHeight(event?.height);
-  }
-
   /** 失焦、点遮罩的主动收起：同样走延迟通道，避免和紧接着的聚焦事件打架 */
   function resetKeyboardHeight() {
     applyKeyboardHeight(0);
@@ -248,8 +423,8 @@ export function useChatViewport() {
 
   onMounted(() => {
     syncWindowHeight();
-    baseViewportHeight = Number(window?.visualViewport?.height) || Number(window?.innerHeight) || 0;
-    uni.onKeyboardHeightChange?.(onKeyboardHeightChange);
+    baseLayoutHeight = Number(window?.innerHeight) || 0;
+    baseVisualHeight = Number(window?.visualViewport?.height) || baseLayoutHeight;
     if (typeof window !== "undefined") {
       window.addEventListener("scroll", onWindowScroll, { passive: true });
       window.addEventListener("resize", onViewportChange);
@@ -263,9 +438,11 @@ export function useChatViewport() {
   });
 
   onBeforeUnmount(() => {
+    ignoreKeyboardLayout = false;
     if (collapseTimer) clearTimeout(collapseTimer);
+    if (voiceCollapseTimer) clearTimeout(voiceCollapseTimer);
     if (fallbackTimer) clearTimeout(fallbackTimer);
-    uni.offKeyboardHeightChange?.(onKeyboardHeightChange);
+    if (voiceFallbackTimer) clearTimeout(voiceFallbackTimer);
     if (typeof window !== "undefined") {
       window.removeEventListener("scroll", onWindowScroll);
       window.removeEventListener("resize", onViewportChange);
@@ -282,8 +459,11 @@ export function useChatViewport() {
   return {
     chatViewportStyle,
     keyboardHeight,
+    voiceKeyboardHeight,
+    keyboardOverlaysViewport,
     isKeyboardOpen,
     syncWindowHeight,
     resetKeyboardHeight,
+    setVoiceInputFocused,
   };
 }

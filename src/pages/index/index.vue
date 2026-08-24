@@ -49,8 +49,11 @@ const { sessions, isSessionSwitching } = storeToRefs(sessionStore);
 const {
   chatViewportStyle,
   keyboardHeight,
+  voiceKeyboardHeight,
+  keyboardOverlaysViewport,
   syncWindowHeight,
   resetKeyboardHeight,
+  setVoiceInputFocused,
 } = useChatViewport();
 const { sendMessage, sendQuickPrompt, stopGenerating, cancelActiveStream } = useChatSend();
 const {
@@ -450,10 +453,14 @@ onBeforeUnmount(cancelActiveStream);
         v-model="inputText"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
+        :keyboard-overlays-viewport="keyboardOverlaysViewport"
+        :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
         @toggle-quick-list="toggleQuickList"
         @input-blur="resetKeyboardHeight"
+        @voice-input-focus="setVoiceInputFocused(true)"
+        @voice-input-blur="setVoiceInputFocused(false)"
       />
 
       <AiBadFeedbackSheet
