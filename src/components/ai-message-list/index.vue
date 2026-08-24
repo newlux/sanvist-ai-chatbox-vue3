@@ -292,7 +292,7 @@ function onCopyClick(index, message) {
   -webkit-overflow-scrolling: touch;
 }
 .chat-box {
-  padding: 0 40rpx;
+  padding: 40rpx 40rpx 0;
 }
 .business-overview {
   padding: 148rpx 40rpx 0;

@@ -129,7 +129,7 @@ function toggleExpanded() {
   padding: 8rpx 0 0;
 }
 .think-block__step {
-  font-family: "PingFang SC";
+  font-family: "Regular";
   font-size: 26rpx;
   line-height: 40rpx;
 }

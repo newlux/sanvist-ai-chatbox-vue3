@@ -1,0 +1,35 @@
+/* 字体声明
+ * - Inter：本地 webfont（latin 子集，覆盖数字/英文/标点）
+ * - Sarasa Gothic SC：设计稿中文字体；未内置字体文件，回退到系统黑体
+ *   （iOS PingFang SC / Android Noto Sans SC 渲染观感一致）
+ */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/inter-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../assets/fonts/inter-latin-500-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../assets/fonts/inter-latin-600-normal.woff2') format('woff2');
+}
+
+/* 设计稿字族：中文走 Sarasa Gothic SC（回退系统黑体），西文走 Inter */
+$font-sarasa: 'Sarasa Gothic SC', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei',
+  -apple-system, 'Helvetica Neue', sans-serif;
+$font-inter: 'Inter', 'Sarasa Gothic SC', -apple-system, 'Helvetica Neue', 'PingFang SC',
+  'Microsoft YaHei', sans-serif;
