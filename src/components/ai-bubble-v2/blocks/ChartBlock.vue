@@ -39,7 +39,7 @@ const CATEGORY_HORIZONTAL_PADDING = 32;
 const DEFAULT_FONT_SIZE = 12;
 const DEFAULT_FONT_FAMILY = "sans-serif";
 const DEFAULT_GRID_SIDE = 16;
-const DEFAULT_GRID_TOP = 16;
+const DEFAULT_GRID_TOP = 24;
 const DEFAULT_GRID_BOTTOM = 24;
 const DEFAULT_AXIS_NAME_GAP = 32;
 const TITLE_SPACE = 36;
@@ -176,22 +176,26 @@ function isVisibleLegend(legend: any, series: any[]) {
   return toArray(legend).some(item => item?.show !== false && (Array.isArray(item?.data) ? item.data.length > 0 : hasNamedSeries));
 }
 
+function resolveTopSpace(option: any, xAxes: any[], series: any[]) {
+  const titleSpace = isVisibleTitle(option.title) ? TITLE_SPACE : 0;
+  const legendSpace = isVisibleLegend(option.legend, series) ? LEGEND_SPACE : 0;
+  const topAxes = xAxes.filter(axis => axis?.position === "top");
+  const topAxisSpace = Math.max(0, ...topAxes.map(axisBottomSpace));
+  return Math.max(DEFAULT_GRID_TOP + titleSpace + legendSpace, topAxisSpace);
+}
+
 function createDefaultGrid(option: any, xAxes: any[], yAxes: any[], series: any[]) {
   const leftAxes = yAxes.filter(axis => axis?.position !== "right");
   const rightAxes = yAxes.filter(axis => axis?.position === "right");
   const bottomAxes = xAxes.filter(axis => axis?.position !== "top");
-  const topAxes = xAxes.filter(axis => axis?.position === "top");
 
   const requiredLeft = Math.max(DEFAULT_GRID_SIDE, ...leftAxes.map(axis => axisLabelExtent(axis) + (axis?.name ? DEFAULT_AXIS_NAME_GAP : 0) + 12));
   const requiredRight = Math.max(DEFAULT_GRID_SIDE, ...rightAxes.map(axis => axisLabelExtent(axis) + (axis?.name ? DEFAULT_AXIS_NAME_GAP : 0) + 12));
   const horizontalInset = Math.ceil(Math.max(requiredLeft, requiredRight));
-  const titleSpace = isVisibleTitle(option.title) ? TITLE_SPACE : 0;
-  const legendSpace = isVisibleLegend(option.legend, series) ? LEGEND_SPACE : 0;
-  const topAxisSpace = Math.max(0, ...topAxes.map(axisBottomSpace));
   const bottom = Math.max(DEFAULT_GRID_BOTTOM, ...bottomAxes.map(axisBottomSpace));
 
   return {
-    top: Math.max(DEFAULT_GRID_TOP + titleSpace + legendSpace, topAxisSpace),
+    top: resolveTopSpace(option, xAxes, series),
     right: horizontalInset,
     bottom,
     left: horizontalInset,
@@ -233,7 +237,15 @@ function normalizeOption(raw: Record<string, any> | null) {
   }
   if (option.xAxis) next.xAxis = Array.isArray(option.xAxis) ? xAxes : xAxes[0];
   if (option.yAxis) next.yAxis = Array.isArray(option.yAxis) ? yAxes : yAxes[0];
-  if (!option.grid && (option.xAxis || option.yAxis)) next.grid = createDefaultGrid(option, xAxes, yAxes, series);
+  if (option.xAxis || option.yAxis) {
+    if (!option.grid) {
+      next.grid = createDefaultGrid(option, xAxes, yAxes, series);
+    }
+    else if (!Array.isArray(option.grid) && option.grid.top == null) {
+      // 后端显式给了 grid 但漏掉 top：补齐动态顶部空间，避免落到 ECharts 默认的 60px 造成大量留白
+      next.grid = { ...option.grid, top: resolveTopSpace(option, xAxes, series) };
+    }
+  }
 
   if (option.radar) {
     const radar = toArray(option.radar).map(item => ({
@@ -433,9 +445,15 @@ onBeforeUnmount(disposeChart);
 
 <template>
   <view class="chart-block" :class="[{ 'chart-block--embedded': embedded }]">
-    <view v-show="!failed" class="chart-block__scroll" :style="{ minHeight: chartMinHeight }">
+    <scroll-view
+      v-show="!failed"
+      class="chart-block__scroll"
+      scroll-x
+      :show-scrollbar="false"
+      :style="{ minHeight: chartMinHeight }"
+    >
       <view ref="chartEl" class="chart-block__canvas" :style="{ minWidth: chartMinWidth, minHeight: chartMinHeight }" />
-    </view>
+    </scroll-view>
     <view v-if="failed && hasFallbackData" class="chart-block__data">
       <text v-if="fallbackTitle" class="chart-block__data-title">
         {{ fallbackTitle }}
