@@ -3,19 +3,23 @@ import { isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
 
 type FocusOwner = "none" | "text" | "voice";
 
-const PAN_OFFSET_PX = 8;
+const HEADER_PAN_VAR = "--chat-header-pan";
 
 /**
  * PC H5 没有软键盘；mPaaS H5 的键盘高度只信宿主 keyboardHeightChange。
  * 键盘弹起后始终按宿主整页上推处理：输入栏贴视口底部，header 用 visualViewport.offsetTop 拉回顶部。
+ *
+ * 上推过程用 rAF 逐帧写 CSS 变量，避免等事件再一次性 translate 造成闪动；
+ * transform 始终存在（含 0），避免合成层创建/销毁闪一帧。
  */
 export function useChatViewport() {
   const windowHeight = ref(0);
   const focusOwner = ref<FocusOwner>("none");
   const nativeKeyboardHeight = ref(0);
   const keyboardOpenedForFocus = ref(false);
-  const viewportOffsetTop = ref(0);
   let disposeNativeKeyboard: (() => void) | null = null;
+  let rafId = 0;
+  let lastPanOffset = 0;
 
   const chatViewportStyle = computed(() =>
     (windowHeight.value > 0 ? { height: `${windowHeight.value}px` } : {}),
@@ -29,14 +33,6 @@ export function useChatViewport() {
     (focusOwner.value === "voice" ? nativeKeyboardHeight.value : 0),
   );
 
-  const headerPinStyle = computed(() => {
-    const offset = viewportOffsetTop.value;
-    if (offset < PAN_OFFSET_PX) return {};
-    return {
-      transform: `translate3d(0, ${offset}px, 0)`,
-    };
-  });
-
   function syncWindowHeight() {
     windowHeight.value = Number(uni.getSystemInfoSync().windowHeight) || 0;
   }
@@ -49,14 +45,44 @@ export function useChatViewport() {
       const scrolled = typeof window !== "undefined"
         ? Number(window.scrollY || document.documentElement?.scrollTop || 0) || 0
         : 0;
-      return Math.max(0, Math.round(Math.max(visual, scrolled)));
+      return Math.max(0, visual, scrolled);
     } catch {
       return 0;
     }
   }
 
-  function syncVisualViewport() {
-    viewportOffsetTop.value = readViewportOffsetTop();
+  function applyHeaderPan(offset: number) {
+    lastPanOffset = offset;
+    try {
+      document.documentElement.style.setProperty(HEADER_PAN_VAR, `${offset}px`);
+    } catch {
+      // 非 H5 运行时没有 document，header 保持在原位
+    }
+  }
+
+  function shouldTrackPan() {
+    return focusOwner.value !== "none" || keyboardOpenedForFocus.value || lastPanOffset > 0.5;
+  }
+
+  function tickPan() {
+    rafId = 0;
+    applyHeaderPan(readViewportOffsetTop());
+    if (shouldTrackPan()) rafId = requestAnimationFrame(tickPan);
+  }
+
+  function startPanTracking() {
+    if (typeof requestAnimationFrame !== "function") {
+      applyHeaderPan(readViewportOffsetTop());
+      return;
+    }
+    if (rafId) return;
+    rafId = requestAnimationFrame(tickPan);
+  }
+
+  function stopPanTracking() {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    applyHeaderPan(0);
   }
 
   function beginFocus(owner: Exclude<FocusOwner, "none">) {
@@ -64,6 +90,7 @@ export function useChatViewport() {
     focusOwner.value = owner;
     nativeKeyboardHeight.value = 0;
     keyboardOpenedForFocus.value = false;
+    startPanTracking();
   }
 
   function endFocus(owner: Exclude<FocusOwner, "none">) {
@@ -71,7 +98,8 @@ export function useChatViewport() {
     focusOwner.value = "none";
     nativeKeyboardHeight.value = 0;
     keyboardOpenedForFocus.value = false;
-    viewportOffsetTop.value = 0;
+    // 不立刻把偏移打成 0：上推回落也要跟 rAF，否则 header 会先弹回再闪一下
+    startPanTracking();
   }
 
   function setTextInputFocused(focused: boolean) {
@@ -96,37 +124,34 @@ export function useChatViewport() {
     const height = Math.max(0, Number(payload?.height) || 0);
 
     if (height > 0) {
-      // 延迟到达的正高度不能重新激活已经失焦的输入框。
       if (focusOwner.value === "none") return;
       nativeKeyboardHeight.value = height;
       keyboardOpenedForFocus.value = true;
-      syncVisualViewport();
+      startPanTracking();
       return;
     }
 
-    // 聚焦启动阶段宿主可能先推一次 0；只有本轮确实打开过键盘才接受关闭。
     if (!keyboardOpenedForFocus.value) return;
     nativeKeyboardHeight.value = 0;
     keyboardOpenedForFocus.value = false;
     focusOwner.value = "none";
-    viewportOffsetTop.value = 0;
+    startPanTracking();
     blurActiveInput();
   }
 
   function onWindowResize() {
-    // PC 浏览器窗口缩放需要同步高度；mPaaS 的 resize 是软键盘行为，不能重排聊天内容区。
     if (!isMpaasReady()) syncWindowHeight();
-    syncVisualViewport();
+    startPanTracking();
   }
 
   onMounted(() => {
+    applyHeaderPan(0);
     syncWindowHeight();
-    syncVisualViewport();
     if (typeof window !== "undefined") {
       window.addEventListener("resize", onWindowResize);
-      window.addEventListener("scroll", syncVisualViewport, { passive: true });
-      window.visualViewport?.addEventListener("resize", syncVisualViewport);
-      window.visualViewport?.addEventListener("scroll", syncVisualViewport);
+      window.addEventListener("scroll", startPanTracking, { passive: true });
+      window.visualViewport?.addEventListener("resize", startPanTracking);
+      window.visualViewport?.addEventListener("scroll", startPanTracking);
     }
     disposeNativeKeyboard = onNativeEvent("keyboardHeightChange", onNativeKeyboardHeight);
   });
@@ -134,17 +159,17 @@ export function useChatViewport() {
   onBeforeUnmount(() => {
     if (typeof window !== "undefined") {
       window.removeEventListener("resize", onWindowResize);
-      window.removeEventListener("scroll", syncVisualViewport);
-      window.visualViewport?.removeEventListener("resize", syncVisualViewport);
-      window.visualViewport?.removeEventListener("scroll", syncVisualViewport);
+      window.removeEventListener("scroll", startPanTracking);
+      window.visualViewport?.removeEventListener("resize", startPanTracking);
+      window.visualViewport?.removeEventListener("scroll", startPanTracking);
     }
     disposeNativeKeyboard?.();
     disposeNativeKeyboard = null;
+    stopPanTracking();
   });
 
   return {
     chatViewportStyle,
-    headerPinStyle,
     keyboardHeight,
     voiceKeyboardHeight,
     syncWindowHeight,

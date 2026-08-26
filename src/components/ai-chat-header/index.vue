@@ -579,6 +579,8 @@ onBeforeUnmount(() => {
   // 键盘把整页上推后 header 会平移回可视顶部，不透明才能盖住下面的消息
   background: #fafafa;
   box-shadow: 0 8rpx 24rpx rgba(26, 26, 26, 0.06);
+  transform: translate3d(0, var(--chat-header-pan, 0px), 0);
+  will-change: transform;
 }
 
 :deep(.uni-popup) {
