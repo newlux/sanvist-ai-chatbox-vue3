@@ -575,6 +575,10 @@ onBeforeUnmount(() => {
 .ai-chat-header {
   position: relative;
   flex: 0 0 auto;
+  z-index: 10;
+  // 键盘把整页上推后 header 会平移回可视顶部，不透明才能盖住下面的消息
+  background: #fafafa;
+  box-shadow: 0 8rpx 24rpx rgba(26, 26, 26, 0.06);
 }
 
 :deep(.uni-popup) {

@@ -38,9 +38,9 @@ const {
 
 const {
   chatViewportStyle,
+  headerPinStyle,
   keyboardHeight,
   voiceKeyboardHeight,
-  keyboardOverlaysViewport,
   syncWindowHeight,
   setTextInputFocused,
   setVoiceInputFocused,
@@ -107,7 +107,7 @@ function onScrollTop() {
 <template>
   <view class="subagent-page">
     <view class="subagent-page__chat" :style="chatViewportStyle">
-      <view class="subagent-header" :style="headerStyle">
+      <view class="subagent-header" :style="{ ...headerStyle, ...headerPinStyle }">
         <view class="subagent-header__back" @tap="onBack">
           <text class="subagent-header__back-text">
             ‹
@@ -140,7 +140,6 @@ function onScrollTop() {
         v-model="inputText"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
-        :keyboard-overlays-viewport="keyboardOverlaysViewport"
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
@@ -174,10 +173,13 @@ function onScrollTop() {
 
 .subagent-header {
   flex: 0 0 auto;
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 32rpx;
+  background: #ffffff;
+  box-shadow: 0 8rpx 24rpx rgba(26, 26, 26, 0.06);
   // 顶部安全区由内联样式给，这里再兜一层刘海高度
   padding-top: constant(safe-area-inset-top);
   padding-top: env(safe-area-inset-top);
