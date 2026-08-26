@@ -10,9 +10,7 @@ const props = defineProps({
   isLoading: { type: Boolean, default: false },
   /** 键盘高度(px)。 */
   keyboardHeight: { type: Number, default: 0 },
-  /** 键盘是否覆盖 WebView；false 表示宿主已缩小布局视口，不再 fixed 补偿。 */
-  keyboardOverlaysViewport: { type: Boolean, default: true },
-  /** 语音识别结果编辑时的键盘高度，仅用于抬升语音文本框。 */
+  /** 语音识别结果编辑时的键盘高度。 */
   voiceKeyboardHeight: { type: Number, default: 0 },
 });
 
@@ -69,21 +67,6 @@ const showSendButton = computed(() => !props.isLoading && canSend.value);
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
 const dockFloating = computed(() => keyboardOpen.value);
 const voiceKeyboardOpen = computed(() => props.voiceKeyboardHeight > 0);
-const voiceKeyboardLiftStyle = computed(() =>
-  (voiceKeyboardOpen.value && props.keyboardOverlaysViewport
-    ? { bottom: `${props.voiceKeyboardHeight}px` }
-    : {}),
-);
-
-/**
- * 键盘弹起后输入栏固定覆盖在消息区上方，不参与 flex 重排。
- * mPaaS resize 模式使用 bottom=0；只有 overlay 模式才额外补偿键盘高度。
- */
-const keyboardLiftStyle = computed(() =>
-  (dockFloating.value
-    ? { bottom: props.keyboardOverlaysViewport ? `${props.keyboardHeight}px` : "0px" }
-    : {}),
-);
 
 /**
  * 收键盘后遮罩多留一会儿：键盘落下的过程中输入栏会跟着往下移动，
@@ -293,7 +276,6 @@ onBeforeUnmount(() => {
       v-if="inputMode === 'voice' && voicePhase !== 'idle' && isVoiceConfirmationOpen"
       class="voice-sheet"
       :class="{ 'voice-sheet--keyboard-open': voiceKeyboardOpen }"
-      :style="voiceKeyboardLiftStyle"
     >
       <view class="voice-confirm">
         <view
@@ -370,7 +352,6 @@ onBeforeUnmount(() => {
       v-if="!voiceKeyboardOpen"
       class="chat-input__dock"
       :class="{ 'chat-input__dock--floating': dockFloating }"
-      :style="keyboardLiftStyle"
     >
       <!-- 附件预览栏：选中的文件在输入栏上方排开 -->
       <AiChatAttachments
@@ -912,10 +893,11 @@ onBeforeUnmount(() => {
   z-index: 1250;
 }
 
-// 键盘弹起：脱离文档流吸到键盘上沿（bottom 由内联样式给），盖住下方的消息列表
+// 键盘弹起：脱离文档流贴在视口底部，随宿主整页上推，盖住下方的消息列表
 .chat-input__dock--floating {
   position: fixed;
   right: 0;
+  bottom: 0;
   left: 0;
   box-sizing: border-box;
   background: #f8f9fc;

@@ -49,9 +49,9 @@ const { sessions, isSessionSwitching } = storeToRefs(sessionStore);
 
 const {
   chatViewportStyle,
+  headerPinStyle,
   keyboardHeight,
   voiceKeyboardHeight,
-  keyboardOverlaysViewport,
   syncWindowHeight,
   setTextInputFocused,
   setVoiceInputFocused,
@@ -330,6 +330,7 @@ onBeforeUnmount(cancelActiveStream);
       <AiChatHeader
         v-model:sessions="sessions"
         class="ai-page__header"
+        :style="headerPinStyle"
         :load-sessions="getAISessionList"
         :selected-session-id="aiSessionId"
         :generating="isLoading"
@@ -479,7 +480,6 @@ onBeforeUnmount(cancelActiveStream);
         v-model="inputText"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
-        :keyboard-overlays-viewport="keyboardOverlaysViewport"
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
