@@ -322,7 +322,7 @@ onBeforeUnmount(() => {
               <view />
             </view>
             <text class="chat-header__title">
-              {{ props.generating ? '正在生成回答' : 'Noyi 等待中..' }}
+              {{ props.generating ? '正在生成回答' : 'Noii 等待中..' }}
             </text>
           </view>
 

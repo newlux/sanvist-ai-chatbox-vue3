@@ -89,3 +89,4 @@ src/
 - Vue 区块顺序：script → template → style
 - 使用单引号、分号和 2 空格缩进
 - 提交信息遵循 Conventional Commits，并由 commitlint 校验
+- 除了border使用`px`，其余使用`rpx`布局，1`px` = 2`rpx`
