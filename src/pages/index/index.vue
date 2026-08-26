@@ -161,6 +161,15 @@ function onNavItemClick(item: { key?: string; title?: string; subagent?: string;
 }
 
 /**
+ * 音频卡片「去收听」：跟底部「听汇报」一样，跳到汇报会话页。
+ */
+function onGoListenReport() {
+  uni.navigateTo({
+    url: `/pages/chat/index?subagent=${encodeURIComponent("report")}&title=${encodeURIComponent("听汇报")}`,
+  });
+}
+
+/**
  * 历史抽屉分页取数。z-paging 每翻一页回调一次，实现落在 sessionStore 里。
  */
 function getAISessionList(pageNo = 1, pageSize = 20) {
@@ -366,6 +375,7 @@ onBeforeUnmount(cancelActiveStream);
         @share-click="onShareClick"
         @copy-click="onCopyMessage"
         @select-toggle="onShareSelectToggle"
+        @listen-report="onGoListenReport"
         @scroll-top="onScrollTop"
         @pinned-change="chatStore.setPinnedToBottom"
       />

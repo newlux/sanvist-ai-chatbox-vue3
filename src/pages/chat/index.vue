@@ -5,6 +5,8 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
+import ReportVoiceSelector from "@/components/report-voice-selector/index.vue";
+import { REPORT_VOICE_STORAGE_KEY } from "@/config/report-voices";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatTts } from "@/hooks/useChatTts";
@@ -73,7 +75,26 @@ async function onTtsClick(index: number) {
 const { safeTopPx } = useSafeArea();
 
 const pageTitle = ref("");
+const isReport = ref(false);
+const showReportVoiceSelector = ref(false);
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
+
+function hasSavedReportVoice() {
+  try {
+    return Boolean(uni.getStorageSync(REPORT_VOICE_STORAGE_KEY));
+  } catch {
+    return false;
+  }
+}
+
+function closeReportVoiceSelector() {
+  showReportVoiceSelector.value = false;
+  uni.navigateBack({ delta: 1 });
+}
+
+function confirmReportVoice() {
+  showReportVoiceSelector.value = false;
+}
 const headerStyle = computed(() => ({ paddingTop: `${safeTopPx.value}px` }));
 
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
@@ -81,6 +102,8 @@ watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBo
 onLoad((query?: Record<string, string>) => {
   syncWindowHeight();
   pageTitle.value = String(query?.title || "AI 助手");
+  isReport.value = String(query?.subagent || "") === "report";
+  showReportVoiceSelector.value = isReport.value && !hasSavedReportVoice();
   // 每次进来都是全新一轮
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
@@ -106,7 +129,12 @@ function onScrollTop() {
 
 <template>
   <view class="subagent-page">
-    <view class="subagent-page__chat" :style="chatViewportStyle">
+    <ReportVoiceSelector
+      v-if="showReportVoiceSelector"
+      @confirm="confirmReportVoice"
+      @close="closeReportVoiceSelector"
+    />
+    <view v-else class="subagent-page__chat" :style="chatViewportStyle">
       <view class="subagent-header" :style="headerStyle">
         <view class="subagent-header__back" @tap="onBack">
           <text class="subagent-header__back-text">

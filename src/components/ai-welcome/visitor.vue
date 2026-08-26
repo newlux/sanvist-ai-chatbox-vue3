@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import { getRoleOptions } from "@/api/user-role";
-import { VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
+import { LISTEN_REPORT_DATE_KEY, VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
 import { createLogger } from "@/utils/logger";
 
 defineOptions({ name: "AiWelcomeVisitor" });
 const logger = createLogger("visitor");
 // 欢迎页挂载即预取角色选项并缓存，进入角色选择页时直接使用，避免页面加载闪动
 onMounted(async () => {
+  try {
+    uni.removeStorageSync(LISTEN_REPORT_DATE_KEY);
+  } catch (error) {
+    logger.warn("failed to clear listen report state", error);
+  }
+
   try {
     const result = await getRoleOptions();
     const roles = result?.roles ?? [];
@@ -30,7 +36,7 @@ function goToRoleSelect() {
       <view class="welcome-visitor__title">
         <text>游客模式</text>
         <text>体验AI助手</text>
-        <text>Noyi</text>
+        <text>Noii</text>
       </view>
       <view class="welcome-visitor__note">
         <view class="welcome-visitor__description">

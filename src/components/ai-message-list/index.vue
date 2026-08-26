@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { UiChatMessage } from "@/stores/chat-types";
+import moment from "moment";
+import { LISTEN_REPORT_DATE_KEY } from "@/config";
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
 
 defineOptions({
@@ -68,6 +70,7 @@ const emit = defineEmits([
   "feedback-change",
   "copy-click",
   "select-toggle",
+  "listen-report",
 ]);
 
 const FALLBACK_OVERVIEW = {
@@ -174,6 +177,37 @@ function onFeedbackChange(index, message, value) {
 function onCopyClick(index, message) {
   emit("copy-click", { index, msg: message });
 }
+
+function getListenReportDate() {
+  try {
+    return String(uni.getStorageSync(LISTEN_REPORT_DATE_KEY) || "");
+  } catch {
+    return "";
+  }
+}
+
+function isListenedToday() {
+  const listenedDate = getListenReportDate();
+  if (!listenedDate) return false;
+
+  const tomorrow = moment().add(1, "day").startOf("day");
+  return moment(listenedDate, "YYYY-MM-DD", true).isSame(tomorrow, "day");
+}
+
+const listenedReport = ref(isListenedToday());
+
+/** “去收听”：首次点击标记当天已收听，并跳转到汇报会话页。 */
+function onListenReport() {
+  if (!listenedReport.value) {
+    try {
+      uni.setStorageSync(LISTEN_REPORT_DATE_KEY, moment().add(1, "day").format("YYYY-MM-DD"));
+    } catch {
+      // 本地存储不可用时仍允许进入汇报会话。
+    }
+    listenedReport.value = true;
+  }
+  emit("listen-report");
+}
 </script>
 
 <template>
@@ -216,8 +250,12 @@ function onCopyClick(index, message) {
                 （0806 早报）
               </text>
             </view>
-            <view class="business-overview__listen">
-              去收听
+            <view
+              class="business-overview__listen"
+              :class="{ 'business-overview__listen--listened': listenedReport }"
+              @tap="onListenReport"
+            >
+              {{ listenedReport ? '已收听' : '去收听' }}
             </view>
           </view>
 
@@ -404,6 +442,12 @@ function onCopyClick(index, message) {
   line-height: 32rpx;
   background: #c8201e;
   border-radius: 32rpx;
+  transition: background-color 0.2s ease;
+}
+
+.business-overview__listen--listened {
+  color: #6b6b6b;
+  background: #f2f3f5;
 }
 
 .business-overview__questions {
