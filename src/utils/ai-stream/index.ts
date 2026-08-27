@@ -1,5 +1,5 @@
 export { expandChartFences } from "./chartFence";
-export type { AiBlock, AiBlockType, StreamBlockUpdate } from "./chatStreamParser";
+export type { AiBlock, AiBlockType, StreamBlockUpdate, ThinkStep } from "./chatStreamParser";
 
 export { applyEventToBlocks, buildInitialBlocks } from "./chatStreamParser";
 

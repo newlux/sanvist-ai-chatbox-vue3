@@ -34,6 +34,7 @@ export interface UiChatMessage {
   ttsPlaying?: boolean;
   rawSseText?: string;
   attachments?: ChatMessageAttachment[];
+  noAnswerGroup?: boolean;
 }
 
 export interface ShareRound {

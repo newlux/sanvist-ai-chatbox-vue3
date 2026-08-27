@@ -3,12 +3,13 @@
   "compilerOptions": {
     "lib": ["esnext", "dom"],
     "baseUrl": ".",
-    "moduleResolution": "bundler",
     "paths": {
       "@/*": ["./src/*"]
     },
     "types": ["@dcloudio/types"],
+    "allowJs": true,
+    "strict": false,
     "sourceMap": true
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "types/**/*.d.ts"]
 }
