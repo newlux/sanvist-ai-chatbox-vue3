@@ -28,6 +28,8 @@ const emit = defineEmits([
   "voice-input-focus",
   "voice-input-blur",
   "dock-height-change",
+  "recognize-begin",
+  "recognize-fail",
 ]);
 
 const { t } = useI18n();
@@ -177,6 +179,8 @@ const {
 } = useVoiceInput({
   isLoading: () => props.isLoading,
   submit: text => submitMessage(text),
+  onRecognizeBegin: () => emit("recognize-begin"),
+  onRecognizeFail: () => emit("recognize-fail"),
   toggleQuickList: () => emit("toggle-quick-list", true),
   dismissKeyboard: onDismissKeyboard,
   emitVoiceEvent: (event, payload) => emit(event, payload),
@@ -243,7 +247,7 @@ function onTrySend() {
 }
 
 function onOpenAttachmentPicker() {
-  if (props.isLoading) return;
+  if (props.isLoading || voice.isRecognizing) return;
   openAttachmentPicker();
 }
 
@@ -287,7 +291,7 @@ onBeforeUnmount(() => {
     <!-- 监听态挂到 body，避免父级层叠上下文让导航和浮动按钮露在遮罩上方 -->
     <Teleport to="body">
       <view
-        v-if="inputMode === 'voice' && voicePhase !== 'idle' && !isVoiceConfirmationOpen"
+        v-if="inputMode === 'voice' && voicePhase === 'recording'"
         class="voice-sheet voice-sheet--listening"
       >
         <view class="voice-listening">
@@ -299,7 +303,7 @@ onBeforeUnmount(() => {
               {{ voice.cancelling ? '松开取消语音' : 'Noyi正在听，请说话' }}
             </text>
             <text class="voice-listening__hint">
-              {{ voice.cancelling ? '松开手指取消识别' : '说完松手  可编辑文字' }}
+              {{ voice.cancelling ? '松开手指取消识别' : '说完松手' }}
             </text>
           </view>
 
@@ -427,7 +431,7 @@ onBeforeUnmount(() => {
         <!-- 左侧：附件入口 -->
         <view
           class="input-bar__plus"
-          :class="{ 'input-bar__plus--disabled': isLoading }"
+          :class="{ 'input-bar__plus--disabled': isLoading || voice.isRecognizing }"
           @tap="onOpenAttachmentPicker"
         >
           <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
@@ -436,14 +440,14 @@ onBeforeUnmount(() => {
         <view
           v-if="inputMode === 'voice'"
           class="input-bar__voice-pill"
-          :class="{ 'input-bar__voice-pill--disabled': isLoading }"
+          :class="{ 'input-bar__voice-pill--disabled': isLoading || voice.isRecognizing }"
           @touchstart.prevent="onVoicePillTouchStart"
           @touchmove.prevent="updateVoiceGesture"
           @touchend.prevent="onVoicePillTouchEnd"
           @touchcancel.prevent="onVoicePillTouchCancel"
         >
           <text class="input-bar__voice-hint">
-            {{ isLoading ? '回答生成中...' : '按住 说话' }}
+            {{ isLoading ? '回答生成中...' : voice.isRecognizing ? '识别中...' : '按住 说话' }}
           </text>
         </view>
         <view v-else class="input-bar__text-field">
@@ -490,7 +494,7 @@ onBeforeUnmount(() => {
         <view
           v-else-if="showSendButton"
           class="input-bar__send"
-          @tap="onTrySend"
+          @touchstart.stop.prevent="onTrySend"
         >
           <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
         </view>
@@ -831,6 +835,7 @@ onBeforeUnmount(() => {
 
 .input-bar__voice-pill--disabled {
   opacity: 0.6;
+  pointer-events: none;
 }
 
 .input-bar__voice-hint {
@@ -911,6 +916,7 @@ onBeforeUnmount(() => {
 
 .input-bar__plus--disabled {
   opacity: 0.35;
+  pointer-events: none;
 }
 
 .input-bar__mode:active,
@@ -958,7 +964,7 @@ onBeforeUnmount(() => {
 // webview 随后补发的 click 会落到下面刚归位的加号按钮上，凭空弹出附件面板。
 .chat-input__keyboard-mask {
   position: fixed;
-  z-index: 1200;
+  z-index: 1;
   top: 0;
   right: 0;
   bottom: 0;

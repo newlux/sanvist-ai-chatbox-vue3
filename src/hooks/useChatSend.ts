@@ -185,16 +185,29 @@ export function useChatSend() {
     chatStore.inputText = "";
     chatStore.showQuickPrompts = false;
     chatStore.isLoading = true;
-    const userMsgId = `user-${uuid}`;
+
+    const pendingIndex = chatStore.messages.findIndex(item => item.role === "user" && item.asrPending);
+    const pendingId = pendingIndex >= 0 ? chatStore.messages[pendingIndex].id : "";
+    const userMsgId = pendingId || `user-${uuid}`;
     const aiMsgId = `ai-${uuid}`;
-    chatStore.messages.push({
-      id: userMsgId,
-      role: "user",
-      content: query,
-      sessionId: conversationId,
-      messageId: null,
-      ...(attachments.length ? { attachments } : {}),
-    });
+
+    if (pendingIndex >= 0) {
+      chatStore.patchMessageById(userMsgId, {
+        content: query,
+        asrPending: false,
+        sessionId: conversationId,
+        ...(attachments.length ? { attachments } : {}),
+      });
+    } else {
+      chatStore.messages.push({
+        id: userMsgId,
+        role: "user",
+        content: query,
+        sessionId: conversationId,
+        messageId: null,
+        ...(attachments.length ? { attachments } : {}),
+      });
+    }
     chatStore.messages.push({
       id: aiMsgId,
       role: "ai",
@@ -211,6 +224,33 @@ export function useChatSend() {
     await sendAiFlow({ aiMsgId, userMsgId, content: query, files, hadSessionId, requestSeq });
   }
 
+  /** 语音松手后立刻插入「识别中...」占位，等 ASR 回来再改成真正的问题和回答 */
+  function beginAsrPlaceholder() {
+    const pending = chatStore.messages.find(item => item.role === "user" && item.asrPending);
+    if (pending?.id) return;
+    chatStore.showQuickPrompts = false;
+    chatStore.messages.push({
+      id: `user-asr-${Date.now()}`,
+      role: "user",
+      content: t("identifying"),
+      asrPending: true,
+      sessionId: chatStore.aiSessionId,
+      messageId: null,
+    });
+    chatStore.scrollToBottom(true);
+  }
+
+  function discardAsrPlaceholder() {
+    const index = chatStore.messages.findIndex(item => item.role === "user" && item.asrPending);
+    if (index < 0) return;
+    chatStore.messages.splice(index, 1);
+    if (!chatStore.messages.length) {
+      chatStore.showQuickPrompts = true;
+      chatStore.showQuickList = true;
+    }
+    chatStore.scrollToBottom(true);
+  }
+
   function sendQuickPrompt(text: string) {
     chatStore.inputText = text;
     void sendMessage();
@@ -219,6 +259,8 @@ export function useChatSend() {
   return {
     sendMessage,
     sendQuickPrompt,
+    beginAsrPlaceholder,
+    discardAsrPlaceholder,
     stopGenerating,
     cancelActiveStream,
   };

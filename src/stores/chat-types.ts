@@ -34,6 +34,8 @@ export interface UiChatMessage {
   ttsPlaying?: boolean;
   rawSseText?: string;
   attachments?: ChatMessageAttachment[];
+  /** 语音已松手、ASR 尚未返回：用户气泡展示「识别中...」 */
+  asrPending?: boolean;
 }
 
 export interface ShareRound {
