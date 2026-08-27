@@ -67,12 +67,8 @@ const showSendButton = computed(() => !props.isLoading && canSend.value);
 
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
 const voiceKeyboardOpen = computed(() => props.voiceKeyboardHeight > 0);
-const dockLiftStyle = computed(() => {
-  const lift = Math.max(0, Number(props.keyboardHeight) || 0);
-  return lift > 0 ? { bottom: `${lift}px` } : {};
-});
-const voiceSheetLiftStyle = computed(() => {
-  const lift = Math.max(0, Number(props.voiceKeyboardHeight) || 0);
+const inputLiftStyle = computed(() => {
+  const lift = Math.max(0, Number(props.keyboardHeight || props.voiceKeyboardHeight) || 0);
   return lift > 0 ? { bottom: `${lift}px` } : {};
 });
 
@@ -274,7 +270,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <view class="chat-input" :class="{ 'chat-input--keyboard-open': keyboardOpen }">
+  <view
+    class="chat-input"
+    :class="{ 'chat-input--keyboard-open': keyboardOpen || voiceKeyboardOpen }"
+    :style="inputLiftStyle"
+  >
     <!-- 键盘弹起时的空白区兜底：点一下收键盘，否则编辑识别结果时没有退出口 -->
     <view
       v-if="showKeyboardMask"
@@ -334,7 +334,6 @@ onBeforeUnmount(() => {
       ref="voiceSheetRef"
       class="voice-sheet"
       :class="{ 'voice-sheet--keyboard-open': voiceKeyboardOpen }"
-      :style="voiceSheetLiftStyle"
     >
       <view class="voice-confirm">
         <view
@@ -411,7 +410,6 @@ onBeforeUnmount(() => {
       v-if="!voiceKeyboardOpen"
       ref="dockRef"
       class="chat-input__dock"
-      :style="dockLiftStyle"
     >
       <!-- 附件预览栏：选中的文件在输入栏上方排开 -->
       <AiChatAttachments
@@ -510,12 +508,13 @@ onBeforeUnmount(() => {
 
 <style lang="scss" scoped>
 .chat-input {
-  // 输入栏 fixed 贴底，这里不占文档流，避免和消息区 padding 叠出双倍空白
-  height: 0;
-  overflow: visible;
-  background: transparent;
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
   box-sizing: border-box;
-  position: relative;
+  background: #fafafa;
   uni-image {
     width: 100%;
     height: 100%;
@@ -523,12 +522,8 @@ onBeforeUnmount(() => {
 }
 
 .voice-sheet {
-  position: fixed;
-  z-index: 1300;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  transition: bottom 0.2s ease-out;
+  position: relative;
+  z-index: 2;
   box-sizing: border-box;
   // 识别完成/编辑态：设计稿中的窄幅底部面板
   border-radius: 64rpx 64rpx 0 0;
@@ -540,6 +535,7 @@ onBeforeUnmount(() => {
 
 // 监听态：全屏对焦（设计稿 495:543）
 .voice-sheet--listening {
+  position: fixed;
   z-index: 100000;
   top: 0;
   right: 0;
@@ -946,16 +942,12 @@ onBeforeUnmount(() => {
 }
 
 .chat-input__dock {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 1250;
+  position: relative;
+  z-index: 2;
   box-sizing: border-box;
   padding-top: 16rpx;
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
-  background: #fafafa;
 }
 
 // 透明层，只负责接住「点空白收键盘」，铺满全屏。

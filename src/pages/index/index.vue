@@ -88,11 +88,11 @@ const realtimeTts = useRealtimeTts();
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
-  // 快捷入口还在时，导航已经用 margin 把输入栏高度让出来了，列表只需少量空隙
-  if (showQuickPrompts.value) return "16px";
+  // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
+  if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
   return composerBottomInset.value;
 });
-const navOffsetStyle = computed(() => ({ marginBottom: composerDockOffset.value }));
+const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 
 /**
  * TTS 播放：先统一走 GET /chat/tts/{conversationId}/{messageId}，有音频则直接播整段；
@@ -583,11 +583,6 @@ $color-white: #ffffff;
   background: #fafafa;
   overflow: hidden;
   position: relative;
-}
-
-.ai-page__chat > * {
-  position: relative;
-  z-index: 1;
 }
 
 // 头部要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，

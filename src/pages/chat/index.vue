@@ -174,7 +174,7 @@ function onScrollTop() {
   overflow: hidden;
 }
 
-:deep(.chat-input__dock) {
+:deep(.chat-input) {
   background: #ffffff;
 }
 
