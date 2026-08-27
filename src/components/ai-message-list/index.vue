@@ -264,6 +264,7 @@ const listPadStyle = computed(() =>
             :select-mode="selectMode"
             :disabled="isMessageDisabled(index, msg)"
             :no-answer-group="!!msg.noAnswerGroup"
+            :asr-pending="!!msg.asrPending"
             @suggestion-tap="onSuggestionTap"
             @tts-click="onTtsClick(index)"
             @share-click="onShareClick(index, msg)"

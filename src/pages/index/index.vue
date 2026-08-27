@@ -58,7 +58,7 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, stopGenerating, cancelActiveStream } = useChatSend();
+const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
 const {
   iconCopyImage,
   iconSaveImage,
@@ -493,6 +493,8 @@ onBeforeUnmount(cancelActiveStream);
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
+        @recognize-begin="beginAsrPlaceholder"
+        @recognize-fail="discardAsrPlaceholder"
         @toggle-quick-list="toggleQuickList"
         @input-focus="setTextInputFocused(true)"
         @input-blur="setTextInputFocused(false)"

@@ -46,7 +46,7 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, stopGenerating, cancelActiveStream } = useChatSend();
+const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
 const { onFeedbackChange } = useChatFeedback();
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts();
 const realtimeTts = useRealtimeTts();
@@ -145,6 +145,8 @@ function onScrollTop() {
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
+        @recognize-begin="beginAsrPlaceholder"
+        @recognize-fail="discardAsrPlaceholder"
         @input-focus="setTextInputFocused(true)"
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
