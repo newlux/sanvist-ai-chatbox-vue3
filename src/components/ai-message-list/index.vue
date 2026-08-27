@@ -51,6 +51,14 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  realtimeTtsMessageKey: {
+    type: null,
+    default: null,
+  },
+  realtimeTtsPlaying: {
+    type: null,
+    default: false,
+  },
   /** 外部（发送、切会话）强制回到底部时会置回 true，组件内的跟随状态要跟着复位 */
   pinnedToBottom: {
     type: Boolean,
@@ -87,6 +95,11 @@ function resolvePositive(message: UiChatMessage) {
   if (message?.feedbackValue === "good") return true;
   if (message?.feedbackValue === "bad") return false;
   return null;
+}
+
+function isActiveRealtimeTts(message: UiChatMessage) {
+  return props.realtimeTtsMessageKey != null
+    && String(message.id) === String(props.realtimeTtsMessageKey);
 }
 
 function isMessageDisabled(index: number, message: UiChatMessage) {
@@ -251,8 +264,8 @@ const listPadStyle = computed(() =>
             :blocks="msg.blocks || []"
             :loading="msg.loading"
             :tts-enabled="!!msg.ttsEnabled"
-            :tts-loading="!!msg.ttsLoading"
-            :tts-playing="!!msg.ttsPlaying"
+            :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
+            :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
             :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted"
             :waiting-text="msg.waitingText"
             :attachments="msg.attachments || []"
