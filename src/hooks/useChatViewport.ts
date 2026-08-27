@@ -60,9 +60,8 @@ export function useChatViewport() {
   });
 
   const composerDockOffset = computed(() => {
-    const lift = Math.max(0, Number(measuredKeyboardHeight.value) || 0);
     const dock = inputDockHeight.value || FALLBACK_DOCK_HEIGHT_PX;
-    return `${dock + lift}px`;
+    return `${dock}px`;
   });
 
   function setInputDockHeight(height: number) {
