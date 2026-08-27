@@ -35,6 +35,10 @@ interface VoiceInputOptions {
   isLoading: () => boolean;
   /** 识别结果确认后的出口 */
   submit: (text: string) => void;
+  /** 松手后立刻在对话里插入「识别中...」占位 */
+  onRecognizeBegin?: () => void;
+  /** 识别失败时撤掉占位 */
+  onRecognizeFail?: () => void;
   /** 录音相关动作发生时收起快捷入口 */
   toggleQuickList: () => void;
   /** 发送前先收键盘 */
@@ -80,6 +84,24 @@ export function useVoiceInput(options: VoiceInputOptions) {
   let recognizeWatchdog: ReturnType<typeof setTimeout> | null = null;
   /** 当前录音会话上下文：本次的 jobSeq 与 start promise */
   let currentJob: { seq: number; start: Promise<RecorderResult> } | null = null;
+  /** 已经往对话里塞了「识别中」占位，失败时要成对撤掉 */
+  let asrPlaceholderOpen = false;
+
+  function openAsrPlaceholder() {
+    if (asrPlaceholderOpen) return;
+    asrPlaceholderOpen = true;
+    options.onRecognizeBegin?.();
+  }
+
+  function failAsrPlaceholder() {
+    if (!asrPlaceholderOpen) return;
+    asrPlaceholderOpen = false;
+    options.onRecognizeFail?.();
+  }
+
+  function consumeAsrPlaceholder() {
+    asrPlaceholderOpen = false;
+  }
 
   const voiceTextValue = computed(() => {
     // 重录期间草稿被清空了，先显示上一轮的识别结果，别让文本框突然空掉
@@ -112,10 +134,9 @@ export function useVoiceInput(options: VoiceInputOptions) {
       logger.warn("recognizing watchdog fired, force reset");
       recognizeWatchdog = null;
       state.isRecognizing = false;
-      if (state.voicePhase === "recognizing") {
-        resetVoiceInput();
-        uni.showToast({ title: t("speech-recognize-timeout"), icon: "none" });
-      }
+      failAsrPlaceholder();
+      resetVoiceInput();
+      uni.showToast({ title: t("speech-recognize-timeout"), icon: "none" });
     }, RECOGNIZE_WATCHDOG_MS);
   }
 
@@ -247,6 +268,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
     const existingText = state.recognizedText || state.draftText;
     state.restartRecording = false;
     invalidateJob();
+    failAsrPlaceholder();
 
     if (keepText && existingText) {
       state.recognizedText = existingText;
@@ -364,6 +386,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
     const { tempFilePath: filePath, audioUrl, audioBase64, mimeType } = audio || {};
     if (!filePath && !audioUrl && !audioBase64) {
       resetVoiceInput();
+      failAsrPlaceholder();
       uni.showToast({ title: t("no-audio-recorded"), icon: "none" });
       return;
     }
@@ -385,24 +408,22 @@ export function useVoiceInput(options: VoiceInputOptions) {
 
       const text = String(result?.text || "").trim();
       if (!text) {
-        state.recognizedText = prevText;
-        state.draftText = prevText;
-        if (prevText) {
-          state.voicePhase = "finished";
-        } else {
-          resetVoiceInput();
-          uni.showToast({ title: t("no-speech-recognized"), icon: "none" });
-        }
+        resetVoiceInput();
+        failAsrPlaceholder();
+        uni.showToast({ title: t("no-speech-recognized"), icon: "none" });
         return;
       }
 
-      // 识别完成：在已有旧文字基础上拼接新识别结果
-      state.recognizedText = prevText ? `${prevText}${text}` : text;
-      state.draftText = state.recognizedText;
-      state.voicePhase = "finished";
+      consumeAsrPlaceholder();
+      state.recognizedText = "";
+      state.draftText = "";
+      state.voicePhase = "idle";
       state.inputMode = "voice";
+      options.dismissKeyboard();
+      options.emitVoiceEvent?.("voice-send", text);
+      options.submit(text);
+      resetVoiceText();
     } catch (error) {
-      // 这条要自带上下文：线上默认只打 warn/error，前面那些 debug 是看不到的
       logger.error("ASR failed", {
         via: audioUrl ? "url" : audioBase64 ? "base64" : "upload",
         base64Length: audioBase64?.length || 0,
@@ -410,17 +431,11 @@ export function useVoiceInput(options: VoiceInputOptions) {
         message: (error as Error)?.message,
         error,
       });
-      // 识别失败也要把录音器归位，否则原生可能还留着上一轮的会话，下次 end 一直不回调
       cancelRecorder();
       if (jobId !== state.jobSeq) return;
-      state.recognizedText = prevText;
-      state.draftText = prevText;
-      if (prevText) {
-        state.voicePhase = "finished";
-      } else {
-        resetVoiceInput();
-        toastVoiceError(error, t("record-failed"));
-      }
+      resetVoiceInput();
+      failAsrPlaceholder();
+      toastVoiceError(error, t("record-failed"));
     } finally {
       setRecognizing(false);
     }
@@ -441,6 +456,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
       invalidateJob();
       cancelRecorder();
       resetVoiceInput();
+      failAsrPlaceholder();
       if (!result?.cancelled) {
         uni.showToast({ title: result?.error || t("record-failed"), icon: "none" });
       }
@@ -465,19 +481,22 @@ export function useVoiceInput(options: VoiceInputOptions) {
     }
 
     const jobSeq = job.seq;
-    state.voicePhase = "recognizing";
+    // 松手即回到输入栏，识别在后台进行，对话里用「识别中...」占位，不再弹确认面板
+    state.voicePhase = "idle";
     state.inputMode = "voice";
     setRecognizing(true);
+    openAsrPlaceholder();
 
     const startResult = await job.start;
     if (jobSeq !== state.jobSeq) return;
     currentJob = null;
     if (!startResult || startResult.success === false) {
       // startRecorder 内部失败已自行回收；这里兜底未进入录音器的失败（如权限被拒）
-      if (state.voicePhase === "recognizing") cancelVoiceRecording({ keepText: keepTextOnCancel });
+      failAsrPlaceholder();
+      if (state.isRecognizing) cancelVoiceRecording({ keepText: keepTextOnCancel });
       return;
     }
-    if (state.voicePhase !== "recognizing") return;
+    if (!state.isRecognizing) return;
     await stopRecorderAndRecognize(jobSeq);
   }
 

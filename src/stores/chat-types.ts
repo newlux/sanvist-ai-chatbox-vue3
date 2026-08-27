@@ -29,12 +29,16 @@ export interface UiChatMessage {
   feedbackValue?: string;
   feedbackRemark?: string;
   ttsEnabled?: boolean;
+  /** 新生成消息实时播放，历史加载消息播放整段语音。 */
+  ttsPlaybackMode?: "realtime" | "history";
   ttsLoading?: boolean;
   /** 语音播放中（整段 /chat/tts 或流式 /speech/tts/stream，二者互斥） */
   ttsPlaying?: boolean;
   rawSseText?: string;
   attachments?: ChatMessageAttachment[];
   noAnswerGroup?: boolean;
+  /** 语音已松手、ASR 尚未返回：用户气泡展示「识别中...」 */
+  asrPending?: boolean;
 }
 
 export interface ShareRound {

@@ -52,11 +52,14 @@ const {
   chatViewportStyle,
   keyboardHeight,
   voiceKeyboardHeight,
+  composerBottomInset,
+  composerDockOffset,
   syncWindowHeight,
+  setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, stopGenerating, cancelActiveStream } = useChatSend();
+const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
 const {
   iconCopyImage,
   iconSaveImage,
@@ -84,11 +87,16 @@ const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFe
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts();
 const realtimeTts = useRealtimeTts();
 
-/**
- * TTS 播放：先统一走 GET /chat/tts/{conversationId}/{messageId}，有音频则直接播整段；
- * 整段还没合成好（无音频）时回退到 /speech/tts/stream。
- */
-async function onTtsClick(index: number) {
+const messageBottomInset = computed(() => {
+  if (shareSheetVisible.value) return shareSheetBottomInset.value;
+  // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
+  if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
+  return composerBottomInset.value;
+});
+const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
+
+/** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
+function onTtsClick(index: number) {
   const msg = chatStore.messages[index];
   const messageId = msg?.messageId;
   if (messageId == null || msg?.sessionId == null) return;
@@ -104,8 +112,11 @@ async function onTtsClick(index: number) {
 
   realtimeTts.stop();
   stopHistoryTts();
-  const playedWhole = await onHistoryTtsClick(index);
-  if (!playedWhole && historyTtsMessageId.value == null) void realtimeTts.togglePlay(msg);
+  if (msg.ttsPlaybackMode === "realtime") {
+    void realtimeTts.togglePlay(msg);
+    return;
+  }
+  void onHistoryTtsClick(index);
 }
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
@@ -368,10 +379,12 @@ onBeforeUnmount(cancelActiveStream);
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
-        :bottom-inset="shareSheetBottomInset"
+        :bottom-inset="messageBottomInset"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"
+        :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
+        :realtime-tts-playing="realtimeTts.playing.value"
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="sendQuickPrompt"
         @tts-click="onTtsClick"
@@ -386,6 +399,7 @@ onBeforeUnmount(cancelActiveStream);
       <AiChatNav
         :visible="showQuickPrompts"
         :active-key="navActiveKey"
+        :style="navOffsetStyle"
         @item-click="onNavItemClick"
       />
 
@@ -496,11 +510,14 @@ onBeforeUnmount(cancelActiveStream);
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
+        @recognize-begin="beginAsrPlaceholder"
+        @recognize-fail="discardAsrPlaceholder"
         @toggle-quick-list="toggleQuickList"
         @input-focus="setTextInputFocused(true)"
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
+        @dock-height-change="setInputDockHeight"
       />
 
       <AiBadFeedbackSheet
@@ -585,11 +602,6 @@ $color-white: #ffffff;
   background: #fafafa;
   overflow: hidden;
   position: relative;
-}
-
-.ai-page__chat > * {
-  position: relative;
-  z-index: 1;
 }
 
 // 头部要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，

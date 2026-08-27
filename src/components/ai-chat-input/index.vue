@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
@@ -27,6 +27,9 @@ const emit = defineEmits([
   "input-blur",
   "voice-input-focus",
   "voice-input-blur",
+  "dock-height-change",
+  "recognize-begin",
+  "recognize-fail",
 ]);
 
 const { t } = useI18n();
@@ -65,8 +68,43 @@ const canSend = computed(() => Boolean(draft.value.trim() || hasAttachments.valu
 const showSendButton = computed(() => !props.isLoading && canSend.value);
 
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
-const dockFloating = computed(() => keyboardOpen.value);
 const voiceKeyboardOpen = computed(() => props.voiceKeyboardHeight > 0);
+const inputLiftStyle = computed(() => {
+  const lift = Math.max(0, Number(props.keyboardHeight || props.voiceKeyboardHeight) || 0);
+  return lift > 0 ? { bottom: `${lift}px` } : {};
+});
+
+const dockRef = ref<unknown>(null);
+const voiceSheetRef = ref<unknown>(null);
+let composerResizeObserver: ResizeObserver | null = null;
+
+function readEl(raw: unknown): HTMLElement | null {
+  if (!raw) return null;
+  if (typeof HTMLElement !== "undefined" && raw instanceof HTMLElement) return raw;
+  const el = (raw as { $el?: unknown }).$el;
+  if (typeof HTMLElement !== "undefined" && el instanceof HTMLElement) return el;
+  return null;
+}
+
+function measureComposerHeight() {
+  const dock = readEl(dockRef.value);
+  const sheet = readEl(voiceSheetRef.value);
+  const height = Math.round(Math.max(dock?.offsetHeight || 0, sheet?.offsetHeight || 0));
+  if (height > 0) emit("dock-height-change", height);
+}
+
+function observeComposer() {
+  composerResizeObserver?.disconnect();
+  composerResizeObserver = null;
+  measureComposerHeight();
+  if (typeof ResizeObserver === "undefined") return;
+  const dock = readEl(dockRef.value);
+  const sheet = readEl(voiceSheetRef.value);
+  if (!dock && !sheet) return;
+  composerResizeObserver = new ResizeObserver(() => measureComposerHeight());
+  if (dock) composerResizeObserver.observe(dock);
+  if (sheet) composerResizeObserver.observe(sheet);
+}
 
 /**
  * 收键盘后遮罩多留一会儿：键盘落下的过程中输入栏会跟着往下移动，
@@ -74,7 +112,7 @@ const voiceKeyboardOpen = computed(() => props.voiceKeyboardHeight > 0);
  */
 const maskLingering = ref(false);
 let maskLingerTimer = null;
-const showKeyboardMask = computed(() => dockFloating.value || voiceKeyboardOpen.value || maskLingering.value);
+const showKeyboardMask = computed(() => keyboardOpen.value || voiceKeyboardOpen.value || maskLingering.value);
 
 /** 点击面板以外的区域收起键盘：识别结果编辑态下这是唯一的退出口 */
 function onDismissKeyboard() {
@@ -141,6 +179,8 @@ const {
 } = useVoiceInput({
   isLoading: () => props.isLoading,
   submit: text => submitMessage(text),
+  onRecognizeBegin: () => emit("recognize-begin"),
+  onRecognizeFail: () => emit("recognize-fail"),
   toggleQuickList: () => emit("toggle-quick-list", true),
   dismissKeyboard: onDismissKeyboard,
   emitVoiceEvent: (event, payload) => emit(event, payload),
@@ -207,17 +247,38 @@ function onTrySend() {
 }
 
 function onOpenAttachmentPicker() {
-  if (props.isLoading) return;
+  if (props.isLoading || voice.isRecognizing) return;
   openAttachmentPicker();
 }
 
+watch(
+  () => [
+    keyboardOpen.value,
+    voiceKeyboardOpen.value,
+    inputMode.value,
+    voicePhase.value,
+    isVoiceConfirmationOpen.value,
+    attachments.value.length,
+    textTextareaHeight.value,
+  ],
+  () => nextTick(observeComposer),
+);
+
+onMounted(() => nextTick(observeComposer));
+
 onBeforeUnmount(() => {
   if (maskLingerTimer) clearTimeout(maskLingerTimer);
+  composerResizeObserver?.disconnect();
+  composerResizeObserver = null;
 });
 </script>
 
 <template>
-  <view class="chat-input" :class="{ 'chat-input--keyboard-open': keyboardOpen }">
+  <view
+    class="chat-input"
+    :class="{ 'chat-input--keyboard-open': keyboardOpen || voiceKeyboardOpen }"
+    :style="inputLiftStyle"
+  >
     <!-- 键盘弹起时的空白区兜底：点一下收键盘，否则编辑识别结果时没有退出口 -->
     <view
       v-if="showKeyboardMask"
@@ -230,7 +291,7 @@ onBeforeUnmount(() => {
     <!-- 监听态挂到 body，避免父级层叠上下文让导航和浮动按钮露在遮罩上方 -->
     <Teleport to="body">
       <view
-        v-if="inputMode === 'voice' && voicePhase !== 'idle' && !isVoiceConfirmationOpen"
+        v-if="inputMode === 'voice' && voicePhase === 'recording'"
         class="voice-sheet voice-sheet--listening"
       >
         <view class="voice-listening">
@@ -242,7 +303,7 @@ onBeforeUnmount(() => {
               {{ voice.cancelling ? '松开取消语音' : 'Noii正在听，请说话' }}
             </text>
             <text class="voice-listening__hint">
-              {{ voice.cancelling ? '松开手指取消识别' : '说完松手  可编辑文字' }}
+              {{ voice.cancelling ? '松开手指取消识别' : '说完松手' }}
             </text>
           </view>
 
@@ -274,6 +335,7 @@ onBeforeUnmount(() => {
     <!-- 识别完成 / 编辑态：底部面板（设计稿 495:589 / 495:656） -->
     <view
       v-if="inputMode === 'voice' && voicePhase !== 'idle' && isVoiceConfirmationOpen"
+      ref="voiceSheetRef"
       class="voice-sheet"
       :class="{ 'voice-sheet--keyboard-open': voiceKeyboardOpen }"
     >
@@ -291,7 +353,7 @@ onBeforeUnmount(() => {
             placeholder=""
             confirm-type="send"
             :adjust-position="false"
-            :cursor-spacing="16"
+            :cursor-spacing="0"
             :show-confirm-bar="false"
             @input="onVoiceTextareaInput"
             @confirm="onVoiceSendUi"
@@ -347,11 +409,11 @@ onBeforeUnmount(() => {
         </view>
       </view>
     </view>
-    <!-- 键盘弹起时切 fixed 悬浮在消息列表之上，收起时回到正常布局 -->
+    <!-- 始终 fixed 贴底；键盘弹起时用 bottom 抬到键盘上方 -->
     <view
       v-if="!voiceKeyboardOpen"
+      ref="dockRef"
       class="chat-input__dock"
-      :class="{ 'chat-input__dock--floating': dockFloating }"
     >
       <!-- 附件预览栏：选中的文件在输入栏上方排开 -->
       <AiChatAttachments
@@ -369,7 +431,7 @@ onBeforeUnmount(() => {
         <!-- 左侧：附件入口 -->
         <view
           class="input-bar__plus"
-          :class="{ 'input-bar__plus--disabled': isLoading }"
+          :class="{ 'input-bar__plus--disabled': isLoading || voice.isRecognizing }"
           @tap="onOpenAttachmentPicker"
         >
           <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
@@ -378,14 +440,14 @@ onBeforeUnmount(() => {
         <view
           v-if="inputMode === 'voice'"
           class="input-bar__voice-pill"
-          :class="{ 'input-bar__voice-pill--disabled': isLoading }"
+          :class="{ 'input-bar__voice-pill--disabled': isLoading || voice.isRecognizing }"
           @touchstart.prevent="onVoicePillTouchStart"
           @touchmove.prevent="updateVoiceGesture"
           @touchend.prevent="onVoicePillTouchEnd"
           @touchcancel.prevent="onVoicePillTouchCancel"
         >
           <text class="input-bar__voice-hint">
-            {{ isLoading ? '回答生成中...' : '按住 说话' }}
+            {{ isLoading ? '回答生成中...' : voice.isRecognizing ? '识别中...' : '按住 说话' }}
           </text>
         </view>
         <view v-else class="input-bar__text-field">
@@ -397,7 +459,8 @@ onBeforeUnmount(() => {
             :disabled="isLoading"
             :auto-height="false"
             :adjust-position="false"
-            :cursor-spacing="16"
+            :cursor-spacing="0"
+            :hold-keyboard="true"
             :maxlength="-1"
             confirm-type="send"
             placeholder-class="input-bar__placeholder"
@@ -431,7 +494,7 @@ onBeforeUnmount(() => {
         <view
           v-else-if="showSendButton"
           class="input-bar__send"
-          @tap="onTrySend"
+          @touchstart.stop.prevent="onTrySend"
         >
           <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
         </view>
@@ -449,14 +512,13 @@ onBeforeUnmount(() => {
 
 <style lang="scss" scoped>
 .chat-input {
-  background: transparent;
-  padding-top: 16rpx;
-  // 底部安全区：home indicator / 手势条区域不放内容
-  padding-bottom: constant(safe-area-inset-bottom);
-  padding-bottom: env(safe-area-inset-bottom);
-  transition: padding-bottom 0.2s ease-out;
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
   box-sizing: border-box;
-  position: relative;
+  background: #fafafa;
   uni-image {
     width: 100%;
     height: 100%;
@@ -464,12 +526,8 @@ onBeforeUnmount(() => {
 }
 
 .voice-sheet {
-  position: fixed;
-  z-index: 1300;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  transition: bottom 0.2s ease-out;
+  position: relative;
+  z-index: 2;
   box-sizing: border-box;
   // 识别完成/编辑态：设计稿中的窄幅底部面板
   border-radius: 64rpx 64rpx 0 0;
@@ -481,6 +539,7 @@ onBeforeUnmount(() => {
 
 // 监听态：全屏对焦（设计稿 495:543）
 .voice-sheet--listening {
+  position: fixed;
   z-index: 100000;
   top: 0;
   right: 0;
@@ -776,6 +835,7 @@ onBeforeUnmount(() => {
 
 .input-bar__voice-pill--disabled {
   opacity: 0.6;
+  pointer-events: none;
 }
 
 .input-bar__voice-hint {
@@ -856,6 +916,7 @@ onBeforeUnmount(() => {
 
 .input-bar__plus--disabled {
   opacity: 0.35;
+  pointer-events: none;
 }
 
 .input-bar__mode:active,
@@ -881,26 +942,18 @@ onBeforeUnmount(() => {
   border-radius: 20rpx;
 }
 
-// 键盘挡住了 home indicator，这段安全区留白让给键盘
-.chat-input--keyboard-open {
+.chat-input--keyboard-open .chat-input__dock {
+  // 键盘挡住了 home indicator，这段安全区留白让给键盘
   padding-bottom: 0;
 }
 
 .chat-input__dock {
-  // 键盘收起：留在文档流里，跟着页面正常排版
   position: relative;
-  // 必须高于收键盘遮罩，否则键盘弹起后点输入栏会被遮罩吃掉
-  z-index: 1250;
-}
-
-// 键盘弹起：脱离文档流贴在视口底部，随宿主整页上推，盖住下方的消息列表
-.chat-input__dock--floating {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  z-index: 2;
   box-sizing: border-box;
-  background: #f8f9fc;
+  padding-top: 16rpx;
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 // 透明层，只负责接住「点空白收键盘」，铺满全屏。
@@ -911,7 +964,7 @@ onBeforeUnmount(() => {
 // webview 随后补发的 click 会落到下面刚归位的加号按钮上，凭空弹出附件面板。
 .chat-input__keyboard-mask {
   position: fixed;
-  z-index: 1200;
+  z-index: 1;
   top: 0;
   right: 0;
   bottom: 0;

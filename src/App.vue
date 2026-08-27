@@ -109,7 +109,10 @@ onLaunch(async (options) => {
 html,
 body,
 #app,
-uni-app {
+uni-app,
+uni-page,
+uni-page-wrapper,
+uni-page-body {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;

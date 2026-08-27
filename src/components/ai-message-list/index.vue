@@ -53,6 +53,14 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  realtimeTtsMessageKey: {
+    type: null,
+    default: null,
+  },
+  realtimeTtsPlaying: {
+    type: null,
+    default: false,
+  },
   /** 外部（发送、切会话）强制回到底部时会置回 true，组件内的跟随状态要跟着复位 */
   pinnedToBottom: {
     type: Boolean,
@@ -90,6 +98,11 @@ function resolvePositive(message: UiChatMessage) {
   if (message?.feedbackValue === "good") return true;
   if (message?.feedbackValue === "bad") return false;
   return null;
+}
+
+function isActiveRealtimeTts(message: UiChatMessage) {
+  return props.realtimeTtsMessageKey != null
+    && String(message.id) === String(props.realtimeTtsMessageKey);
 }
 
 function isMessageDisabled(index: number, message: UiChatMessage) {
@@ -208,6 +221,9 @@ function onListenReport() {
   }
   emit("listen-report");
 }
+const listPadStyle = computed(() =>
+  (props.bottomInset ? { paddingBottom: props.bottomInset } : {}),
+);
 </script>
 
 <template>
@@ -221,92 +237,94 @@ function onListenReport() {
       @scrolltolower="onScrollToLower"
       @scrolltoupper="onScrollTop"
     >
-      <view v-if="showQuickPrompts" class="business-overview">
-        <view v-if="awakeningLoading" class="business-overview__loading">
-          <view class="business-overview__spinner" />
-        </view>
-        <template v-else>
-          <text class="business-overview__title">
-            {{ overview.greeting }}
-          </text>
-          <text class="business-overview__summary">
-            {{ overview.summary }}
-          </text>
-
-          <view
-            v-if="showQuickList"
-            class="business-overview__report"
-          >
-            <view class="business-overview__sound" aria-hidden="true">
-              <text class="business-overview__sound-bar business-overview__sound-bar--short" />
-              <text class="business-overview__sound-bar business-overview__sound-bar--tall" />
-              <text class="business-overview__sound-bar business-overview__sound-bar--middle" />
-            </view>
-            <view class="business-overview__report-info">
-              <text class="business-overview__report-title">
-                经营概览
-              </text>
-              <text class="business-overview__report-date">
-                （0806 早报）
-              </text>
-            </view>
-            <view
-              class="business-overview__listen"
-              :class="{ 'business-overview__listen--listened': listenedReport }"
-              @tap="onListenReport"
-            >
-              {{ listenedReport ? '已收听' : '去收听' }}
-            </view>
+      <view class="msg-list__inner" :style="listPadStyle">
+        <view v-if="showQuickPrompts" class="business-overview">
+          <view v-if="awakeningLoading" class="business-overview__loading">
+            <view class="business-overview__spinner" />
           </view>
-
-          <view v-if="showQuickList" class="business-overview__questions">
-            <text class="business-overview__questions-title">
-              你还可以这么问
+          <template v-else>
+            <text class="business-overview__title">
+              {{ overview.greeting }}
             </text>
-            <view
-              v-for="(prompt, index) in quickPrompts"
-              :key="`${index}-${prompt}`"
-              class="business-overview__question"
-              @tap="onQuickPrompt(prompt)"
-            >
-              {{ prompt }}
-            </view>
-          </view>
-        </template>
-      </view>
+            <text class="business-overview__summary">
+              {{ overview.summary }}
+            </text>
 
-      <view class="chat-box">
-        <!-- 对话内容 -->
-        <view v-for="(msg, index) in messages" :key="index">
-          <AiBubbleV2
-            :role="msg.role"
-            :content="msg.content"
-            :blocks="msg.blocks || []"
-            :loading="msg.loading"
-            :tts-enabled="!!msg.ttsEnabled"
-            :tts-loading="!!msg.ttsLoading"
-            :tts-playing="!!msg.ttsPlaying"
-            :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted"
-            :waiting-text="msg.waitingText"
-            :attachments="msg.attachments || []"
-            :interrupted="!!msg.interrupted"
-            :duration-ms="msg.durationMs"
-            :positive="resolvePositive(msg)"
-            :selected="selectedIndexes.includes(index)"
-            :suppress-highlight="suppressHighlight"
-            :select-mode="selectMode"
-            :disabled="isMessageDisabled(index, msg)"
-            :no-answer-group="!!msg.noAnswerGroup"
-            @suggestion-tap="onSuggestionTap"
-            @tts-click="onTtsClick(index)"
-            @share-click="onShareClick(index, msg)"
-            @select-toggle="onSelectToggle(index)"
-            @feedback-change="onFeedbackChange(index, msg, $event)"
-            @copy-click="onCopyClick(index, msg)"
-          />
+            <view
+              v-if="showQuickList"
+              class="business-overview__report"
+            >
+              <view class="business-overview__sound" aria-hidden="true">
+                <text class="business-overview__sound-bar business-overview__sound-bar--short" />
+                <text class="business-overview__sound-bar business-overview__sound-bar--tall" />
+                <text class="business-overview__sound-bar business-overview__sound-bar--middle" />
+              </view>
+              <view class="business-overview__report-info">
+                <text class="business-overview__report-title">
+                  经营概览
+                </text>
+                <text class="business-overview__report-date">
+                  （0806 早报）
+                </text>
+              </view>
+              <view
+                class="business-overview__listen"
+                :class="{ 'business-overview__listen--listened': listenedReport }"
+                @tap="onListenReport"
+              >
+                {{ listenedReport ? '已收听' : '去收听' }}
+              </view>
+            </view>
+
+            <view v-if="showQuickList" class="business-overview__questions">
+              <text class="business-overview__questions-title">
+                你还可以这么问
+              </text>
+              <view
+                v-for="(prompt, index) in quickPrompts"
+                :key="`${index}-${prompt}`"
+                class="business-overview__question"
+                @tap="onQuickPrompt(prompt)"
+              >
+                {{ prompt }}
+              </view>
+            </view>
+          </template>
+        </view>
+
+        <view class="chat-box">
+          <!-- 对话内容 -->
+          <view v-for="(msg, index) in messages" :key="index">
+            <AiBubbleV2
+              :role="msg.role"
+              :content="msg.content"
+              :blocks="msg.blocks || []"
+              :loading="msg.loading"
+              :tts-enabled="!!msg.ttsEnabled"
+              :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
+              :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
+              :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted"
+              :waiting-text="msg.waitingText"
+              :attachments="msg.attachments || []"
+              :interrupted="!!msg.interrupted"
+              :duration-ms="msg.durationMs"
+              :positive="resolvePositive(msg)"
+              :selected="selectedIndexes.includes(index)"
+              :suppress-highlight="suppressHighlight"
+              :select-mode="selectMode"
+              :disabled="isMessageDisabled(index, msg)"
+              :no-answer-group="!!msg.noAnswerGroup"
+              :asr-pending="!!msg.asrPending"
+              @suggestion-tap="onSuggestionTap"
+              @tts-click="onTtsClick(index)"
+              @share-click="onShareClick(index, msg)"
+              @select-toggle="onSelectToggle(index)"
+              @feedback-change="onFeedbackChange(index, msg, $event)"
+              @copy-click="onCopyClick(index, msg)"
+            />
+          </view>
         </view>
       </view>
-      <view v-if="bottomInset" :style="{ height: bottomInset }" />
       <!-- 底部锚点用于流式输出时触发滚动到底部，不额外制造底部间距 -->
       <view id="msg-bottom-anchor-a" style="height: 1px" />
       <view id="msg-bottom-anchor-b" style="height: 1px" />
@@ -328,6 +346,9 @@ function onListenReport() {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+.msg-list__inner {
+  box-sizing: border-box;
 }
 .chat-box {
   padding: 40rpx 40rpx 0;
