@@ -94,11 +94,8 @@ const messageBottomInset = computed(() => {
 });
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 
-/**
- * TTS 播放：先统一走 GET /chat/tts/{conversationId}/{messageId}，有音频则直接播整段；
- * 整段还没合成好（无音频）时回退到 /speech/tts/stream。
- */
-async function onTtsClick(index: number) {
+/** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
+function onTtsClick(index: number) {
   const msg = chatStore.messages[index];
   const messageId = msg?.messageId;
   if (messageId == null || msg?.sessionId == null) return;
@@ -114,8 +111,11 @@ async function onTtsClick(index: number) {
 
   realtimeTts.stop();
   stopHistoryTts();
-  const playedWhole = await onHistoryTtsClick(index);
-  if (!playedWhole && historyTtsMessageId.value == null) void realtimeTts.togglePlay(msg);
+  if (msg.ttsPlaybackMode === "realtime") {
+    void realtimeTts.togglePlay(msg);
+    return;
+  }
+  void onHistoryTtsClick(index);
 }
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
@@ -369,6 +369,8 @@ onBeforeUnmount(cancelActiveStream);
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"
+        :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
+        :realtime-tts-playing="realtimeTts.playing.value"
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="sendQuickPrompt"
         @tts-click="onTtsClick"

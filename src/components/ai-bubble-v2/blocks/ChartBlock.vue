@@ -44,6 +44,7 @@ const DEFAULT_GRID_BOTTOM = 24;
 const DEFAULT_AXIS_NAME_GAP = 32;
 const TITLE_SPACE = 36;
 const LEGEND_SPACE = 32;
+const AXIS_NAME_TOP_SPACE = 16;
 const EMBEDDED_MIN_HEIGHT = "240px";
 
 interface ChartLayout {
@@ -176,12 +177,14 @@ function isVisibleLegend(legend: any, series: any[]) {
   return toArray(legend).some(item => item?.show !== false && (Array.isArray(item?.data) ? item.data.length > 0 : hasNamedSeries));
 }
 
-function resolveTopSpace(option: any, xAxes: any[], series: any[]) {
+function resolveTopSpace(option: any, xAxes: any[], yAxes: any[], series: any[]) {
   const titleSpace = isVisibleTitle(option.title) ? TITLE_SPACE : 0;
   const legendSpace = isVisibleLegend(option.legend, series) ? LEGEND_SPACE : 0;
+  const hasYAxisName = yAxes.some(axis => String(axis?.name || "").trim());
   const topAxes = xAxes.filter(axis => axis?.position === "top");
   const topAxisSpace = Math.max(0, ...topAxes.map(axisBottomSpace));
-  return Math.max(DEFAULT_GRID_TOP + titleSpace + legendSpace, topAxisSpace);
+  const axisNameSpace = legendSpace && hasYAxisName ? AXIS_NAME_TOP_SPACE : 0;
+  return Math.max(DEFAULT_GRID_TOP + titleSpace + legendSpace + axisNameSpace, topAxisSpace);
 }
 
 function createDefaultGrid(option: any, xAxes: any[], yAxes: any[], series: any[]) {
@@ -195,7 +198,7 @@ function createDefaultGrid(option: any, xAxes: any[], yAxes: any[], series: any[
   const bottom = Math.max(DEFAULT_GRID_BOTTOM, ...bottomAxes.map(axisBottomSpace));
 
   return {
-    top: resolveTopSpace(option, xAxes, series),
+    top: resolveTopSpace(option, xAxes, yAxes, series),
     right: horizontalInset,
     bottom,
     left: horizontalInset,
@@ -243,7 +246,7 @@ function normalizeOption(raw: Record<string, any> | null) {
     }
     else if (!Array.isArray(option.grid) && option.grid.top == null) {
       // 后端显式给了 grid 但漏掉 top：补齐动态顶部空间，避免落到 ECharts 默认的 60px 造成大量留白
-      next.grid = { ...option.grid, top: resolveTopSpace(option, xAxes, series) };
+      next.grid = { ...option.grid, top: resolveTopSpace(option, xAxes, yAxes, series) };
     }
   }
 

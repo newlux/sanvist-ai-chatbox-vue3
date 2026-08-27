@@ -96,8 +96,7 @@ export function useChatTts() {
 
   /**
    * 播放 /chat/tts 整段音频。
-   * 返回 true 表示已接管播放（含“再点一次停止”）；返回 false 表示整段尚未合成好
-   * （无音频数据），由调用方决定是否回退到 tts/stream。
+   * 返回 true 表示已接管播放（含“再点一次停止”）；返回 false 表示整段音频尚未就绪或播放失败。
    */
   async function onTtsClick(messageIndex: number): Promise<boolean> {
     const aiMsg = chatStore.messages[messageIndex];

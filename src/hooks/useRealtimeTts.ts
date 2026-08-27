@@ -86,6 +86,7 @@ export function useRealtimeTts() {
   const chatStore = useChatStore();
   const playing = ref(false);
   const playingMessageId = ref<Identifier | null>(null);
+  const playingMessageKey = ref<string | null>(null);
 
   let sessionSeq = 0;
   let streamFinished = false;
@@ -120,6 +121,7 @@ export function useRealtimeTts() {
       if (streamFinished && playingMessageId.value === messageId) {
         playing.value = false;
         playingMessageId.value = null;
+        playingMessageKey.value = null;
         patchMessage(messageId, { ttsLoading: false, ttsPlaying: false });
       }
       return;
@@ -135,6 +137,8 @@ export function useRealtimeTts() {
     }
 
     playing.value = true;
+    // 部分 WebView 不会可靠触发 InnerAudioContext.onPlay；拿到首个可播分片即结束 loading，展示停止图标。
+    patchMessage(messageId, { ttsLoading: false, ttsPlaying: true });
 
     const audio = uni.createInnerAudioContext();
     activeAudio = audio;
@@ -160,7 +164,6 @@ export function useRealtimeTts() {
       audio.destroy?.();
       playNext(messageId, seq);
     });
-    // 真正出声才切到「流式播放中」，避免创建音频/缓冲阶段就显示停止图标
     audio.onPlay(() => {
       if (activeAudio !== audio) return;
       patchMessage(messageId, { ttsLoading: false, ttsPlaying: true });
@@ -209,6 +212,7 @@ export function useRealtimeTts() {
     const rawLanguage = String(locale.value || "zh").toLowerCase();
     const language = rawLanguage.startsWith("zh") ? "zh" : rawLanguage.startsWith("en") ? "en" : "zh";
     playingMessageId.value = messageId;
+    playingMessageKey.value = String(message.id ?? messageId);
     patchMessage(messageId, { ttsLoading: true, ttsPlaying: false });
 
     try {
@@ -218,6 +222,7 @@ export function useRealtimeTts() {
       if (!text) {
         finishRequest(messageId, seq);
         playingMessageId.value = null;
+        playingMessageKey.value = null;
         return;
       }
 
@@ -236,6 +241,7 @@ export function useRealtimeTts() {
       logger.warn("获取消息详情失败", error);
       finishRequest(messageId, seq);
       playingMessageId.value = null;
+      playingMessageKey.value = null;
     }
   }
 
@@ -250,6 +256,7 @@ export function useRealtimeTts() {
       patchMessage(playingMessageId.value, { ttsLoading: false, ttsPlaying: false });
     }
     playingMessageId.value = null;
+    playingMessageKey.value = null;
     playing.value = false;
   }
 
@@ -260,5 +267,6 @@ export function useRealtimeTts() {
     stop,
     playing,
     playingMessageId,
+    playingMessageKey,
   };
 }

@@ -59,6 +59,7 @@ export function mapHistoryMessages(
         blocks,
         loading: false,
         ttsEnabled: Boolean(sessionId && messageId),
+        ttsPlaybackMode: "history",
         ttsLoading: false,
         ttsPlaying: false,
         sessionId,

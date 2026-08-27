@@ -53,12 +53,12 @@ export function useChatSend() {
       chatStore.patchMessageById(activeId, { loading: false, interrupted: true });
     }
     chatStore.activeMessageId = "";
+    chatStore.isLoading = false;
   }
 
   function stopGenerating() {
     if (!chatStore.isLoading) return;
     cancelActiveStream();
-    chatStore.isLoading = false;
     chatStore.scrollToBottom();
   }
 
@@ -217,6 +217,7 @@ export function useChatSend() {
       interrupted: false,
       sessionId: conversationId,
       messageId: null,
+      ttsPlaybackMode: "realtime",
       waitingText: query,
     });
     chatStore.activeMessageId = aiMsgId;
