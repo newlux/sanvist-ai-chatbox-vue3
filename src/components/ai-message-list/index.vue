@@ -174,6 +174,10 @@ function onFeedbackChange(index, message, value) {
 function onCopyClick(index, message) {
   emit("copy-click", { index, msg: message });
 }
+
+const listPadStyle = computed(() =>
+  (props.bottomInset ? { paddingBottom: props.bottomInset } : {}),
+);
 </script>
 
 <template>
@@ -187,6 +191,7 @@ function onCopyClick(index, message) {
       @scrolltolower="onScrollToLower"
       @scrolltoupper="onScrollTop"
     >
+      <view class="msg-list__inner" :style="listPadStyle">
       <view v-if="showQuickPrompts" class="business-overview">
         <view v-if="awakeningLoading" class="business-overview__loading">
           <view class="business-overview__spinner" />
@@ -268,7 +273,7 @@ function onCopyClick(index, message) {
           />
         </view>
       </view>
-      <view v-if="bottomInset" :style="{ height: bottomInset }" />
+      </view>
       <!-- 底部锚点用于流式输出时触发滚动到底部，不额外制造底部间距 -->
       <view id="msg-bottom-anchor-a" style="height: 1px" />
       <view id="msg-bottom-anchor-b" style="height: 1px" />
@@ -290,6 +295,9 @@ function onCopyClick(index, message) {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+.msg-list__inner {
+  box-sizing: border-box;
 }
 .chat-box {
   padding: 40rpx 40rpx 0;

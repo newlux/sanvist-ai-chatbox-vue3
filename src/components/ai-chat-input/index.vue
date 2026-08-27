@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
@@ -27,6 +27,7 @@ const emit = defineEmits([
   "input-blur",
   "voice-input-focus",
   "voice-input-blur",
+  "dock-height-change",
 ]);
 
 const { t } = useI18n();
@@ -65,8 +66,47 @@ const canSend = computed(() => Boolean(draft.value.trim() || hasAttachments.valu
 const showSendButton = computed(() => !props.isLoading && canSend.value);
 
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
-const dockFloating = computed(() => keyboardOpen.value);
 const voiceKeyboardOpen = computed(() => props.voiceKeyboardHeight > 0);
+const dockLiftStyle = computed(() => {
+  const lift = Math.max(0, Number(props.keyboardHeight) || 0);
+  return lift > 0 ? { bottom: `${lift}px` } : {};
+});
+const voiceSheetLiftStyle = computed(() => {
+  const lift = Math.max(0, Number(props.voiceKeyboardHeight) || 0);
+  return lift > 0 ? { bottom: `${lift}px` } : {};
+});
+
+const dockRef = ref<unknown>(null);
+const voiceSheetRef = ref<unknown>(null);
+let composerResizeObserver: ResizeObserver | null = null;
+
+function readEl(raw: unknown): HTMLElement | null {
+  if (!raw) return null;
+  if (typeof HTMLElement !== "undefined" && raw instanceof HTMLElement) return raw;
+  const el = (raw as { $el?: unknown }).$el;
+  if (typeof HTMLElement !== "undefined" && el instanceof HTMLElement) return el;
+  return null;
+}
+
+function measureComposerHeight() {
+  const dock = readEl(dockRef.value);
+  const sheet = readEl(voiceSheetRef.value);
+  const height = Math.round(Math.max(dock?.offsetHeight || 0, sheet?.offsetHeight || 0));
+  if (height > 0) emit("dock-height-change", height);
+}
+
+function observeComposer() {
+  composerResizeObserver?.disconnect();
+  composerResizeObserver = null;
+  measureComposerHeight();
+  if (typeof ResizeObserver === "undefined") return;
+  const dock = readEl(dockRef.value);
+  const sheet = readEl(voiceSheetRef.value);
+  if (!dock && !sheet) return;
+  composerResizeObserver = new ResizeObserver(() => measureComposerHeight());
+  if (dock) composerResizeObserver.observe(dock);
+  if (sheet) composerResizeObserver.observe(sheet);
+}
 
 /**
  * 收键盘后遮罩多留一会儿：键盘落下的过程中输入栏会跟着往下移动，
@@ -74,7 +114,7 @@ const voiceKeyboardOpen = computed(() => props.voiceKeyboardHeight > 0);
  */
 const maskLingering = ref(false);
 let maskLingerTimer = null;
-const showKeyboardMask = computed(() => dockFloating.value || voiceKeyboardOpen.value || maskLingering.value);
+const showKeyboardMask = computed(() => keyboardOpen.value || voiceKeyboardOpen.value || maskLingering.value);
 
 /** 点击面板以外的区域收起键盘：识别结果编辑态下这是唯一的退出口 */
 function onDismissKeyboard() {
@@ -211,8 +251,25 @@ function onOpenAttachmentPicker() {
   openAttachmentPicker();
 }
 
+watch(
+  () => [
+    keyboardOpen.value,
+    voiceKeyboardOpen.value,
+    inputMode.value,
+    voicePhase.value,
+    isVoiceConfirmationOpen.value,
+    attachments.value.length,
+    textTextareaHeight.value,
+  ],
+  () => nextTick(observeComposer),
+);
+
+onMounted(() => nextTick(observeComposer));
+
 onBeforeUnmount(() => {
   if (maskLingerTimer) clearTimeout(maskLingerTimer);
+  composerResizeObserver?.disconnect();
+  composerResizeObserver = null;
 });
 </script>
 
@@ -274,8 +331,10 @@ onBeforeUnmount(() => {
     <!-- 识别完成 / 编辑态：底部面板（设计稿 495:589 / 495:656） -->
     <view
       v-if="inputMode === 'voice' && voicePhase !== 'idle' && isVoiceConfirmationOpen"
+      ref="voiceSheetRef"
       class="voice-sheet"
       :class="{ 'voice-sheet--keyboard-open': voiceKeyboardOpen }"
+      :style="voiceSheetLiftStyle"
     >
       <view class="voice-confirm">
         <view
@@ -291,7 +350,7 @@ onBeforeUnmount(() => {
             placeholder=""
             confirm-type="send"
             :adjust-position="false"
-            :cursor-spacing="16"
+            :cursor-spacing="0"
             :show-confirm-bar="false"
             @input="onVoiceTextareaInput"
             @confirm="onVoiceSendUi"
@@ -347,11 +406,12 @@ onBeforeUnmount(() => {
         </view>
       </view>
     </view>
-    <!-- 键盘弹起时切 fixed 悬浮在消息列表之上，收起时回到正常布局 -->
+    <!-- 始终 fixed 贴底；键盘弹起时用 bottom 抬到键盘上方 -->
     <view
       v-if="!voiceKeyboardOpen"
+      ref="dockRef"
       class="chat-input__dock"
-      :class="{ 'chat-input__dock--floating': dockFloating }"
+      :style="dockLiftStyle"
     >
       <!-- 附件预览栏：选中的文件在输入栏上方排开 -->
       <AiChatAttachments
@@ -397,7 +457,8 @@ onBeforeUnmount(() => {
             :disabled="isLoading"
             :auto-height="false"
             :adjust-position="false"
-            :cursor-spacing="16"
+            :cursor-spacing="0"
+            :hold-keyboard="true"
             :maxlength="-1"
             confirm-type="send"
             placeholder-class="input-bar__placeholder"
@@ -449,12 +510,10 @@ onBeforeUnmount(() => {
 
 <style lang="scss" scoped>
 .chat-input {
+  // 输入栏 fixed 贴底，这里不占文档流，避免和消息区 padding 叠出双倍空白
+  height: 0;
+  overflow: visible;
   background: transparent;
-  padding-top: 16rpx;
-  // 底部安全区：home indicator / 手势条区域不放内容
-  padding-bottom: constant(safe-area-inset-bottom);
-  padding-bottom: env(safe-area-inset-bottom);
-  transition: padding-bottom 0.2s ease-out;
   box-sizing: border-box;
   position: relative;
   uni-image {
@@ -881,26 +940,22 @@ onBeforeUnmount(() => {
   border-radius: 20rpx;
 }
 
-// 键盘挡住了 home indicator，这段安全区留白让给键盘
-.chat-input--keyboard-open {
+.chat-input--keyboard-open .chat-input__dock {
+  // 键盘挡住了 home indicator，这段安全区留白让给键盘
   padding-bottom: 0;
 }
 
 .chat-input__dock {
-  // 键盘收起：留在文档流里，跟着页面正常排版
-  position: relative;
-  // 必须高于收键盘遮罩，否则键盘弹起后点输入栏会被遮罩吃掉
-  z-index: 1250;
-}
-
-// 键盘弹起：脱离文档流贴在视口底部，随宿主整页上推，盖住下方的消息列表
-.chat-input__dock--floating {
   position: fixed;
   right: 0;
   bottom: 0;
   left: 0;
+  z-index: 1250;
   box-sizing: border-box;
-  background: #f8f9fc;
+  padding-top: 16rpx;
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+  background: #fafafa;
 }
 
 // 透明层，只负责接住「点空白收键盘」，铺满全屏。

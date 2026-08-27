@@ -51,7 +51,10 @@ const {
   chatViewportStyle,
   keyboardHeight,
   voiceKeyboardHeight,
+  composerBottomInset,
+  composerDockOffset,
   syncWindowHeight,
+  setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
@@ -82,6 +85,14 @@ const {
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback();
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts();
 const realtimeTts = useRealtimeTts();
+
+const messageBottomInset = computed(() => {
+  if (shareSheetVisible.value) return shareSheetBottomInset.value;
+  // 快捷入口还在时，导航已经用 margin 把输入栏高度让出来了，列表只需少量空隙
+  if (showQuickPrompts.value) return "16px";
+  return composerBottomInset.value;
+});
+const navOffsetStyle = computed(() => ({ marginBottom: composerDockOffset.value }));
 
 /**
  * TTS 播放：先统一走 GET /chat/tts/{conversationId}/{messageId}，有音频则直接播整段；
@@ -354,7 +365,7 @@ onBeforeUnmount(cancelActiveStream);
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
-        :bottom-inset="shareSheetBottomInset"
+        :bottom-inset="messageBottomInset"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"
@@ -371,6 +382,7 @@ onBeforeUnmount(cancelActiveStream);
       <AiChatNav
         :visible="showQuickPrompts"
         :active-key="navActiveKey"
+        :style="navOffsetStyle"
         @item-click="onNavItemClick"
       />
 
@@ -486,6 +498,7 @@ onBeforeUnmount(cancelActiveStream);
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
+        @dock-height-change="setInputDockHeight"
       />
 
       <AiBadFeedbackSheet
