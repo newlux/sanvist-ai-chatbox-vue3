@@ -51,7 +51,6 @@ const {
   chatViewportStyle,
   keyboardHeight,
   voiceKeyboardHeight,
-  keyboardOverlaysViewport,
   syncWindowHeight,
   setTextInputFocused,
   setVoiceInputFocused,
@@ -489,7 +488,6 @@ onBeforeUnmount(cancelActiveStream);
         v-model="inputText"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
-        :keyboard-overlays-viewport="keyboardOverlaysViewport"
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
