@@ -39,6 +39,8 @@ const props = defineProps({
   hideSuggestion: { type: Boolean, default: false },
   // 分享海报场景：不渲染「输出结果」分组标题
   noAnswerGroup: { type: Boolean, default: false },
+  /** 语音已松手、ASR 尚未返回：展示「识别中...」占位 */
+  asrPending: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -266,7 +268,22 @@ function onNegativeFeedback() {
 
     <view v-if="!isUser || props.content" class="ai-bubble-v2__body">
       <template v-if="isUser">
+        <view v-if="props.asrPending" class="ai-bubble-v2__asr" aria-label="识别中">
+          <text class="ai-bubble-v2__asr-label">
+            {{ props.content }}
+          </text>
+          <text class="ai-bubble-v2__asr-dot">
+            .
+          </text>
+          <text class="ai-bubble-v2__asr-dot">
+            .
+          </text>
+          <text class="ai-bubble-v2__asr-dot">
+            .
+          </text>
+        </view>
         <text
+          v-else
           class="ai-bubble-v2__user-content"
           :selectable="true"
           :user-select="true"
@@ -434,6 +451,29 @@ function onNegativeFeedback() {
   // 允许划词选中复制；长按仍走整条复制
   -webkit-user-select: text;
   user-select: text;
+}
+
+.ai-bubble-v2__asr {
+  display: flex;
+  align-items: baseline;
+  font-size: 28rpx;
+  line-height: 40rpx;
+  color: #ffffff;
+}
+
+.ai-bubble-v2__asr-dot {
+  opacity: 0.25;
+  animation: asr-dot-blink 1.2s ease-in-out infinite;
+}
+
+.ai-bubble-v2__asr-dot:nth-child(2) { animation-delay: 0s; }
+.ai-bubble-v2__asr-dot:nth-child(3) { animation-delay: 0.2s; }
+.ai-bubble-v2__asr-dot:nth-child(4) { animation-delay: 0.4s; }
+
+@keyframes asr-dot-blink {
+  0%, 20% { opacity: 0.2; }
+  40% { opacity: 1; }
+  100% { opacity: 0.2; }
 }
 
 /* 长按用户消息弹出的跟随菜单 */

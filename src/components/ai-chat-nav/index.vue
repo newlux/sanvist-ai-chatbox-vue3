@@ -91,8 +91,10 @@ function onItemTap(item: NavItem) {
 
 <style lang="scss" scoped>
 .ai-chat-nav {
-  position: relative;
-  z-index: 2;
+  position: fixed;
+  right: 0;
+  left: 0;
+  z-index: 1;
   width: 100%;
   box-sizing: border-box;
 }

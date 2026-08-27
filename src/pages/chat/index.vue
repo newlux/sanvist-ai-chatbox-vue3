@@ -42,17 +42,19 @@ const {
   chatViewportStyle,
   keyboardHeight,
   voiceKeyboardHeight,
+  composerBottomInset,
   syncWindowHeight,
+  setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, stopGenerating, cancelActiveStream } = useChatSend();
+const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
 const { onFeedbackChange } = useChatFeedback();
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts();
 const realtimeTts = useRealtimeTts();
 
-/** TTS 播放：先走 GET /chat/tts 整段；整段未就绪时回退到 /speech/tts/stream。 */
-async function onTtsClick(index: number) {
+/** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
+function onTtsClick(index: number) {
   const msg = chatStore.messages[index];
   const messageId = msg?.messageId;
   if (messageId == null || msg?.sessionId == null) return;
@@ -68,8 +70,11 @@ async function onTtsClick(index: number) {
 
   realtimeTts.stop();
   stopHistoryTts();
-  const playedWhole = await onHistoryTtsClick(index);
-  if (!playedWhole && historyTtsMessageId.value == null) void realtimeTts.togglePlay(msg);
+  if (msg.ttsPlaybackMode === "realtime") {
+    void realtimeTts.togglePlay(msg);
+    return;
+  }
+  void onHistoryTtsClick(index);
 }
 const { safeTopPx } = useSafeArea();
 
@@ -155,6 +160,9 @@ function onScrollTop() {
         :scroll-into-view="scrollIntoView"
         :awakening="userStore.awakeningPrompt"
         :pinned-to-bottom="pinnedToBottom"
+        :bottom-inset="composerBottomInset"
+        :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
+        :realtime-tts-playing="realtimeTts.playing.value"
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="sendQuickPrompt"
         @tts-click="onTtsClick"
@@ -170,10 +178,13 @@ function onScrollTop() {
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
+        @recognize-begin="beginAsrPlaceholder"
+        @recognize-fail="discardAsrPlaceholder"
         @input-focus="setTextInputFocused(true)"
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
+        @dock-height-change="setInputDockHeight"
       />
     </view>
   </view>
@@ -198,6 +209,10 @@ function onScrollTop() {
   overflow: hidden;
 }
 
+:deep(.chat-input) {
+  background: #ffffff;
+}
+
 .subagent-header {
   flex: 0 0 auto;
   z-index: 30;
@@ -207,8 +222,6 @@ function onScrollTop() {
   padding: 0 32rpx;
   background: #ffffff;
   box-shadow: 0 8rpx 24rpx rgba(26, 26, 26, 0.06);
-  transform: translate3d(0, var(--chat-header-pan, 0px), 0);
-  will-change: transform;
   // 顶部安全区由内联样式给，这里再兜一层刘海高度
   padding-top: constant(safe-area-inset-top);
   padding-top: env(safe-area-inset-top);
