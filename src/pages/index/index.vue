@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onShow } from "@dcloudio/uni-app";
+import { onLoad, onShow } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
-import { computed, nextTick, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
@@ -32,9 +32,10 @@ const sessionStore = useSessionStore();
 const sharePosterWrap = ref<unknown>(null);
 const navActiveKey = ref("");
 const shareSheetBottomInset = ref("");
+const pageStage = ref<"welcome" | "chat">("welcome");
+let isDemoPage = false;
 
 const {
-  stage,
   messages,
   inputText,
   isLoading,
@@ -186,7 +187,7 @@ function goToChat() {
   } catch (error) {
     logger.error("caught error", error);
   }
-  chatStore.stage = "chat";
+  pageStage.value = "chat";
 }
 
 function backToWelcome() {
@@ -290,13 +291,13 @@ async function loadAwakeningPrompt() {
 }
 
 function syncPageStage() {
-  if (userStore.visitorRole) {
-    chatStore.stage = "chat";
+  if (isDemoPage) {
+    pageStage.value = "chat";
     return;
   }
   try {
     if (!userStore.isVisitor && uni.getStorageSync(AI_ASK_WELCOME_DONE_KEY)) {
-      chatStore.stage = "chat";
+      pageStage.value = "chat";
     }
   } catch (error) {
     logger.error("caught error", error);
@@ -313,9 +314,13 @@ async function onScrollTop() {
   }
 }
 
+onLoad((options) => {
+  isDemoPage = options?.mode === "demo";
+  syncPageStage();
+});
+
 onMounted(() => {
   syncWindowHeight();
-  syncPageStage();
   loadAwakeningPrompt();
 });
 onShow(() => {
@@ -328,7 +333,7 @@ onBeforeUnmount(cancelActiveStream);
 <template>
   <view class="ai-page">
     <!-- 欢迎页 -->
-    <AiWelcome v-if="stage === 'welcome'" @start-chat="goToChat" />
+    <AiWelcome v-if="pageStage === 'welcome'" @start-chat="goToChat" />
 
     <!-- 问答页 -->
     <view v-else class="ai-page__chat" :style="chatViewportStyle">

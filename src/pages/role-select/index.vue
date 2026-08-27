@@ -6,7 +6,7 @@ import { getRoleOptions, getTodayAwakeningPrompt } from "@/api/user-role";
 import iconBoss from "@/assets/img/icon-boss.png";
 import iconOperator from "@/assets/img/icon-operator.png";
 import { VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
-import { useUserStore } from "@/stores";
+import { DEFAULT_CHAT_SCOPE, useChatStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { isGuestRole, setGuestRole } from "@/utils/request";
 
@@ -84,6 +84,7 @@ const FALLBACK_ROLES: ViewRole[] = [
 ];
 
 const userStore = useUserStore();
+const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
 const selectedRole = ref<VisitorRole | null>(null);
 const roles = ref<ViewRole[]>(FALLBACK_ROLES);
 const loading = ref(false);
@@ -100,18 +101,19 @@ async function startChat() {
   if (!selectedRole.value || submitting.value) return;
   submitting.value = true;
   try {
+    chatStore.resetConversation();
     userStore.setAwakeningPrompt(null);
     userStore.setVisitorRole(selectedRole.value);
     setGuestRole(selectedRole.value);
     // 设置身份后立刻预取今日觉醒内容，进入首页即可直接展示
     const result = await getTodayAwakeningPrompt();
     userStore.setAwakeningPrompt(result ?? null);
-    uni.redirectTo({ url: "/pages/index/index" });
+    uni.redirectTo({ url: "/pages/index/index?mode=demo" });
   } catch (error) {
     logger.warn("failed to prefetch awakening prompt", error);
     // 预取失败仍允许进入首页，首页会兜底重试
     userStore.setAwakeningPrompt(null);
-    uni.redirectTo({ url: "/pages/index/index" });
+    uni.redirectTo({ url: "/pages/index/index?mode=demo" });
   } finally {
     submitting.value = false;
   }

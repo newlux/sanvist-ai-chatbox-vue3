@@ -25,7 +25,6 @@ const storeCache = new Map<string, ReturnType<typeof defineChatStore>>();
 
 function defineChatStore(scope: string) {
   return defineStore(`chat:${scope}`, () => {
-    const stage = ref<"welcome" | "chat">("welcome");
     const messages = ref<UiChatMessage[]>([]);
     const inputText = ref("");
     const isLoading = ref(false);
@@ -136,7 +135,6 @@ function defineChatStore(scope: string) {
     }
 
     return {
-      stage,
       messages,
       inputText,
       isLoading,
