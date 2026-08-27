@@ -40,7 +40,9 @@ const {
   chatViewportStyle,
   keyboardHeight,
   voiceKeyboardHeight,
+  composerBottomInset,
   syncWindowHeight,
+  setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
@@ -127,6 +129,7 @@ function onScrollTop() {
         :scroll-into-view="scrollIntoView"
         :awakening="userStore.awakeningPrompt"
         :pinned-to-bottom="pinnedToBottom"
+        :bottom-inset="composerBottomInset"
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="sendQuickPrompt"
         @tts-click="onTtsClick"
@@ -146,6 +149,7 @@ function onScrollTop() {
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
+        @dock-height-change="setInputDockHeight"
       />
     </view>
   </view>
@@ -170,6 +174,10 @@ function onScrollTop() {
   overflow: hidden;
 }
 
+:deep(.chat-input__dock) {
+  background: #ffffff;
+}
+
 .subagent-header {
   flex: 0 0 auto;
   z-index: 30;
@@ -179,8 +187,6 @@ function onScrollTop() {
   padding: 0 32rpx;
   background: #ffffff;
   box-shadow: 0 8rpx 24rpx rgba(26, 26, 26, 0.06);
-  transform: translate3d(0, var(--chat-header-pan, 0px), 0);
-  will-change: transform;
   // 顶部安全区由内联样式给，这里再兜一层刘海高度
   padding-top: constant(safe-area-inset-top);
   padding-top: env(safe-area-inset-top);
