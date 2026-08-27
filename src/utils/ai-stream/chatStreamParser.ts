@@ -4,7 +4,7 @@ import type {
   MessageEndEvent,
 } from "@/api/chat/types";
 
-export type AiBlockType = "answer" | "think" | "suggestion" | "chart" | "table" | "metric";
+export type AiBlockType = "answer" | "think" | "suggestion" | "chart" | "table" | "metric" | "status" | "tool_call" | "error";
 
 /** 深度思考步骤：由 status 事件按 node 聚合而来 */
 export interface ThinkStep {

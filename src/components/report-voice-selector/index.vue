@@ -3,8 +3,11 @@ import type { ReportVoiceOption } from "@/config/report-voices";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import microphoneBadge from "@/assets/img/voice-assistant/report-microphone-badge.png";
 import smallWave from "@/assets/img/voice-assistant/report-small-wave.png";
+import closeIcon from "@/assets/img/voice-assistant/voice-close.svg";
+import ReportStyleSelector from "@/components/report-style-selector/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
-import { REPORT_VOICE_OPTIONS, REPORT_VOICE_STORAGE_KEY } from "@/config/report-voices";
+import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
+import { useReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 
 const emit = defineEmits<{
@@ -14,6 +17,12 @@ const emit = defineEmits<{
 
 // 顶部状态栏安全区（宿主注入 > uni 信息 > CSS 环境变量 > 平台兜底），以 CSS 变量 --safe-top-px 暴露
 const { safeAreaStyle } = useSafeArea();
+
+// 报告听播音色交互：只在风格确认后一起保存，避免留下半完成配置
+const { saveReportVoice } = useReportVoice();
+
+// 两步流程：先选音色（voice），点「下一步」进「选择风格」（style）
+const step = ref<"voice" | "style">("voice");
 
 // 设计稿 940:3 左声波 17 根柱高（px）
 const leftWaveBars = [2, 2, 18, 4, 10, 4, 16, 8, 4, 16, 4, 30, 12, 20, 2, 1, 1];
@@ -52,6 +61,11 @@ function playPreview(index: number) {
   previewAudio.stop();
   previewAudio.src = voice.preview;
   previewAudio.play();
+}
+
+function stopPreview() {
+  previewAudio?.stop();
+  isPlaying.value = false;
 }
 
 onMounted(() => {
@@ -118,115 +132,139 @@ function endDrag() {
   dragDeltaX.value = 0;
 }
 
+// 下一步只进入风格选择；确认前不持久化，用户退出后仍会回到完整配置流程。
 function confirmVoice() {
   const voice = selectedVoice.value;
   if (!voice) return;
-  uni.setStorageSync(REPORT_VOICE_STORAGE_KEY, voice.id);
+  stopPreview();
+  step.value = "style";
+}
+
+// 选择风格完成：风格由子组件保存，音色在此时提交，二者共同构成有效的报告配置。
+function onStyleConfirm() {
+  const voice = selectedVoice.value;
+  if (!voice) return;
+  saveReportVoice(voice);
   emit("confirm", voice);
+}
+
+// 风格页点关闭：退回到音色选择步骤（不离开，不改状态）
+function onStyleBack() {
+  step.value = "voice";
+}
+
+// 关闭：使用 pages.json 中显式注册的首页路径。
+function goHome() {
+  uni.reLaunch({ url: "/pages/index/index" });
 }
 </script>
 
 <template>
   <view class="report-voice-selector" :style="safeAreaStyle">
-    <!-- ② 顶部导航 Top Nav(1024:1)：关闭 + 工作胶囊 + Home -->
-    <view class="report-voice-selector__topbar">
-      <view class="report-voice-selector__close" @tap="emit('close')">
-        <text class="report-voice-selector__close-icon">
-          ×
-        </text>
+    <ReportStyleSelector
+      v-if="step === 'style'"
+      @confirm="onStyleConfirm"
+      @close="onStyleBack"
+    />
+    <template v-else>
+      <!-- ② 顶部导航 Top Nav(1024:1)：关闭 + 工作胶囊 + Home -->
+      <view class="report-voice-selector__topbar">
+        <view class="report-voice-selector__close" @tap="goHome">
+          <image class="report-voice-selector__close-icon" :src="closeIcon" mode="aspectFit" />
+        </view>
+        <view class="report-voice-selector__working">
+          <view class="report-voice-selector__working-inner">
+            <text class="report-voice-selector__dot" />
+            <text class="report-voice-selector__dot" />
+            <text class="report-voice-selector__working-text">
+              Noii 等你选..
+            </text>
+          </view>
+        </view>
+        <view class="report-voice-selector__home-placeholder" />
       </view>
-      <view class="report-voice-selector__working">
-        <view class="report-voice-selector__working-inner">
-          <text class="report-voice-selector__dot" />
-          <text class="report-voice-selector__dot" />
-          <text class="report-voice-selector__working-text">
-            Noii 等你选..
+
+      <!-- ③ 页面标题(940:79) -->
+      <text class="report-voice-selector__title">
+        快来选择你的汇报助手吧
+      </text>
+
+      <!-- ④ 主视觉区(940:56 群组)：人物 + 左右声波 -->
+      <view class="report-voice-selector__hero">
+        <view class="report-voice-selector__wave report-voice-selector__wave--left" aria-hidden="true">
+          <ReportWaveform :bars="leftWaveBars" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
+        </view>
+        <image class="report-voice-selector__hero-image" :src="selectedVoice.hero" mode="aspectFit" />
+        <view class="report-voice-selector__wave report-voice-selector__wave--right" aria-hidden="true">
+          <ReportWaveform :bars="rightWaveBars" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
+        </view>
+      </view>
+
+      <!-- ⑤ 性格信息：名称(940:78) + 说明(940:107) -->
+      <text class="report-voice-selector__name">
+        {{ selectedVoice.name }}
+      </text>
+      <text class="report-voice-selector__description">
+        {{ selectedVoice.description }}
+      </text>
+
+      <!-- ⑥ 正在播报胶囊(940:52) -->
+      <view class="report-voice-selector__broadcast">
+        <image class="report-voice-selector__broadcast-wave" :src="smallWave" mode="scaleToFill" />
+        <text>正在播报</text>
+      </view>
+
+      <!-- ⑦ 轮播区：轨道弧线(940:48) + 5 槽位 -->
+      <view
+        class="report-voice-selector__carousel"
+        @touchstart="startDrag"
+        @touchmove="moveDrag"
+        @touchend="endDrag"
+        @touchcancel="endDrag"
+      >
+        <image class="report-voice-selector__track" src="@/assets/img/voice-assistant/voice-assistant-track.png" mode="scaleToFill" />
+        <view
+          v-for="item in visibleVoices"
+          :key="item.voice.id"
+          class="report-voice-selector__item"
+          :class="{ 'report-voice-selector__item--selected': item.index === selectedIndex }"
+          :style="{
+            left: `${item.x * 2}rpx`,
+            top: `${(item.y - 481) * 2}rpx`,
+            opacity: item.opacity,
+            transform: `translateX(${dragDeltaX * 0.12}rpx)`,
+          }"
+          @tap.stop="selectVoice(item.index)"
+        >
+          <!-- 选中项外层椭圆(940:27)：粉渐变 + 红描边；非选中为空 -->
+          <view v-if="item.index === selectedIndex" class="report-voice-selector__selected-halo" />
+          <!-- 头像容器(940:67/102 等)：椭圆头像 -->
+          <view class="report-voice-selector__avatar-wrap">
+            <image class="report-voice-selector__avatar" :src="item.voice.avatar" mode="aspectFill" />
+          </view>
+          <!-- 选中麦克风徽标(940:28) -->
+          <image v-if="item.index === selectedIndex" class="report-voice-selector__mic" :src="microphoneBadge" mode="scaleToFill" />
+          <!-- 音色标签(940:83 等) -->
+          <text class="report-voice-selector__tag">
+            {{ item.voice.tag }}
           </text>
         </view>
       </view>
-      <view class="report-voice-selector__home-placeholder" />
-    </view>
 
-    <!-- ③ 页面标题(940:79) -->
-    <text class="report-voice-selector__title">
-      快来选择你的汇报助手吧
-    </text>
-
-    <!-- ④ 主视觉区(940:56 群组)：人物 + 左右声波 -->
-    <view class="report-voice-selector__hero">
-      <view class="report-voice-selector__wave report-voice-selector__wave--left" aria-hidden="true">
-        <ReportWaveform :bars="leftWaveBars" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
+      <!-- ⑨ 分页圆点(940:45/46/64) -->
+      <view class="report-voice-selector__dots">
+        <text v-for="index in 3" :key="`dot-${index}`" class="report-voice-selector__page-dot" :class="{ 'report-voice-selector__page-dot--active': index === 2 }" />
       </view>
-      <image class="report-voice-selector__hero-image" :src="selectedVoice.hero" mode="aspectFit" />
-      <view class="report-voice-selector__wave report-voice-selector__wave--right" aria-hidden="true">
-        <ReportWaveform :bars="rightWaveBars" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
+      <!-- ⑩ 可滑动切换(940:31) -->
+      <text class="report-voice-selector__hint">
+        可滑动切换
+      </text>
+
+      <!-- ⑪ CTA 按钮(940:108) -->
+      <view class="report-voice-selector__button" @tap="confirmVoice">
+        <text>下一步</text>
       </view>
-    </view>
-
-    <!-- ⑤ 性格信息：名称(940:78) + 说明(940:107) -->
-    <text class="report-voice-selector__name">
-      {{ selectedVoice.name }}
-    </text>
-    <text class="report-voice-selector__description">
-      {{ selectedVoice.description }}
-    </text>
-
-    <!-- ⑥ 正在播报胶囊(940:52) -->
-    <view class="report-voice-selector__broadcast">
-      <image class="report-voice-selector__broadcast-wave" :src="smallWave" mode="scaleToFill" />
-      <text>正在播报</text>
-    </view>
-
-    <!-- ⑦ 轮播区：轨道弧线(940:48) + 5 槽位 -->
-    <view
-      class="report-voice-selector__carousel"
-      @touchstart="startDrag"
-      @touchmove="moveDrag"
-      @touchend="endDrag"
-      @touchcancel="endDrag"
-    >
-      <image class="report-voice-selector__track" src="@/assets/img/voice-assistant/voice-assistant-track.png" mode="scaleToFill" />
-      <view
-        v-for="item in visibleVoices"
-        :key="item.voice.id"
-        class="report-voice-selector__item"
-        :class="{ 'report-voice-selector__item--selected': item.index === selectedIndex }"
-        :style="{
-          left: `${item.x * 2}rpx`,
-          top: `${(item.y - 481) * 2}rpx`,
-          opacity: item.opacity,
-          transform: `translateX(${dragDeltaX * 0.12}rpx)`,
-        }"
-        @tap.stop="selectVoice(item.index)"
-      >
-        <!-- 选中项外层椭圆(940:27)：粉渐变 + 红描边；非选中为空 -->
-        <view v-if="item.index === selectedIndex" class="report-voice-selector__selected-halo" />
-        <!-- 头像容器(940:67/102 等)：椭圆头像 -->
-        <view class="report-voice-selector__avatar-wrap">
-          <image class="report-voice-selector__avatar" :src="item.voice.avatar" mode="aspectFill" />
-        </view>
-        <!-- 选中麦克风徽标(940:28) -->
-        <image v-if="item.index === selectedIndex" class="report-voice-selector__mic" :src="microphoneBadge" mode="scaleToFill" />
-        <!-- 音色标签(940:83 等) -->
-        <text class="report-voice-selector__tag">
-          {{ item.voice.tag }}
-        </text>
-      </view>
-    </view>
-
-    <!-- ⑨ 分页圆点(940:45/46/64) -->
-    <view class="report-voice-selector__dots">
-      <text v-for="index in 3" :key="`dot-${index}`" class="report-voice-selector__page-dot" :class="{ 'report-voice-selector__page-dot--active': index === 2 }" />
-    </view>
-    <!-- ⑩ 可滑动切换(940:31) -->
-    <text class="report-voice-selector__hint">
-      可滑动切换
-    </text>
-
-    <!-- ⑪ CTA 按钮(940:108) -->
-    <view class="report-voice-selector__button" @tap="confirmVoice">
-      <text>下一步</text>
-    </view>
+    </template>
   </view>
 </template>
 
@@ -243,6 +281,7 @@ function confirmVoice() {
   width: 100%;
   height: 100%;
   padding-top: var(--safe-top-px, 0px);
+  padding-bottom: var(--safe-bottom-px, 0px);
   overflow: hidden;
   color: #1a1a1a;
   background: #fff;
@@ -269,12 +308,11 @@ function confirmVoice() {
   height: 48rpx;
 }
 
-/* 关闭 × ：设计稿 1024:12 为 24×24px=48×48rpx 矢量叉（灰 #999） */
+/* 关闭 × ：设计稿 1024:12 为 24×24px=48×48rpx 矢量叉（灰 #999），用 SVG 图承载 */
 .report-voice-selector__close-icon {
-  color: #999;
-  font-size: 44rpx;
-  font-weight: 300;
-  line-height: 48rpx;
+  display: block;
+  width: 48rpx;
+  height: 48rpx;
 }
 
 /* 工作胶囊(1024:2)：外层渐变描边(2rpx)，内层纯白实底。设计稿 1024:2 为纯白底 + 1.5px 渐变描边。

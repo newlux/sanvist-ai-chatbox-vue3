@@ -2,6 +2,8 @@
 import { onMounted } from "vue";
 import { getRoleOptions } from "@/api/user-role";
 import { LISTEN_REPORT_DATE_KEY, VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
+import { REPORT_STYLE_STORAGE_KEY } from "@/config/report-styles";
+import { REPORT_VOICE_STORAGE_KEY } from "@/config/report-voices";
 import { createLogger } from "@/utils/logger";
 
 defineOptions({ name: "AiWelcomeVisitor" });
@@ -10,8 +12,10 @@ const logger = createLogger("visitor");
 onMounted(async () => {
   try {
     uni.removeStorageSync(LISTEN_REPORT_DATE_KEY);
+    uni.removeStorageSync(REPORT_VOICE_STORAGE_KEY);
+    uni.removeStorageSync(REPORT_STYLE_STORAGE_KEY);
   } catch (error) {
-    logger.warn("failed to clear listen report state", error);
+    logger.warn("failed to clear visitor experience state", error);
   }
 
   try {
