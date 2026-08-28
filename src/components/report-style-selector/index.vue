@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { ReportStyleOption } from "@/config/report-styles";
-import { computed, ref } from "vue";
+import type { ListenBroadcastConfig, ListenBroadcastStyle } from "@/api/listen-broadcast/types";
+import { computed, onMounted, ref } from "vue";
+import { getListenBroadcastConfig, saveListenBroadcastPreference } from "@/api/listen-broadcast";
 import arrowLeftIcon from "@/assets/img/voice-assistant/voice-arrow-left.svg";
 import arrowRightIcon from "@/assets/img/voice-assistant/voice-arrow-right.svg";
 import bubbleGlowIcon from "@/assets/img/voice-assistant/voice-bubble-glow.svg";
@@ -9,61 +10,111 @@ import capsuleGlowOn from "@/assets/img/voice-assistant/voice-capsule-glow-on.pn
 import checkOffIcon from "@/assets/img/voice-assistant/voice-check-off.svg";
 import checkOnIcon from "@/assets/img/voice-assistant/voice-check-on.svg";
 import closeIcon from "@/assets/img/voice-assistant/voice-close.svg";
-import { REPORT_STYLE_OPTIONS } from "@/config/report-styles";
 import { useReportStyle } from "@/hooks/useReportStyle";
-import { useSafeArea } from "@/hooks/useSafeArea";
+import { createLogger } from "@/utils/logger";
+
+const props = defineProps<{
+  voiceCode: string;
+}>();
 
 const emit = defineEmits<{
-  confirm: [style: ReportStyleOption, permissionIds: string[]];
+  confirm: [style: ListenBroadcastStyle, moduleCodes: string[]];
   close: [];
 }>();
 
-const { safeAreaStyle } = useSafeArea();
+const logger = createLogger("report-style-selector");
 const { saveReportStyle } = useReportStyle();
-
-// 当前浏览的风格（carousel 左/右翻页）
+const config = ref<ListenBroadcastConfig | null>(null);
+const loading = ref(true);
+const submitting = ref(false);
 const styleIndex = ref(0);
-const currentStyle = computed(() => REPORT_STYLE_OPTIONS[styleIndex.value]);
-
-// 当前风格下勾选的权限点（按 config 的 defaultChecked 初始化，点击胶囊切换）
 const checkedIds = ref<string[]>([]);
-function resetChecked() {
-  checkedIds.value = (currentStyle.value?.permissions || [])
-    .filter(permission => permission.defaultChecked)
-    .map(permission => permission.id);
-}
-resetChecked();
+const selectionHint = ref("");
 
-function togglePermission(id: string) {
-  if (checkedIds.value.includes(id)) {
-    checkedIds.value = checkedIds.value.filter(item => item !== id);
+const styles = computed(() => config.value?.styles || []);
+const modules = computed(() => config.value?.modules || []);
+const currentStyle = computed(() => styles.value[styleIndex.value]);
+const canConfirm = computed(() => Boolean(currentStyle.value && modules.value.length && !submitting.value));
+
+function resetChecked() {
+  const defaultModules = currentStyle.value?.defaultModules || [];
+  const availableModules = new Set(modules.value.map(item => item.code));
+  checkedIds.value = defaultModules.filter(code => availableModules.has(code));
+}
+
+function toggleModule(code: string) {
+  if (loading.value || submitting.value || !modules.value.some(item => item.code === code)) return;
+  selectionHint.value = "";
+  if (checkedIds.value.includes(code)) {
+    checkedIds.value = checkedIds.value.filter(item => item !== code);
   }
   else {
-    checkedIds.value = [...checkedIds.value, id];
+    checkedIds.value = [...checkedIds.value, code];
   }
 }
 
 function prevStyle() {
-  styleIndex.value = (styleIndex.value - 1 + REPORT_STYLE_OPTIONS.length) % REPORT_STYLE_OPTIONS.length;
+  if (loading.value || submitting.value || styles.value.length < 2) return;
+  styleIndex.value = (styleIndex.value - 1 + styles.value.length) % styles.value.length;
   resetChecked();
 }
 
 function nextStyle() {
-  styleIndex.value = (styleIndex.value + 1) % REPORT_STYLE_OPTIONS.length;
+  if (loading.value || submitting.value || styles.value.length < 2) return;
+  styleIndex.value = (styleIndex.value + 1) % styles.value.length;
   resetChecked();
 }
 
-// 选择：保存风格（id + 勾选权限点），再通知父层
-function confirmStyle() {
+async function confirmStyle() {
   const style = currentStyle.value;
-  if (!style) return;
-  saveReportStyle(style.id, checkedIds.value);
-  emit("confirm", style, checkedIds.value);
+  if (!style || submitting.value) return;
+  if (!props.voiceCode) {
+    selectionHint.value = "音色信息缺失，请返回重新选择";
+    return;
+  }
+  if (!checkedIds.value.length) {
+    selectionHint.value = "请至少选择一项汇报内容";
+    return;
+  }
+  selectionHint.value = "";
+  submitting.value = true;
+  try {
+    await saveListenBroadcastPreference({
+      voiceCode: props.voiceCode,
+      styleCode: style.code,
+      checkedModules: checkedIds.value,
+    });
+    saveReportStyle(style.code, checkedIds.value);
+    emit("confirm", style, checkedIds.value);
+  } catch (error) {
+    logger.error("failed to save listen broadcast preference", error);
+    selectionHint.value = "保存失败，请稍后重试";
+  } finally {
+    submitting.value = false;
+  }
 }
+
+async function loadConfig() {
+  loading.value = true;
+  try {
+    config.value = await getListenBroadcastConfig();
+    styleIndex.value = 0;
+    resetChecked();
+  } catch (error) {
+    logger.error("failed to load listen broadcast config", error);
+    config.value = null;
+  } finally {
+    loading.value = false;
+  }
+}
+
+onMounted(() => {
+  void loadConfig();
+});
 </script>
 
 <template>
-  <view class="report-style-selector" :style="safeAreaStyle">
+  <view class="report-style-selector">
     <!-- ② 顶部导航 Top Nav(940:136)：关闭 + 工作胶囊（不与 Home 重名） -->
     <view class="report-style-selector__topbar">
       <view class="report-style-selector__close" @tap="emit('close')">
@@ -96,32 +147,48 @@ function confirmStyle() {
     <!-- ⑤ 主体光晕 Bubble(1004:72)：风格名 + 说明 + 左右切换 -->
     <view class="report-style-selector__stage">
       <!-- 左切换箭头(940:192 24×24px 图) -->
-      <image class="report-style-selector__switch" :src="arrowLeftIcon" mode="aspectFit" @tap="prevStyle" />
+      <image
+        class="report-style-selector__switch"
+        :class="{ 'report-style-selector__switch--disabled': loading || styles.length < 2 }"
+        :src="arrowLeftIcon"
+        mode="aspectFit"
+        @tap="prevStyle"
+      />
       <!-- 外层渐变描边(1004:69 主风格红色光晕)：纵向线性渐变 #F9FDFF→#FFFFFF→#FFEBEB -->
       <view class="report-style-selector__bubble">
         <!-- 内层白底 + 径向光晕(1004:72 设计稿矢量) -->
         <image class="report-style-selector__bubble-glow" :src="bubbleGlowIcon" mode="aspectFill" />
-        <text class="report-style-selector__style-label">
-          汇报风格
-        </text>
-        <text class="report-style-selector__style-name">
-          {{ currentStyle.name }}
-        </text>
-        <text class="report-style-selector__style-desc">
-          {{ currentStyle.description }}
-        </text>
-        <!-- 分页圆点(940:182 8×6 当前 / 940:183 6×6) -->
-        <view class="report-style-selector__dots">
-          <text
-            v-for="(_, index) in REPORT_STYLE_OPTIONS"
-            :key="`style-dot-${index}`"
-            class="report-style-selector__dot"
-            :class="{ 'report-style-selector__dot--active': index === styleIndex }"
-          />
-        </view>
+        <template v-if="loading">
+          <view class="report-style-selector__skeleton report-style-selector__skeleton--style-label" />
+          <view class="report-style-selector__skeleton report-style-selector__skeleton--style-name" />
+          <view class="report-style-selector__skeleton report-style-selector__skeleton--dots" />
+        </template>
+        <template v-else>
+          <text class="report-style-selector__style-label">
+            汇报风格
+          </text>
+          <text class="report-style-selector__style-name">
+            {{ currentStyle?.name || "" }}
+          </text>
+          <!-- 分页圆点(940:182 8×6 当前 / 940:183 6×6) -->
+          <view class="report-style-selector__dots">
+            <text
+              v-for="(_, index) in styles"
+              :key="`style-dot-${index}`"
+              class="report-style-selector__dot"
+              :class="{ 'report-style-selector__dot--active': index === styleIndex }"
+            />
+          </view>
+        </template>
       </view>
       <!-- 右切换箭头(940:134 24×24px 图) -->
-      <image class="report-style-selector__switch report-style-selector__switch--right" :src="arrowRightIcon" mode="aspectFit" @tap="nextStyle" />
+      <image
+        class="report-style-selector__switch report-style-selector__switch--right"
+        :class="{ 'report-style-selector__switch--disabled': loading || styles.length < 2 }"
+        :src="arrowRightIcon"
+        mode="aspectFit"
+        @tap="nextStyle"
+      />
     </view>
 
     <!-- ⑥ 权限说明(940:154) -->
@@ -131,51 +198,67 @@ function confirmStyle() {
 
     <!-- ⑦ 权限数据胶囊(1004:28/29/42, 1024:21)：扇形排布 -->
     <view class="report-style-selector__permission-stage">
-      <view
-        v-for="(permission, index) in currentStyle.permissions"
-        :key="permission.id"
-        class="report-style-selector__capsule"
-        :class="`report-style-selector__capsule--${index + 1}`"
-        @tap="togglePermission(permission.id)"
-      >
-        <!-- 胶囊底图：选中=设计稿导出粉光玻璃(1004:20)；未选=纯白玻璃(1024:25) -->
-        <image
-          class="report-style-selector__capsule-glow"
-          :src="checkedIds.includes(permission.id) ? capsuleGlowOn : capsuleGlowOff"
-          mode="aspectFill"
+      <template v-if="loading">
+        <view
+          v-for="index in 3"
+          :key="`module-skeleton-${index}`"
+          class="report-style-selector__capsule report-style-selector__capsule--skeleton"
+          :class="`report-style-selector__capsule--${index}`"
         />
-        <image
-          class="report-style-selector__capsule-check"
-          :src="checkedIds.includes(permission.id) ? checkOnIcon : checkOffIcon"
-          mode="aspectFit"
-        />
-        <text class="report-style-selector__capsule-text">
-          {{ permission.label }}
-        </text>
-      </view>
+      </template>
+      <template v-else>
+        <view
+          v-for="(module, index) in modules"
+          :key="module.code"
+          class="report-style-selector__capsule"
+          :class="`report-style-selector__capsule--${index + 1}`"
+          @tap="toggleModule(module.code)"
+        >
+          <!-- 胶囊底图：选中=设计稿导出粉光玻璃(1004:20)；未选=纯白玻璃(1024:25) -->
+          <image
+            class="report-style-selector__capsule-glow"
+            :src="checkedIds.includes(module.code) ? capsuleGlowOn : capsuleGlowOff"
+            mode="aspectFill"
+          />
+          <image
+            class="report-style-selector__capsule-check"
+            :src="checkedIds.includes(module.code) ? checkOnIcon : checkOffIcon"
+            mode="aspectFit"
+          />
+          <text class="report-style-selector__capsule-text">
+            {{ module.name }}
+          </text>
+        </view>
+      </template>
     </view>
 
     <!-- ⑧ CTA 按钮(940:132) -->
-    <view class="report-style-selector__button" @tap="confirmStyle">
-      <text>选择</text>
+    <text v-if="selectionHint" class="report-style-selector__selection-hint">
+      {{ selectionHint }}
+    </text>
+    <view
+      class="report-style-selector__button"
+      :class="{ 'report-style-selector__button--disabled': !canConfirm }"
+      @tap="canConfirm && confirmStyle()"
+    >
+      <text>{{ loading ? "加载中" : submitting ? "保存中" : "选择" }}</text>
     </view>
   </view>
 </template>
 
 <style lang="scss" scoped>
-/* —— ① 根容器(940:130 画布 375×812，白底，flex 纵向流，内容居中) —— */
+/* —— ① 根容器(940:130 画布 375×812，白底，flex 纵向流，内容居中) ——
+   普通文档流（非 fixed 覆盖层），由外层 subagent-page flex 撑满；
+   relative 仅为内部 absolute 子元素提供定位参照。顶部安全区由外层 statusbar 占位统一负责 */
 .report-style-selector {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
+  position: relative;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
   width: 100%;
-  height: 100%;
-  padding-top: var(--safe-top-px, 0px);
-  padding-bottom: var(--safe-bottom-px, 0px);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
   color: #1a1a1a;
   background: #fff;
@@ -323,6 +406,37 @@ function confirmStyle() {
   height: 100%;
 }
 
+@keyframes report-style-selector-skeleton-pulse {
+  0%, 100% { opacity: 0.42; }
+  50% { opacity: 0.9; }
+}
+
+.report-style-selector__skeleton {
+  position: relative;
+  z-index: 1;
+  background: rgb(89 67 66 / 14%);
+  border-radius: 999rpx;
+  animation: report-style-selector-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.report-style-selector__skeleton--style-label {
+  width: 112rpx;
+  height: 28rpx;
+}
+
+.report-style-selector__skeleton--style-name {
+  width: 210rpx;
+  height: 60rpx;
+  margin-top: 30rpx;
+}
+
+.report-style-selector__skeleton--dots {
+  position: absolute;
+  bottom: 46rpx;
+  width: 72rpx;
+  height: 12rpx;
+}
+
 /* 汇报风格标签(940:191)：14px=28rpx，Inter Regular，#594342 */
 .report-style-selector__style-label {
   position: relative;
@@ -390,6 +504,10 @@ function confirmStyle() {
 
 .report-style-selector__switch--right { right: 54rpx; }
 .report-style-selector__switch:not(.report-style-selector__switch--right) { left: 54rpx; }
+.report-style-selector__switch--disabled {
+  pointer-events: none;
+  opacity: 0.35;
+}
 
 /* —— ⑥ 权限说明(940:154)：14px=28rpx，Inter Regular，#999999；与主体底(382)间距=410-382=28px=56rpx —— */
 .report-style-selector__permission-hint {
@@ -433,6 +551,12 @@ function confirmStyle() {
     inset 13px 19px 31px rgb(173 173 173 / 25%);
 }
 
+.report-style-selector__capsule--skeleton {
+  background: #f1f3f6;
+  box-shadow: none;
+  animation: report-style-selector-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
 /* 胶囊底图：选中=粉光玻璃(1004:20)、未选=纯白玻璃(1024:25)，铺满并裁成圆形 */
 .report-style-selector__capsule-glow {
   position: absolute;
@@ -469,6 +593,14 @@ function confirmStyle() {
 
 /* —— ⑧ CTA 按钮(940:132 319×56px=638×112rpx)：白底、radius 28px、红字 #C8201E；与胶囊底(677)间距=713-677=36px=72rpx；
    box-shadow(px)：0 -2px 21px rgba(0,0,0,0.06) —— */
+.report-style-selector__selection-hint {
+  height: 36rpx;
+  margin-top: 36rpx;
+  color: #c8201e;
+  font-size: 26rpx;
+  line-height: 36rpx;
+}
+
 .report-style-selector__button {
   display: flex;
   align-items: center;
@@ -483,7 +615,15 @@ function confirmStyle() {
   line-height: 42rpx;
   background: #fff;
   border-radius: 56rpx;
-  box-shadow: 0 -2px 21px rgb(0 0 0 / 6%);
+  box-shadow: 0 -2px 21px rgb(0 0 0 / 6.1%);
   flex-shrink: 0;
+  /* 底部安全区：改由按钮自身承担，避免贴底按钮被系统导航栏/手势条遮挡。 */
+  margin-bottom: var(--safe-bottom-px, 0px);
+}
+
+.report-style-selector__button--disabled {
+  pointer-events: none;
+  color: #999;
+  opacity: 0.6;
 }
 </style>

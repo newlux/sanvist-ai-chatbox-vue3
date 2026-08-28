@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { getTodayListenBroadcast } from "@/api/listen-broadcast";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
@@ -11,7 +13,7 @@ import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
-import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
+import { AI_ASK_WELCOME_DONE_KEY, LISTEN_REPORT_DATE_KEY } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
@@ -33,6 +35,8 @@ const sharePosterWrap = ref<unknown>(null);
 const navActiveKey = ref("");
 const shareSheetBottomInset = ref("");
 const pageStage = ref<"welcome" | "chat">("welcome");
+const listenBroadcast = ref<TodayListenBroadcast | null>(null);
+const listenBroadcastLoading = ref(false);
 let isDemoPage = false;
 
 const {
@@ -203,6 +207,12 @@ function goToChat() {
 
 function backToWelcome() {
   if (userStore.isVisitor) {
+    try {
+      uni.removeStorageSync(LISTEN_REPORT_DATE_KEY);
+    } catch (error) {
+      logger.warn("failed to reset visitor listen report state", error);
+    }
+    listenBroadcast.value = null;
     userStore.setVisitorRole(null);
     userStore.setUserId("");
   }
@@ -301,6 +311,19 @@ async function loadAwakeningPrompt() {
   }
 }
 
+async function loadTodayListenBroadcast() {
+  if (!isDemoPage) return;
+  listenBroadcastLoading.value = true;
+  try {
+    listenBroadcast.value = await getTodayListenBroadcast();
+  } catch (error) {
+    logger.warn("failed to load today listen broadcast", error);
+    listenBroadcast.value = null;
+  } finally {
+    listenBroadcastLoading.value = false;
+  }
+}
+
 function syncPageStage() {
   if (isDemoPage) {
     pageStage.value = "chat";
@@ -328,6 +351,7 @@ async function onScrollTop() {
 onLoad((options) => {
   isDemoPage = options?.mode === "demo";
   syncPageStage();
+  void loadTodayListenBroadcast();
 });
 
 onMounted(() => {
@@ -382,6 +406,8 @@ onBeforeUnmount(cancelActiveStream);
         :bottom-inset="messageBottomInset"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
+        :listen-broadcast="listenBroadcast"
+        :listen-broadcast-loading="listenBroadcastLoading"
         :pinned-to-bottom="pinnedToBottom"
         :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
         :realtime-tts-playing="realtimeTts.playing.value"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ListenBroadcastStyle } from "@/api/listen-broadcast/types";
 import type { ReportVoiceOption } from "@/config/report-voices";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import microphoneBadge from "@/assets/img/voice-assistant/report-microphone-badge.png";
@@ -8,21 +9,18 @@ import ReportStyleSelector from "@/components/report-style-selector/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
 import { useReportVoice } from "@/hooks/useReportVoice";
-import { useSafeArea } from "@/hooks/useSafeArea";
 
 const emit = defineEmits<{
-  confirm: [voice: ReportVoiceOption];
+  confirm: [voice: ReportVoiceOption, style: ListenBroadcastStyle, moduleCodes: string[]];
   close: [];
 }>();
-
-// 顶部状态栏安全区（宿主注入 > uni 信息 > CSS 环境变量 > 平台兜底），以 CSS 变量 --safe-top-px 暴露
-const { safeAreaStyle } = useSafeArea();
 
 // 报告听播音色交互：只在风格确认后一起保存，避免留下半完成配置
 const { saveReportVoice } = useReportVoice();
 
 // 两步流程：先选音色（voice），点「下一步」进「选择风格」（style）
 const step = ref<"voice" | "style">("voice");
+const confirmedVoiceCode = ref("");
 
 // 设计稿 940:3 左声波 17 根柱高（px）
 const leftWaveBars = [2, 2, 18, 4, 10, 4, 16, 8, 4, 16, 4, 30, 12, 20, 2, 1, 1];
@@ -136,16 +134,17 @@ function endDrag() {
 function confirmVoice() {
   const voice = selectedVoice.value;
   if (!voice) return;
+  confirmedVoiceCode.value = voice.id;
   stopPreview();
   step.value = "style";
 }
 
 // 选择风格完成：风格由子组件保存，音色在此时提交，二者共同构成有效的报告配置。
-function onStyleConfirm() {
+function onStyleConfirm(style: ListenBroadcastStyle, moduleCodes: string[]) {
   const voice = selectedVoice.value;
   if (!voice) return;
   saveReportVoice(voice);
-  emit("confirm", voice);
+  emit("confirm", voice, style, moduleCodes);
 }
 
 // 风格页点关闭：退回到音色选择步骤（不离开，不改状态）
@@ -160,9 +159,10 @@ function goHome() {
 </script>
 
 <template>
-  <view class="report-voice-selector" :style="safeAreaStyle">
+  <view class="report-voice-selector">
     <ReportStyleSelector
       v-if="step === 'style'"
+      :voice-code="confirmedVoiceCode"
       @confirm="onStyleConfirm"
       @close="onStyleBack"
     />
@@ -269,19 +269,17 @@ function goHome() {
 </template>
 
 <style lang="scss" scoped>
-/* 根容器：整屏、白底、flex 纵向流，内容居中（页面级不再用 absolute） */
+/* 根容器：普通文档流（非 fixed 覆盖层），由外层 subagent-page flex 撑满；
+   relative 仅为内部 absolute 子元素提供定位参照。顶部安全区由外层 statusbar 占位统一负责 */
 .report-voice-selector {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
+  position: relative;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
   width: 100%;
-  height: 100%;
-  padding-top: var(--safe-top-px, 0px);
-  padding-bottom: var(--safe-bottom-px, 0px);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
   color: #1a1a1a;
   background: #fff;
@@ -630,5 +628,8 @@ function goHome() {
   border-radius: 56rpx;
   box-shadow: 0 -2px 21px rgb(0 0 0 / 6.1%);
   flex-shrink: 0;
+  /* 底部安全区：改由按钮自身承担。优先用真实 inset；安卓 WebView 读不到时为 0，
+     兜底 48px（96rpx）避免贴底的「下一步」被系统导航栏/手势条遮挡。 */
+  margin-bottom: max(var(--safe-bottom-px, 0px), 48px);
 }
 </style>
