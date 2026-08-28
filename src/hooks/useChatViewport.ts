@@ -38,7 +38,9 @@ export function useChatViewport() {
   let inputFocused = false;
   let usingFallbackHeight = false;
   let nativeKeyboardSupported = false;
+  let h5KeyboardAuthoritative = false;
   let disposeNativeKeyboard: (() => void) | null = null;
+  let disposeH5Keyboard: (() => void) | null = null;
   let baseViewportHeight = 0;
 
   const chatViewportStyle = computed(() =>
@@ -79,7 +81,8 @@ export function useChatViewport() {
     return limit > 0 && raw > limit ? limit : raw;
   }
 
-  function applyKeyboardHeight(height: unknown) {
+  function applyKeyboardHeight(height: unknown, fromNative = false) {
+    if (h5KeyboardAuthoritative && !fromNative) return;
     const next = normalizeKeyboardHeight(height);
     if (next > 0) usingFallbackHeight = false;
     if (collapseTimer) {
@@ -197,6 +200,7 @@ export function useChatViewport() {
     if (measuredKeyboardHeight.value <= 0) return;
     usingFallbackHeight = false;
     inputFocused = false;
+    h5KeyboardAuthoritative = false;
     measuredKeyboardHeight.value = 0;
     focusOwner.value = "none";
     try {
@@ -223,11 +227,48 @@ export function useChatViewport() {
       forceCollapse();
       return;
     }
-    applyKeyboardHeight(height);
+    h5KeyboardAuthoritative = true;
+    applyKeyboardHeight(height, true);
+  }
+
+  function onH5KeyboardChange(payload: {
+    visible?: boolean;
+    top?: number | string;
+    height?: number | string;
+    viewportHeight?: number | string;
+    unit?: string;
+  }) {
+    logger.info("[h5KeyboardChange] 收到回调", payload);
+    if (typeof payload?.visible !== "boolean") {
+      logger.warn("[h5KeyboardChange] payload 缺少 visible 字段，直接忽略", payload);
+      return;
+    }
+    nativeKeyboardSupported = true;
+    if (!payload.visible) {
+      logger.info("[h5KeyboardChange] 键盘收起，forceCollapse");
+      forceCollapse();
+      return;
+    }
+
+    const top = Number(payload.top);
+    const viewportHeight = Number(payload.viewportHeight);
+    const reportedHeight = Number(payload.height);
+    const height = Number.isFinite(top) && Number.isFinite(viewportHeight)
+      ? viewportHeight - top
+      : reportedHeight;
+    if (height > 0) {
+      logger.info("[h5KeyboardChange] 计算键盘高度", { top, viewportHeight, reportedHeight, height });
+      pinLayoutViewport();
+      h5KeyboardAuthoritative = true;
+      applyKeyboardHeight(height, true);
+    } else {
+      logger.info("[h5KeyboardChange] 计算键盘高度为 0，不处理", { top, viewportHeight, reportedHeight });
+    }
   }
 
   function onKeyboardHeightChange(event: { height?: number }) {
-    applyKeyboardHeight(event?.height);
+    if (Number(event?.height) > 0) h5KeyboardAuthoritative = true;
+    applyKeyboardHeight(event?.height, Number(event?.height) > 0);
   }
 
   function resetKeyboardHeight() {
@@ -268,6 +309,7 @@ export function useChatViewport() {
       document.addEventListener("touchstart", onDocumentTouchStart, { passive: true });
       window.visualViewport?.addEventListener("resize", onViewportChange);
       window.visualViewport?.addEventListener("scroll", onViewportChange);
+      disposeH5Keyboard = onNativeEvent("h5KeyboardChange", onH5KeyboardChange);
     }
     disposeNativeKeyboard = onNativeEvent("keyboardHeightChange", onNativeKeyboardHeight);
   });
@@ -287,6 +329,8 @@ export function useChatViewport() {
     }
     disposeNativeKeyboard?.();
     disposeNativeKeyboard = null;
+    disposeH5Keyboard?.();
+    disposeH5Keyboard = null;
   });
 
   return {

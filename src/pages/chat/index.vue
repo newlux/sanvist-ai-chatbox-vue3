@@ -1,19 +1,18 @@
 <script setup lang="ts">
+import type { ListenBroadcastStyle, PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
+import type { ReportVoiceOption } from "@/config/report-voices";
 import { onLoad, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { useI18n } from "vue-i18n";
+import { computed, onBeforeUnmount, ref } from "vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
-import AiMessageList from "@/components/ai-message-list/index.vue";
+import ReportBroadcastPlayer from "@/components/report-broadcast-player/index.vue";
 import ReportVoiceSelector from "@/components/report-voice-selector/index.vue";
-import { REPORT_VOICE_STORAGE_KEY } from "@/config/report-voices";
-import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
-import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
-import { useRealtimeTts } from "@/hooks/useRealtimeTts";
+import { loadReportStyle } from "@/hooks/useReportStyle";
+import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { provideChatScope, useChatStore, useUserStore } from "@/stores";
+import { provideChatScope, useChatStore } from "@/stores";
 
 /**
  * 智能体会话页（听汇报 / 任务协同）。
@@ -23,72 +22,48 @@ import { provideChatScope, useChatStore, useUserStore } from "@/stores";
  */
 defineOptions({ name: "SubagentChatPage" });
 
-const { t } = useI18n();
-// 智能体会话独立成域：与首页各持一份消息，来回切换互不干扰
+// 智能体会话独立成域：底部输入栏仍使用独立会话状态。
 const chatScope = provideChatScope("subagent");
 const chatStore = useChatStore(chatScope);
-const userStore = useUserStore();
+const { inputText, isLoading } = storeToRefs(chatStore);
+const { safeAreaStyle, safeTopPx } = useSafeArea();
 
-const {
-  messages,
-  inputText,
-  isLoading,
-  aiSessionId,
-  scrollIntoView,
-  pinnedToBottom,
-} = storeToRefs(chatStore);
+// 顶部状态栏占位：高度随真实机型状态栏高度，避免内容被顶到状态栏底下
+const statusbarStyle = computed(() => ({
+  height: `${safeTopPx.value}px`,
+}));
 
 const {
   chatViewportStyle,
   keyboardHeight,
   voiceKeyboardHeight,
-  composerBottomInset,
+  composerDockOffset,
   syncWindowHeight,
   setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
-const { onFeedbackChange } = useChatFeedback();
-const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts();
-const realtimeTts = useRealtimeTts();
+const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
 
-/** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
-function onTtsClick(index: number) {
-  const msg = chatStore.messages[index];
-  const messageId = msg?.messageId;
-  if (messageId == null || msg?.sessionId == null) return;
-
-  if (realtimeTts.playingMessageId.value === messageId) {
-    realtimeTts.stop();
-    return;
-  }
-  if (historyTtsMessageId.value === messageId) {
-    stopHistoryTts();
-    return;
-  }
-
-  realtimeTts.stop();
-  stopHistoryTts();
-  if (msg.ttsPlaybackMode === "realtime") {
-    void realtimeTts.togglePlay(msg);
-    return;
-  }
-  void onHistoryTtsClick(index);
-}
-const { safeTopPx } = useSafeArea();
-
-const pageTitle = ref("");
 const isReport = ref(false);
 const showReportVoiceSelector = ref(false);
-const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
+const reportBroadcastParams = ref<PlayListenBroadcastParams | null>(null);
+const reportBroadcastPortrait = ref("");
 
-function hasSavedReportVoice() {
-  try {
-    return Boolean(uni.getStorageSync(REPORT_VOICE_STORAGE_KEY));
-  } catch {
-    return false;
+function restoreReportBroadcast() {
+  const voice = loadReportVoice();
+  const style = loadReportStyle();
+  if (!voice || !style || !style.moduleCodes.length) {
+    showReportVoiceSelector.value = true;
+    return;
   }
+  reportBroadcastParams.value = {
+    voice: voice.id,
+    styleCode: style.styleCode,
+    checkedModules: style.moduleCodes,
+  };
+  reportBroadcastPortrait.value = voice.hero;
+  showReportVoiceSelector.value = false;
 }
 
 function closeReportVoiceSelector() {
@@ -96,18 +71,25 @@ function closeReportVoiceSelector() {
   uni.navigateBack({ delta: 1 });
 }
 
-function confirmReportVoice() {
+function confirmReportVoice(voice: ReportVoiceOption, style: ListenBroadcastStyle, moduleCodes: string[]) {
+  reportBroadcastParams.value = {
+    voice: voice.id,
+    styleCode: style.code,
+    checkedModules: moduleCodes,
+  };
+  reportBroadcastPortrait.value = voice.hero;
   showReportVoiceSelector.value = false;
 }
-const headerStyle = computed(() => ({ paddingTop: `${safeTopPx.value}px` }));
 
-watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
+function closeReportBroadcast() {
+  reportBroadcastParams.value = null;
+  onBack();
+}
 
 onLoad((query?: Record<string, string>) => {
   syncWindowHeight();
-  pageTitle.value = String(query?.title || "AI 助手");
   isReport.value = String(query?.subagent || "") === "report";
-  showReportVoiceSelector.value = isReport.value && !hasSavedReportVoice();
+  if (isReport.value) restoreReportBroadcast();
   // 每次进来都是全新一轮
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
@@ -125,52 +107,26 @@ onBeforeUnmount(cancelActiveStream);
 function onBack() {
   uni.navigateBack({ delta: 1 });
 }
-
-function onScrollTop() {
-  // 预留：加载更多历史消息
-}
 </script>
 
 <template>
-  <view class="subagent-page">
+  <view class="subagent-page" :style="safeAreaStyle">
+    <!-- 状态栏占位：动态读取真实机型状态栏高度 -->
+    <view class="chat-header__statusbar" :style="statusbarStyle" />
     <ReportVoiceSelector
-      v-if="showReportVoiceSelector"
+      v-if="isReport && showReportVoiceSelector"
       @confirm="confirmReportVoice"
       @close="closeReportVoiceSelector"
     />
     <view v-else class="subagent-page__chat" :style="chatViewportStyle">
-      <view class="subagent-header" :style="headerStyle">
-        <view class="subagent-header__back" @tap="onBack">
-          <text class="subagent-header__back-text">
-            ‹
-          </text>
-        </view>
-        <text class="subagent-header__title">
-          {{ pageTitle }}
-        </text>
-        <view class="subagent-header__placeholder" />
-      </view>
-
-      <AiMessageList
-        :key="aiSessionId || 'subagent-conversation'"
-        :messages="messages"
-        :quick-prompts="localizedQuickPrompts"
-        :show-quick-prompts="false"
-        :show-quick-list="false"
-        :scroll-into-view="scrollIntoView"
-        :awakening="userStore.awakeningPrompt"
-        :pinned-to-bottom="pinnedToBottom"
-        :bottom-inset="composerBottomInset"
-        :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
-        :realtime-tts-playing="realtimeTts.playing.value"
-        @quick-prompt="sendQuickPrompt"
-        @suggestion-tap="sendQuickPrompt"
-        @tts-click="onTtsClick"
-        @feedback-change="onFeedbackChange"
-        @scroll-top="onScrollTop"
-        @pinned-change="chatStore.setPinnedToBottom"
+      <!-- 听汇报专用 SSE 播放视图，不复用普通对话消息列表 -->
+      <ReportBroadcastPlayer
+        v-if="isReport && reportBroadcastParams"
+        :params="reportBroadcastParams"
+        :portrait="reportBroadcastPortrait"
+        :dock-offset="composerDockOffset"
+        @close="closeReportBroadcast"
       />
-
       <AiChatInput
         v-model="inputText"
         :is-loading="isLoading"
@@ -192,63 +148,33 @@ function onScrollTop() {
 
 <style lang="scss" scoped>
 .subagent-page {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   height: 100%;
   box-sizing: border-box;
-  background: #f2f4f8;
+  background: #ffffff;
   font-family: PingFang SC;
   overflow: hidden;
+}
+
+/* 顶部状态栏占位：撑开安全区，避免页面内容顶到状态栏底下 */
+.chat-header__statusbar {
+  width: 100%;
+  flex: 0 0 auto;
+  background: transparent;
 }
 
 .subagent-page__chat {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
-  height: 100%;
   background: #ffffff;
   overflow: hidden;
 }
 
 :deep(.chat-input) {
   background: #ffffff;
-}
-
-.subagent-header {
-  flex: 0 0 auto;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 32rpx;
-  background: #ffffff;
-  box-shadow: 0 8rpx 24rpx rgba(26, 26, 26, 0.06);
-  // 顶部安全区由内联样式给，这里再兜一层刘海高度
-  padding-top: constant(safe-area-inset-top);
-  padding-top: env(safe-area-inset-top);
-  min-height: 96rpx;
-}
-
-.subagent-header__back,
-.subagent-header__placeholder {
-  width: 64rpx;
-  height: 64rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.subagent-header__back-text {
-  font-size: 56rpx;
-  line-height: 56rpx;
-  color: #1a1a1a;
-}
-
-.subagent-header__title {
-  flex: 1;
-  min-width: 0;
-  font-size: 32rpx;
-  font-weight: 600;
-  color: #1a1a1a;
-  text-align: center;
 }
 </style>

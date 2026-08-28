@@ -111,6 +111,7 @@ const groupedSessionList = computed(() => {
 const statusbarStyle = computed(() => ({
   height: `${safeTopPx.value}px`,
 }));
+
 const historyDrawerStyle = computed(() => ({
   paddingTop: `calc(${safeTopPx.value}px + 32rpx)`,
 }));

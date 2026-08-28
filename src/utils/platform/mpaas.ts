@@ -166,12 +166,16 @@ export function onNativeEvent(eventName: string, handler: (payload: BridgeResult
   function bindBridgeEvent() {
     if (disposed) return;
     const bridge = readBridge() as EventBridge | undefined;
-    if (!bridge || bridge === subscribedBridge || typeof bridge.on !== "function") return;
+    if (!bridge || bridge === subscribedBridge || typeof bridge.on !== "function") {
+      logger.debug("[mpaas] 未通过 bridge.on 订阅", { eventName, hasBridge: Boolean(bridge), hasOn: typeof bridge?.on === "function" });
+      return;
+    }
     if (typeof subscribedBridge?.off === "function") {
       subscribedBridge.off(eventName, bridgeHandler);
     }
     subscribedBridge = bridge;
     bridge.on(eventName, bridgeHandler);
+    logger.info(`[mpaas] 已通过 AlipayJSBridge.on 订阅 ${eventName}`);
   }
 
   bindBridgeEvent();

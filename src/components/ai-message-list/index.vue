@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { UiChatMessage } from "@/stores/chat-types";
 import moment from "moment";
+import { computed, ref, watch } from "vue";
 import { LISTEN_REPORT_DATE_KEY } from "@/config";
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
 
@@ -53,6 +55,14 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  listenBroadcast: {
+    type: Object as () => TodayListenBroadcast | null,
+    default: null,
+  },
+  listenBroadcastLoading: {
+    type: Boolean,
+    default: false,
+  },
   realtimeTtsMessageKey: {
     type: null,
     default: null,
@@ -92,6 +102,13 @@ const overview = computed(() => {
   const greeting = data.userName ? `${data.userName}，你好。` : FALLBACK_OVERVIEW.greeting;
   const summary = data.content || FALLBACK_OVERVIEW.summary;
   return { greeting, summary };
+});
+
+const listenBroadcastTitle = computed(() => props.listenBroadcast?.title?.trim() || "");
+const listenBroadcastDate = computed(() => {
+  const bizDate = props.listenBroadcast?.bizDate;
+  const date = moment(bizDate, "YYYY-MM-DD", true);
+  return date.isValid() ? date.format("MMDD") : "";
 });
 function resolvePositive(message: UiChatMessage) {
   if (typeof message?.positive === "boolean") return message.positive;
@@ -163,8 +180,8 @@ function onTtsClick(index) {
 
 function onSelectToggle(index) {
   const list = Array.isArray(props.messages) ? props.messages : [];
-  const message = list[index] || {};
-  if (isMessageDisabled(index, message)) return;
+  const message = list[index];
+  if (!message || isMessageDisabled(index, message)) return;
 
   const group = message.role === "ai"
     ? findConversationGroup(index)
@@ -201,19 +218,21 @@ function getListenReportDate() {
 
 function isListenedToday() {
   const listenedDate = getListenReportDate();
-  if (!listenedDate) return false;
-
-  const tomorrow = moment().add(1, "day").startOf("day");
-  return moment(listenedDate, "YYYY-MM-DD", true).isSame(tomorrow, "day");
+  const bizDate = props.listenBroadcast?.bizDate;
+  return Boolean(listenedDate && bizDate && listenedDate === bizDate);
 }
 
 const listenedReport = ref(isListenedToday());
 
-/** “去收听”：首次点击标记当天已收听，并跳转到汇报会话页。 */
+watch(() => props.listenBroadcast?.bizDate, () => {
+  listenedReport.value = isListenedToday();
+}, { immediate: true });
+
+/** “去收听”：首次点击标记当前早报已收听，并跳转到汇报会话页。 */
 function onListenReport() {
   if (!listenedReport.value) {
     try {
-      uni.setStorageSync(LISTEN_REPORT_DATE_KEY, moment().add(1, "day").format("YYYY-MM-DD"));
+      uni.setStorageSync(LISTEN_REPORT_DATE_KEY, props.listenBroadcast?.bizDate || "");
     } catch {
       // 本地存储不可用时仍允许进入汇报会话。
     }
@@ -239,8 +258,27 @@ const listPadStyle = computed(() =>
     >
       <view class="msg-list__inner" :style="listPadStyle">
         <view v-if="showQuickPrompts" class="business-overview">
-          <view v-if="awakeningLoading" class="business-overview__loading">
-            <view class="business-overview__spinner" />
+          <!-- 首页问候、摘要、早报与问题列表加载骨架 -->
+          <view v-if="awakeningLoading" class="business-overview__skeleton">
+            <view class="business-overview__skeleton-title business-overview__skeleton-block" />
+            <view class="business-overview__skeleton-summary">
+              <view class="business-overview__skeleton-line business-overview__skeleton-block" />
+              <view class="business-overview__skeleton-line business-overview__skeleton-line--short business-overview__skeleton-block" />
+            </view>
+            <view v-if="showQuickList" class="business-overview__report business-overview__report--skeleton">
+              <view class="business-overview__skeleton-sound business-overview__skeleton-block" />
+              <view class="business-overview__skeleton-report-info">
+                <view class="business-overview__skeleton-report-title business-overview__skeleton-block" />
+                <view class="business-overview__skeleton-report-date business-overview__skeleton-block" />
+              </view>
+              <view class="business-overview__skeleton-listen business-overview__skeleton-block" />
+            </view>
+            <view v-if="showQuickList" class="business-overview__skeleton-questions">
+              <view class="business-overview__skeleton-question-title business-overview__skeleton-block" />
+              <view v-for="index in 2" :key="`question-skeleton-${index}`" class="business-overview__skeleton-question">
+                <view class="business-overview__skeleton-question-line business-overview__skeleton-block" />
+              </view>
+            </view>
           </view>
           <template v-else>
             <text class="business-overview__title">
@@ -250,8 +288,20 @@ const listPadStyle = computed(() =>
               {{ overview.summary }}
             </text>
 
+            <!-- 早报接口独立请求时保留 120rpx 卡片骨架 -->
             <view
-              v-if="showQuickList"
+              v-if="showQuickList && listenBroadcastLoading"
+              class="business-overview__report business-overview__report--skeleton"
+            >
+              <view class="business-overview__skeleton-sound business-overview__skeleton-block" />
+              <view class="business-overview__skeleton-report-info">
+                <view class="business-overview__skeleton-report-title business-overview__skeleton-block" />
+                <view class="business-overview__skeleton-report-date business-overview__skeleton-block" />
+              </view>
+              <view class="business-overview__skeleton-listen business-overview__skeleton-block" />
+            </view>
+            <view
+              v-else-if="showQuickList && listenBroadcast"
               class="business-overview__report"
             >
               <view class="business-overview__sound" aria-hidden="true">
@@ -261,10 +311,10 @@ const listPadStyle = computed(() =>
               </view>
               <view class="business-overview__report-info">
                 <text class="business-overview__report-title">
-                  经营概览
+                  {{ listenBroadcastTitle }}
                 </text>
                 <text class="business-overview__report-date">
-                  （0806 早报）
+                  （{{ listenBroadcastDate }} 早报）
                 </text>
               </view>
               <view
@@ -357,25 +407,105 @@ const listPadStyle = computed(() =>
   padding: 148rpx 40rpx 0;
 }
 
-.business-overview__loading {
+@keyframes business-overview-skeleton-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+}
+
+.business-overview__skeleton {
   display: flex;
+  flex-direction: column;
+}
+
+.business-overview__skeleton-block {
+  background: #f2f3f5;
+  border-radius: 8rpx;
+  animation: business-overview-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.business-overview__skeleton-title {
+  width: 360rpx;
+  height: 68rpx;
+}
+
+.business-overview__skeleton-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  padding-top: 24rpx;
+}
+
+.business-overview__skeleton-line {
+  width: 100%;
+  height: 32rpx;
+}
+
+.business-overview__skeleton-line--short {
+  width: 72%;
+}
+
+.business-overview__report--skeleton {
+  pointer-events: none;
+}
+
+.business-overview__skeleton-sound {
+  width: 40rpx;
+  height: 40rpx;
+  flex: 0 0 40rpx;
+  border-radius: 20rpx;
+}
+
+.business-overview__skeleton-report-info {
+  display: flex;
+  flex: 1;
   align-items: center;
-  justify-content: center;
-  min-height: 220rpx;
+  gap: 36rpx;
+  padding-left: 32rpx;
 }
 
-.business-overview__spinner {
-  width: 56rpx;
-  height: 56rpx;
-  border: 6rpx solid rgb(95 103 117 / 20%);
-  border-top-color: #c8201e;
-  border-radius: 50%;
-  animation: business-overview-spin 0.9s linear infinite;
+.business-overview__skeleton-report-title {
+  width: 150rpx;
+  height: 36rpx;
 }
 
-@keyframes business-overview-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+.business-overview__skeleton-report-date {
+  width: 162rpx;
+  height: 36rpx;
+}
+
+.business-overview__skeleton-listen {
+  width: 134rpx;
+  height: 64rpx;
+  flex: 0 0 134rpx;
+  border-radius: 32rpx;
+}
+
+.business-overview__skeleton-questions {
+  display: flex;
+  flex-direction: column;
+  padding-top: 66rpx;
+}
+
+.business-overview__skeleton-question-title {
+  width: 240rpx;
+  height: 36rpx;
+  margin-bottom: 16rpx;
+}
+
+.business-overview__skeleton-question {
+  display: flex;
+  height: 100rpx;
+  align-items: center;
+  border-top: 1px solid #efefef;
+}
+
+.business-overview__skeleton-question:last-child {
+  border-bottom: 1px solid #efefef;
+}
+
+.business-overview__skeleton-question-line {
+  width: 72%;
+  height: 36rpx;
 }
 
 .business-overview__title {
