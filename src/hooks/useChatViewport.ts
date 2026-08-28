@@ -231,6 +231,16 @@ export function useChatViewport() {
     applyKeyboardHeight(height, true);
   }
 
+  /**
+   * mPaaS 容器里 Native 主动调用前端页面走的是 document 上派发的 DOM 事件
+   * （参考 h5NetworkChange 的注册方式），payload 在 event.data / event.detail / event 本身上。
+   */
+  function onH5KeyboardChangeEvent(event: Event) {
+    const source = event as { data?: unknown; detail?: unknown };
+    const payload = (source?.data || source?.detail || event || {}) as Parameters<typeof onH5KeyboardChange>[0];
+    onH5KeyboardChange(payload);
+  }
+
   function onH5KeyboardChange(payload: {
     visible?: boolean;
     top?: number | string;
@@ -309,7 +319,13 @@ export function useChatViewport() {
       document.addEventListener("touchstart", onDocumentTouchStart, { passive: true });
       window.visualViewport?.addEventListener("resize", onViewportChange);
       window.visualViewport?.addEventListener("scroll", onViewportChange);
-      disposeH5Keyboard = onNativeEvent("h5KeyboardChange", onH5KeyboardChange);
+      // H5 容器中 Native 主动推送的前端事件，用 document.addEventListener 注册
+      document.addEventListener("h5KeyboardChange", onH5KeyboardChangeEvent);
+      logger.info("[h5KeyboardChange] 已通过 document.addEventListener 注册监听");
+      disposeH5Keyboard = () => {
+        document.removeEventListener("h5KeyboardChange", onH5KeyboardChangeEvent);
+        logger.info("[h5KeyboardChange] 已解绑 document.addEventListener 监听");
+      };
     }
     disposeNativeKeyboard = onNativeEvent("keyboardHeightChange", onNativeKeyboardHeight);
   });
