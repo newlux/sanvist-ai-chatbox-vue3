@@ -5,6 +5,7 @@ import type {
   ChatFileUploadResult,
   ChatMessage,
   Conversation,
+  CosPresignedUrlVO,
   CursorPage,
   DeleteConversationParams,
   Identifier,
@@ -101,6 +102,15 @@ export function uploadChatFile(params: UploadChatFileParams) {
     formData: { user: params.user },
     timeout: params.timeout,
   }).json();
+}
+
+/**
+ * 获取 COS 下载/读取预签名 URL。
+ * 上传返回的 url 可能带 Content-Disposition: attachment 导致无法内联预览，
+ * 前端用 objectKey 换预签名地址用于图片预览/下载。
+ */
+export function getCosPresignedDownloadUrl(objectKey: string) {
+  return request.get<CosPresignedUrlVO>("/v1/cos/presigned/download", { objectKey }).json();
 }
 
 /**

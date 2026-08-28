@@ -2,45 +2,64 @@ import type { ChatFile } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { uploadChatFile } from "@/api/chat";
-import { useUserStore } from "@/stores";
+import { getCosPresignedDownloadUrl } from "@/api/chat";
 import { createLogger } from "@/utils/logger";
 
 import {
   chooseNativeFiles,
-  ensureNativePermission,
-  isMpaasReady,
-  permissionDeniedMessage,
+  waitForMpaas,
+  type NativeSelectedFile,
 } from "@/utils/platform/mpaas";
 
 const logger = createLogger("attachments");
 
 export const MAX_ATTACHMENT_COUNT = 3;
-const MAX_LOCAL_FILE_SIZE = 50 * 1024 * 1024;
 
-type AttachmentStatus = "uploading" | "uploaded" | "failed";
+/**
+ * 允许上传的文件后缀白名单。
+ * 与端上 FileUploadInterceptor#DEFAULT_ALLOWED_EXTENSIONS 一一对应，
+ * 原生选择器（imageChoose.fileTypes）与前端本地校验共用这一份清单。
+ */
+export const DEFAULT_ALLOWED_EXTENSIONS = [
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg",
+  "pdf",
+  "doc", "docx",
+  "xls", "xlsx",
+  "ppt", "pptx",
+  "txt", "md", "csv",
+  "mp3", "wav", "m4a", "aac", "ogg", "flac", "wma",
+  "mp4", "mov", "avi", "mkv", "webm", "flv", "wmv",
+] as const;
+
+/** 原生选择器 fileTypes：逗号分隔的完整白名单（文件选择用） */
+export const DEFAULT_ALLOWED_FILE_TYPES = DEFAULT_ALLOWED_EXTENSIONS.join(",");
+
+/** 纯图片选择（showFile=false）时的类型白名单 */
+const ALLOWED_IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"] as const;
+export const DEFAULT_ALLOWED_IMAGE_TYPES = ALLOWED_IMAGE_EXTENSIONS.join(",");
+
+const ALLOWED_EXTENSION_SET = new Set<string>(DEFAULT_ALLOWED_EXTENSIONS);
+
 type AttachmentKind = "image" | "audio" | "video" | "document" | "custom";
 
 export interface ComposerAttachment {
   localId: string;
-  /** 本地临时路径，用于图片缩略图预览与失败重传 */
+  /** 原生上传完成后的可访问地址，同时用于缩略图预览与发送 */
   localPath: string;
-  /** 上传成功后网关返回的可访问地址，发送时作为 files[].url */
+  /** 发送时作为 files[].url */
   url: string;
+  /**
+   * 预览回显地址：由 COS 预签名接口换取的可内联显示地址。
+   * 上传返回的 url 可能带 Content-Disposition: attachment 无法内联预览。
+   */
+  previewPath?: string;
   name: string;
   size: number;
   extension: string;
   mimeType: string;
   type: AttachmentKind;
-  status: AttachmentStatus;
-  error?: string;
-}
-
-interface LocalSelectedFile {
-  path: string;
-  name: string;
-  size: number;
-  mimeType?: string;
+  /** 文件由原生完成上传，添加即完成，恒为 uploaded */
+  status: "uploaded";
 }
 
 /**
@@ -84,6 +103,28 @@ function getFileExtension(name: string, path = "") {
   return String(matched?.[1] || "").trim().toLowerCase();
 }
 
+/**
+ * 从原生 imageChoose 返回值中取出 objectKey（文件在存储桶里的路径+文件名）。
+ *
+ * 宿主回参有两种形态，都要兼容：
+ * - 完整 URL：https://xxx.oss-cn-shanghai.aliyuncs.com/ai-files/2026/08/28/a.png
+ *   → ai-files/2026/08/28/a.png（取路径部分）
+ * - 纯对象路径：ai-files/2026/08/28/a.png 或 /ai-files/2026/08/28/a.png
+ *   → 去掉开头 / 后原样返回（它本身就是 objectKey）
+ */
+function extractObjectKey(value: string) {
+  if (!value) return "";
+  const raw = String(value).split(/[?#]/)[0];
+  // 没有协议头的就是对象路径本身，直接作为 objectKey
+  if (!/^https?:\/\//i.test(raw)) return raw.replace(/^\//, "");
+  try {
+    const pathname = new URL(raw).pathname;
+    return pathname.replace(/^\//, "");
+  } catch {
+    return raw.replace(/^\//, "");
+  }
+}
+
 const DOCUMENT_MIME_HINTS = [
   "application/pdf",
   "application/msword",
@@ -97,7 +138,7 @@ const DOCUMENT_MIME_HINTS = [
 
 /**
  * 判定优先级：扩展名 > MIME。
- * 扩展名是文件真实身份最稳的线索；相册/文件选择器给的 MIME 经常是
+ * 扩展名是文件真实身份最稳的线索；选择器给的 MIME 经常是
  * application/octet-stream 这种笼统值，先看它会把 docx、xlsx 全归成 custom。
  */
 function inferAttachmentKind(extension: string, mimeType = ""): AttachmentKind {
@@ -116,13 +157,6 @@ function inferAttachmentKind(extension: string, mimeType = ""): AttachmentKind {
   return "custom";
 }
 
-/** uploadFile 的 fileType 只影响小程序端的参数校验，与真实类型无关 */
-function toUploadFileType(kind: AttachmentKind) {
-  if (kind === "video") return "video" as const;
-  if (kind === "audio") return "audio" as const;
-  return "image" as const;
-}
-
 export function formatFileSize(size: number) {
   if (!size || size <= 0) return "";
   if (size < 1024) return `${size}B`;
@@ -130,17 +164,14 @@ export function formatFileSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)}MB`;
 }
 
-/** 预览条上的副标题：上传中显示状态，失败提示重试，完成后显示体积 */
+/** 文件由原生完成上传，展示体积即可 */
 export function formatAttachmentStatus(attachment: ComposerAttachment) {
-  if (attachment.status === "uploading") return "上传中...";
-  if (attachment.status === "failed") return "上传失败，点击重试";
   return formatFileSize(attachment.size) || "已上传";
 }
 
-/** 输入栏的附件选择、上传与状态维护 */
+/** 输入栏的附件选择（全部经由原生 imageChoose，由原生完成上传） */
 export function useComposerAttachments() {
   const { t } = useI18n();
-  const userStore = useUserStore();
 
   function toastLimit() {
     uni.showToast({ title: t("attachment-limit", { count: MAX_ATTACHMENT_COUNT }), icon: "none" });
@@ -148,56 +179,69 @@ export function useComposerAttachments() {
   const attachments = ref<ComposerAttachment[]>([]);
 
   const hasAttachments = computed(() => attachments.value.length > 0);
-  const hasIncompleteAttachments = computed(() =>
-    attachments.value.some(item => item.status !== "uploaded"),
-  );
-  const hasFailedAttachments = computed(() =>
-    attachments.value.some(item => item.status === "failed"),
-  );
+  // 文件由原生完成上传，附件加入即可发送：不存在「上传中 / 上传失败」状态。
+  // 保留这两个字段以兼容发送前的校验逻辑（恒为 false）。
+  const hasIncompleteAttachments = computed(() => false);
+  const hasFailedAttachments = computed(() => false);
   const isLimitReached = computed(() => attachments.value.length >= MAX_ATTACHMENT_COUNT);
 
   function findAttachment(localId: string) {
     return attachments.value.find(item => item.localId === localId);
   }
 
-  async function uploadAttachment(localId: string) {
+  /**
+   * 通过 COS 预签名接口换取可内联预览的实际图片地址。
+   * 上传返回的 url 可能带 Content-Disposition: attachment 导致浏览器不渲染，
+   * 预签名 URL 用于缩略图与大图预览。
+   */
+  async function refreshAttachmentPreviewUrl(localId: string) {
     const attachment = findAttachment(localId);
-    if (!attachment) return;
-
-    attachment.status = "uploading";
-    attachment.error = undefined;
-
-    try {
-      const uploaded = await uploadChatFile({
-        filePath: attachment.localPath,
-        // 网关校验非空：游客态没有用户 ID 时用固定占位
-        user: String(userStore.userId || "guest"),
-        fileType: toUploadFileType(attachment.type),
+    if (!attachment?.url || attachment.previewPath) return;
+    const objectKey = extractObjectKey(attachment.url);
+    logger.info("[attachment] refresh preview url start", {
+      localId,
+      url: attachment.url,
+      objectKey,
+    });
+    if (!objectKey) {
+      logger.warn("[attachment] refresh preview url skipped: empty objectKey", {
+        localId,
+        url: attachment.url,
       });
-      // 上传期间用户可能已移除该附件
+      return;
+    }
+    try {
+      const presigned = await getCosPresignedDownloadUrl(objectKey);
+      logger.info("[attachment] presigned url response", {
+        localId,
+        objectKey,
+        bucket: presigned?.bucket,
+        region: presigned?.region,
+        fileUrl: presigned?.fileUrl,
+        expireTime: presigned?.expireTime,
+        hasPresignedUrl: Boolean(presigned?.presignedUrl),
+      });
       const current = findAttachment(localId);
       if (!current) return;
-      if (!uploaded?.url) throw new Error(t("upload-result-missing-url"));
-
-      current.url = uploaded.url;
-      current.name = uploaded.name || current.name;
-      current.size = Number(uploaded.size) || current.size;
-      current.extension = uploaded.extension || current.extension;
-      current.mimeType = uploaded.mimeType || current.mimeType;
-      current.type = inferAttachmentKind(current.extension, current.mimeType);
-      current.status = "uploaded";
+      if (!presigned?.presignedUrl) {
+        logger.warn("[attachment] presigned url missing, keep original url", { localId });
+        return;
+      }
+      current.previewPath = presigned.presignedUrl;
+      logger.info("[attachment] preview url refreshed", {
+        localId,
+        previewPath: current.previewPath,
+      });
     } catch (error) {
-      const current = findAttachment(localId);
-      if (!current) return;
-      const message = error instanceof Error ? error.message : t("upload-failed");
-      current.status = "failed";
-      current.error = message;
-      logger.error("upload failed", error);
-      uni.showToast({ title: message.slice(0, 28), icon: "none", duration: 2500 });
+      logger.warn("[attachment] fetch presigned url failed", { localId, objectKey, error });
     }
   }
 
-  function appendSelectedFiles(files: LocalSelectedFile[]) {
+  /**
+   * 原生 imageChoose 回参整理：原生弹窗已完成选择与上传，回参即最终 URL。
+   * 直接生成 uploaded 附件，前端不再做任何文件传输。
+   */
+  function appendNativeUploadedFiles(files: NativeSelectedFile[]) {
     const remaining = MAX_ATTACHMENT_COUNT - attachments.value.length;
     if (remaining <= 0) {
       toastLimit();
@@ -207,143 +251,172 @@ export function useComposerAttachments() {
     if (files.length > remaining) toastLimit();
 
     accepted.forEach((file, index) => {
-      if (!file.path) return;
-      if (file.size > MAX_LOCAL_FILE_SIZE) {
-        uni.showToast({ title: t("attachment-oversize", { name: file.name || "文件" }), icon: "none" });
+      if (!file.url) {
+        logger.warn("[attachment] skip native file: empty url", { index, file });
         return;
       }
 
-      const extension = getFileExtension(file.name, file.path);
+      // 类型白名单校验：原生回参通常带扩展名；无扩展名时按图片 MIME 放行
+      const extension = getFileExtension(file.name || "", file.url);
+      const inWhitelist = ALLOWED_EXTENSION_SET.has(extension);
+      const mimeIsImage = String(file.mimeType || "").toLowerCase().startsWith("image/");
+      const isAllowed = inWhitelist || (!extension && mimeIsImage);
+
+      logger.info("[attachment] native file received", {
+        index,
+        url: file.url,
+        name: file.name,
+        size: file.size,
+        mimeType: file.mimeType,
+        extension,
+        inWhitelist,
+        mimeIsImage,
+        isAllowed,
+      });
+
+      if (!isAllowed) {
+        logger.warn("[attachment] reject by whitelist", {
+          url: file.url,
+          name: file.name,
+          extension,
+          mimeType: file.mimeType,
+        });
+        uni.showToast({ title: t("attachment-type-unsupported"), icon: "none" });
+        return;
+      }
+
       const type = inferAttachmentKind(extension, file.mimeType);
-      const localId = createAttachmentLocalId();
       const fallbackName = type === "image"
         ? `图片-${index + 1}.${extension || "jpg"}`
         : `附件-${index + 1}${extension ? `.${extension}` : ""}`;
 
+      const localId = createAttachmentLocalId();
       attachments.value.push({
         localId,
-        localPath: file.path,
-        url: "",
+        // 原生已上传，localPath 与 url 都指向最终地址，预览与发送直接可用
+        localPath: file.url,
+        url: file.url,
         name: file.name || fallbackName,
         size: Number(file.size) || 0,
         extension,
         mimeType: file.mimeType || "",
         type,
-        status: "uploading",
+        status: "uploaded",
       });
-      void uploadAttachment(localId);
+      logger.info("[attachment] appended native-uploaded file", {
+        localId,
+        url: file.url,
+        name: attachments.value[attachments.value.length - 1].name,
+        extension,
+        type,
+        size: file.size,
+        total: attachments.value.length,
+      });
+      // 换取 COS 预签名地址用于可内联预览
+      void refreshAttachmentPreviewUrl(localId);
     });
   }
 
+  /**
+   * 选择照片/拍照：走原生 imageChoose（showFile=false，仅图片），
+   * 原生弹窗自带来源选择，选择后由原生完成上传。
+   */
   async function chooseImages(sourceType: Array<"album" | "camera">) {
-    // 容器里先向原生要权限：安卓 WebView 不先授权的话，选图/拍照会被静默拒绝
-    const permission = sourceType.includes("camera") ? "camera" : "photo";
-    if (!await ensureNativePermission(permission)) {
-      uni.showToast({ title: permissionDeniedMessage(permission), icon: "none" });
-      return;
-    }
-
     const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
-    uni.chooseImage({
-      count,
+    logger.info("[attachment] chooseImages start", {
       sourceType,
-      sizeType: ["compressed", "original"],
-      success: (result) => {
-        const tempFiles = (result.tempFiles || []) as Array<{ path?: string; size?: number; name?: string; type?: string }>;
-        const paths = Array.isArray(result.tempFilePaths)
-          ? result.tempFilePaths
-          : [result.tempFilePaths].filter(Boolean) as string[];
-        appendSelectedFiles(paths.map((path, index) => ({
-          path: String(path),
-          name: String(tempFiles[index]?.name || ""),
-          size: Number(tempFiles[index]?.size) || 0,
-          mimeType: String(tempFiles[index]?.type || "image/*"),
-        })));
-      },
-      fail: error => logger.warn("chooseImage failed", error),
+      currentCount: attachments.value.length,
+      limit: MAX_ATTACHMENT_COUNT,
+      requestCount: count,
     });
-  }
 
-  // #ifdef H5
-  async function chooseLocalFiles() {
-    if (!await ensureNativePermission("photo")) {
-      uni.showToast({ title: permissionDeniedMessage("photo"), icon: "none" });
+    // 等待 bridge 注入窗口，避免用户点击时 bridge 尚未就绪而白白错过原生弹窗
+    const bridge = await waitForMpaas(2000);
+    logger.info("[attachment] chooseImages bridge ready", { ready: Boolean(bridge) });
+    if (!bridge) {
+      logger.warn("[attachment] native picker unavailable, skip chooseImages", { sourceType });
       return;
     }
 
-    const chooseFile = (uni as { chooseFile?: (options: Record<string, unknown>) => void }).chooseFile;
-    if (typeof chooseFile !== "function") {
-      uni.showToast({ title: t("file-select-unsupported"), icon: "none" });
-      return;
-    }
-    chooseFile({
-      count: Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length),
-      type: "all",
-      success: (result: { tempFiles?: Array<Record<string, unknown>> }) => {
-        appendSelectedFiles((result.tempFiles || []).map(file => ({
-          path: String(file.path || ""),
-          name: String(file.name || ""),
-          size: Number(file.size) || 0,
-          mimeType: String(file.type || ""),
-        })));
-      },
-      fail: (error: unknown) => logger.warn("chooseFile failed", error),
-    });
-  }
-  // #endif
-
-  async function chooseFilesFromNative() {
     try {
-      const files = await chooseNativeFiles(MAX_ATTACHMENT_COUNT - attachments.value.length);
-      appendSelectedFiles(files.map(file => ({
-        path: file.url,
-        name: file.name || "",
-        size: Number(file.size) || 0,
-        mimeType: file.mimeType || "",
-      })));
+      const params = {
+        showFile: false,
+        fileTypes: DEFAULT_ALLOWED_IMAGE_TYPES,
+        nativeUploaded: true,
+      };
+      logger.info("[attachment] chooseImages -> imageChoose", { count, params });
+      const files = await chooseNativeFiles(count, params);
+      logger.info("[attachment] native imageChoose result", {
+        mode: "image",
+        count: files.length,
+        files: files.map(f => ({ url: f.url, name: f.name, size: f.size, mimeType: f.mimeType })),
+      });
+      appendNativeUploadedFiles(files);
+      logger.info("[attachment] chooseImages done", { total: attachments.value.length });
     } catch (error) {
-      logger.warn("imageChoose failed", error);
-      uni.showToast({ title: "文件选择失败", icon: "none" });
+      logger.error("[attachment] native imageChoose failed", error);
     }
   }
 
-  /** 弹出来源选择。达到上限时只提示，不弹面板 */
-  function openAttachmentPicker() {
+  /**
+   * 文件/图片混合选择：走原生 imageChoose（showFile=true + fileTypes 白名单），
+   * 由原生弹窗完成选择与上传。
+   */
+  async function chooseFilesFromNative() {
+    const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
+    logger.info("[attachment] chooseFilesFromNative start", {
+      currentCount: attachments.value.length,
+      limit: MAX_ATTACHMENT_COUNT,
+      requestCount: count,
+    });
+
+    // 等待 bridge 注入窗口
+    const bridge = await waitForMpaas(2000);
+    logger.info("[attachment] chooseFilesFromNative bridge ready", { ready: Boolean(bridge) });
+    if (!bridge) {
+      logger.warn("[attachment] native picker unavailable, skip chooseFilesFromNative");
+      return;
+    }
+
+    try {
+      const params = {
+        showFile: true,
+        fileTypes: DEFAULT_ALLOWED_FILE_TYPES,
+        nativeUploaded: true,
+      };
+      logger.info("[attachment] chooseFilesFromNative -> imageChoose", { count, params });
+      const files = await chooseNativeFiles(count, params);
+      logger.info("[attachment] native imageChoose result", {
+        mode: "file+image",
+        count: files.length,
+        files: files.map(f => ({ url: f.url, name: f.name, size: f.size, mimeType: f.mimeType })),
+      });
+      appendNativeUploadedFiles(files);
+      logger.info("[attachment] chooseFilesFromNative done", { total: attachments.value.length });
+    } catch (error) {
+      logger.error("[attachment] native imageChoose failed", error);
+    }
+  }
+
+  /**
+   * 原生 imageChoose 是否可用（等待 bridge 注入窗口）。
+   * 用于组件决定：优先触发原生弹窗（imageChoose 自带拍照/相册/文件），还是回退到前端三选项弹窗。
+   */
+  function isNativePickerAvailable() {
+    return waitForMpaas(2000).then(Boolean);
+  }
+
+  /** 触发原生选择器；已达上限时只提示 */
+  async function openAttachmentPicker() {
     if (isLimitReached.value) {
       toastLimit();
       return;
     }
-
-    if (isMpaasReady()) {
-      void chooseFilesFromNative();
-      return;
-    }
-
-    // 支付宝小程序没有通用文件选择器，只能走相机与相册；普通 H5 多给一个文件入口
-    const itemList = ["拍照", "从相册选择"];
-    // #ifdef H5
-    itemList.push("选择文件");
-    // #endif
-
-    uni.showActionSheet({
-      itemList,
-      success: ({ tapIndex }) => {
-        if (tapIndex === 0) void chooseImages(["camera"]);
-        else if (tapIndex === 1) void chooseImages(["album"]);
-        // #ifdef H5
-        else if (tapIndex === 2) void chooseLocalFiles();
-        // #endif
-      },
-      fail: () => {},
-    });
+    await chooseFilesFromNative();
   }
 
   function removeAttachment(localId: string) {
     attachments.value = attachments.value.filter(item => item.localId !== localId);
-  }
-
-  function retryAttachment(localId: string) {
-    void uploadAttachment(localId);
   }
 
   function clearAttachments() {
@@ -356,9 +429,10 @@ export function useComposerAttachments() {
    * meta 多带名称体积，用于消息气泡展示和 inputs 透传。
    */
   function takeUploadedFiles(): { files: ChatFile[]; meta: ChatMessageAttachment[] } {
-    const uploaded = attachments.value.filter(item => item.status === "uploaded" && item.url);
+    logger.info("[attachment] takeUploadedFiles start", { total: attachments.value.length });
+    const uploaded = attachments.value.filter(item => item.url);
     // type 直接用归类结果（含 custom），transferMethod 固定 remote_url——
-    // 文件已经由 /files/upload 传过一次，这里给的是可访问地址
+    // 文件已由原生上传，这里给的是可访问地址
     const files = uploaded.map(item => ({
       type: item.type,
       transferMethod: "remote_url" as const,
@@ -371,6 +445,7 @@ export function useComposerAttachments() {
       size: item.size,
       mimeType: item.mimeType,
     }));
+    logger.info("[attachment] takeUploadedFiles result", { files, meta });
     clearAttachments();
     return { files, meta };
   }
@@ -381,8 +456,10 @@ export function useComposerAttachments() {
     hasIncompleteAttachments,
     hasFailedAttachments,
     openAttachmentPicker,
+    isNativePickerAvailable,
+    chooseImages,
+    chooseFilesFromNative,
     removeAttachment,
-    retryAttachment,
     clearAttachments,
     takeUploadedFiles,
   };

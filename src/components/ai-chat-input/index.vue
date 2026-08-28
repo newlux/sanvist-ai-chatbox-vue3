@@ -4,6 +4,9 @@ import { useI18n } from "vue-i18n";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("chat-input");
 
 const props = defineProps({
   modelValue: { type: String, default: "" },
@@ -58,8 +61,10 @@ const {
   hasIncompleteAttachments,
   hasFailedAttachments,
   openAttachmentPicker,
+  isNativePickerAvailable,
+  chooseImages,
+  chooseFilesFromNative,
   removeAttachment,
-  retryAttachment,
   takeUploadedFiles,
 } = useComposerAttachments();
 
@@ -246,9 +251,51 @@ function onTrySend() {
   submitMessage();
 }
 
-function onOpenAttachmentPicker() {
+/** 附件来源弹窗：拍照 / 相册 / 文件 三选一（仅作为原生 imageChoose 不可用时的兜底） */
+const isAttachmentPickerOpen = ref(false);
+
+async function onOpenAttachmentPicker() {
+  logger.info("[picker] tap plus", {
+    isLoading: props.isLoading,
+    isRecognizing: voice.isRecognizing,
+    currentCount: attachments.value.length,
+  });
   if (props.isLoading || voice.isRecognizing) return;
-  openAttachmentPicker();
+  if (attachments.value.length >= 3) {
+    logger.info("[picker] limit reached", { count: attachments.value.length });
+    openAttachmentPicker(); // 触顶提示
+    return;
+  }
+
+  // 容器内优先触发原生 imageChoose：原生自带自定义弹窗（拍照/相册/文件）
+  const nativeReady = await isNativePickerAvailable();
+  logger.info("[picker] native picker available", { nativeReady });
+  if (nativeReady) {
+    logger.info("[picker] -> native imageChoose (showFile=true)");
+    void chooseFilesFromNative();
+    return;
+  }
+
+  // 原生不可用（Web/H5 等）时才用前端三选项弹窗兜底
+  logger.info("[picker] -> show fallback sheet");
+  isAttachmentPickerOpen.value = true;
+}
+
+function onCloseAttachmentPicker() {
+  isAttachmentPickerOpen.value = false;
+}
+
+function onPickAttachmentSource(source: "camera" | "album" | "file") {
+  logger.info("[picker] pick source", {
+    source,
+    currentCount: attachments.value.length,
+  });
+  isAttachmentPickerOpen.value = false;
+  if (source === "file") {
+    void chooseFilesFromNative();
+  } else {
+    void chooseImages([source]);
+  }
 }
 
 watch(
@@ -420,7 +467,6 @@ onBeforeUnmount(() => {
         v-if="attachments.length"
         :attachments="attachments"
         @remove="removeAttachment"
-        @retry="retryAttachment"
       />
 
       <!-- 底部输入栏：默认语音、键盘文本、发送和生成中状态 -->
@@ -505,6 +551,31 @@ onBeforeUnmount(() => {
         <text class="chat-input__footer-text">
           内容由AI生成，请核实重要信息
         </text>
+      </view>
+    </view>
+
+    <!-- 附件来源弹窗：拍照 / 从相册选择 / 选择文件（参考 media-picker 的 pickerPopup） -->
+    <view
+      v-if="isAttachmentPickerOpen"
+      class="attachment-picker-mask"
+      @tap.stop="onCloseAttachmentPicker"
+    >
+      <view class="attachment-picker" @tap.stop>
+        <view class="attachment-picker__title">
+          添加附件
+        </view>
+        <view class="attachment-picker__btn" @tap="onPickAttachmentSource('camera')">
+          拍照
+        </view>
+        <view class="attachment-picker__btn" @tap="onPickAttachmentSource('album')">
+          从相册选择
+        </view>
+        <view class="attachment-picker__btn" @tap="onPickAttachmentSource('file')">
+          选择文件
+        </view>
+        <view class="attachment-picker__cancel" @tap="onCloseAttachmentPicker">
+          取消
+        </view>
       </view>
     </view>
   </view>
@@ -992,5 +1063,59 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 0 240rpx 16rpx;
   box-sizing: border-box;
+}
+
+/* ---------- 附件来源弹窗 ---------- */
+.attachment-picker-mask {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.attachment-picker {
+  width: 560rpx;
+  border-radius: 24rpx;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.attachment-picker__title {
+  padding: 32rpx 0 20rpx;
+  font-size: 28rpx; // 14px
+  font-weight: 600;
+  color: #333333;
+  line-height: 36rpx;
+  text-align: center;
+}
+
+.attachment-picker__btn,
+.attachment-picker__cancel {
+  height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30rpx; // 15px
+  line-height: 40rpx;
+  border-top: 1rpx solid #f0f0f0;
+  box-sizing: border-box;
+
+  &:active {
+    background: #f5f5f5;
+  }
+}
+
+.attachment-picker__btn {
+  color: #1a1a1a;
+}
+
+.attachment-picker__cancel {
+  color: #999999;
 }
 </style>
