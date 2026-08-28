@@ -43,6 +43,30 @@ export function useChatViewport() {
   let disposeH5Keyboard: (() => void) | null = null;
   let baseViewportHeight = 0;
 
+  /** 设备像素比（物理像素 / CSS 像素）。H5/WebView 里 window.devicePixelRatio 最权威。 */
+  function readDevicePixelRatio(): number {
+    const dpr =
+      Number(window?.devicePixelRatio)
+      || Number(document?.defaultView?.devicePixelRatio)
+      || Number(uni.getSystemInfoSync?.()?.pixelRatio)
+      || 0;
+    return dpr > 0 ? dpr : 1;
+  }
+
+  /**
+   * 原生回调的键盘高度是「物理像素」，布局用的是 CSS 像素，这里是单位换算。
+   * 直接用 window.devicePixelRatio（物理像素 / CSS 像素）换算。
+   * 不要用 nativeViewportHeight / baseViewportHeight 反推缩放比：baseViewportHeight 是页面
+   * 挂载早期一次性量到的快照，未必等于原生 viewportHeight 对应的 CSS 视口高（实测会偏大），
+   * 用它反推会得到偏小的缩放比、把键盘高度算大（如 774/2.835≈273，正确应为 774/3=258）。
+   */
+  function cssKeyboardHeightFromNative(physical: number): number {
+    const phys = Math.max(0, Number(physical) || 0);
+    if (phys <= 0) return 0;
+    const dpr = readDevicePixelRatio();
+    return Math.round(phys / (dpr > 0 ? dpr : 1));
+  }
+
   const chatViewportStyle = computed(() =>
     (windowHeight.value > 0 ? { height: `${windowHeight.value}px` } : {}),
   );
@@ -228,13 +252,25 @@ export function useChatViewport() {
       return;
     }
     h5KeyboardAuthoritative = true;
-    applyKeyboardHeight(height, true);
+    // 原生推的是物理像素 → 换算成 CSS 像素再进布局
+    applyKeyboardHeight(cssKeyboardHeightFromNative(height), true);
+  }
+
+  /**
+   * mPaaS 容器里 Native 主动调用前端页面走的是 document 上派发的 DOM 事件
+   * （参考 h5NetworkChange 的注册方式），payload 在 event.data / event.detail / event 本身上。
+   */
+  function onH5KeyboardChangeEvent(event: Event) {
+    const source = event as { data?: unknown; detail?: unknown };
+    const payload = (source?.data || source?.detail || event || {}) as Parameters<typeof onH5KeyboardChange>[0];
+    onH5KeyboardChange(payload);
   }
 
   function onH5KeyboardChange(payload: {
     visible?: boolean;
     top?: number | string;
     height?: number | string;
+    reportedHeight?: number | string;
     viewportHeight?: number | string;
     unit?: string;
   }) {
@@ -252,23 +288,34 @@ export function useChatViewport() {
 
     const top = Number(payload.top);
     const viewportHeight = Number(payload.viewportHeight);
-    const reportedHeight = Number(payload.height);
-    const height = Number.isFinite(top) && Number.isFinite(viewportHeight)
+    const reportedHeight = Number(payload.height ?? payload.reportedHeight);
+    const physical = Number.isFinite(top) && Number.isFinite(viewportHeight)
       ? viewportHeight - top
       : reportedHeight;
+    // 原生推的是物理像素 → 换算成 CSS 像素再进布局
+    const height = cssKeyboardHeightFromNative(physical);
     if (height > 0) {
-      logger.info("[h5KeyboardChange] 计算键盘高度", { top, viewportHeight, reportedHeight, height });
+      logger.info("[h5KeyboardChange] 计算键盘高度", {
+        top,
+        viewportHeight,
+        reportedHeight,
+        physical,
+        height,
+        dpr: readDevicePixelRatio(),
+      });
       pinLayoutViewport();
       h5KeyboardAuthoritative = true;
       applyKeyboardHeight(height, true);
     } else {
-      logger.info("[h5KeyboardChange] 计算键盘高度为 0，不处理", { top, viewportHeight, reportedHeight });
+      logger.info("[h5KeyboardChange] 计算键盘高度为 0，不处理", { top, viewportHeight, reportedHeight, physical });
     }
   }
 
   function onKeyboardHeightChange(event: { height?: number }) {
-    if (Number(event?.height) > 0) h5KeyboardAuthoritative = true;
-    applyKeyboardHeight(event?.height, Number(event?.height) > 0);
+    // uni.onKeyboardHeightChange 已在内部归一成 CSS px；优先级低于 mPaaS 原生通道，
+    // 一旦 h5KeyboardChange / keyboardHeightChange 可信就不再覆盖，也不抢占「原生权威」身份
+    if (h5KeyboardAuthoritative) return;
+    applyKeyboardHeight(Number(event?.height) || 0, false);
   }
 
   function resetKeyboardHeight() {
@@ -309,7 +356,13 @@ export function useChatViewport() {
       document.addEventListener("touchstart", onDocumentTouchStart, { passive: true });
       window.visualViewport?.addEventListener("resize", onViewportChange);
       window.visualViewport?.addEventListener("scroll", onViewportChange);
-      disposeH5Keyboard = onNativeEvent("h5KeyboardChange", onH5KeyboardChange);
+      // H5 容器中 Native 主动推送的前端事件，用 document.addEventListener 注册
+      document.addEventListener("h5KeyboardChange", onH5KeyboardChangeEvent);
+      logger.info("[h5KeyboardChange] 已通过 document.addEventListener 注册监听");
+      disposeH5Keyboard = () => {
+        document.removeEventListener("h5KeyboardChange", onH5KeyboardChangeEvent);
+        logger.info("[h5KeyboardChange] 已解绑 document.addEventListener 监听");
+      };
     }
     disposeNativeKeyboard = onNativeEvent("keyboardHeightChange", onNativeKeyboardHeight);
   });

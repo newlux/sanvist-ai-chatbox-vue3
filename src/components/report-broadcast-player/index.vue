@@ -174,7 +174,6 @@ onMounted(() => play(props.params));
   flex-direction: column;
   overflow: hidden;
   box-sizing: border-box;
-  padding-top: var(--safe-top-px, 0px);
   background: #fff;
 }
 
