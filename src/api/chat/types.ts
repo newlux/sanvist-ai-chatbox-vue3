@@ -235,6 +235,17 @@ export interface ChatFileUploadResult {
   url: string;
 }
 
+/** COS 下载/读取预签名 URL 响应（GET /v1/cos/presigned/download） */
+export interface CosPresignedUrlVO {
+  presignedUrl: string;
+  objectKey: string;
+  bucket: string;
+  region: string;
+  fileUrl: string;
+  httpMethod: string;
+  expireTime: number;
+}
+
 export interface TextToSpeechResult {
   audioUrl?: string;
   audioBase64?: string;

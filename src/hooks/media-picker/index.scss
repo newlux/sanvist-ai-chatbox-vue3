@@ -1,0 +1,176 @@
+.media-picker {
+  font-size: 14px;
+  color: #181c26;
+  border-bottom: 1px solid #DADEE6;
+}
+
+.media-picker-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 24px 0;
+}
+
+.media-picker-title {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 20px;
+  margin-bottom: 16px;
+  margin-left: 16px;
+  color: #1d1d1f;
+}
+
+.media-section {
+  margin-bottom: 16px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 0 16px;
+  text {
+    color: #505364;
+    font-size: 12px;
+    font-weight: 400;
+  }
+  .picker-numbers{
+    font-size: 10px;
+    color: #7F7F7F;
+  }
+
+}
+
+.picker-numbers {
+  color: #808497;
+  margin-left: 4px;
+  font-size: 14px;
+}
+
+.image_wrap {
+  border-radius: 10px;
+  border: 1px solid #e4e9f0;
+  background: #ffffff;
+  position: relative;
+  width: 103px;
+  height: 103px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.image_wrap:active {
+  background-color: #f9f9f9;
+}
+
+// 图片网格：CSS Grid 布局，一行三个，间隔均匀
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 103px);
+  justify-content: space-between;
+  row-gap: 17px;
+}
+
+.grid-cell {
+  width: 103px;
+  height: 103px;
+  box-sizing: border-box;
+}
+
+// 空白占位元素：不可见，仅用于维持 grid 布局
+.grid-cell-placeholder {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.preview-content {
+  border-radius: 10px;
+  overflow: hidden;
+  width: 103px;
+  height: 103px;
+  position: relative;
+}
+
+.delete-img {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 20px;
+  z-index: 9;
+}
+
+.preview-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 11px;
+}
+
+.img_add {
+  width: 41.2px;
+  height: 41.2px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.img_add_svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 27px;
+  height: 27px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-play {
+  width: 38px;
+  height: 38px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+// RTL 兼容：整体镜像，删除按钮与加号保持在视觉正确位置
+.image_rtl {
+  direction: rtl;
+}
+
+.preview_rtl {
+  direction: rtl;
+
+  .delete-img {
+    right: auto;
+    left: 6px;
+  }
+}
+
+// 选择弹框的样式
+.picker-modal {
+  border-radius: 6px 6px 0 0;
+  width: calc(100vw - 48px);
+  background: #fff;
+}
+
+.p-btn {
+  color: #181c26;
+  font-size: 16px;
+  padding: 20px 12px;
+}
+
+.p-btn:nth-of-type(1) {
+  border-bottom: 1px solid #f2f4f7;
+}
+
+.rtl .picker-numbers {
+  margin-left: 0;
+  margin-right: 4px;
+}
