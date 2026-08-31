@@ -1,14 +1,101 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>COS 预签名图片预览测试</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; padding: 24px; color: #222; }
+    h2 { font-size: 18px; margin-bottom: 16px; }
+    .row { margin-bottom: 12px; }
+    label { display: inline-block; width: 110px; font-size: 13px; color: #555; vertical-align: top; }
+    input { width: 620px; padding: 6px 8px; font-size: 13px; box-sizing: border-box; }
+    button { padding: 8px 20px; font-size: 14px; cursor: pointer; }
+    pre { background: #f6f6f6; padding: 12px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; max-width: 760px; }
+    #preview { display: block; max-width: 480px; margin-top: 16px; border: 1px solid #ddd; }
+    .hint { font-size: 12px; color: #888; margin-top: 4px; }
+  </style>
 </head>
 <body>
-    <div>
-        <img src="https://sanvist-ai.oss-cn-shanghai.aliyuncs.com/ai-files/2026/08/28/a272918a-967f-4c68-aed4-34e5f789bbaa.png" alt="">
-    </div>
+  <h2>COS 预签名 URL → img 渲染测试</h2>
+
+  <div class="row">
+    <label>接口地址</label>
+    <input id="api" value="https://sanvist-api-dev.etripon.com/sanvist-ai-api/v1/cos/presigned/download">
+  </div>
+  <div class="row">
+    <label>objectKey</label>
+    <input id="objectKey" value="MySANY/2/20260828/20260828173333322.jpeg">
+  </div>
+  <div class="row">
+    <label>Authorization</label>
+    <input id="token" value="bearer 9ae76087-03f6-4db0-878b-ed6e9af37879" placeholder="bearer xxx">
+    <div class="hint">接口需登录凭证；留空则不带 Authorization 头</div>
+  </div>
+
+  <button id="run">请求并渲染</button>
+
+  <pre id="log">等待执行...</pre>
+  <img id="preview" style="display: none" alt="预览图">
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const logEl = $("log");
+    const imgEl = $("preview");
+
+    function log(...args) {
+      const line = args.map(a => (typeof a === "string" ? a : JSON.stringify(a, null, 2))).join(" ");
+      logEl.textContent += "\n" + line;
+      console.log(...args);
+    }
+
+    imgEl.onload = () => log("[img] 加载成功:", imgEl.src);
+    imgEl.onerror = () => log("[img] 加载失败:", imgEl.src);
+
+    async function run() {
+      logEl.textContent = "";
+      imgEl.style.display = "none";
+
+      const api = $("api").value.trim();
+      const objectKey = $("objectKey").value.trim();
+      const token = $("token").value.trim();
+      const url = `${api}?objectKey=${encodeURIComponent(objectKey)}`;
+      log("[request] GET", url);
+
+      try {
+        const headers = {};
+        if (token) headers["Authorization"] = token;
+        const res = await fetch(url, { method: "GET", headers });
+        log("[response] status", res.status);
+
+        const text = await res.text();
+        let json;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          json = text;
+        }
+        log("[response] body", json);
+
+        // 兼容两种结构：{ code, message, data } 或直接 data
+        const data = json && typeof json === "object" && "data" in json ? json.data : json;
+        const pictureUrl = data && (data.presignedUrl || data.fileUrl);
+        if (!pictureUrl) {
+          log("[error] 响应中没有 presignedUrl / fileUrl，无法渲染");
+          return;
+        }
+
+        log("[render] 使用地址来源:", data.presignedUrl ? "presignedUrl" : "fileUrl");
+        log("[render] src =", pictureUrl);
+        imgEl.src = pictureUrl;
+        imgEl.style.display = "block";
+      } catch (error) {
+        log("[error] 请求失败:", String(error));
+      }
+    }
+
+    $("run").onclick = run;
+    run();
+  </script>
 </body>
 </html>

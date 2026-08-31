@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { getCosPresignedDownloadUrl } from "@/api/chat";
 import { createLogger } from "@/utils/logger";
+import { getRequestHeaders } from "@/utils/request";
 
 import {
   chooseNativeFiles,
@@ -210,6 +211,15 @@ export function useComposerAttachments() {
       });
       return;
     }
+    // 确认请求确实带上了登录凭证（只打印前缀与长度，不输出完整 token）
+    const headers = getRequestHeaders() as Record<string, string>;
+    const authValue = String(headers.Authorization || "");
+    logger.info("[attachment] presigned request auth", {
+      hasAuthorization: Boolean(authValue),
+      scheme: authValue.split(" ")[0] || "",
+      tokenLength: authValue.split(" ")[1]?.length || 0,
+    });
+
     try {
       const presigned = await getCosPresignedDownloadUrl(objectKey);
       logger.info("[attachment] presigned url response", {
@@ -223,13 +233,17 @@ export function useComposerAttachments() {
       });
       const current = findAttachment(localId);
       if (!current) return;
-      if (!presigned?.presignedUrl) {
+      // 预览地址优先用带签名的 presignedUrl（响应 data.presignedUrl）；
+      // 缺失时回退 fileUrl（响应 data.fileUrl，不带签名的原始对象地址）
+      const previewUrl = presigned?.presignedUrl || presigned?.fileUrl || "";
+      if (!previewUrl) {
         logger.warn("[attachment] presigned url missing, keep original url", { localId });
         return;
       }
-      current.previewPath = presigned.presignedUrl;
+      current.previewPath = previewUrl;
       logger.info("[attachment] preview url refreshed", {
         localId,
+        from: presigned?.presignedUrl ? "presignedUrl" : "fileUrl",
         previewPath: current.previewPath,
       });
     } catch (error) {

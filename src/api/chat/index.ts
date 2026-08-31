@@ -21,6 +21,7 @@ import type {
   TextToSpeechResult,
   UploadChatFileParams,
 } from "./types";
+import { COS_PRESIGNED_BASE_URL } from "@/config";
 import { request } from "@/utils/request";
 
 export { consumeTextToSpeechStream } from "./tts-stream";
@@ -110,7 +111,13 @@ export function uploadChatFile(params: UploadChatFileParams) {
  * 前端用 objectKey 换预签名地址用于图片预览/下载。
  */
 export function getCosPresignedDownloadUrl(objectKey: string) {
-  return request.get<CosPresignedUrlVO>("/v1/cos/presigned/download", { objectKey }).json();
+  // 该服务与主对话 API 不同域，走 COS_PRESIGNED_BASE_URL 前缀（见 src/config）；
+  // 登录凭证（Authorization）由 request 层统一注入：App.vue 启动时通过 setRequestAuth 写入，
+  // getRequestHeaders 会自动带上，这里无需重复声明
+  return request.get<CosPresignedUrlVO>("/v1/cos/presigned/download", { objectKey }, {
+    baseURL: COS_PRESIGNED_BASE_URL,
+    headers: { Accept: "application/json" },
+  }).json();
 }
 
 /**

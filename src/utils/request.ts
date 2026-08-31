@@ -14,6 +14,8 @@ export interface BaseResponse<T = unknown> {
 
 interface RequestOptions<T = unknown> extends PlatformRequestOptions {
   data?: T;
+  /** 单独指定服务前缀：用于与主 API 不同域的服务（如 COS 预签名），不传则用全局 baseURL */
+  baseURL?: string;
 }
 
 interface JsonRequest<T> {
@@ -176,7 +178,7 @@ function createJsonRequest<T>(
 ): JsonRequest<T> {
   return {
     async json() {
-      const response = await platformRequest<BaseResponse<T> | T>(baseURL, method, path, {
+      const response = await platformRequest<BaseResponse<T> | T>(options.baseURL || baseURL, method, path, {
         ...options,
         data: options.data ?? data,
         headers: getRequestHeaders(options.headers),
