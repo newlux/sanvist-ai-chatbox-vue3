@@ -21,7 +21,6 @@ import type {
   TextToSpeechResult,
   UploadChatFileParams,
 } from "./types";
-import { COS_PRESIGNED_BASE_URL } from "@/config";
 import { request } from "@/utils/request";
 
 export { consumeTextToSpeechStream } from "./tts-stream";
@@ -111,11 +110,13 @@ export function uploadChatFile(params: UploadChatFileParams) {
  * 前端用 objectKey 换预签名地址用于图片预览/下载。
  */
 export function getCosPresignedDownloadUrl(objectKey: string) {
-  // 该服务与主对话 API 不同域，走 COS_PRESIGNED_BASE_URL 前缀（见 src/config）；
+  // 该服务与主对话 API 不同域、不同前缀：固定走
+  // https://sanvist-api-test.sany.com.cn/ 网关（/hfle 服务前缀），
+  // 不随宿主注入的 baseUrl / setRequestBaseURL 变化
   // 登录凭证（Authorization）由 request 层统一注入：App.vue 启动时通过 setRequestAuth 写入，
   // getRequestHeaders 会自动带上，这里无需重复声明
-  return request.get<CosPresignedUrlVO>("/v1/cos/presigned/download", { objectKey }, {
-    baseURL: COS_PRESIGNED_BASE_URL,
+  return request.get<CosPresignedUrlVO>("/hfle/v1/cos/presigned/download", { objectKey }, {
+    baseURL: "https://sanvist-api-test.sany.com.cn/",
     headers: { Accept: "application/json" },
   }).json();
 }
