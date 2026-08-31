@@ -191,15 +191,18 @@ onMounted(() => play(props.params));
       </scroll-view>
       <!-- 文字区底部渐变：淡化滚动文字，避免遮挡反馈操作。 -->
       <view v-if="!showTranscriptSkeleton" class="report-broadcast-player__bottom-fade" />
-      <!-- 设计稿 2525:212：点赞与历史操作，24×24px，间距 16px -->
-      <view v-if="!showTranscriptSkeleton" class="report-broadcast-player__feedback">
-        <image
-          class="report-broadcast-player__feedback-icon"
-          :src="feedbackHistoryIcon"
-          mode="aspectFit"
-          @tap="openHistory"
-        />
-        <image class="report-broadcast-player__feedback-icon" :src="feedbackGoodIcon" mode="aspectFit" />
+      <!-- 设计稿 2582:293：底部 mask 遮挡文字，并承载历史与点赞操作。 -->
+      <view v-if="!showTranscriptSkeleton" class="report-broadcast-player__feedback-mask">
+        <!-- 设计稿 2525:212：点赞与历史操作，24×24px，间距 16px。 -->
+        <view class="report-broadcast-player__feedback">
+          <image
+            class="report-broadcast-player__feedback-icon"
+            :src="feedbackHistoryIcon"
+            mode="aspectFit"
+            @tap="openHistory"
+          />
+          <image class="report-broadcast-player__feedback-icon" :src="feedbackGoodIcon" mode="aspectFit" />
+        </view>
       </view>
     </view>
 
@@ -498,15 +501,27 @@ onMounted(() => play(props.params));
   background: linear-gradient(180deg, rgb(255 255 255 / 0%) 0%, rgb(255 255 255 / 86%) 58%, #ffffff 100%);
 }
 
+/* 设计稿 2582:293：纯白遮挡，避免滚动文字穿过历史与点赞操作区。 */
+.report-broadcast-player__feedback-mask {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 48rpx;
+  left: 0;
+  display: flex;
+  height: 112rpx;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 60rpx;
+  box-sizing: border-box;
+  background: #fff;
+}
+
 /* 设计稿 2525:212：点赞 x=281px、历史 x=321px，尺寸均为 24px。 */
 .report-broadcast-player__feedback {
-  position: absolute;
-  z-index: 3;
-  right: 60rpx;
   display: flex;
   align-items: center;
   gap: 16rpx;
-  bottom: 100rpx;
 }
 
 .report-broadcast-player__feedback-icon {
