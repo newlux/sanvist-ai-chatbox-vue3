@@ -234,30 +234,163 @@ export interface NativeSelectedFile {
   mimeType?: string;
 }
 
-/**
- * 调起宿主原生图片/文件选择器。
- * showFile=true 时由原生同时提供图片和文件入口；返回值兼容字符串路径和 { url } 对象。
- */
-export async function chooseNativeFiles(count: number): Promise<NativeSelectedFile[]> {
-  const result = await callNative("imageChoose", {
-    count: Math.max(1, count),
-    showFile: true,
+export interface ChooseNativeFilesOptions {
+  /** 是否展示文件入口。true=图片+文件；false=仅图片 */
+  showFile?: boolean;
+  /**
+   * 允许选择的文件类型：逗号分隔的小写扩展名，如 "pdf,jpg,png"。
+   * 与端上 DEFAULT_ALLOWED_EXTENSIONS 白名单保持一致；不传则由宿主按默认放开。
+   */
+  fileTypes?: string;
+  /**
+   * 原生是否已代为完成上传：为 true 时 tempFilePaths / apFilePaths 直接作为
+   * 已上传的最终 URL 返回，不再下载或交给前端二次传输
+   * （对应新版安卓 imageChoose 由原生完成上传的场景）。
+   */
+  nativeUploaded?: boolean;
+}
+
+/** 宿主可能返回远程 URL（apFilePaths 场景），先下载成本地临时文件再上传 */
+function downloadRemoteFile(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    logger.info("[mpaas] downloadRemoteFile start", { url });
+    uni.downloadFile({
+      url,
+      success: (res) => {
+        if (res.statusCode === 200 && res.tempFilePath) {
+          logger.info("[mpaas] downloadRemoteFile success", { url, tempFilePath: res.tempFilePath });
+          resolve(res.tempFilePath);
+        } else {
+          logger.error("[mpaas] downloadRemoteFile bad status", { url, statusCode: res.statusCode });
+          reject(new Error(`downloadFile 失败（statusCode=${res.statusCode ?? "unknown"}）`));
+        }
+      },
+      fail: (error) => {
+        logger.error("[mpaas] downloadRemoteFile fail", { url, error });
+        reject(error);
+      },
+    });
   });
+}
+
+async function resolvePickPath(raw: unknown, skipDownload = false): Promise<string> {
+  const value = String(raw || "");
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return skipDownload ? value : downloadRemoteFile(value);
+  return value;
+}
+
+/**
+ * 把原生回参归一化成「可直接上传的本地文件」列表。
+ * 兼容两种形态：
+ * - tempFilePaths：字符串路径数组，或 { url|path, name, size, mimeType } 对象数组
+ * - apFilePaths：JSON 字符串或数组（内容多为远程 URL，需要先下载）
+ */
+async function collectPickFiles(result: BridgeResult, skipDownload = false): Promise<NativeSelectedFile[]> {
+  const tempPaths = Array.isArray(result?.tempFilePaths) ? result.tempFilePaths : [];
+  let apPaths: unknown[] = [];
+  const apPathsRaw = result?.apFilePaths;
+  if (typeof apPathsRaw === "string") {
+    try {
+      apPaths = JSON.parse(apPathsRaw);
+    } catch {
+      apPaths = [];
+    }
+  } else if (Array.isArray(apPathsRaw)) {
+    apPaths = apPathsRaw;
+  }
+
+  logger.info("[mpaas] collectPickFiles start", {
+    tempPaths: tempPaths.length,
+    apPaths: apPaths.length,
+    skipDownload,
+  });
+
+  const collected: NativeSelectedFile[] = [];
+  for (const item of tempPaths) {
+    if (typeof item === "string") {
+      const url = await resolvePickPath(item, skipDownload);
+      logger.info("[mpaas] pick item(string)", { raw: item, resolved: url });
+      if (url) collected.push({ url });
+      continue;
+    }
+    if (item && typeof item === "object") {
+      const file = item as Record<string, unknown>;
+      const url = await resolvePickPath(file.url || file.path || file.filePath, skipDownload);
+      logger.info("[mpaas] pick item(object)", {
+        raw: file,
+        resolved: url,
+        name: file.name,
+        size: file.size,
+      });
+      if (!url) continue;
+      collected.push({
+        url,
+        name: String(file.name || file.fileName || file.title || ""),
+        size: Number(file.size) || 0,
+        mimeType: String(file.mimeType || file.type || ""),
+      });
+    }
+  }
+  for (const raw of apPaths) {
+    const url = await resolvePickPath(raw, skipDownload);
+    if (url) collected.push({ url });
+  }
+  return collected;
+}
+
+/**
+ * 调起宿主原生图片/文件选择器（imageChoose），由原生弹窗完成选择与上传。
+ *
+ * - showFile=true：原生同时提供图片与文件入口，文件类型受 fileTypes 约束
+ * - showFile=false：仅图片
+ * - fileTypes：逗号分隔的小写扩展名白名单，如 "pdf,jpg,png"
+ * - nativeUploaded=true：原生已代为上传，回参（tempFilePaths / apFilePaths）
+ *   直接作为最终 URL 使用，前端不再二次传输
+ * - nativeUploaded=false（默认）：兼容旧链路，本地路径直接返回，远程 URL 先下载成临时文件
+ */
+export async function chooseNativeFiles(
+  count: number,
+  options: ChooseNativeFilesOptions = {},
+): Promise<NativeSelectedFile[]> {
+  const { showFile = true, fileTypes = "", nativeUploaded = false } = options;
+  const params = {
+    count: Math.max(1, count),
+    showFile,
+    ...(fileTypes ? { fileTypes } : {}),
+  };
+  logger.info("[mpaas] imageChoose call start", {
+    params,
+    nativeUploaded,
+    bridgeReady: isMpaasReady(),
+  });
+
+  const result = await callNative("imageChoose", params);
+
+  // 打印原始回参的字段构成（不展开大数组，只给类型与长度，便于核对宿主返回形态）
+  const tempRaw = (result as Record<string, unknown>)?.tempFilePaths;
+  const apRaw = (result as Record<string, unknown>)?.apFilePaths;
+  logger.info("[mpaas] imageChoose raw result", {
+    keys: Object.keys(result || {}),
+    success: result?.success,
+    error: result?.error ?? result?.errorCode,
+    errorMessage: result?.errorMessage ?? result?.message,
+    tempFilePathsType: Array.isArray(tempRaw) ? "array" : typeof tempRaw,
+    tempFilePathsLength: Array.isArray(tempRaw) ? tempRaw.length : 0,
+    apFilePathsType: Array.isArray(apRaw) ? "array" : typeof apRaw,
+  });
+
   if (result?.success === false || String(result?.success) === "false") {
+    logger.error("[mpaas] imageChoose failed", { code: result?.code ?? "unknown" });
     throw new Error(`imageChoose 失败（code=${result?.code ?? "unknown"}）`);
   }
 
-  const paths = Array.isArray(result?.tempFilePaths) ? result.tempFilePaths : [];
-  return paths.map((item) => {
-    if (typeof item === "string") return { url: item };
-    const file = item as Record<string, unknown>;
-    return {
-      url: String(file.url || file.path || ""),
-      name: String(file.name || file.fileName || ""),
-      size: Number(file.size || 0),
-      mimeType: String(file.mimeType || file.type || ""),
-    };
-  }).filter(file => file.url);
+  const files = await collectPickFiles(result, nativeUploaded);
+  logger.info("[mpaas] imageChoose files resolved", {
+    count: files.length,
+    files: files.map(f => ({ url: f.url, name: f.name, size: f.size, mimeType: f.mimeType })),
+  });
+  return files;
 }
 
 /** 宿主支持动态申请的系统权限 */

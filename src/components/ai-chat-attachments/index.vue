@@ -6,12 +6,35 @@ defineProps<{ attachments: ComposerAttachment[] }>();
 
 const emit = defineEmits<{
   remove: [localId: string];
-  retry: [localId: string];
 }>();
 
+/** 点击图片弹出大图预览（优先用可内联显示的 COS 预签名地址） */
 function onItemTap(attachment: ComposerAttachment) {
-  if (attachment.status !== "failed") return;
-  emit("retry", attachment.localId);
+  if (attachment.type === "image") {
+    uni.previewImage({
+      urls: [attachment.previewPath || attachment.url || attachment.localPath],
+      current: 0,
+    });
+  }
+}
+
+/** 图片加载失败时打印排查（预签名地址失效 / 防盗链 / 404 等） */
+function onImageError(attachment: ComposerAttachment) {
+  console.warn("[attachment] image load failed", {
+    name: attachment.name,
+    url: attachment.url,
+    previewPath: attachment.previewPath,
+    localPath: attachment.localPath,
+  });
+}
+
+/** 图片加载成功：确认最终生效的是哪个地址（预签名 / url / 本地） */
+function onImageLoad(attachment: ComposerAttachment) {
+  console.log("[attachment] image load success", {
+    name: attachment.name,
+    src: attachment.previewPath || attachment.url || attachment.localPath,
+    from: attachment.previewPath ? "previewPath(cos 预签名)" : "url/localPath",
+  });
 }
 </script>
 
@@ -32,7 +55,9 @@ function onItemTap(attachment: ComposerAttachment) {
           v-if="attachment.type === 'image'"
           class="attachments__thumb"
           mode="aspectFill"
-          :src="attachment.localPath"
+          :src="attachment.previewPath || attachment.url || attachment.localPath"
+          @load="onImageLoad(attachment)"
+          @error="onImageError(attachment)"
         />
         <view v-else class="attachments__file-icon">
           <image src="@/assets/img/icon-form.svg" mode="aspectFit" />
@@ -45,13 +70,6 @@ function onItemTap(attachment: ComposerAttachment) {
           <text class="attachments__meta">
             {{ formatAttachmentStatus(attachment) }}
           </text>
-        </view>
-
-        <view
-          v-if="attachment.type === 'image' && attachment.status !== 'uploaded'"
-          class="attachments__mask"
-        >
-          <text>{{ attachment.status === 'failed' ? '重试' : '上传中' }}</text>
         </view>
 
         <view class="attachments__remove" @tap.stop="emit('remove', attachment.localId)">
@@ -115,6 +133,8 @@ function onItemTap(attachment: ComposerAttachment) {
   width: 112rpx;
   height: 112rpx;
   border-radius: 18rpx;
+  // 图片加载失败/未加载时不再纯白，给个占位底色避免"空白"误判
+  background: #ececec;
 }
 
 .attachments__file-icon {
