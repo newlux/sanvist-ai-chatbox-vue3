@@ -6,6 +6,7 @@ import { platformRequest, PlatformRequestError, platformUploadFile } from "@/uti
 const logger = createLogger("request");
 
 export interface BaseResponse<T = unknown> {
+  failed: boolean;
   code: number;
   errorCode?: number;
   data: T;
@@ -94,7 +95,9 @@ function notifyAuthFailure(statusCode: number, message: string) {
 function unwrapResponse<T>(response: BaseResponse<T> | T): T {
   if (!response || typeof response !== "object" || !("code" in response)) return response as T;
   const envelope = response as BaseResponse<T>;
-  if (envelope.code === 200) return envelope.data;
+  // 主 API 成功包是 code=200；COS 预签名等 hfle 网关服务是 errorCode=200 + 业务码字符串
+  // （code 形如 common.info.vo.success），两种都算成功并返回 data
+  if (envelope.code === 200 || envelope.failed === false||envelope.errorCode===200) return envelope.data;
   const message = envelope.message || "业务请求失败";
   // 网关把鉴权结果放在业务 code 里返回，HTTP 状态仍是 200
   notifyAuthFailure(envelope.code, message);
