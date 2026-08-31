@@ -139,6 +139,10 @@ function onItemTap(item: NavItem) {
   background: #fff2f3;
 }
 
+.ai-chat-nav__chip--active .ai-chat-nav__icon {
+  filter: brightness(0) saturate(100%) invert(11%) sepia(99%) saturate(6668%) hue-rotate(358deg) brightness(105%) contrast(113%);
+}
+
 .ai-chat-nav__chip--active .ai-chat-nav__title {
   color: #fe0000;
   font-weight: 600;

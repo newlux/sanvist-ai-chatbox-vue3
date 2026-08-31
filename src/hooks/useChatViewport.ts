@@ -266,16 +266,6 @@ export function useChatViewport() {
     onH5KeyboardChange(payload);
   }
 
-  /**
-   * mPaaS 容器里 Native 主动调用前端页面走的是 document 上派发的 DOM 事件
-   * （参考 h5NetworkChange 的注册方式），payload 在 event.data / event.detail / event 本身上。
-   */
-  function onH5KeyboardChangeEvent(event: Event) {
-    const source = event as { data?: unknown; detail?: unknown };
-    const payload = (source?.data || source?.detail || event || {}) as Parameters<typeof onH5KeyboardChange>[0];
-    onH5KeyboardChange(payload);
-  }
-
   function onH5KeyboardChange(payload: {
     visible?: boolean;
     top?: number | string;
