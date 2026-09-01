@@ -3,6 +3,14 @@ import type { AiBlock } from "@/utils/ai-stream";
 
 export type ChatRole = "user" | "ai";
 
+/** Dify 工作流节点/工作流结束事件驱动的回答过程标题。 */
+export interface ChatProcessStatus {
+  phase: "thinking" | "succeeded" | "failed" | "stopped";
+  title?: string;
+  /** 工作流结束时由 `workflow_finished.data.elapsed_time` 提供，单位秒。 */
+  elapsedSeconds?: number;
+}
+
 /** 用户消息里随行展示的附件 */
 export interface ChatMessageAttachment {
   url: string;
@@ -27,6 +35,7 @@ export interface UiChatMessage {
   taskId?: Identifier | null;
   waitingText?: string;
   durationMs?: number | null;
+  processStatus?: ChatProcessStatus | null;
   positive?: boolean | null;
   feedbackValue?: string;
   feedbackRemark?: string;

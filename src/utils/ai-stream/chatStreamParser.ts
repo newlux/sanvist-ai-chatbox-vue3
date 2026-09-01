@@ -26,6 +26,11 @@ export interface StreamBlockUpdate {
   messageId?: Identifier;
   taskId?: Identifier;
   metadata?: MessageEndEvent["metadata"];
+  processStatus?: {
+    phase: "thinking" | "succeeded" | "failed" | "stopped";
+    title?: string;
+    elapsedSeconds?: number;
+  };
   receivedContent: boolean;
 }
 
@@ -78,17 +83,13 @@ export function applyEventToBlocks(
       return base;
     case "status": {
       const { node, message, phase } = event.data;
-      if (!node || !message) return base;
-      const previousSteps = readThinkSteps(blocks);
-      const stepIndex = previousSteps.findIndex(item => item?.node === node);
-      const steps = [...previousSteps];
-      const step: ThinkStep = { node, message, complete: phase === "completed" };
-      if (stepIndex < 0) steps.push(step);
-      else steps[stepIndex] = { ...steps[stepIndex], ...step };
+      if (!message) return base;
       return {
         ...base,
-        blocks: upsertBlock(blocks, "think-0", "think", { steps }),
-        receivedContent: true,
+        processStatus: {
+          phase: phase === "completed" ? "succeeded" : "thinking",
+          title: node ? String(node) : undefined,
+        },
       };
     }
     case "message": {
@@ -128,6 +129,16 @@ export function applyEventToBlocks(
         ...base,
         blocks: completeBlocks(blocks),
         metadata: event.metadata,
+        processStatus: {
+          phase: event.metadata.status === "failed"
+            ? "failed"
+            : event.metadata.status === "stopped"
+              ? "stopped"
+              : "succeeded",
+          elapsedSeconds: Number.isFinite(Number(event.metadata.duration_ms))
+            ? Number(event.metadata.duration_ms) / 1000
+            : undefined,
+        },
       };
     case "think": {
       const { node, message, phase, append } = event.data;

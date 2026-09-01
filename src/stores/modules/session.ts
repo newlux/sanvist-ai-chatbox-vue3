@@ -1,7 +1,6 @@
 import type { useChatStore } from "./chat";
 import type { Conversation, Identifier } from "@/api/chat/types";
 import type { UiChatMessage } from "@/stores/chat-types";
-import type { AiBlock } from "@/utils/ai-stream";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import {
@@ -14,28 +13,6 @@ import {
 
 type ChatStore = ReturnType<typeof useChatStore>;
 
-function mapHistoryBlocks(contents: unknown, messageId: Identifier | null): AiBlock[] {
-  const items = Array.isArray(contents) ? contents : [];
-  return items.reduce<AiBlock[]>((blocks, content, index) => {
-    const item = content as { type?: string; data?: Record<string, unknown> };
-    const type = String(item?.type || "").toLowerCase();
-    const payload = item?.data && typeof item.data === "object" ? item.data : {};
-    const id = `history-${messageId ?? "message"}-${index}`;
-
-    if (type === "text" && String(payload.text || "").trim()) {
-      blocks.push({
-        id,
-        type: "answer",
-        payload: { content: String(payload.text).trim() },
-        complete: true,
-      });
-    } else if (["chart", "table", "metric", "suggestion"].includes(type)) {
-      blocks.push({ id, type: type as AiBlock["type"], payload, complete: true });
-    }
-    return blocks;
-  }, []);
-}
-
 export function mapHistoryMessages(
   list: unknown[],
   fallbackSessionId: Identifier | null,
@@ -46,7 +23,16 @@ export function mapHistoryMessages(
     const sessionId = (item?.conversationId ?? fallbackSessionId ?? null) as Identifier | null;
     const messageId = (item?.id ?? null) as Identifier | null;
     const userText = String(item?.query || "").trim();
-    const blocks = mapHistoryBlocks(item?.contents, messageId);
+    // 标准 Dify `/v1/messages` 的回答正文固定使用 answer 字段。
+    const answer = String(item?.answer || "").trim();
+    const blocks = answer
+      ? [{
+          id: `history-${messageId ?? "message"}-answer`,
+          type: "answer" as const,
+          payload: { content: answer },
+          complete: true,
+        }]
+      : [];
     if (userText) {
       mapped.push({ role: "user", content: userText, sessionId, messageId });
     }

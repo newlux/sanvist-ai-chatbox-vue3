@@ -166,10 +166,6 @@ export interface ChatMessage {
   inputs: Record<string, unknown>;
   query: string;
   answer: string;
-  contents?: Array<{
-    type?: string;
-    data?: Record<string, unknown>;
-  }>;
   messageFiles: MessageFile[];
   feedback: Feedback | null;
   retrieverResources: Record<string, unknown>[];

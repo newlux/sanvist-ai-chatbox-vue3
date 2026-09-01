@@ -30,6 +30,7 @@ const props = defineProps({
   attachments: { type: Array, default: () => [] },
   interrupted: { type: Boolean, default: false },
   durationMs: { type: Number, default: null },
+  processStatus: { type: Object, default: null },
   positive: { type: Boolean, default: null },
   selected: { type: Boolean, default: false },
   suppressHighlight: { type: Boolean, default: false },
@@ -158,6 +159,18 @@ const visibleBlocks = computed(() =>
 const showWaiting = computed(
   () => Boolean(props.waitingText) && (props.loading || props.interrupted),
 );
+
+const processStatusText = computed(() => {
+  const status = props.processStatus as { phase?: string; title?: string } | null;
+  if (!status) return "";
+  if (status.phase === "succeeded") return "已完成";
+  if (status.phase === "failed") return "执行失败";
+  if (status.phase === "stopped") return "已停止";
+  return status.title ? `${status.title}...` : "正在思考...";
+});
+
+const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusText.value));
+const hasProcessContent = computed(() => Boolean(visibleBlocks.value.length || props.content));
 
 function onSelectTap() {
   if (props.selectMode && !props.disabled) emit("select-toggle");
@@ -302,7 +315,25 @@ function onNegativeFeedback() {
 
       <template v-else>
         <view
-          v-if="showWaiting"
+          v-if="showProcessStatus"
+          class="ai-bubble-v2__process-status"
+          :class="[
+            `ai-bubble-v2__process-status--${props.processStatus?.phase}`,
+            { 'ai-bubble-v2__process-status--with-content': hasProcessContent },
+          ]"
+        >
+          <text v-if="props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-icon">
+            ✓
+          </text>
+          <text class="ai-bubble-v2__process-text">
+            {{ processStatusText }}
+          </text>
+          <text v-if="durationSeconds != null && props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-duration">
+            耗时 {{ durationSeconds }} 秒
+          </text>
+        </view>
+        <view
+          v-if="showWaiting && !showProcessStatus"
           class="ai-bubble-v2__waiting"
           :class="{ 'ai-bubble-v2__waiting--stopped': props.interrupted }"
         >
@@ -371,9 +402,6 @@ function onNegativeFeedback() {
               class="ai-bubble-v2__action-icon"
             />
           </view>
-          <text v-if="durationSeconds !== null" class="ai-bubble-v2__duration">
-            已消耗 {{ durationSeconds }} 秒
-          </text>
         </view>
       </template>
     </view>
@@ -625,6 +653,56 @@ function onNegativeFeedback() {
 .ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-mark,
 .ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-label {
   color: #7b7b7b;
+}
+.ai-bubble-v2__process-status {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 40rpx;
+  color: #777777;
+  font-size: 28rpx;
+  line-height: 40rpx;
+}
+.ai-bubble-v2__process-status--with-content {
+  margin-bottom: 32rpx;
+  padding-bottom: 24rpx;
+  border-bottom: 1rpx solid #eeeeee;
+}
+.ai-bubble-v2__process-icon {
+  flex-shrink: 0;
+  margin-right: 8rpx;
+  color: #5a8dff;
+  font-size: 28rpx;
+}
+.ai-bubble-v2__process-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-bubble-v2__process-status--thinking .ai-bubble-v2__process-text {
+  background-image: linear-gradient(90deg, #8a8a8a 25%, #c9c9c9 45%, #c9c9c9 55%, #8a8a8a 75%);
+  background-position: 200% 0;
+  background-size: 200% 100%;
+  background-repeat: repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ai-bubble-process-shimmer 2.8s linear infinite;
+}
+.ai-bubble-v2__process-duration {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 16rpx;
+  color: #999999;
+  font-size: 24rpx;
+  white-space: nowrap;
+}
+.ai-bubble-v2__process-status--failed { color: #d54941; }
+.ai-bubble-v2__process-status--stopped { color: #999999; }
+@keyframes ai-bubble-process-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
 }
 .ai-bubble-v2__duration {
   color: #bababa;
