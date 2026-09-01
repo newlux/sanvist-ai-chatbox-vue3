@@ -53,6 +53,13 @@ const emit = defineEmits([
   "longpress-copy",
 ]);
 
+/** 工作流结束事件的 elapsed_time 已在流层换算为毫秒；展示时统一转换为秒。 */
+const durationSeconds = computed(() => {
+  const milliseconds = Number(props.durationMs);
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
+  return (milliseconds / 1000).toFixed(2).replace(/\.00$/, "");
+});
+
 async function copyText(text) {
   const value = String(text || "").trim();
   if (!value) return false;
@@ -364,8 +371,8 @@ function onNegativeFeedback() {
               class="ai-bubble-v2__action-icon"
             />
           </view>
-          <text v-if="props.durationMs !== null" class="ai-bubble-v2__duration">
-            已消耗 {{ props.durationMs }} ms
+          <text v-if="durationSeconds !== null" class="ai-bubble-v2__duration">
+            已消耗 {{ durationSeconds }} 秒
           </text>
         </view>
       </template>

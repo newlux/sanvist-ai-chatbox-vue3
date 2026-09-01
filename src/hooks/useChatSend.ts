@@ -3,7 +3,7 @@ import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { useI18n } from "vue-i18n";
 import { interruptChat } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
-import { useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { useChatStore, useSessionStore } from "@/stores";
 import { buildInitialBlocks, consumeChatStream } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
@@ -33,7 +33,6 @@ export function useChatSend() {
   const { t } = useI18n();
   const chatStore = useChatStore();
   const sessionStore = useSessionStore();
-  const userStore = useUserStore();
   const { stream, cancel } = useChatStream({
     onError: (error) => {
       if (!isAbortError(error)) logger.error("stream request failed", error);
@@ -131,10 +130,9 @@ export function useChatSend() {
           {
             query: content,
             conversationId: chatStore.aiSessionId,
-            // Dify 开始节点通过 inputs 接收场景与原有用户标识。
+            // Dify 开始节点通过 inputs 接收场景；用户由网关从鉴权上下文注入。
             inputs: {
               scene: getDifyScene(chatStore.subagent),
-              user: String(userStore.userId || ""),
             },
             files,
           },
