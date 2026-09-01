@@ -57,6 +57,7 @@
   "record-failed": "录音失败",
   "attachment-limit": "最多添加 {count} 个附件",
   "attachment-oversize": "{name} 超过 50MB",
+  "attachment-type-unsupported": "不支持的文件类型",
   "attachment-uploading-wait": "请等待附件上传完成",
   "attachment-retry-or-remove": "请重试或移除上传失败的附件",
   "attachment-only-query": "请查看我发送的附件",

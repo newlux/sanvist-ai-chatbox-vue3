@@ -12,6 +12,7 @@ import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
+import type { ChatMessageAttachment } from "@/stores/chat-types";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
@@ -265,8 +266,8 @@ function onNegativeFeedback() {
           v-if="file.type === 'image'"
           class="ai-bubble-v2__file-image"
           mode="aspectFill"
-          :src="file.url"
-          @tap.stop="onPreviewImage(file.url)"
+          :src="file.previewPath || file.url"
+          @tap.stop="onPreviewImage(file.previewPath || file.url)"
         />
         <view v-else class="ai-bubble-v2__file-card">
           <image

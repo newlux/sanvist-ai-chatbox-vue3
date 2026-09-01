@@ -55,6 +55,7 @@
   "record-failed": "Recording failed",
   "attachment-limit": "You can attach up to {count} files",
   "attachment-oversize": "{name} exceeds 50MB",
+  "attachment-type-unsupported": "Unsupported file type",
   "attachment-uploading-wait": "Please wait for the upload to finish",
   "attachment-retry-or-remove": "Retry or remove the failed attachment",
   "attachment-only-query": "Please take a look at the attachment I sent",

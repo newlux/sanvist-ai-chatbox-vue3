@@ -65,6 +65,7 @@ const {
   chooseImages,
   chooseFilesFromNative,
   removeAttachment,
+  retryAttachment,
   takeUploadedFiles,
 } = useComposerAttachments();
 
@@ -467,6 +468,7 @@ onBeforeUnmount(() => {
         v-if="attachments.length"
         :attachments="attachments"
         @remove="removeAttachment"
+        @retry="retryAttachment"
       />
 
       <!-- 底部输入栏：默认语音、键盘文本、发送和生成中状态 -->

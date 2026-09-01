@@ -2,12 +2,16 @@ import type { ChatFile } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { getCosPresignedDownloadUrl } from "@/api/chat";
+import { getCosPresignedDownloadUrl, uploadChatFile } from "@/api/chat";
+import { useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { getRequestHeaders } from "@/utils/request";
 
 import {
   chooseNativeFiles,
+  ensureNativePermission,
+  isMpaasReady,
+  permissionDeniedMessage,
   waitForMpaas,
   type NativeSelectedFile,
 } from "@/utils/platform/mpaas";
@@ -15,6 +19,8 @@ import {
 const logger = createLogger("attachments");
 
 export const MAX_ATTACHMENT_COUNT = 3;
+/** 低版本降级路径（uni.chooseImage / chooseFile）的本地文件大小上限 */
+const MAX_LOCAL_FILE_SIZE = 50 * 1024 * 1024;
 
 /**
  * 允许上传的文件后缀白名单。
@@ -42,10 +48,11 @@ export const DEFAULT_ALLOWED_IMAGE_TYPES = ALLOWED_IMAGE_EXTENSIONS.join(",");
 const ALLOWED_EXTENSION_SET = new Set<string>(DEFAULT_ALLOWED_EXTENSIONS);
 
 type AttachmentKind = "image" | "audio" | "video" | "document" | "custom";
+type AttachmentStatus = "uploading" | "uploaded" | "failed";
 
 export interface ComposerAttachment {
   localId: string;
-  /** 原生上传完成后的可访问地址，同时用于缩略图预览与发送 */
+  /** 原生上传完成后是可访问地址；低版本降级上传是本地临时路径，用于缩略图预览与失败重传 */
   localPath: string;
   /** 发送时作为 files[].url */
   url: string;
@@ -59,8 +66,16 @@ export interface ComposerAttachment {
   extension: string;
   mimeType: string;
   type: AttachmentKind;
-  /** 文件由原生完成上传，添加即完成，恒为 uploaded */
-  status: "uploaded";
+  /** 原生路径恒为 uploaded（原生已完成上传）；低版本降级路径维护真实上传状态 */
+  status: AttachmentStatus;
+  error?: string;
+}
+
+interface LocalSelectedFile {
+  path: string;
+  name: string;
+  size: number;
+  mimeType?: string;
 }
 
 /**
@@ -158,6 +173,25 @@ function inferAttachmentKind(extension: string, mimeType = ""): AttachmentKind {
   return "custom";
 }
 
+/**
+ * 后缀白名单判定，原生与低版本降级两条入口共用同一份口径。
+ * 扩展名优先命中 DEFAULT_ALLOWED_EXTENSIONS；
+ * H5 选图回参常是 blob URL（拿不到后缀），这时按图片 MIME 放行，
+ * 否则低版本 H5 选图会被整体误拒。
+ */
+function isAllowedExtension(extension: string, mimeType = "") {
+  if (ALLOWED_EXTENSION_SET.has(extension)) return true;
+  const mimeIsImage = String(mimeType || "").toLowerCase().startsWith("image/");
+  return !extension && mimeIsImage;
+}
+
+/** 低版本降级上传时 uni.uploadFile 需要的 fileType */
+function toUploadFileType(kind: AttachmentKind) {
+  if (kind === "video") return "video" as const;
+  if (kind === "audio") return "audio" as const;
+  return "image" as const;
+}
+
 export function formatFileSize(size: number) {
   if (!size || size <= 0) return "";
   if (size < 1024) return `${size}B`;
@@ -165,14 +199,21 @@ export function formatFileSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)}MB`;
 }
 
-/** 文件由原生完成上传，展示体积即可 */
+/** 预览条上的副标题：上传中显示状态，失败提示重试，完成后显示体积 */
 export function formatAttachmentStatus(attachment: ComposerAttachment) {
+  if (attachment.status === "uploading") return "上传中...";
+  if (attachment.status === "failed") return "上传失败，点击重试";
   return formatFileSize(attachment.size) || "已上传";
 }
 
-/** 输入栏的附件选择（全部经由原生 imageChoose，由原生完成上传） */
+/**
+ * 输入栏的附件选择与上传：
+ * - 原生 mPaaS 可用：走原生 imageChoose（原生弹窗完成选择 + 原生完成上传，恒 uploaded）
+ * - 原生不可用（低版本系统 / 普通 H5 / bridge 未注入）：降级到 uni 标准选择 + /files/upload 上传
+ */
 export function useComposerAttachments() {
   const { t } = useI18n();
+  const userStore = useUserStore();
 
   function toastLimit() {
     uni.showToast({ title: t("attachment-limit", { count: MAX_ATTACHMENT_COUNT }), icon: "none" });
@@ -180,10 +221,13 @@ export function useComposerAttachments() {
   const attachments = ref<ComposerAttachment[]>([]);
 
   const hasAttachments = computed(() => attachments.value.length > 0);
-  // 文件由原生完成上传，附件加入即可发送：不存在「上传中 / 上传失败」状态。
-  // 保留这两个字段以兼容发送前的校验逻辑（恒为 false）。
-  const hasIncompleteAttachments = computed(() => false);
-  const hasFailedAttachments = computed(() => false);
+  // 原生路径恒为 uploaded；低版本降级路径存在「上传中 / 上传失败」状态，发送前需校验
+  const hasIncompleteAttachments = computed(() =>
+    attachments.value.some(item => item.status !== "uploaded"),
+  );
+  const hasFailedAttachments = computed(() =>
+    attachments.value.some(item => item.status === "failed"),
+  );
   const isLimitReached = computed(() => attachments.value.length >= MAX_ATTACHMENT_COUNT);
 
   function findAttachment(localId: string) {
@@ -251,6 +295,95 @@ export function useComposerAttachments() {
     }
   }
 
+  /** 低版本降级路径：把本地选择的文件走 /files/upload 上传到网关，维护真实上传状态 */
+  async function uploadAttachment(localId: string) {
+    const attachment = findAttachment(localId);
+    if (!attachment) return;
+
+    attachment.status = "uploading";
+    attachment.error = undefined;
+
+    try {
+      const uploaded = await uploadChatFile({
+        filePath: attachment.localPath,
+        // 网关校验非空：游客态没有用户 ID 时用固定占位
+        user: String(userStore.userId || "guest"),
+        fileType: toUploadFileType(attachment.type),
+      });
+      // 上传期间用户可能已移除该附件
+      const current = findAttachment(localId);
+      if (!current) return;
+      if (!uploaded?.url) throw new Error(t("upload-result-missing-url"));
+
+      current.url = uploaded.url;
+      current.name = uploaded.name || current.name;
+      current.size = Number(uploaded.size) || current.size;
+      current.extension = uploaded.extension || current.extension;
+      current.mimeType = uploaded.mimeType || current.mimeType;
+      current.type = inferAttachmentKind(current.extension, current.mimeType);
+      current.status = "uploaded";
+    } catch (error) {
+      const current = findAttachment(localId);
+      if (!current) return;
+      const message = error instanceof Error ? error.message : t("upload-failed");
+      current.status = "failed";
+      current.error = message;
+      logger.error("upload failed", error);
+      uni.showToast({ title: message.slice(0, 28), icon: "none", duration: 2500 });
+    }
+  }
+
+  /** 低版本降级路径：本地选择文件整理成附件并逐个触发上传 */
+  function appendSelectedFiles(files: LocalSelectedFile[]) {
+    const remaining = MAX_ATTACHMENT_COUNT - attachments.value.length;
+    if (remaining <= 0) {
+      toastLimit();
+      return;
+    }
+    const accepted = files.slice(0, remaining);
+    if (files.length > remaining) toastLimit();
+
+    accepted.forEach((file, index) => {
+      if (!file.path) return;
+      if (file.size > MAX_LOCAL_FILE_SIZE) {
+        uni.showToast({ title: t("attachment-oversize", { name: file.name || "文件" }), icon: "none" });
+        return;
+      }
+
+      const extension = getFileExtension(file.name, file.path);
+      // 后缀白名单：与原生选择器 fileTypes 同一份清单，不支持的直接拒绝并提示
+      if (!isAllowedExtension(extension, file.mimeType)) {
+        logger.warn("[attachment] reject by whitelist", {
+          path: file.path,
+          name: file.name,
+          extension,
+          mimeType: file.mimeType,
+        });
+        uni.showToast({ title: t("attachment-type-unsupported"), icon: "none" });
+        return;
+      }
+
+      const type = inferAttachmentKind(extension, file.mimeType);
+      const localId = createAttachmentLocalId();
+      const fallbackName = type === "image"
+        ? `图片-${index + 1}.${extension || "jpg"}`
+        : `附件-${index + 1}${extension ? `.${extension}` : ""}`;
+
+      attachments.value.push({
+        localId,
+        localPath: file.path,
+        url: "",
+        name: file.name || fallbackName,
+        size: Number(file.size) || 0,
+        extension,
+        mimeType: file.mimeType || "",
+        type,
+        status: "uploading",
+      });
+      void uploadAttachment(localId);
+    });
+  }
+
   /**
    * 原生 imageChoose 回参整理：原生弹窗已完成选择与上传，回参即最终 URL。
    * 直接生成 uploaded 附件，前端不再做任何文件传输。
@@ -270,11 +403,9 @@ export function useComposerAttachments() {
         return;
       }
 
-      // 类型白名单校验：原生回参通常带扩展名；无扩展名时按图片 MIME 放行
+      // 类型白名单校验：与低版本降级路径共用同一份口径
       const extension = getFileExtension(file.name || "", file.url);
-      const inWhitelist = ALLOWED_EXTENSION_SET.has(extension);
-      const mimeIsImage = String(file.mimeType || "").toLowerCase().startsWith("image/");
-      const isAllowed = inWhitelist || (!extension && mimeIsImage);
+      const isAllowed = isAllowedExtension(extension, file.mimeType);
 
       logger.info("[attachment] native file received", {
         index,
@@ -283,8 +414,6 @@ export function useComposerAttachments() {
         size: file.size,
         mimeType: file.mimeType,
         extension,
-        inWhitelist,
-        mimeIsImage,
         isAllowed,
       });
 
@@ -331,9 +460,70 @@ export function useComposerAttachments() {
     });
   }
 
+  /** 低版本降级：uni.chooseImage 选择照片/拍照，再走 /files/upload 上传 */
+  async function chooseImagesViaUni(sourceType: Array<"album" | "camera">) {
+    // 容器里先向原生要权限：安卓 WebView 不先授权的话，选图/拍照会被静默拒绝
+    const permission = sourceType.includes("camera") ? "camera" : "photo";
+    if (!await ensureNativePermission(permission)) {
+      uni.showToast({ title: permissionDeniedMessage(permission), icon: "none" });
+      return;
+    }
+
+    const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
+    uni.chooseImage({
+      count,
+      sourceType,
+      sizeType: ["compressed", "original"],
+      success: (result) => {
+        const tempFiles = (result.tempFiles || []) as Array<{ path?: string; size?: number; name?: string; type?: string }>;
+        const paths = Array.isArray(result.tempFilePaths)
+          ? result.tempFilePaths
+          : [result.tempFilePaths].filter(Boolean) as string[];
+        appendSelectedFiles(paths.map((path, index) => ({
+          path: String(path),
+          name: String(tempFiles[index]?.name || ""),
+          size: Number(tempFiles[index]?.size) || 0,
+          mimeType: String(tempFiles[index]?.type || "image/*"),
+        })));
+      },
+      fail: error => logger.warn("chooseImage failed", error),
+    });
+  }
+
+  // #ifdef H5
+  /** 低版本降级：H5 通用文件选择，再走 /files/upload 上传 */
+  async function chooseFilesViaUni() {
+    if (!await ensureNativePermission("photo")) {
+      uni.showToast({ title: permissionDeniedMessage("photo"), icon: "none" });
+      return;
+    }
+
+    const chooseFile = (uni as { chooseFile?: (options: Record<string, unknown>) => void }).chooseFile;
+    if (typeof chooseFile !== "function") {
+      uni.showToast({ title: t("file-select-unsupported"), icon: "none" });
+      return;
+    }
+    chooseFile({
+      count: Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length),
+      type: "all",
+      // 选择器层面先过滤一轮（个别环境不认这个参数，appendSelectedFiles 还有一次白名单兜底）
+      extension: DEFAULT_ALLOWED_EXTENSIONS.map(ext => `.${ext}`),
+      success: (result: { tempFiles?: Array<Record<string, unknown>> }) => {
+        appendSelectedFiles((result.tempFiles || []).map(file => ({
+          path: String(file.path || ""),
+          name: String(file.name || ""),
+          size: Number(file.size) || 0,
+          mimeType: String(file.type || ""),
+        })));
+      },
+      fail: (error: unknown) => logger.warn("chooseFile failed", error),
+    });
+  }
+  // #endif
+
   /**
-   * 选择照片/拍照：走原生 imageChoose（showFile=false，仅图片），
-   * 原生弹窗自带来源选择，选择后由原生完成上传。
+   * 选择照片/拍照：优先走原生 imageChoose（showFile=false，仅图片，原生完成上传）；
+   * 原生不可用（低版本容器 / 普通 H5）时降级到 uni.chooseImage + /files/upload。
    */
   async function chooseImages(sourceType: Array<"album" | "camera">) {
     const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
@@ -348,7 +538,9 @@ export function useComposerAttachments() {
     const bridge = await waitForMpaas(2000);
     logger.info("[attachment] chooseImages bridge ready", { ready: Boolean(bridge) });
     if (!bridge) {
-      logger.warn("[attachment] native picker unavailable, skip chooseImages", { sourceType });
+      // 原生不可用：降级到 uni 标准选择 + /files/upload 上传（低版本兼容）
+      logger.warn("[attachment] native picker unavailable, fallback to uni.chooseImage", { sourceType });
+      await chooseImagesViaUni(sourceType);
       return;
     }
 
@@ -373,8 +565,8 @@ export function useComposerAttachments() {
   }
 
   /**
-   * 文件/图片混合选择：走原生 imageChoose（showFile=true + fileTypes 白名单），
-   * 由原生弹窗完成选择与上传。
+   * 文件/图片混合选择：优先走原生 imageChoose（showFile=true + fileTypes 白名单，原生完成上传）；
+   * 原生不可用（低版本容器 / 普通 H5）时降级到 H5 文件选择 + /files/upload。
    */
   async function chooseFilesFromNative() {
     const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
@@ -388,7 +580,11 @@ export function useComposerAttachments() {
     const bridge = await waitForMpaas(2000);
     logger.info("[attachment] chooseFilesFromNative bridge ready", { ready: Boolean(bridge) });
     if (!bridge) {
-      logger.warn("[attachment] native picker unavailable, skip chooseFilesFromNative");
+      // 原生不可用：降级到 H5 通用文件选择 + /files/upload 上传（低版本兼容）
+      logger.warn("[attachment] native picker unavailable, fallback to uni file picker");
+      // #ifdef H5
+      await chooseFilesViaUni();
+      // #endif
       return;
     }
 
@@ -420,17 +616,22 @@ export function useComposerAttachments() {
     return waitForMpaas(2000).then(Boolean);
   }
 
-  /** 触发原生选择器；已达上限时只提示 */
+  /** 触发附件选择（含原生降级）；已达上限时只提示 */
   async function openAttachmentPicker() {
     if (isLimitReached.value) {
       toastLimit();
       return;
     }
+    // 原生可用走原生（选择 + 上传一步完成）；不可用由 chooseFilesFromNative 内部降级
     await chooseFilesFromNative();
   }
 
   function removeAttachment(localId: string) {
     attachments.value = attachments.value.filter(item => item.localId !== localId);
+  }
+
+  function retryAttachment(localId: string) {
+    void uploadAttachment(localId);
   }
 
   function clearAttachments() {
@@ -444,9 +645,9 @@ export function useComposerAttachments() {
    */
   function takeUploadedFiles(): { files: ChatFile[]; meta: ChatMessageAttachment[] } {
     logger.info("[attachment] takeUploadedFiles start", { total: attachments.value.length });
-    const uploaded = attachments.value.filter(item => item.url);
+    const uploaded = attachments.value.filter(item => item.status === "uploaded" && item.url);
     // type 直接用归类结果（含 custom），transferMethod 固定 remote_url——
-    // 文件已由原生上传，这里给的是可访问地址
+    // 文件已上传过，这里给的是可访问地址
     const files = uploaded.map(item => ({
       type: item.type,
       transferMethod: "remote_url" as const,
@@ -454,6 +655,7 @@ export function useComposerAttachments() {
     }));
     const meta = uploaded.map(item => ({
       url: item.url,
+      previewPath: item.previewPath,
       name: item.name,
       type: item.type,
       size: item.size,
@@ -474,6 +676,7 @@ export function useComposerAttachments() {
     chooseImages,
     chooseFilesFromNative,
     removeAttachment,
+    retryAttachment,
     clearAttachments,
     takeUploadedFiles,
   };
