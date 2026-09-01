@@ -126,11 +126,17 @@ function onBackTap() {
 function onShareSelectAllTap() {
   if (!props.shareSelectAllDisabled) emit("share-select-all");
 }
+async function reloadSessions() {
+  await nextTick();
+  await sessionPaging.value?.reload?.();
+}
+
+defineExpose({ reloadSessions });
+
 async function openHistoryDrawer() {
   historyLoading.value = true;
   historyPopup.value?.open?.("left");
-  await nextTick();
-  sessionPaging.value?.reload?.();
+  await reloadSessions();
 }
 async function onSessionQuery(pageNo: number, pageSize: number) {
   try {

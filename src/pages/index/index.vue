@@ -31,6 +31,7 @@ const userStore = useUserStore();
 provideChatScope(DEFAULT_CHAT_SCOPE);
 const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
 const sessionStore = useSessionStore();
+const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
 const sharePosterWrap = ref<unknown>(null);
 const navActiveKey = ref("");
 const shareSheetBottomInset = ref("");
@@ -261,6 +262,7 @@ async function onSessionDelete(session: { id?: string | number }) {
   if (!await confirmModal("删除此对话？", "删除后，这条对话记录将无法找回。确定删除此对话？")) return;
   try {
     await sessionStore.removeSession(id);
+    await chatHeader.value?.reloadSessions?.();
     if (String(chatStore.aiSessionId) === String(id)) chatStore.resetConversation();
     uni.showToast({ title: t("delete-success"), icon: "none" });
   } catch (error) {
@@ -275,6 +277,7 @@ async function onSessionDeleteBatch(ids: Array<string | number>) {
   if (!await confirmModal("批量删除选中对话？", "删除后，选中对话记录将无法找回。确定删除选中对话？")) return;
   try {
     await sessionStore.removeSessions(uniqueIds);
+    await chatHeader.value?.reloadSessions?.();
     if (chatStore.aiSessionId && uniqueIds.includes(String(chatStore.aiSessionId))) {
       chatStore.resetConversation();
     }
@@ -376,6 +379,7 @@ onBeforeUnmount(cancelActiveStream);
       <view class="ai-chat-glow ai-chat-glow--red" />
       <!-- Header -->
       <AiChatHeader
+        ref="chatHeader"
         v-model:sessions="sessions"
         class="ai-page__header"
         :load-sessions="getAISessionList"
