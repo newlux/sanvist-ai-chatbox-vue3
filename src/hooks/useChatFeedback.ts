@@ -2,7 +2,7 @@ import type { Identifier } from "@/api/chat/types";
 import { onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { cancelFeedback, submitFeedback } from "@/api/chat";
-import { useChatStore, useUserStore } from "@/stores";
+import { useChatStore } from "@/stores";
 
 import { createLogger } from "@/utils/logger";
 
@@ -10,15 +10,12 @@ const logger = createLogger("feedback");
 
 interface FeedbackContext {
   index: number;
-  conversationId: Identifier;
   messageId: Identifier;
-  user?: string;
 }
 
 export function useChatFeedback() {
   const { t } = useI18n();
   const chatStore = useChatStore();
-  const userStore = useUserStore();
   const sheetVisible = ref(false);
   const context = ref<FeedbackContext | null>(null);
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -34,17 +31,15 @@ export function useChatFeedback() {
     const msg = payload?.msg || {};
     const value = payload?.value || "";
     const targetMsg = Number.isInteger(index) ? chatStore.messages[index] : null;
-    const conversationId = (msg.conversationId || msg.sessionId || targetMsg?.conversationId || targetMsg?.sessionId || chatStore.aiSessionId) as Identifier | null;
     const messageId = (msg.messageId ?? targetMsg?.messageId ?? msg.id ?? targetMsg?.id) as Identifier | null;
-    const user = userStore.userId || undefined;
 
-    if (!targetMsg || !conversationId || !messageId) {
+    if (!targetMsg || !messageId) {
       uni.showToast({ title: t("feedback-unavailable"), icon: "none" });
       return;
     }
 
     if (value === "bad") {
-      context.value = { index, conversationId, messageId, user };
+      context.value = { index, messageId };
       sheetVisible.value = true;
       return;
     }
@@ -53,7 +48,7 @@ export function useChatFeedback() {
     if (value === "") {
       chatStore.replaceMessage(index, { ...prev, positive: null, feedbackValue: "", feedbackRemark: "" });
       try {
-        await cancelFeedback(messageId, { conversationId, user, messageId });
+        await cancelFeedback(messageId);
       } catch (error) {
         logger.error("caught error", error);
         chatStore.replaceMessage(index, { ...prev });
@@ -65,7 +60,7 @@ export function useChatFeedback() {
     if (value === "good") {
       chatStore.replaceMessage(index, { ...prev, positive: true, feedbackValue: "good", feedbackRemark: prev.feedbackRemark || "" });
       try {
-        await submitFeedback(messageId, { conversationId, user, messageId, rating: "like" });
+        await submitFeedback(messageId, { rating: "like" });
       } catch (error) {
         logger.error("caught error", error);
         chatStore.replaceMessage(index, { ...prev });
@@ -93,9 +88,6 @@ export function useChatFeedback() {
 
     try {
       await submitFeedback(ctx.messageId, {
-        conversationId: ctx.conversationId,
-        user: ctx.user,
-        messageId: ctx.messageId,
         rating: "dislike",
         content: remark,
       });

@@ -11,7 +11,6 @@ import {
   getMessages,
   renameConversation,
 } from "@/api/chat";
-import { useUserStore } from "./user";
 
 type ChatStore = ReturnType<typeof useChatStore>;
 
@@ -87,20 +86,15 @@ export const useSessionStore = defineStore("session", () => {
   const lastId = ref<Identifier | null>(null);
 
   async function loadSessions(pageNo = 1, pageSize = 20) {
-    const userStore = useUserStore();
-    const user = String(userStore.userId || "");
-    if (!user) return { data: [] as Conversation[], hasMore: false };
-
     if (pageNo === 1) {
       lastId.value = null;
       hasMore.value = true;
     }
 
     const page = await getConversations({
-      user,
       lastId: pageNo > 1 ? lastId.value || undefined : undefined,
       limit: pageSize,
-      sortBy: "updated_at_desc",
+      sortBy: "-updated_at",
     });
     const rows = Array.isArray(page?.data) ? page.data : [];
     lastId.value = rows.at(-1)?.id || null;
@@ -117,10 +111,8 @@ export const useSessionStore = defineStore("session", () => {
    * 这里默认取一个的话就会写错页面。
    */
   async function loadHistory(sessionId: Identifier, chatStore: ChatStore) {
-    const userStore = useUserStore();
     const page = await getMessages({
       conversationId: sessionId,
-      user: String(userStore.userId || ""),
       limit: HISTORY_PAGE_SIZE,
     });
     const rows = page?.data || [];
@@ -145,10 +137,8 @@ export const useSessionStore = defineStore("session", () => {
 
     historyLoading.value = true;
     try {
-      const userStore = useUserStore();
       const page = await getMessages({
         conversationId: sessionId,
-        user: String(userStore.userId || ""),
         firstId: historyFirstId.value,
         limit: HISTORY_PAGE_SIZE,
       });
@@ -168,15 +158,12 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   async function removeSession(sessionId: Identifier) {
-    const userStore = useUserStore();
-    await deleteConversation(sessionId, { user: String(userStore.userId || "") });
+    await deleteConversation(sessionId);
     await loadSessions();
   }
 
   async function removeSessions(ids: Identifier[]) {
-    const userStore = useUserStore();
     await batchDeleteConversations({
-      user: String(userStore.userId || ""),
       conversationIds: ids,
     });
     await loadSessions();
