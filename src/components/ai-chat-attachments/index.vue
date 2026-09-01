@@ -6,10 +6,18 @@ defineProps<{ attachments: ComposerAttachment[] }>();
 
 const emit = defineEmits<{
   remove: [localId: string];
+  retry: [localId: string];
 }>();
 
-/** 点击图片弹出大图预览（优先用可内联显示的 COS 预签名地址） */
+/**
+ * 点击附件：失败态触发重传（低版本降级路径），
+ * 其余图片点击弹出大图预览（优先用可内联显示的 COS 预签名地址）。
+ */
 function onItemTap(attachment: ComposerAttachment) {
+  if (attachment.status === "failed") {
+    emit("retry", attachment.localId);
+    return;
+  }
   if (attachment.type === "image") {
     uni.previewImage({
       urls: [attachment.previewPath || attachment.url || attachment.localPath],
@@ -59,7 +67,15 @@ function onImageLoad(attachment: ComposerAttachment) {
           @load="onImageLoad(attachment)"
           @error="onImageError(attachment)"
         />
-        <view v-else class="attachments__file-icon">
+        <view
+          v-if="attachment.type === 'image' && attachment.status !== 'uploaded'"
+          class="attachments__mask"
+        >
+          <text>{{ attachment.status === 'failed' ? '重试' : '上传中' }}</text>
+        </view>
+        <!-- 独立 v-if，不能用 v-else：遮罩也是 v-if，v-else 会绑到它上面，
+             导致图片上传完成后缩略图与文件图标同时渲染 -->
+        <view v-if="attachment.type !== 'image'" class="attachments__file-icon">
           <image src="@/assets/img/icon-form.svg" mode="aspectFit" />
         </view>
 
