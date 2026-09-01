@@ -24,6 +24,7 @@ export interface StreamBlockUpdate {
   blocks: AiBlock[];
   conversationId?: Identifier;
   messageId?: Identifier;
+  taskId?: Identifier;
   metadata?: MessageEndEvent["metadata"];
   receivedContent: boolean;
 }
@@ -68,6 +69,7 @@ export function applyEventToBlocks(
     blocks,
     conversationId: event.conversationId,
     messageId: event.messageId,
+    taskId: event.taskId,
     receivedContent: false,
   };
 
@@ -98,7 +100,7 @@ export function applyEventToBlocks(
       return {
         ...base,
         blocks: upsertBlock(blocks, "answer-0", "answer", {
-          content: `${previousContent}${event.answer}`,
+          content: event.replace ? event.answer : `${previousContent}${event.answer}`,
         }),
         receivedContent: true,
       };
@@ -127,9 +129,28 @@ export function applyEventToBlocks(
         blocks: completeBlocks(blocks),
         metadata: event.metadata,
       };
+    case "think": {
+      const { node, message, phase, append } = event.data;
+      if (!node || !message) return base;
+      const previousSteps = readThinkSteps(blocks);
+      const stepIndex = previousSteps.findIndex(item => item?.node === node);
+      const steps = [...previousSteps];
+      const previous = stepIndex < 0 ? undefined : steps[stepIndex];
+      const step: ThinkStep = {
+        node: String(node),
+        message: append ? `${previous?.message || ""}${message}` : String(message),
+        complete: phase === "completed",
+      };
+      if (stepIndex < 0) steps.push(step);
+      else steps[stepIndex] = { ...previous, ...step };
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, "think-0", "think", { steps }),
+        receivedContent: true,
+      };
+    }
     case "table":
     case "metric":
-    case "think":
     case "tool_call":
       return base;
   }

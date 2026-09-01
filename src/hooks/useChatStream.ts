@@ -1,4 +1,5 @@
 import type { ChatStreamEvent, SendChatMessageParams } from "@/api/chat/types";
+import { createDifyEventNormalizer, toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
 import { createSseSession } from "@/utils/ai-stream/sseSession";
 import { getRequestBaseURL, getRequestHeaders } from "@/utils/request";
 
@@ -55,8 +56,8 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
 
   async function* stream(params: SendChatMessageParams, streamOptions: StreamOptions = {}) {
     const queue = createAsyncQueue<StreamChunk<ChatStreamEvent>>();
-    const url = `${getRequestBaseURL().replace(/\/$/, "")}/chat/send`;
-    const body = { ...params, responseMode: "streaming" as const };
+    const url = `${getRequestBaseURL().replace(/\/$/, "")}/proxy/v1/chat-messages`;
+    const body = toDifyChatMessagesRequest(params);
     const idleTimeoutMs = streamOptions.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     const requestTimeoutMs = streamOptions.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
@@ -98,11 +99,19 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
       }, waitMs);
     }
 
+    const normalizeEvent = createDifyEventNormalizer();
+
     function pushEvent(payload: unknown) {
       if (finished) return;
+      const event = normalizeEvent(payload);
+      if (!event) return;
+      if (event instanceof Error) {
+        fail(event);
+        return;
+      }
       receivedEvent = true;
       armIdleTimer();
-      queue.push({ result: payload as ChatStreamEvent });
+      queue.push({ result: event });
     }
 
     // 浏览器环境：fetch 原生支持分块读取，直接消费 SSE，不需要 WebSocket 通道

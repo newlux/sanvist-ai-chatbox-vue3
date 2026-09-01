@@ -18,6 +18,7 @@ export interface ChatStreamSnapshot {
   blocks: AiBlock[];
   conversationId?: Identifier;
   messageId?: Identifier;
+  taskId?: Identifier;
   metadata?: MessageEndEvent["metadata"];
   /** 是否收到过实质内容，用于区分「真的没答案」和「刚开始就断了」 */
   receivedContent: boolean;
@@ -50,6 +51,7 @@ export async function consumeChatStream(
     snapshot.receivedContent ||= update.receivedContent;
     if (update.conversationId) snapshot.conversationId = update.conversationId;
     if (update.messageId) snapshot.messageId = update.messageId;
+    if (update.taskId) snapshot.taskId = update.taskId;
     if (update.metadata) snapshot.metadata = update.metadata;
     if (event.event === "message_end") snapshot.ended = true;
   }
