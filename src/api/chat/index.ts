@@ -33,7 +33,7 @@ const jsonOptions = {
 };
 
 export function interruptChat(params: InterruptChatParams) {
-  return request.post<null>("/chat/interrupt", params, jsonOptions).json();
+  return request.post<null>(`/proxy/v1/chat-messages/${params.taskId}/stop`, {}, jsonOptions).json();
 }
 
 export function getConversations(params: ListConversationsParams) {
@@ -92,7 +92,7 @@ export function getTextToSpeech(conversationId: Identifier, messageId: Identifie
 
 /**
  * 对话附件上传。契约：multipart 字段名固定为 `file`，`user` 走表单字段且不能为空。
- * 返回的 url 直接作为 /chat/send 的 files[].url（transferMethod=remote_url）。
+ * 返回的 url 直接作为 Dify `/chat-messages` 的 files[].url（transfer_method=remote_url）。
  */
 export function uploadChatFile(params: UploadChatFileParams) {
   return request.upload<ChatFileUploadResult>("/files/upload", {

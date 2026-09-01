@@ -11,6 +11,16 @@ import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("chat");
 
+const DIFY_SCENE_BY_SUBAGENT: Record<string, "ASK" | "GUIDE" | "TASK" | "PODCAST"> = {
+  guide: "GUIDE",
+  task: "TASK",
+  report: "PODCAST",
+};
+
+function getDifyScene(subagent: string) {
+  return DIFY_SCENE_BY_SUBAGENT[subagent] || "ASK";
+}
+
 function isAbortError(error: unknown) {
   if (!error) return false;
   const err = error as { name?: string; message?: string };
@@ -42,10 +52,9 @@ export function useChatSend() {
       logger.error("failed to cancel stream", error);
     }
 
-    if (activeMessage?.sessionId && activeMessage?.messageId) {
+    if (activeMessage?.taskId) {
       interruptChat({
-        conversationId: activeMessage.sessionId,
-        messageId: activeMessage.messageId,
+        taskId: activeMessage.taskId,
       }).catch(error => logger.error("failed to interrupt chat", error));
     }
 
@@ -69,6 +78,7 @@ export function useChatSend() {
       blocks: ReturnType<typeof buildInitialBlocks>;
       conversationId?: Identifier;
       messageId?: Identifier;
+      taskId?: Identifier;
       metadata?: { duration_ms?: number | null; status?: string };
       ended?: boolean;
     },
@@ -82,6 +92,7 @@ export function useChatSend() {
       blocks: snapshot.blocks,
       sessionId: snapshot.conversationId ?? aiMessage.sessionId,
       messageId: snapshot.messageId ?? aiMessage.messageId,
+      taskId: snapshot.taskId ?? aiMessage.taskId,
       durationMs: snapshot.metadata?.duration_ms ?? aiMessage.durationMs,
       loading: !snapshot.ended,
       interrupted: snapshot.metadata?.status === "stopped",
@@ -119,13 +130,13 @@ export function useChatSend() {
         source: stream(
           {
             query: content,
-            user: String(userStore.userId || ""),
             conversationId: chatStore.aiSessionId,
-            // 智能体分身通过 inputs 透传；附件只走 files，不再往 inputs 里塞一份
-            ...(chatStore.subagent
-              ? { inputs: { subagent: chatStore.subagent, scene: "knowledgeGuide" } }
-              : {}),
-            ...(files.length ? { files } : {}),
+            // Dify 开始节点通过 inputs 接收场景与原有用户标识。
+            inputs: {
+              scene: getDifyScene(chatStore.subagent),
+              user: String(userStore.userId || ""),
+            },
+            files,
           },
           { idleTimeoutMs: 60_000 },
         ),

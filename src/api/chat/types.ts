@@ -21,7 +21,6 @@ export interface SendChatMessageParams {
   user?: string;
   conversationId: Identifier | null;
   language?: string;
-  responseMode?: "streaming";
   inputs?: ChatInput;
   files?: ChatFile[];
 }
@@ -30,12 +29,14 @@ export interface MessageStartEvent {
   event: "message_start";
   conversationId: Identifier;
   messageId: Identifier;
+  taskId?: Identifier;
 }
 
 export interface StatusEvent {
   event: "status";
   conversationId: Identifier;
   messageId: Identifier;
+  taskId?: Identifier;
   data: {
     stage?: string;
     phase?: string;
@@ -51,6 +52,7 @@ export interface ThinkEvent {
   event: "think";
   conversationId: Identifier;
   messageId: Identifier;
+  taskId?: Identifier;
   data: Record<string, unknown>;
 }
 
@@ -58,6 +60,7 @@ export interface ToolCallEvent {
   event: "tool_call";
   conversationId: Identifier;
   messageId: Identifier;
+  taskId?: Identifier;
   data: {
     name: string;
     args: Record<string, unknown>;
@@ -69,13 +72,17 @@ export interface MessageEvent {
   event: "message";
   conversationId: Identifier;
   messageId: Identifier;
+  taskId?: Identifier;
   answer: string;
+  /** Dify 的 message_replace 和 Agent 收尾 message 均为完整内容。 */
+  replace?: boolean;
 }
 
 export interface RichContentEvent {
   event: "suggestion" | "table" | "chart" | "metric";
   conversationId: Identifier;
   messageId: Identifier;
+  taskId?: Identifier;
   data: Record<string, unknown>;
 }
 
@@ -83,6 +90,7 @@ export interface MessageEndEvent {
   event: "message_end";
   conversationId: Identifier;
   messageId: Identifier;
+  taskId?: Identifier;
   metadata: {
     is_end: boolean;
     status: "succeeded" | "stopped" | "failed";
@@ -271,6 +279,5 @@ export interface RealtimeTtsChunk {
 }
 
 export interface InterruptChatParams {
-  conversationId: Identifier;
-  messageId: Identifier;
+  taskId: Identifier;
 }

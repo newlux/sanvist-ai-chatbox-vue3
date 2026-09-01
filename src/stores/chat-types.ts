@@ -23,6 +23,8 @@ export interface UiChatMessage {
   sessionId?: Identifier | null;
   conversationId?: Identifier | null;
   messageId?: Identifier | null;
+  /** Dify task_id，用于停止当前生成任务。 */
+  taskId?: Identifier | null;
   waitingText?: string;
   durationMs?: number | null;
   positive?: boolean | null;
