@@ -53,12 +53,23 @@ export function toDifyChatMessagesRequest(params: SendChatMessageParams): DifyCh
  */
 export function createDifyEventNormalizer() {
   let receivedAgentMessage = false;
+  let isWorkflowStream = false;
+  /** Chatflow 通常先发 message_end，后发 workflow_finished；先暂存，等待后者提供总耗时。 */
+  let pendingMessageEnd: {
+    conversationId: Identifier;
+    messageId: Identifier;
+    taskId?: Identifier;
+  } | null = null;
 
   return (payload: unknown): ChatStreamEvent | Error | null => {
     const data = asRecord(payload);
     if (!data) return null;
 
     const event = String(data.event || "");
+    if (event === "workflow_started") {
+      isWorkflowStream = true;
+      return null;
+    }
     if (event === "ping" || event === "message_file" || event === "tts_message" || event === "tts_message_end"
       || event.startsWith("node_") || event.startsWith("iteration_")
       || event.startsWith("loop_") || event === "agent_log" || event === "human_input_required") {
@@ -69,17 +80,36 @@ export function createDifyEventNormalizer() {
     const { conversationId, messageId, taskId } = getReferences(data);
     if (conversationId == null || messageId == null) return null;
 
-    // Chatflow 暂停或被停止时可能不会发送 message_end；将其收敛为正常结束，避免气泡永久 loading。
+    // Chatflow 结束事件包含工作流总耗时（elapsed_time，单位秒），优先以它作为气泡「已消耗时间」。
+    // 标准事件顺序可能为 message_end -> workflow_finished，因此不能在收到 message_end 时立即结束消费。
     if (event === "workflow_paused" || event === "workflow_finished") {
       const workflow = asRecord(data.data) || {};
       const status = String(workflow.status || "");
+      const elapsedSeconds = Number(workflow.elapsed_time);
+      const durationMs = Number.isFinite(elapsedSeconds)
+        ? Math.round(elapsedSeconds * 1000)
+        : null;
+      const message = String(workflow.error || "") || null;
+      const references = pendingMessageEnd || { conversationId, messageId, taskId };
+
       if (event === "workflow_paused" || status === "stopped") {
         return {
           event: "message_end",
-          conversationId,
-          messageId,
-          taskId,
-          metadata: { is_end: true, status: "stopped", reason: "interrupt", duration_ms: null },
+          ...references,
+          metadata: { is_end: true, status: "stopped", reason: "interrupt", duration_ms: durationMs, message },
+        };
+      }
+      if (event === "workflow_finished") {
+        return {
+          event: "message_end",
+          ...references,
+          metadata: {
+            is_end: true,
+            status: status === "failed" ? "failed" : "succeeded",
+            reason: status === "failed" ? "exception" : "normal",
+            duration_ms: durationMs,
+            message,
+          },
         };
       }
       return null;
@@ -131,6 +161,10 @@ export function createDifyEventNormalizer() {
       };
     }
     if (event === "message_end") {
+      if (isWorkflowStream) {
+        pendingMessageEnd = { conversationId, messageId, taskId };
+        return null;
+      }
       const metadata = asRecord(data.metadata) || {};
       const usage = asRecord(metadata.usage) || {};
       const latency = Number(usage.latency);
