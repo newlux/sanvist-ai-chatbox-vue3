@@ -154,6 +154,8 @@ export function useChatSend() {
           blocks: receivedContent ? aiMessage.blocks : buildInitialBlocks(),
           content: receivedContent ? aiMessage.content : t("ai-unavailable-retry-later"),
           loading: false,
+          // 与过程标题的正常结束保持一致：接口/解析异常后不能继续停在“正在思考...”。
+          processStatus: { ...aiMessage.processStatus, phase: "failed" },
         });
         logger.error("stream consumption failed", error);
       }
