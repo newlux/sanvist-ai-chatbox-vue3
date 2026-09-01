@@ -98,7 +98,7 @@ async function openHistory() {
   if (historyItems.value.length || historyLoading.value) return;
   historyLoading.value = true;
   try {
-    historyItems.value = await getListenBroadcastHistory();
+    historyItems.value = await getListenBroadcastHistory("daily");
   } catch {
     historyItems.value = [];
   } finally {
