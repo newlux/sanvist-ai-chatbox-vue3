@@ -57,6 +57,8 @@ export interface ListenBroadcastAudioChunk {
   dataUrl?: string | null;
 }
 
+export type ListenBroadcastPeriod = "daily" | "weekly" | "monthly";
+
 export interface ListenBroadcastHistoryItem {
   bizDate: string;
   title: string;
