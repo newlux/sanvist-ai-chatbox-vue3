@@ -1,13 +1,11 @@
 import type {
   BatchDeleteConversationsParams,
   BatchDeleteResult,
-  CancelFeedbackParams,
   ChatFileUploadResult,
   ChatMessage,
   Conversation,
   CosPresignedUrlVO,
   CursorPage,
-  DeleteConversationParams,
   Identifier,
   InterruptChatParams,
   ListConversationsParams,
@@ -32,34 +30,108 @@ const jsonOptions = {
   },
 };
 
+/** Dify 原生字段使用 snake_case；在 API 边界转换为页面沿用的 camelCase。 */
+interface DifyCursorPage<T> {
+  limit: number;
+  has_more: boolean;
+  data: T[];
+}
+
+interface DifyConversation {
+  id: Identifier;
+  name?: string;
+  inputs?: Record<string, unknown>;
+  status?: string;
+  introduction?: string | null;
+  created_at?: number;
+  updated_at?: number;
+}
+
+interface DifyChatMessage {
+  id: Identifier;
+  conversation_id: Identifier;
+  inputs?: Record<string, unknown>;
+  query?: string;
+  answer?: string;
+  message_files?: ChatMessage["messageFiles"];
+  feedback?: ChatMessage["feedback"];
+  retriever_resources?: ChatMessage["retrieverResources"];
+  created_at?: number;
+  status?: string;
+}
+
+function toConversation(item: DifyConversation): Conversation {
+  return {
+    id: item.id,
+    name: item.name || "",
+    inputs: item.inputs || {},
+    status: item.status || "normal",
+    introduction: item.introduction ?? null,
+    createdAt: Number(item.created_at || 0),
+    updatedAt: Number(item.updated_at || item.created_at || 0),
+  };
+}
+
+function toChatMessage(item: DifyChatMessage): ChatMessage {
+  return {
+    id: item.id,
+    conversationId: item.conversation_id,
+    inputs: item.inputs || {},
+    query: item.query || "",
+    answer: item.answer || "",
+    messageFiles: item.message_files || [],
+    feedback: item.feedback || null,
+    retrieverResources: item.retriever_resources || [],
+    createdAt: Number(item.created_at || 0),
+    status: item.status,
+  };
+}
+
+function toCursorPage<T, R>(page: DifyCursorPage<T>, mapper: (item: T) => R): CursorPage<R> {
+  return {
+    limit: Number(page?.limit || 0),
+    hasMore: Boolean(page?.has_more),
+    data: Array.isArray(page?.data) ? page.data.map(mapper) : [],
+  };
+}
+
 export function interruptChat(params: InterruptChatParams) {
   return request.post<null>(`/proxy/v1/chat-messages/${params.taskId}/stop`, {}, jsonOptions).json();
 }
 
 export function getConversations(params: ListConversationsParams) {
-  return request.get<CursorPage<Conversation>>("/conversations", params).json();
+  // Dify 标准：GET /v1/conversations?user=&last_id=&limit=&sort_by=
+  return request.get<DifyCursorPage<DifyConversation>>("/proxy/v1/conversations", {
+    last_id: params.lastId,
+    limit: params.limit,
+    sort_by: params.sortBy,
+  }).json().then(page => toCursorPage(page, toConversation));
 }
 
-export function deleteConversation(conversationId: Identifier, params: DeleteConversationParams) {
-  return request.delete<null, DeleteConversationParams>(`/conversations/${conversationId}`, {
-    ...jsonOptions,
-    data: params,
-  }).json();
+export function deleteConversation(conversationId: Identifier) {
+  return request.delete<null>(`/proxy/v1/conversations/${conversationId}`, jsonOptions).json();
 }
 
-export function batchDeleteConversations(params: BatchDeleteConversationsParams) {
-  return request.delete<BatchDeleteResult, BatchDeleteConversationsParams>("/conversations", {
-    ...jsonOptions,
-    data: params,
-  }).json();
+export async function batchDeleteConversations(params: BatchDeleteConversationsParams): Promise<BatchDeleteResult> {
+  // Dify 没有批量删除会话接口，保留原有批量操作体验，逐条调用标准 DELETE 接口。
+  await Promise.all(params.conversationIds.map(conversationId => (
+    deleteConversation(conversationId)
+  )));
+  return { deleted: params.conversationIds.length };
 }
 
 export function renameConversation(conversationId: Identifier, params: RenameConversationParams) {
-  return request.post<null>(`/conversations/${conversationId}/name`, params, jsonOptions).json();
+  return request.post<null>(`/proxy/v1/conversations/${conversationId}/name`, {
+    name: params.name,
+  }, jsonOptions).json();
 }
 
 export function getMessages(params: ListMessagesParams) {
-  return request.get<CursorPage<ChatMessage>>("/messages", params).json();
+  return request.get<DifyCursorPage<DifyChatMessage>>("/proxy/v1/messages", {
+    conversation_id: params.conversationId,
+    first_id: params.firstId,
+    limit: params.limit,
+  }).json().then(page => toCursorPage(page, toChatMessage));
 }
 
 /**
@@ -71,14 +143,16 @@ export function getMessage(messageId: Identifier, params: { conversationId: Iden
 }
 
 export function submitFeedback(messageId: Identifier, params: SubmitFeedbackParams) {
-  return request.post<null>(`/messages/${messageId}/feedbacks`, params, jsonOptions).json();
+  // Dify 标准：POST /v1/messages/{message_id}/feedbacks
+  return request.post<null>(`/proxy/v1/messages/${messageId}/feedbacks`, {
+    rating: params.rating,
+    content: params.content || "",
+  }, jsonOptions).json();
 }
 
-export function cancelFeedback(messageId: Identifier, params: CancelFeedbackParams) {
-  return request.delete<null, CancelFeedbackParams>(`/messages/${messageId}/feedbacks`, {
-    ...jsonOptions,
-    data: params,
-  }).json();
+export function cancelFeedback(messageId: Identifier) {
+  // Dify 标准：DELETE /v1/messages/{message_id}/feedbacks?user={user}
+  return request.delete<null>(`/proxy/v1/messages/${messageId}/feedbacks`, jsonOptions).json();
 }
 
 /**

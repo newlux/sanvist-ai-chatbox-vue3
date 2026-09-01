@@ -112,10 +112,9 @@ export type ChatStreamEvent =
   | MessageEndEvent;
 
 export interface ListConversationsParams {
-  user?: string;
   lastId?: Identifier;
   limit?: number;
-  sortBy?: "created_at_asc" | "created_at_desc" | "updated_at_asc" | "updated_at_desc";
+  sortBy?: "created_at" | "-created_at" | "updated_at" | "-updated_at";
 }
 
 export interface Conversation {
@@ -134,12 +133,7 @@ export interface CursorPage<T> {
   data: T[];
 }
 
-export interface DeleteConversationParams {
-  user?: string;
-}
-
 export interface BatchDeleteConversationsParams {
-  user?: string;
   conversationIds: Identifier[];
 }
 
@@ -153,7 +147,6 @@ export interface RenameConversationParams {
 
 export interface ListMessagesParams {
   conversationId: Identifier;
-  user?: string;
   firstId?: Identifier;
   limit?: number;
 }
@@ -184,19 +177,9 @@ export interface ChatMessage {
   status?: string;
 }
 
-export interface GetFeedbackParams {
-  conversationId: Identifier;
-  user?: string;
-}
-
-export interface SubmitFeedbackParams extends GetFeedbackParams {
-  messageId: Identifier;
+export interface SubmitFeedbackParams {
   rating: Feedback["rating"];
   content?: string;
-}
-
-export interface CancelFeedbackParams extends GetFeedbackParams {
-  messageId: Identifier;
 }
 
 export interface SpeechRecognitionResult {
