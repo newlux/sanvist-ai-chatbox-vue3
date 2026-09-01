@@ -1,6 +1,7 @@
 import type {
   ListenBroadcastConfig,
   ListenBroadcastHistoryItem,
+  ListenBroadcastPeriod,
   ListenBroadcastPreference,
   SaveListenBroadcastPreferenceParams,
   TodayListenBroadcast,
@@ -20,9 +21,9 @@ export function getTodayListenBroadcast() {
   return request.get<TodayListenBroadcast | null>("/listen-broadcast/today").json();
 }
 
-/** 按业务日期倒序返回日报历史播报。 */
-export function getListenBroadcastHistory() {
-  return request.get<ListenBroadcastHistoryItem[]>("/listen-broadcast/history").json();
+/** 按业务日期倒序返回指定周期的历史播报。 */
+export function getListenBroadcastHistory(reportPeriod: ListenBroadcastPeriod = "daily") {
+  return request.get<ListenBroadcastHistoryItem[]>("/listen-broadcast/history", { reportPeriod }).json();
 }
 
 export function getListenBroadcastConfig() {
