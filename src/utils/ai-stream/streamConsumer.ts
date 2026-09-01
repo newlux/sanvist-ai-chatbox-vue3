@@ -20,6 +20,11 @@ export interface ChatStreamSnapshot {
   messageId?: Identifier;
   taskId?: Identifier;
   metadata?: MessageEndEvent["metadata"];
+  processStatus?: {
+    phase: "thinking" | "succeeded" | "failed" | "stopped";
+    title?: string;
+    elapsedSeconds?: number;
+  };
   /** 是否收到过实质内容，用于区分「真的没答案」和「刚开始就断了」 */
   receivedContent: boolean;
   ended: boolean;
@@ -53,6 +58,7 @@ export async function consumeChatStream(
     if (update.messageId) snapshot.messageId = update.messageId;
     if (update.taskId) snapshot.taskId = update.taskId;
     if (update.metadata) snapshot.metadata = update.metadata;
+    if (update.processStatus) snapshot.processStatus = update.processStatus;
     if (event.event === "message_end") snapshot.ended = true;
   }
 

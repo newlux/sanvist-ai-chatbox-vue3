@@ -79,6 +79,7 @@ export function useChatSend() {
       messageId?: Identifier;
       taskId?: Identifier;
       metadata?: { duration_ms?: number | null; status?: string };
+      processStatus?: { phase: "thinking" | "succeeded" | "failed" | "stopped"; title?: string; elapsedSeconds?: number };
       ended?: boolean;
     },
   ) {
@@ -93,6 +94,7 @@ export function useChatSend() {
       messageId: snapshot.messageId ?? aiMessage.messageId,
       taskId: snapshot.taskId ?? aiMessage.taskId,
       durationMs: snapshot.metadata?.duration_ms ?? aiMessage.durationMs,
+      processStatus: snapshot.processStatus ?? aiMessage.processStatus,
       loading: !snapshot.ended,
       interrupted: snapshot.metadata?.status === "stopped",
       ttsEnabled: Boolean(
@@ -228,6 +230,8 @@ export function useChatSend() {
       messageId: null,
       ttsPlaybackMode: "realtime",
       waitingText: query,
+      // 先展示过程标题，不依赖首个 Dify SSE 事件到达，避免请求初段只剩旧的等待占位。
+      processStatus: { phase: "thinking" },
     });
     chatStore.activeMessageId = aiMsgId;
     chatStore.scrollToBottom(true);

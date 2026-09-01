@@ -30,6 +30,12 @@ const jsonOptions = {
   },
 };
 
+/** Dify 对 DELETE 同样按 JSON 读取请求体；显式传空对象，避免 WebView 丢失 JSON Content-Type。 */
+const jsonDeleteOptions = {
+  ...jsonOptions,
+  data: {},
+};
+
 /** Dify 原生字段使用 snake_case；在 API 边界转换为页面沿用的 camelCase。 */
 interface DifyCursorPage<T> {
   limit: number;
@@ -109,7 +115,7 @@ export function getConversations(params: ListConversationsParams) {
 }
 
 export function deleteConversation(conversationId: Identifier) {
-  return request.delete<null>(`/proxy/v1/conversations/${conversationId}`, jsonOptions).json();
+  return request.delete<null>(`/proxy/v1/conversations/${conversationId}`, jsonDeleteOptions).json();
 }
 
 export async function batchDeleteConversations(params: BatchDeleteConversationsParams): Promise<BatchDeleteResult> {
@@ -152,7 +158,7 @@ export function submitFeedback(messageId: Identifier, params: SubmitFeedbackPara
 
 export function cancelFeedback(messageId: Identifier) {
   // Dify 标准：DELETE /v1/messages/{message_id}/feedbacks?user={user}
-  return request.delete<null>(`/proxy/v1/messages/${messageId}/feedbacks`, jsonOptions).json();
+  return request.delete<null>(`/proxy/v1/messages/${messageId}/feedbacks`, jsonDeleteOptions).json();
 }
 
 /**

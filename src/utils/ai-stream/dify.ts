@@ -66,12 +66,9 @@ export function createDifyEventNormalizer() {
     if (!data) return null;
 
     const event = String(data.event || "");
-    if (event === "workflow_started") {
-      isWorkflowStream = true;
-      return null;
-    }
+    if (event === "workflow_started") isWorkflowStream = true;
     if (event === "ping" || event === "message_file" || event === "tts_message" || event === "tts_message_end"
-      || event.startsWith("node_") || event.startsWith("iteration_")
+      || event.startsWith("iteration_")
       || event.startsWith("loop_") || event === "agent_log" || event === "human_input_required") {
       return null;
     }
@@ -79,6 +76,34 @@ export function createDifyEventNormalizer() {
 
     const { conversationId, messageId, taskId } = getReferences(data);
     if (conversationId == null || messageId == null) return null;
+
+    // 将 Dify 工作流节点事件折叠为回答卡片标题状态；不渲染节点详情，避免干扰最终回答。
+    if (event === "workflow_started") {
+      return {
+        event: "status",
+        conversationId,
+        messageId,
+        taskId,
+        data: { node: "", message: "思考中", phase: "running" },
+      };
+    }
+    if (event === "node_started" || event === "node_finished") {
+      const node = asRecord(data.data) || data;
+      const title = String(node.title || node.node_type || "思考");
+      // 隐藏节点仍在工作流里执行，但不应打断用户看到的上一个可见状态。
+      if (title.trim().startsWith("[HIDDEN]")) return null;
+      return {
+        event: "status",
+        conversationId,
+        messageId,
+        taskId,
+        data: {
+          node: title,
+          message: title,
+          phase: event === "node_finished" ? "completed" : "running",
+        },
+      };
+    }
 
     // Chatflow 结束事件包含工作流总耗时（elapsed_time，单位秒），优先以它作为气泡「已消耗时间」。
     // 标准事件顺序可能为 message_end -> workflow_finished，因此不能在收到 message_end 时立即结束消费。
