@@ -1,5 +1,6 @@
 import type {
   ListenBroadcastConfig,
+  ListenBroadcastHistoryItem,
   ListenBroadcastPreference,
   SaveListenBroadcastPreferenceParams,
   TodayListenBroadcast,
@@ -17,6 +18,11 @@ const jsonOptions = {
 
 export function getTodayListenBroadcast() {
   return request.get<TodayListenBroadcast | null>("/listen-broadcast/today").json();
+}
+
+/** 按业务日期倒序返回日报历史播报。 */
+export function getListenBroadcastHistory() {
+  return request.get<ListenBroadcastHistoryItem[]>("/listen-broadcast/history").json();
 }
 
 export function getListenBroadcastConfig() {
