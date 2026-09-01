@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import type { PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
+import type { ListenBroadcastHistoryItem, PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
 import { computed, getCurrentInstance, nextTick, onMounted, ref, watch } from "vue";
+import { getListenBroadcastHistory } from "@/api/listen-broadcast";
 import aiChatIcon from "@/assets/img/report-broadcast/ai-chat.png";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
 import feedbackHistoryIcon from "@/assets/img/report-broadcast/feedback-history.svg";
 import closeIcon from "@/assets/img/voice-assistant/voice-close.svg";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 import { useListenBroadcastPlayer } from "@/hooks/useListenBroadcastPlayer";
+import { useSafeArea } from "@/hooks/useSafeArea";
 
 const props = defineProps<{
   params: PlayListenBroadcastParams;
@@ -17,6 +19,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: [];
 }>();
+
+const { safeBottomPx } = useSafeArea();
 
 // 设计稿 940:3 / 940:110：左右声波逐柱高度（px）。
 const leftWaveBars = [2, 2, 18, 4, 10, 4, 16, 8, 4, 16, 4, 30, 12, 20, 2, 1, 1];
@@ -61,6 +65,10 @@ const transcriptItems = computed<TranscriptItem[]>(() => {
 const showTranscriptSkeleton = computed(() => loading.value && transcriptSegments.value.length === 0);
 const transcriptScrollTop = ref(0);
 const instance = getCurrentInstance();
+const showHistory = ref(false);
+const historyLoading = ref(false);
+const historyItems = ref<ListenBroadcastHistoryItem[]>([]);
+const activeHistoryBizDate = ref("");
 
 function updateTranscriptScroll() {
   if (!playing.value || currentSeq.value === null) return;
@@ -83,6 +91,32 @@ watch(currentSeq, updateTranscriptScroll);
 function close() {
   stop();
   emit("close");
+}
+
+async function openHistory() {
+  showHistory.value = true;
+  if (historyItems.value.length || historyLoading.value) return;
+  historyLoading.value = true;
+  try {
+    historyItems.value = await getListenBroadcastHistory();
+  } catch {
+    historyItems.value = [];
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+function closeHistory() {
+  showHistory.value = false;
+}
+
+function playHistory(item: ListenBroadcastHistoryItem) {
+  activeHistoryBizDate.value = item.bizDate;
+  showHistory.value = false;
+  play({
+    ...props.params,
+    bizDate: item.bizDate,
+  });
 }
 
 onMounted(() => play(props.params));
@@ -157,10 +191,78 @@ onMounted(() => play(props.params));
       </scroll-view>
       <!-- 文字区底部渐变：淡化滚动文字，避免遮挡反馈操作。 -->
       <view v-if="!showTranscriptSkeleton" class="report-broadcast-player__bottom-fade" />
-      <!-- 设计稿 2525:212：点赞与历史操作，24×24px，间距 16px -->
-      <view v-if="!showTranscriptSkeleton" class="report-broadcast-player__feedback">
-        <image class="report-broadcast-player__feedback-icon" :src="feedbackHistoryIcon" mode="aspectFit" />
-        <image class="report-broadcast-player__feedback-icon" :src="feedbackGoodIcon" mode="aspectFit" />
+      <!-- 设计稿 2582:293：底部 mask 遮挡文字，并承载历史与点赞操作。 -->
+      <view v-if="!showTranscriptSkeleton" class="report-broadcast-player__feedback-mask">
+        <!-- 设计稿 2525:212：点赞与历史操作，24×24px，间距 16px。 -->
+        <view class="report-broadcast-player__feedback">
+          <image
+            class="report-broadcast-player__feedback-icon"
+            :src="feedbackHistoryIcon"
+            mode="aspectFit"
+            @tap="openHistory"
+          />
+          <image class="report-broadcast-player__feedback-icon" :src="feedbackGoodIcon" mode="aspectFit" />
+        </view>
+      </view>
+    </view>
+
+    <!-- 设计稿 940:1000 / 940:1001：日报历史播放列表底部弹层 -->
+    <view v-if="showHistory" class="report-history">
+      <view class="report-history__mask" @tap="closeHistory" />
+      <view class="report-history__sheet">
+        <!-- 设计稿：标题与关闭按钮 -->
+        <view class="report-history__header">
+          <text class="report-history__title">
+            历史播放列表
+          </text>
+          <image class="report-history__close" :src="closeIcon" mode="aspectFit" @tap="closeHistory" />
+        </view>
+
+        <!-- 设计稿：周期筛选；当前仅实现日报，周报/月报为不可用展示项 -->
+        <view class="report-history__tabs">
+          <view class="report-history__tab report-history__tab--active">
+            <text>日报</text>
+          </view>
+          <view class="report-history__tab report-history__tab--disabled">
+            <text>周报</text>
+          </view>
+          <view class="report-history__tab report-history__tab--disabled">
+            <text>月报</text>
+          </view>
+        </view>
+
+        <!-- 设计稿：日报历史记录列表 -->
+        <scroll-view class="report-history__list" scroll-y>
+          <view v-if="historyLoading" class="report-history__empty">
+            加载中...
+          </view>
+          <view v-else-if="!historyItems.length" class="report-history__empty">
+            暂无日报
+          </view>
+          <view
+            v-for="(item, index) in historyItems"
+            v-else
+            :key="item.bizDate"
+            class="report-history__item"
+            :class="{ 'report-history__item--selected': activeHistoryBizDate ? item.bizDate === activeHistoryBizDate : index === 0 }"
+            @tap="playHistory(item)"
+          >
+            <view class="report-history__item-title-row">
+              <text class="report-history__item-title">
+                {{ item.title || "经营概览早报" }}
+              </text>
+              <view v-if="index === 0" class="report-history__new-badge">
+                <text>NEW</text>
+              </view>
+            </view>
+            <text class="report-history__item-date">
+              {{ item.bizDate }}
+            </text>
+          </view>
+        </scroll-view>
+
+        <!-- 设计稿：底部系统安全区 -->
+        <view class="report-history__safe-area" :style="{ height: `${safeBottomPx * 2}rpx` }" />
       </view>
     </view>
   </view>
@@ -399,20 +501,214 @@ onMounted(() => play(props.params));
   background: linear-gradient(180deg, rgb(255 255 255 / 0%) 0%, rgb(255 255 255 / 86%) 58%, #ffffff 100%);
 }
 
+/* 设计稿 2582:293：纯白遮挡，避免滚动文字穿过历史与点赞操作区。 */
+.report-broadcast-player__feedback-mask {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 48rpx;
+  left: 0;
+  display: flex;
+  height: 112rpx;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 60rpx;
+  box-sizing: border-box;
+  background: #fff;
+}
+
 /* 设计稿 2525:212：点赞 x=281px、历史 x=321px，尺寸均为 24px。 */
 .report-broadcast-player__feedback {
-  position: absolute;
-  z-index: 3;
-  right: 60rpx;
   display: flex;
   align-items: center;
   gap: 16rpx;
-  bottom: 100rpx;
 }
 
 .report-broadcast-player__feedback-icon {
   width: 48rpx;
   height: 48rpx;
   flex: 0 0 48rpx;
+}
+
+/* 设计稿 940:1000：历史播放列表页面底部弹层，375×455px。 */
+.report-history {
+  position: fixed;
+  z-index: 10;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/* 设计稿 940:1027：全屏黑色 40% 遮罩。 */
+.report-history__mask {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 40%);
+}
+
+/* 设计稿 940:1001：白色底部内容区域，375×455px。 */
+.report-history__sheet {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  height: 910rpx;
+  box-sizing: border-box;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 48rpx 48rpx 0 0;
+  background: #fff;
+  box-shadow: 0 -8rpx 24rpx rgb(0 0 0 / 8%);
+}
+
+/* 设计稿 940:1002 + 940:1023：标题和右上角关闭按钮。 */
+.report-history__header {
+  display: flex;
+  height: 128rpx;
+  flex: 0 0 128rpx;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 36rpx 0 52rpx;
+  box-sizing: border-box;
+}
+
+.report-history__title {
+  color: #666;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 36rpx;
+  font-weight: 500;
+  line-height: 44rpx;
+}
+
+.report-history__close {
+  width: 60rpx;
+  height: 60rpx;
+  flex: 0 0 60rpx;
+}
+
+/* 设计稿 1004:10 / 1004:11 / 1004:14：日报、周报、月报筛选项。 */
+.report-history__tabs {
+  display: flex;
+  height: 82rpx;
+  flex: 0 0 82rpx;
+  gap: 12rpx;
+  padding: 0 52rpx;
+  box-sizing: border-box;
+}
+
+.report-history__tab {
+  display: flex;
+  width: 208rpx;
+  height: 82rpx;
+  flex: 0 0 208rpx;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 32rpx;
+  font-weight: 500;
+  line-height: 40rpx;
+}
+
+.report-history__tab--active {
+  background: #191b27;
+  box-shadow: 0 6rpx 16rpx rgb(25 27 39 / 20%);
+  color: #fff;
+  font-weight: 500;
+}
+
+.report-history__tab--disabled {
+  background: #f4f3f8;
+  color: #4f4e56;
+}
+
+/* 设计稿 940:1033 / 940:1011 / 940:1028 / 940:1015 / 940:1007：日报历史记录。 */
+.report-history__list {
+  display: flex;
+  width: 694rpx;
+  align-self: center;
+  height: 656rpx;
+  flex: 0 0 656rpx;
+  padding-top: 44rpx;
+  box-sizing: border-box;
+  flex-direction: column;
+}
+
+.report-history__item {
+  display: flex;
+  width: 694rpx;
+  height: 128rpx;
+  flex: 0 0 128rpx;
+  box-sizing: border-box;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 44rpx;
+  gap: 12rpx;
+}
+
+.report-history__item--selected {
+  border-radius: 24rpx;
+  background: #f4f3f8;
+}
+
+.report-history__item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+}
+
+.report-history__item-title {
+  color: #1a1a1a;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 28rpx;
+  font-weight: 500;
+  line-height: 34rpx;
+}
+
+.report-history__new-badge {
+  display: flex;
+  width: 80rpx;
+  height: 34rpx;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 4rpx 14rpx;
+  border-radius: 10rpx;
+  background: #ffe6e4;
+}
+
+.report-history__new-badge text {
+  color: #fe0000;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 22rpx;
+  font-weight: 400;
+  line-height: 26rpx;
+}
+
+.report-history__item-date {
+  color: #999;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 24rpx;
+  font-weight: 400;
+  line-height: 30rpx;
+}
+
+.report-history__empty {
+  display: flex;
+  width: 694rpx;
+  height: 128rpx;
+  flex: 0 0 128rpx;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  font-size: 24rpx;
+}
+
+/* 设计稿 940:1021 / 940:1022：高度由真实设备的底部安全区决定。 */
+.report-history__safe-area {
+  width: 100%;
+  flex: 0 0 auto;
 }
 </style>

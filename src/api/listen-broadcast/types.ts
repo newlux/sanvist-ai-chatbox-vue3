@@ -57,10 +57,12 @@ export interface ListenBroadcastAudioChunk {
   dataUrl?: string | null;
 }
 
-export interface TodayListenBroadcast {
+export interface ListenBroadcastHistoryItem {
   bizDate: string;
   title: string;
   summary?: string;
   broadcastTime?: string;
   moduleCodes?: string[];
 }
+
+export interface TodayListenBroadcast extends ListenBroadcastHistoryItem {}
