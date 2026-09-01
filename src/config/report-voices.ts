@@ -1,11 +1,11 @@
-import bunnyPreview from "@/assets/audio/voice/bunny.wav";
-import ethanPreview from "@/assets/audio/voice/ethan.wav";
-import kaiPreview from "@/assets/audio/voice/kai.wav";
-import maiaPreview from "@/assets/audio/voice/maia.wav";
-import miaPreview from "@/assets/audio/voice/mia.wav";
-import mochiPreview from "@/assets/audio/voice/mochi.wav";
-import neilPreview from "@/assets/audio/voice/neil.wav";
-import serenaPreview from "@/assets/audio/voice/serena.wav";
+import bunnyPreview from "@/assets/audio/voice/bunny.mp3";
+import ethanPreview from "@/assets/audio/voice/ethan.mp3";
+import kaiPreview from "@/assets/audio/voice/kai.mp3";
+import maiaPreview from "@/assets/audio/voice/maia.mp3";
+import miaPreview from "@/assets/audio/voice/mia.mp3";
+import mochiPreview from "@/assets/audio/voice/mochi.mp3";
+import neilPreview from "@/assets/audio/voice/neil.mp3";
+import serenaPreview from "@/assets/audio/voice/serena.mp3";
 // 8 个 Qwen 音色试听（本地 wav），id 与声音一一对应
 
 import avatarBunny from "@/assets/img/voice-assistant/voice-avatar-Bunny.png";
