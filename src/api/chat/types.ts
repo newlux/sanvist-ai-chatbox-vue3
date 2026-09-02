@@ -204,6 +204,11 @@ export interface RecognizeSpeechByBase64Params {
 
 export interface UploadChatFileParams {
   filePath: string;
+  /**
+   * 优先上传的原生 File 对象（H5 形态）：uni-h5 的 uploadFile 会直接用它的
+   * 文件名与 MIME 构造 multipart，避免 blob URL 二次转换导致文件名退化。
+   */
+  file?: File;
   /** 网关要求非空，游客态没有真实用户 ID 时由调用方兜底 */
   user: string;
   fileType?: "image" | "video" | "audio";
@@ -220,17 +225,6 @@ export interface ChatFileUploadResult {
   createdBy?: string;
   createdAt?: number;
   url: string;
-}
-
-/** COS 下载/读取预签名 URL 响应（GET /v1/cos/presigned/download） */
-export interface CosPresignedUrlVO {
-  presignedUrl: string;
-  objectKey: string;
-  bucket: string;
-  region: string;
-  fileUrl: string;
-  httpMethod: string;
-  expireTime: number;
 }
 
 export interface TextToSpeechResult {

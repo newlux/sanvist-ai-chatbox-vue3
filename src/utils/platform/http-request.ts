@@ -140,6 +140,11 @@ export function platformRequest<T>(
 export interface PlatformUploadOptions {
   url: string;
   filePath: string;
+  /**
+   * 优先上传的文件对象：H5 下 uni.uploadFile 直接接收原生 File（走 blobToFile 原样返回），
+   * 保留真实文件名与 MIME；否则它对 blob URL 二次转换，文件名会退化且 MIME 可能丢失。
+   */
+  file?: File;
   name?: string;
   fileType?: "image" | "video" | "audio";
   formData?: Record<string, string>;
@@ -206,6 +211,8 @@ export async function platformUploadFile(
           reject(new PlatformRequestError(readUploadFailMessage(error)));
         },
       };
+      // 优先传原生 File 对象（H5 形态）：uni.uploadFile 会直接用它的文件名与 MIME 构造 multipart
+      if (options.file) payload.file = options.file;
       const header = pickPlainHeaders(options.headers);
       if (header) payload.header = header;
       if (options.formData && Object.keys(options.formData).length > 0) {
@@ -214,7 +221,8 @@ export async function platformUploadFile(
       logger.debug("uploadFile", {
         url: payload.url,
         filePath: payload.filePath,
-        name: payload.name,
+        fileProvided: Boolean(options.file),
+        fileName: options.file?.name,
         fileType: payload.fileType,
       });
       uni.uploadFile(payload);
