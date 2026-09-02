@@ -1023,6 +1023,8 @@ onBeforeUnmount(() => {
 .chat-input__dock {
   position: relative;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
   padding-top: 16rpx;
   padding-bottom: constant(safe-area-inset-bottom);

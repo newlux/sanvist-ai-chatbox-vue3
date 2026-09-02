@@ -1,6 +1,7 @@
 import type {
   BatchDeleteConversationsParams,
   BatchDeleteResult,
+  BlockingChatMessageResponse,
   ChatFileUploadResult,
   ChatMessage,
   Conversation,
@@ -14,11 +15,13 @@ import type {
   RecognizeSpeechByUploadParams,
   RecognizeSpeechByUrlParams,
   RenameConversationParams,
+  SendChatMessageParams,
   SpeechRecognitionResult,
   SubmitFeedbackParams,
   TextToSpeechResult,
   UploadChatFileParams,
 } from "./types";
+import { toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
 import { request } from "@/utils/request";
 
 export { consumeTextToSpeechStream } from "./tts-stream";
@@ -93,6 +96,28 @@ function toChatMessage(item: DifyChatMessage): ChatMessage {
   };
 }
 
+interface DifyBlockingChatMessageResponse {
+  answer?: string;
+  conversation_id: Identifier;
+  message_id: Identifier;
+  task_id?: Identifier;
+  metadata?: {
+    elapsed_time?: number;
+  };
+}
+
+function toBlockingChatMessageResponse(item: DifyBlockingChatMessageResponse): BlockingChatMessageResponse {
+  return {
+    answer: item.answer || "",
+    conversationId: item.conversation_id,
+    messageId: item.message_id,
+    taskId: item.task_id,
+    metadata: item.metadata
+      ? { elapsedTime: Number(item.metadata.elapsed_time) || 0 }
+      : undefined,
+  };
+}
+
 function toCursorPage<T, R>(page: DifyCursorPage<T>, mapper: (item: T) => R): CursorPage<R> {
   return {
     limit: Number(page?.limit || 0),
@@ -103,6 +128,18 @@ function toCursorPage<T, R>(page: DifyCursorPage<T>, mapper: (item: T) => R): Cu
 
 export function interruptChat(params: InterruptChatParams) {
   return request.post<null>(`/proxy/v1/chat-messages/${params.taskId}/stop`, {}, jsonOptions).json();
+}
+
+/** Dify blocking 模式一次性返回完整回答。 */
+export function sendBlockingChatMessage(params: SendChatMessageParams) {
+  return request
+    .post<DifyBlockingChatMessageResponse>(
+      "/proxy/v1/chat-messages",
+      toDifyChatMessagesRequest({ ...params, responseMode: "blocking" }),
+      jsonOptions,
+    )
+    .json()
+    .then(toBlockingChatMessageResponse);
 }
 
 export function getConversations(params: ListConversationsParams) {

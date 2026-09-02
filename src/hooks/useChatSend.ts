@@ -1,10 +1,10 @@
 import type { ChatFile, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { useI18n } from "vue-i18n";
-import { interruptChat } from "@/api/chat";
+import { interruptChat, sendBlockingChatMessage } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
-import { useChatStore, useSessionStore } from "@/stores";
-import { buildInitialBlocks, consumeChatStream } from "@/utils/ai-stream";
+import { useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { buildInitialBlocks, consumeChatStream, parseReportQaInteraction } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
 import { createLogger } from "@/utils/logger";
@@ -29,10 +29,14 @@ function isAbortError(error: unknown) {
   return name === "AbortError" || message.includes("aborted") || message.includes("abort");
 }
 
-export function useChatSend() {
+export function useChatSend(scope?: string, handlers?: {
+  onReportQa?: (answer: string) => void;
+  onReportBlockingComplete?: () => void;
+}) {
   const { t } = useI18n();
-  const chatStore = useChatStore();
+  const chatStore = useChatStore(scope);
   const sessionStore = useSessionStore();
+  const userStore = useUserStore();
   const { stream, cancel } = useChatStream({
     onError: (error) => {
       if (!isAbortError(error)) logger.error("stream request failed", error);
@@ -115,6 +119,32 @@ export function useChatSend() {
     chatStore.scrollToBottom();
   }
 
+  function createChatRequest(content: string, files: ChatFile[]) {
+    return {
+      query: content,
+      user: userStore.userId,
+      conversationId: chatStore.aiSessionId,
+      // Dify 开始节点通过 inputs 接收场景。
+      inputs: {
+        scene: getDifyScene(chatStore.subagent),
+      },
+      files,
+    };
+  }
+
+  function finishRequest(aiMsgId: string, hadSessionId: boolean, requestSeq: number) {
+    if (requestSeq !== chatStore.activeRequestSeq) return;
+    chatStore.patchMessageById(aiMsgId, { loading: false });
+    chatStore.isLoading = false;
+    chatStore.activeMessageId = "";
+    chatStore.scrollToBottom();
+    if (!hadSessionId && chatStore.aiSessionId) {
+      sessionStore
+        .loadSessions()
+        .catch(error => logger.error("failed to refresh AI sessions", error));
+    }
+  }
+
   async function sendAiFlow(options: {
     aiMsgId: string;
     userMsgId: string;
@@ -128,18 +158,7 @@ export function useChatSend() {
 
     try {
       await consumeChatStream({
-        source: stream(
-          {
-            query: content,
-            conversationId: chatStore.aiSessionId,
-            // Dify 开始节点通过 inputs 接收场景；用户由网关从鉴权上下文注入。
-            inputs: {
-              scene: getDifyScene(chatStore.subagent),
-            },
-            files,
-          },
-          { idleTimeoutMs: 60_000 },
-        ),
+        source: stream(createChatRequest(content, files), { idleTimeoutMs: 60_000 }),
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
@@ -160,17 +179,57 @@ export function useChatSend() {
         logger.error("stream consumption failed", error);
       }
     } finally {
-      if (requestSeq === chatStore.activeRequestSeq) {
-        chatStore.patchMessageById(aiMsgId, { loading: false });
-        chatStore.isLoading = false;
-        chatStore.activeMessageId = "";
-        chatStore.scrollToBottom();
-        if (!hadSessionId && chatStore.aiSessionId) {
-          sessionStore
-            .loadSessions()
-            .catch(error => logger.error("failed to refresh AI sessions", error));
-        }
+      finishRequest(aiMsgId, hadSessionId, requestSeq);
+    }
+  }
+
+  async function sendBlockingAiFlow(options: {
+    aiMsgId: string;
+    userMsgId: string;
+    content: string;
+    files: ChatFile[];
+    hadSessionId: boolean;
+    requestSeq: number;
+  }) {
+    const { aiMsgId, userMsgId, content, files, hadSessionId, requestSeq } = options;
+
+    try {
+      const response = await sendBlockingChatMessage(createChatRequest(content, files));
+      if (requestSeq !== chatStore.activeRequestSeq) return;
+      const qaInteraction = parseReportQaInteraction(response.answer);
+      if (qaInteraction) handlers?.onReportQa?.(qaInteraction.answer);
+
+      applySnapshot(aiMsgId, userMsgId, {
+        blocks: qaInteraction || !response.answer
+          ? buildInitialBlocks()
+          : [{ id: "answer-0", type: "answer", payload: { content: response.answer }, complete: true }],
+        conversationId: response.conversationId,
+        messageId: response.messageId,
+        taskId: response.taskId,
+        metadata: response.metadata?.elapsedTime == null
+          ? undefined
+          : { duration_ms: response.metadata.elapsedTime * 1000, status: "succeeded" },
+        processStatus: {
+          phase: "succeeded",
+          elapsedSeconds: response.metadata?.elapsedTime,
+        },
+        ended: true,
+      });
+    } catch (error) {
+      const index = chatStore.findMessageIndex(aiMsgId);
+      const aiMessage = index >= 0 ? chatStore.messages[index] : null;
+      if (aiMessage && requestSeq === chatStore.activeRequestSeq && !isAbortError(error)) {
+        chatStore.patchMessageById(aiMsgId, {
+          blocks: buildInitialBlocks(),
+          content: t("ai-unavailable-retry-later"),
+          loading: false,
+          processStatus: { ...aiMessage.processStatus, phase: "failed" },
+        });
+        logger.error("blocking chat request failed", error);
       }
+    } finally {
+      if (requestSeq === chatStore.activeRequestSeq) handlers?.onReportBlockingComplete?.();
+      finishRequest(aiMsgId, hadSessionId, requestSeq);
     }
   }
 
@@ -237,7 +296,9 @@ export function useChatSend() {
     });
     chatStore.activeMessageId = aiMsgId;
     chatStore.scrollToBottom(true);
-    await sendAiFlow({ aiMsgId, userMsgId, content: query, files, hadSessionId, requestSeq });
+    const options = { aiMsgId, userMsgId, content: query, files, hadSessionId, requestSeq };
+    if (chatStore.subagent === "report") await sendBlockingAiFlow(options);
+    else await sendAiFlow(options);
   }
 
   /** 语音松手后立刻插入「识别中...」占位，等 ASR 回来再改成真正的问题和回答 */

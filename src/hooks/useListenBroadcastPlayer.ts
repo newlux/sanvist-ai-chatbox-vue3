@@ -48,6 +48,7 @@ function resolveAudioSource(chunk: ListenBroadcastAudioChunk) {
 export function useListenBroadcastPlayer() {
   const loading = ref(false);
   const playing = ref(false);
+  const paused = ref(false);
   const finished = ref(false);
   const currentSeq = ref<number | null>(null);
   const previousText = ref("");
@@ -77,7 +78,7 @@ export function useListenBroadcastPlayer() {
   }
 
   function completeIfDrained(id: number) {
-    if (id !== sessionId || !streamFinished || activeAudio || readyQueue.length || pendingChunks.size) return;
+    if (id !== sessionId || paused.value || !streamFinished || activeAudio || readyQueue.length || pendingChunks.size) return;
     loading.value = false;
     playing.value = false;
     finished.value = !error.value;
@@ -85,7 +86,7 @@ export function useListenBroadcastPlayer() {
   }
 
   function playNext(id: number) {
-    if (id !== sessionId || activeAudio) return;
+    if (id !== sessionId || paused.value || activeAudio) return;
 
     const chunk = readyQueue.shift();
     if (!chunk) {
@@ -125,7 +126,6 @@ export function useListenBroadcastPlayer() {
       logger.warn("跳过无法播放的听播分片", {
         audioError,
         seq: chunk.seq,
-        text: String(chunk.text || ""),
         ...inspectAudioSource(source, chunk),
       });
       activeAudio = null;
@@ -184,6 +184,40 @@ export function useListenBroadcastPlayer() {
     flushRemainingChunks(id);
   }
 
+  function pause() {
+    if (paused.value || finished.value) return;
+    paused.value = true;
+    loading.value = false;
+    playing.value = false;
+    try {
+      activeAudio?.pause();
+    } catch {
+      logger.warn("暂停听播音频失败");
+    }
+    logger.info("听播已暂停");
+  }
+
+  function resume() {
+    if (!paused.value) return;
+    paused.value = false;
+    finished.value = false;
+    logger.info("听播继续播放");
+
+    if (activeAudio) {
+      playing.value = true;
+      try {
+        activeAudio.play();
+      } catch {
+        playing.value = false;
+        logger.warn("继续听播音频失败");
+      }
+      return;
+    }
+
+    if (!streamFinished && !readyQueue.length && !pendingChunks.size) loading.value = true;
+    playNext(sessionId);
+  }
+
   function stop() {
     sessionId += 1;
     activeStream?.cancel();
@@ -192,9 +226,10 @@ export function useListenBroadcastPlayer() {
     readyQueue = [];
     pendingChunks.clear();
     nextSeq = 1;
-    streamFinished = false;
+    streamFinished = true;
     loading.value = false;
     playing.value = false;
+    paused.value = false;
     finished.value = false;
     currentSeq.value = null;
     previousText.value = "";
@@ -202,6 +237,7 @@ export function useListenBroadcastPlayer() {
     nextText.value = "";
     transcriptSegments.value = [];
     error.value = null;
+    logger.info("听播已终止");
   }
 
   function play(params: PlayListenBroadcastParams) {
@@ -220,10 +256,13 @@ export function useListenBroadcastPlayer() {
 
   return {
     play,
+    pause,
+    resume: () => resume(),
     stop,
     active,
     loading,
     playing,
+    paused,
     finished,
     currentSeq,
     previousText,

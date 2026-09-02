@@ -16,6 +16,8 @@ export interface ChatFile {
   url: string;
 }
 
+export type ChatResponseMode = "streaming" | "blocking";
+
 export interface SendChatMessageParams {
   query: string;
   user?: string;
@@ -23,6 +25,18 @@ export interface SendChatMessageParams {
   language?: string;
   inputs?: ChatInput;
   files?: ChatFile[];
+  responseMode?: ChatResponseMode;
+}
+
+/** Dify blocking 模式的完整回答。 */
+export interface BlockingChatMessageResponse {
+  answer: string;
+  conversationId: Identifier;
+  messageId: Identifier;
+  taskId?: Identifier;
+  metadata?: {
+    elapsedTime?: number;
+  };
 }
 
 export interface MessageStartEvent {

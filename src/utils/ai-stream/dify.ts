@@ -1,10 +1,12 @@
-import type { ChatStreamEvent, Identifier, SendChatMessageParams } from "@/api/chat/types";
+import type { ChatResponseMode, ChatStreamEvent, Identifier, SendChatMessageParams } from "@/api/chat/types";
 
 /** Dify `/chat-messages` 的请求体；只在网络边界使用 snake_case。 */
 export interface DifyChatMessagesRequest {
+  /** Dify 要求非空，用于标识同一用户的会话。 */
+  user: string;
   inputs: Record<string, unknown>;
   query: string;
-  response_mode: "streaming";
+  response_mode: ChatResponseMode;
   /** 空字符串代表开启一轮新会话；后续请求传服务端返回的 conversation_id。 */
   conversation_id: Identifier | "";
   files: Array<{
@@ -35,9 +37,10 @@ function getReferences(payload: Record<string, unknown>) {
 /** 将页面内部的 camelCase 参数转换成 Dify 标准请求格式。 */
 export function toDifyChatMessagesRequest(params: SendChatMessageParams): DifyChatMessagesRequest {
   return {
+    user: String(params.user || ""),
     inputs: params.inputs || {},
     query: params.query,
-    response_mode: "streaming",
+    response_mode: params.responseMode ?? "streaming",
     conversation_id: params.conversationId ?? "",
     files: (params.files || []).map(file => ({
       type: file.type,
