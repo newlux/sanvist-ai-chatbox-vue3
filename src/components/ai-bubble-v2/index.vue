@@ -13,6 +13,7 @@ import iconGood from "@/assets/img/icon-good.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
+import { toInlineImageUrl } from "@/utils/image-preview";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
@@ -28,7 +29,7 @@ const props = defineProps({
   showActions: { type: Boolean, default: false },
   waitingText: { type: String, default: "" },
   /** 用户消息随行的附件：图片直接出图，其它文件出卡片 */
-  attachments: { type: Array, default: () => [] },
+  attachments: { type: Array as () => ChatMessageAttachment[], default: () => [] },
   interrupted: { type: Boolean, default: false },
   durationMs: { type: Number, default: null },
   processStatus: { type: Object, default: null },
@@ -93,13 +94,37 @@ async function copyText(text) {
   return false;
 }
 
-/** 点开大图。同一条消息里的图片一起进预览，可以左右翻 */
+/**
+ * 点开大图。同一条消息里的图片一起进预览，可以左右翻。
+ * urls 必须用可内联地址（previewPath / blob 兜底），
+ * 否则原始 url 带 Content-Disposition: attachment 时，
+ * 部分浏览器（Firefox/Safari）会提示下载而不是显示图片。
+ */
 function onPreviewImage(url) {
   const urls = props.attachments
-    .filter(item => item?.type === "image" && item?.url)
-    .map(item => item.url);
+    .map((item, index) => item?.type === "image"
+      ? fileImageFallback.value[index] || item.previewPath || item.url
+      : "")
+    .filter(Boolean);
   if (!urls.length) return;
   uni.previewImage({ current: url, urls });
+}
+
+/** 图片加载失败时的 blob 兜底地址（按附件下标记录，避免重复请求） */
+const fileImageFallback = ref<Record<number, string>>({});
+
+/**
+ * 图片加载失败兜底：把带 attachment 头/Content-Type 异常的原始地址
+ * 用 fetch + blob 换成一定能被 img 渲染的本地地址。
+ */
+async function onFileImageError(file, fileIndex) {
+  if (fileImageFallback.value[fileIndex]) return;
+  const source = file.previewPath || file.url;
+  if (!source) return;
+  const inline = await toInlineImageUrl(source);
+  if (inline !== source) {
+    fileImageFallback.value = { ...fileImageFallback.value, [fileIndex]: inline };
+  }
 }
 
 const USER_MENU_GAP_PX = 12;
@@ -266,8 +291,9 @@ function onNegativeFeedback() {
           v-if="file.type === 'image'"
           class="ai-bubble-v2__file-image"
           mode="aspectFill"
-          :src="file.previewPath || file.url"
-          @tap.stop="onPreviewImage(file.previewPath || file.url)"
+          :src="fileImageFallback[fileIndex] || file.previewPath || file.url"
+          @tap.stop="onPreviewImage(fileImageFallback[fileIndex] || file.previewPath || file.url)"
+          @error="onFileImageError(file, fileIndex)"
         />
         <view v-else class="ai-bubble-v2__file-card">
           <image

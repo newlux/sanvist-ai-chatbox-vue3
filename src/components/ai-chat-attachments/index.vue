@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { ComposerAttachment } from "@/hooks/useComposerAttachments";
 import { formatAttachmentStatus } from "@/hooks/useComposerAttachments";
+import { ref } from "vue";
+import { toInlineImageUrl } from "@/utils/image-preview";
 
 defineProps<{ attachments: ComposerAttachment[] }>();
 
@@ -9,9 +11,12 @@ const emit = defineEmits<{
   retry: [localId: string];
 }>();
 
+/** 图片加载失败时的 blob 兜底地址（按附件 localId 记录，避免重复请求） */
+const imageFallback = ref<Record<string, string>>({});
+
 /**
  * 点击附件：失败态触发重传（低版本降级路径），
- * 其余图片点击弹出大图预览（优先用可内联显示的 COS 预签名地址）。
+ * 其余图片点击弹出大图预览（直接用上传返回的地址回显）。
  */
 function onItemTap(attachment: ComposerAttachment) {
   if (attachment.status === "failed") {
@@ -20,7 +25,7 @@ function onItemTap(attachment: ComposerAttachment) {
   }
   if (attachment.type === "image") {
     uni.previewImage({
-      urls: [attachment.previewPath || attachment.url || attachment.localPath],
+      urls: [imageFallback.value[attachment.localId] || attachment.previewPath || attachment.url || attachment.localPath],
       current: 0,
     });
   }
@@ -34,14 +39,27 @@ function onImageError(attachment: ComposerAttachment) {
     previewPath: attachment.previewPath,
     localPath: attachment.localPath,
   });
+  // 兜底：原始 url 可能带 Content-Disposition: attachment（Firefox/Safari 拒绝渲染），
+  // 用 fetch + blob 换成一定能被 img 渲染的本地地址
+  void resolveImageFallback(attachment);
 }
 
-/** 图片加载成功：确认最终生效的是哪个地址（预签名 / url / 本地） */
+async function resolveImageFallback(attachment: ComposerAttachment) {
+  if (imageFallback.value[attachment.localId]) return;
+  const source = attachment.previewPath || attachment.url || attachment.localPath;
+  if (!source) return;
+  const inline = await toInlineImageUrl(source);
+  if (inline !== source) {
+    imageFallback.value = { ...imageFallback.value, [attachment.localId]: inline };
+  }
+}
+
+/** 图片加载成功：确认最终生效的是哪个地址（url / 本地） */
 function onImageLoad(attachment: ComposerAttachment) {
   console.log("[attachment] image load success", {
     name: attachment.name,
     src: attachment.previewPath || attachment.url || attachment.localPath,
-    from: attachment.previewPath ? "previewPath(cos 预签名)" : "url/localPath",
+    from: attachment.previewPath ? "previewPath(历史兼容)" : "url/localPath",
   });
 }
 </script>
@@ -63,7 +81,7 @@ function onImageLoad(attachment: ComposerAttachment) {
           v-if="attachment.type === 'image'"
           class="attachments__thumb"
           mode="aspectFill"
-          :src="attachment.previewPath || attachment.url || attachment.localPath"
+          :src="imageFallback[attachment.localId] || attachment.previewPath || attachment.url || attachment.localPath"
           @load="onImageLoad(attachment)"
           @error="onImageError(attachment)"
         />
