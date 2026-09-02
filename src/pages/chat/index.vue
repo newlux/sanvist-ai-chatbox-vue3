@@ -43,9 +43,20 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
+const reportQaAnswer = ref("");
+const reportQaLoading = ref(false);
+const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+  onReportQa(answer) {
+    reportQaLoading.value = false;
+    reportQaAnswer.value = answer;
+  },
+  onReportBlockingComplete() {
+    reportQaLoading.value = false;
+  },
+});
 
 const isReport = ref(false);
+const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> | null>(null);
 const showReportVoiceSelector = ref(false);
 const reportBroadcastParams = ref<PlayListenBroadcastParams | null>(null);
 const reportBroadcastPortrait = ref("");
@@ -86,9 +97,47 @@ function closeReportBroadcast() {
   onBack();
 }
 
+function pauseReportBroadcast() {
+  if (isReport.value) reportBroadcastPlayerRef.value?.pause();
+}
+
+function dismissReportQa() {
+  reportQaLoading.value = false;
+  reportQaAnswer.value = "";
+}
+
+function enterReportQaLoading() {
+  if (!isReport.value) return;
+  reportQaAnswer.value = "";
+  reportQaLoading.value = true;
+  chatStore.setSubagent("report");
+}
+
+function sendSubagentMessage(payload?: Parameters<typeof sendMessage>[0]) {
+  enterReportQaLoading();
+  pauseReportBroadcast();
+  return sendMessage(payload);
+}
+
+function onVoiceStart() {
+  pauseReportBroadcast();
+}
+
+function onRecognizeBegin() {
+  enterReportQaLoading();
+  beginAsrPlaceholder();
+}
+
+function onRecognizeFail() {
+  dismissReportQa();
+  discardAsrPlaceholder();
+}
+
 onLoad((query?: Record<string, string>) => {
   syncWindowHeight();
   isReport.value = String(query?.subagent || "") === "report";
+  reportQaAnswer.value = "";
+  reportQaLoading.value = false;
   if (isReport.value) restoreReportBroadcast();
   // 每次进来都是全新一轮
   chatStore.resetConversation();
@@ -111,7 +160,7 @@ function onBack() {
 
 <template>
   <view class="subagent-page" :style="safeAreaStyle">
-    <!-- 状态栏占位：动态读取真实机型状态栏高度 -->
+    <!-- 所有页面共用宿主安全区；系统状态栏由手机原生绘制。 -->
     <view class="chat-header__statusbar" :style="statusbarStyle" />
     <ReportVoiceSelector
       v-if="isReport && showReportVoiceSelector"
@@ -119,23 +168,28 @@ function onBack() {
       @close="closeReportVoiceSelector"
     />
     <view v-else class="subagent-page__chat" :style="chatViewportStyle">
-      <!-- 听汇报专用 SSE 播放视图，不复用普通对话消息列表 -->
+      <!-- 听汇报专用播放视图：QA 仅替换其内部主体区域，不替换页面根结构。 -->
       <ReportBroadcastPlayer
         v-if="isReport && reportBroadcastParams"
+        ref="reportBroadcastPlayerRef"
         :params="reportBroadcastParams"
         :portrait="reportBroadcastPortrait"
         :dock-offset="composerDockOffset"
-        @close="closeReportBroadcast"
+        :qa-loading="reportQaLoading"
+        :qa-answer="reportQaAnswer"
+        @dismiss-qa="dismissReportQa"
+        @exit-report="closeReportBroadcast"
       />
       <AiChatInput
         v-model="inputText"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
-        @send="sendMessage"
+        @send="sendSubagentMessage"
         @stop="stopGenerating"
-        @recognize-begin="beginAsrPlaceholder"
-        @recognize-fail="discardAsrPlaceholder"
+        @voice-start="onVoiceStart"
+        @recognize-begin="onRecognizeBegin"
+        @recognize-fail="onRecognizeFail"
         @input-focus="setTextInputFocused(true)"
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
