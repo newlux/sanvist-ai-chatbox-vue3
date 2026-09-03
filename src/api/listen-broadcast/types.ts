@@ -42,6 +42,7 @@ export interface ListenBroadcastPreference {
 export interface PlayListenBroadcastParams {
   styleCode?: string;
   checkedModules?: string[];
+  scriptVersion?: "normal" | "brief";
   voice?: string;
   language?: string;
   bizDate?: string;

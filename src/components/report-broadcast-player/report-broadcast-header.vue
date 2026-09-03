@@ -5,12 +5,10 @@ import closeIcon from "@/assets/img/voice-assistant/voice-close.svg";
 defineProps<{
   status: string;
   qaVisible: boolean;
-  canResume: boolean;
 }>();
 
 const emit = defineEmits<{
   "dismiss-qa": [];
-  resume: [];
   "exit-report": [];
 }>();
 
@@ -25,12 +23,8 @@ function onClose() {
     <view class="report-broadcast-header__close" @tap="qaVisible ? onClose() : emit('exit-report')">
       <image class="report-broadcast-header__icon" :src="closeIcon" mode="aspectFit" />
     </view>
-    <view
-      class="report-broadcast-header__status"
-      :class="{ 'report-broadcast-header__status--actionable': canResume && !qaVisible }"
-      @tap="canResume && !qaVisible ? emit('resume') : undefined"
-    >
-      <text>{{ canResume && !qaVisible ? "继续播放" : status }}</text>
+    <view class="report-broadcast-header__status">
+      <text>{{ status }}</text>
     </view>
     <view class="report-broadcast-header__ai-entry">
       <image class="report-broadcast-header__icon" :src="aiChatIcon" mode="aspectFit" />
@@ -76,8 +70,5 @@ function onClose() {
   font-size: 28rpx;
   font-weight: 500;
   backdrop-filter: blur(32rpx);
-}
-.report-broadcast-header__status--actionable {
-  color: #ed1a1a;
 }
 </style>

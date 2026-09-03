@@ -41,16 +41,17 @@ const showHistory = ref(false);
 const historyLoading = ref(false);
 const historyItems = ref<ListenBroadcastHistoryItem[]>([]);
 const activeHistoryBizDate = ref("");
+
 const isQaVisible = computed(() => props.qaLoading || Boolean(props.qaAnswer));
 const statusText = computed(() => {
-  if (isQaVisible.value) return "播报中...";
+  if (props.qaLoading) return "识别中...";
+  if (props.qaAnswer) return "Noii 说..";
   if (paused.value) return "已暂停";
   if (loading.value) return "准备中...";
   if (playing.value) return "播报中...";
   if (error.value) return "播报失败";
   return "播报完成";
 });
-const canResume = computed(() => paused.value);
 
 async function openHistory() {
   showHistory.value = true;
@@ -77,7 +78,7 @@ function exitReport() {
 }
 
 onMounted(() => play(props.params));
-defineExpose({ pause, resume, stop });
+defineExpose({ pause, resume, restart: play, stop });
 </script>
 
 <template>
@@ -85,9 +86,7 @@ defineExpose({ pause, resume, stop });
     <ReportBroadcastHeader
       :status="statusText"
       :qa-visible="isQaVisible"
-      :can-resume="canResume"
       @dismiss-qa="emit('dismiss-qa')"
-      @resume="resume"
       @exit-report="exitReport"
     />
     <ReportQaAnswer v-if="isQaVisible" :loading="qaLoading" :answer="qaAnswer" />

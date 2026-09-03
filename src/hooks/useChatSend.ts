@@ -1,10 +1,11 @@
 import type { ChatFile, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
+import type { ReportAdjustmentAction } from "@/utils/ai-stream";
 import { useI18n } from "vue-i18n";
 import { interruptChat, sendBlockingChatMessage } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { buildInitialBlocks, consumeChatStream, parseReportQaInteraction } from "@/utils/ai-stream";
+import { buildInitialBlocks, consumeChatStream, parseReportInteraction } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
 import { createLogger } from "@/utils/logger";
@@ -31,7 +32,9 @@ function isAbortError(error: unknown) {
 
 export function useChatSend(scope?: string, handlers?: {
   onReportQa?: (answer: string) => void;
+  onReportAdjustment?: (action: ReportAdjustmentAction) => void;
   onReportBlockingComplete?: () => void;
+  getReportCheckedModules?: () => string[];
 }) {
   const { t } = useI18n();
   const chatStore = useChatStore(scope);
@@ -124,13 +127,16 @@ export function useChatSend(scope?: string, handlers?: {
   }
 
   function createChatRequest(content: string, files: ChatFile[]) {
+    const scene = getDifyScene(chatStore.subagent);
+    const checkedModules = handlers?.getReportCheckedModules?.() || [];
     return {
       query: content,
       user: userStore.userId,
       conversationId: chatStore.aiSessionId,
       // Dify 开始节点通过 inputs 接收场景。
       inputs: {
-        scene: getDifyScene(chatStore.subagent),
+        scene,
+        ...(scene === "PODCAST" ? { checkedModules: JSON.stringify(checkedModules) } : {}),
       },
       files,
     };
@@ -200,11 +206,16 @@ export function useChatSend(scope?: string, handlers?: {
     try {
       const response = await sendBlockingChatMessage(createChatRequest(content, files));
       if (requestSeq !== chatStore.activeRequestSeq) return;
-      const qaInteraction = parseReportQaInteraction(response.answer);
-      if (qaInteraction) handlers?.onReportQa?.(qaInteraction.answer);
+      const reportInteraction = parseReportInteraction(response.answer);
+      if (reportInteraction?.interactionType === "qa") {
+        handlers?.onReportQa?.(reportInteraction.answer);
+      }
+      if (reportInteraction?.interactionType === "adjustment") {
+        handlers?.onReportAdjustment?.(reportInteraction.action);
+      }
 
       applySnapshot(aiMsgId, userMsgId, {
-        blocks: qaInteraction || !response.answer
+        blocks: reportInteraction || !response.answer
           ? buildInitialBlocks()
           : [{ id: "answer-0", type: "answer", payload: { content: response.answer }, complete: true }],
         conversationId: response.conversationId,
