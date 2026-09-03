@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import { getRoleOptions } from "@/api/user-role";
-import { LISTEN_REPORT_DATE_KEY, VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
+import { LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY, VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
 import { REPORT_STYLE_STORAGE_KEY } from "@/config/report-styles";
 import { REPORT_VOICE_STORAGE_KEY } from "@/config/report-voices";
 import { createLogger } from "@/utils/logger";
@@ -12,6 +12,7 @@ const logger = createLogger("visitor");
 onMounted(async () => {
   try {
     uni.removeStorageSync(LISTEN_REPORT_DATE_KEY);
+    uni.removeStorageSync(LISTEN_REPORT_CURRENT_DATE_KEY);
     uni.removeStorageSync(REPORT_VOICE_STORAGE_KEY);
     uni.removeStorageSync(REPORT_STYLE_STORAGE_KEY);
   } catch (error) {

@@ -13,7 +13,7 @@ import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
-import { AI_ASK_WELCOME_DONE_KEY, LISTEN_REPORT_DATE_KEY } from "@/config";
+import { AI_ASK_WELCOME_DONE_KEY, LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
@@ -21,6 +21,7 @@ import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady } from "@/utils/platform/mpaas";
 
@@ -37,6 +38,7 @@ const shareSheetBottomInset = ref("");
 const pageStage = ref<"welcome" | "chat">("welcome");
 const listenBroadcast = ref<TodayListenBroadcast | null>(null);
 const listenBroadcastLoading = ref(false);
+const listenReportRefreshKey = ref(0);
 let isDemoPage = false;
 
 const {
@@ -159,6 +161,13 @@ function startNewConversation() {
  * 快捷入口：听汇报 / 任务协同各自另开一个会话页，
  * 作业指导不跳转，就地高亮，之后的提问都带上它的 subagent。
  */
+function enterListenReport() {
+  saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
+  uni.navigateTo({
+    url: `/pages/chat/index?subagent=${encodeURIComponent("report")}&title=${encodeURIComponent("听汇报")}`,
+  });
+}
+
 function onNavItemClick(item: { key?: string; title?: string; subagent?: string; mode?: string }) {
   const subagent = String(item?.subagent || "");
   if (!subagent) return;
@@ -170,18 +179,21 @@ function onNavItemClick(item: { key?: string; title?: string; subagent?: string;
     return;
   }
 
+  if (subagent === "report") {
+    enterListenReport();
+    return;
+  }
+
   uni.navigateTo({
     url: `/pages/chat/index?subagent=${encodeURIComponent(subagent)}&title=${encodeURIComponent(item?.title || "")}`,
   });
 }
 
 /**
- * 音频卡片「去收听」：跟底部「听汇报」一样，跳到汇报会话页。
+ * 音频卡片「去收听」：跳转前固定本次早报日期。
  */
 function onGoListenReport() {
-  uni.navigateTo({
-    url: `/pages/chat/index?subagent=${encodeURIComponent("report")}&title=${encodeURIComponent("听汇报")}`,
-  });
+  enterListenReport();
 }
 
 /**
@@ -209,6 +221,7 @@ function backToWelcome() {
   if (userStore.isVisitor) {
     try {
       uni.removeStorageSync(LISTEN_REPORT_DATE_KEY);
+      uni.removeStorageSync(LISTEN_REPORT_CURRENT_DATE_KEY);
     } catch (error) {
       logger.warn("failed to reset visitor listen report state", error);
     }
@@ -316,6 +329,7 @@ async function loadTodayListenBroadcast() {
   listenBroadcastLoading.value = true;
   try {
     listenBroadcast.value = await getTodayListenBroadcast();
+    saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
   } catch (error) {
     logger.warn("failed to load today listen broadcast", error);
     listenBroadcast.value = null;
@@ -357,12 +371,21 @@ onLoad((options) => {
 onMounted(() => {
   syncWindowHeight();
   loadAwakeningPrompt();
+  uni.$on("listen-report-marked", refreshListenReportState);
 });
+function refreshListenReportState() {
+  listenReportRefreshKey.value += 1;
+}
+
 onShow(() => {
   syncWindowHeight();
   syncPageStage();
+  refreshListenReportState();
 });
-onBeforeUnmount(cancelActiveStream);
+onBeforeUnmount(() => {
+  uni.$off("listen-report-marked", refreshListenReportState);
+  cancelActiveStream();
+});
 </script>
 
 <template>
@@ -408,6 +431,7 @@ onBeforeUnmount(cancelActiveStream);
         :awakening-loading="awakeningLoading"
         :listen-broadcast="listenBroadcast"
         :listen-broadcast-loading="listenBroadcastLoading"
+        :listen-report-refresh-key="listenReportRefreshKey"
         :pinned-to-bottom="pinnedToBottom"
         :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
         :realtime-tts-playing="realtimeTts.playing.value"

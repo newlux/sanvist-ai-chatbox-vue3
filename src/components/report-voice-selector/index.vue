@@ -152,9 +152,9 @@ function onStyleBack() {
   step.value = "voice";
 }
 
-// 关闭：使用 pages.json 中显式注册的首页路径。
-function goHome() {
-  uni.reLaunch({ url: "/pages/index/index" });
+function closeSelector() {
+  stopPreview();
+  emit("close");
 }
 </script>
 
@@ -169,7 +169,7 @@ function goHome() {
     <template v-else>
       <!-- ② 顶部导航 Top Nav(1024:1)：关闭 + 工作胶囊 + Home -->
       <view class="report-voice-selector__topbar">
-        <view class="report-voice-selector__close" @tap="goHome">
+        <view class="report-voice-selector__close" @tap="closeSelector">
           <image class="report-voice-selector__close-icon" :src="closeIcon" mode="aspectFit" />
         </view>
         <view class="report-voice-selector__working">
