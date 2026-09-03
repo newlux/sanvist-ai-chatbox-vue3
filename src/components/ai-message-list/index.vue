@@ -27,6 +27,11 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  /** 空会话时是否展示首页式业务概览（问候/摘要/早报/可继续问）。独立业务页可关闭。 */
+  showBusinessOverview: {
+    type: Boolean,
+    default: true,
+  },
   showQuickList: {
     type: Boolean,
     default: true,
@@ -242,7 +247,7 @@ const listPadStyle = computed(() =>
       @scrolltoupper="onScrollTop"
     >
       <view class="msg-list__inner" :style="listPadStyle">
-        <view v-if="showQuickPrompts" class="business-overview">
+        <view v-if="showQuickPrompts && showBusinessOverview" class="business-overview">
           <!-- 首页问候、摘要、早报与问题列表加载骨架 -->
           <view v-if="awakeningLoading" class="business-overview__skeleton">
             <view class="business-overview__skeleton-title business-overview__skeleton-block" />

@@ -115,8 +115,16 @@ function clearRenderTimer() {
   renderTimer = null;
 }
 
+/** 可信 HTML 渲染前缀：内容以该标记开头时直接交给 mp-html，跳过 markdown-it 转义。
+ * 仅用于本地 demo 等可控场景，正常模型输出仍走 markdown 安全渲染。 */
+const TRUSTED_HTML_PREFIX = "<!--html-->";
+
 function parseMarkdown(content) {
-  if (!content.trim()) return "";
+  const trimmed = content.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith(TRUSTED_HTML_PREFIX)) {
+    return trimmed.slice(TRUSTED_HTML_PREFIX.length).trimStart();
+  }
   try {
     return markdown.render(content);
   }

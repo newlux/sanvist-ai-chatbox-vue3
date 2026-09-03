@@ -34,6 +34,19 @@ function getReferences(payload: Record<string, unknown>) {
   };
 }
 
+function getSanvistNodeTitle(event: Record<string, unknown>, data: Record<string, unknown>) {
+  return String(event.title || data.title || event.message || data.message || "").trim();
+}
+
+function isHiddenSanvistTitle(title: string) {
+  return title.startsWith("[HIDDEN]");
+}
+
+function isFailedSanvistEvent(event: Record<string, unknown>, data: Record<string, unknown>) {
+  const phase = String(event.phase || data.phase || event.status || data.status || "").toLowerCase();
+  return ["failed", "failure", "error", "exception"].includes(phase);
+}
+
 /**
  * 历史消息是一段完整文本，不需要处理跨 SSE 分片；仅提取 SANVIST answer 事件的正文。
  * 若不包含有效 SANVIST 事件，按普通 Dify answer 原样返回。
@@ -41,24 +54,38 @@ function getReferences(payload: Record<string, unknown>) {
 export function extractSanvistAnswer(value: unknown) {
   const source = String(value || "");
   const pattern = /<SANVIST>([\s\S]*?)<\/SANVIST>/g;
-  let found = false;
+  let foundProtocol = false;
+  let foundAnswer = false;
   let answer = "";
+  let plainText = "";
+  let cursor = 0;
   while (true) {
     const match = pattern.exec(source);
     if (!match) break;
+    plainText += source.slice(cursor, match.index);
+    cursor = match.index + match[0].length;
     try {
       const customEvent = asRecord(JSON.parse(match[1]));
-      if (!customEvent || !["status", "answer", "done"].includes(String(customEvent.event || ""))) continue;
-      found = true;
+      const difyEvent = String(customEvent?.dify_event || "");
+      const isLegacyEvent = ["status", "answer", "done"].includes(String(customEvent?.event || ""));
+      const isDifyNodeEvent = ["node_started", "node_retry", "node_finished", "workflow_finished"].includes(difyEvent);
+      if (!customEvent || (!isLegacyEvent && !isDifyNodeEvent)) {
+        continue;
+      }
+      foundProtocol = true;
       if (customEvent.event !== "answer") continue;
       const data = asRecord(customEvent.data) || {};
       const content = String(data.content || "");
+      foundAnswer = true;
       answer = data.is_delta === false ? content : `${answer}${content}`;
     } catch {
       // 非法的协议块不进入历史正文。
     }
   }
-  return found ? answer : source;
+  plainText += source.slice(cursor);
+  // 只有自定义 answer 事件才用其累积正文；节点状态协议不能吞掉标签外的标准 Dify 回答。
+  if (foundAnswer) return answer;
+  return foundProtocol ? plainText : source;
 }
 
 /** 将页面内部的 camelCase 参数转换成 Dify 标准请求格式。 */
@@ -141,7 +168,23 @@ export function createDifyEventNormalizer() {
       try {
         const customEvent = asRecord(JSON.parse(raw));
         const customData = asRecord(customEvent?.data) || {};
-        if (customEvent?.event === "status") {
+        const difyEvent = String(customEvent?.dify_event || "");
+        const title = getSanvistNodeTitle(customEvent || {}, customData);
+        if (difyEvent === "node_started" || difyEvent === "node_retry") {
+          receivedSanvistEvent = true;
+          if (title && !isHiddenSanvistTitle(title)) {
+            events.push({ event: "subtitle", ...references, message: title });
+          }
+        } else if (difyEvent === "node_finished") {
+          receivedSanvistEvent = true;
+          // 成功完成不闪回标题；失败和异常才展示当前节点，帮助定位执行问题。
+          if (isFailedSanvistEvent(customEvent || {}, customData) && title && !isHiddenSanvistTitle(title)) {
+            events.push({ event: "subtitle", ...references, message: title });
+          }
+        } else if (difyEvent === "workflow_finished") {
+          receivedSanvistEvent = true;
+          events.push({ event: "subtitle", ...references, message: "" });
+        } else if (customEvent?.event === "status") {
           receivedSanvistEvent = true;
           const message = String(customData.message || "").trim();
           if (message) events.push({ event: "subtitle", ...references, message });

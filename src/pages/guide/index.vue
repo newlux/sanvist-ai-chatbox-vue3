@@ -1,45 +1,48 @@
 <script setup lang="ts">
-import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
-import { onLoad, onShow } from "@dcloudio/uni-app";
+import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { getTodayListenBroadcast } from "@/api/listen-broadcast";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
+import AiReplyCard from "@/components/ai-reply-card/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
-import AiWelcome from "@/components/ai-welcome/index.vue";
-import { AI_ASK_WELCOME_DONE_KEY, LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
-import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { saveCurrentListenReportDate } from "@/utils/listen-report";
+import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
-import { closeWebview, isMpaasReady } from "@/utils/platform/mpaas";
+import { buildDemoConversation, normalizeDemoStep } from "./demo-conversation";
 
-defineOptions({ name: "AiChatPage" });
-const logger = createLogger("chat-page");
+/**
+ * 作业指导页（基于首页 index 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
+ *
+ * 与首页 / 听汇报的区别：
+ * - 独立会话域 "guide"，不与首页主会话互相污染；
+ * - 进入即固定 subagent=guide，发送时由 useChatSend 透传 inputs.subagent；
+ * - 每次进入起一轮干净会话（与听汇报一致），返回再进时重新开一轮。
+ */
+defineOptions({ name: "AiGuidePage" });
+
+/** 作业指导对应的导航项 key（与 ai-chat-nav 默认数据一致），本页内导航高亮该项 */
+const GUIDE_NAV_KEY = "fix-master-ai";
+const logger = createLogger("guide-page");
 const { t } = useI18n();
+
+const chatScope = provideChatScope("guide");
 const userStore = useUserStore();
-provideChatScope(DEFAULT_CHAT_SCOPE);
-const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
+const chatStore = useChatStore(chatScope);
 const sessionStore = useSessionStore();
+const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
 const sharePosterWrap = ref<unknown>(null);
-const navActiveKey = ref("");
 const shareSheetBottomInset = ref("");
-const pageStage = ref<"welcome" | "chat">("welcome");
-const listenBroadcast = ref<TodayListenBroadcast | null>(null);
-const listenBroadcastLoading = ref(false);
-const listenReportRefreshKey = ref(0);
-let isDemoPage = false;
 
 const {
   messages,
@@ -95,11 +98,64 @@ const realtimeTts = useRealtimeTts();
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
+  // 回答卡片盖住输入栏时，列表要抬到卡片上方（测量值未回传前按估算垫高）
+  if (replyOptions.value) {
+    return replyCardHeightPx.value
+      ? `calc(${replyCardHeightPx.value}px + 24rpx)`
+      : `calc(${composerBottomInset.value} + 800rpx)`;
+  }
   // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
   if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
   return composerBottomInset.value;
 });
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
+/** 底部回答卡片实测高度（px），用于给消息列表垫底 */
+const replyCardHeightPx = ref(0);
+
+function onReplyCardHeightChange(height: number) {
+  replyCardHeightPx.value = Number(height) || 0;
+}
+
+/** 点回答卡片右上角关闭：移除最后一条已完成 AI 消息里的 suggestion 块，卡片随之收起 */
+function closeReplyCard() {
+  for (let index = chatStore.messages.length - 1; index >= 0; index--) {
+    const message = chatStore.messages[index];
+    if (message.role !== "ai" || !Array.isArray(message.blocks)) continue;
+    const blockIndex = message.blocks.findIndex(block => block.type === "suggestion");
+    if (blockIndex < 0) continue;
+    message.blocks.splice(blockIndex, 1);
+    return;
+  }
+}
+
+/**
+ * 回答卡片数据来源：AI 回答末尾的选项以底部浮层展示（盖住输入栏），
+ * 不再渲染进气泡正文。取最后一条已完成 AI 消息的 suggestion 块作为当前卡片：
+ * - 生成中/被中断或该消息没有选项时返回 null（不出现卡片，输入栏恢复可用）；
+ * - 选项被消费（发送下一条消息）后 loading 消息置顶，卡片随之收起。
+ */
+const replyOptions = computed<{ key: string; payload: Record<string, unknown> } | null>(() => {
+  for (let index = chatStore.messages.length - 1; index >= 0; index--) {
+    const message = chatStore.messages[index];
+    if (message.role !== "ai") continue;
+    if (message.loading || message.interrupted) return null;
+    const suggestion = (message.blocks || []).find(block => block.type === "suggestion" && block.complete);
+    return suggestion
+      ? { key: String(message.id || index), payload: (suggestion.payload || {}) as Record<string, unknown> }
+      : null;
+  }
+  return null;
+});
+
+/** 传给消息列表的气泡数据：suggestion 已上浮为底部回答卡片，气泡内不再重复渲染 */
+const bubbleMessages = computed(() =>
+  chatStore.messages.map(message => {
+    if (message.role !== "ai" || !Array.isArray(message.blocks)) return message;
+    const hasSuggestion = message.blocks.some(block => block.type === "suggestion");
+    if (!hasSuggestion) return message;
+    return { ...message, blocks: message.blocks.filter(block => block.type !== "suggestion") };
+  }),
+);
 
 /** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
 function onTtsClick(index: number) {
@@ -158,49 +214,27 @@ function startNewConversation() {
 }
 
 /**
- * 快捷入口：听汇报另开通用智能体会话页。
- * 作业指导等带专属页面 url 的入口由 onNavItemClick 优先跳专属页（url 优先）。
+ * 快捷入口：听汇报 / 任务协同各自另开一个会话页；
+ * 作业指导已在当前页（高亮），点了不重复入栈。
  */
-function enterListenReport() {
-  saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
-  uni.navigateTo({
-    url: `/pages/chat/index?subagent=${encodeURIComponent("report")}&title=${encodeURIComponent("听汇报")}`,
-  });
-}
-
-function onNavItemClick(item: { key?: string; title?: string; subagent?: string; mode?: string; url?: string }) {
+function onNavItemClick(item: { key?: string; title?: string; subagent?: string; url?: string }) {
   const subagent = String(item?.subagent || "");
-  if (!subagent) return;
+  if (subagent === "guide") return;
 
-  if (item?.mode === "inline") {
-    const nextKey = navActiveKey.value === item.key ? "" : String(item.key || "");
-    navActiveKey.value = nextKey;
-    chatStore.setSubagent(nextKey ? subagent : "");
-    return;
-  }
-
-  // 带专属页面 url 的入口（如作业指导 → /pages/guide/index）优先跳专属页
   const targetUrl = String(item?.url || "");
   if (targetUrl) {
     uni.navigateTo({ url: targetUrl });
     return;
   }
-
-  if (subagent === "report") {
-    enterListenReport();
-    return;
-  }
+  if (!subagent) return;
 
   uni.navigateTo({
     url: `/pages/chat/index?subagent=${encodeURIComponent(subagent)}&title=${encodeURIComponent(item?.title || "")}`,
   });
 }
 
-/**
- * 音频卡片「去收听」：跳转前固定本次早报日期。
- */
-function onGoListenReport() {
-  enterListenReport();
+function onBack() {
+  uni.navigateBack({ delta: 1 });
 }
 
 /**
@@ -213,35 +247,6 @@ function getAISessionList(pageNo = 1, pageSize = 20) {
 function toggleQuickList(show: boolean) {
   if (chatStore.messages.length > 0 && show) return;
   chatStore.showQuickList = show;
-}
-
-function goToChat() {
-  try {
-    uni.setStorageSync(AI_ASK_WELCOME_DONE_KEY, true);
-  } catch (error) {
-    logger.error("caught error", error);
-  }
-  pageStage.value = "chat";
-}
-
-function backToWelcome() {
-  if (userStore.isVisitor) {
-    try {
-      uni.removeStorageSync(LISTEN_REPORT_DATE_KEY);
-      uni.removeStorageSync(LISTEN_REPORT_CURRENT_DATE_KEY);
-    } catch (error) {
-      logger.warn("failed to reset visitor listen report state", error);
-    }
-    listenBroadcast.value = null;
-    userStore.setVisitorRole(null);
-    userStore.setUserId("");
-  }
-  // 嵌在宿主 APP 里时，返回交回 mPaaS 容器
-  if (isMpaasReady()) {
-    void closeWebview().catch(error => logger.warn("popWindow failed", error));
-    return;
-  }
-  if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
 }
 
 async function onSessionClick(session: { sessionId?: string | number; id?: string | number }) {
@@ -281,6 +286,7 @@ async function onSessionDelete(session: { id?: string | number }) {
   if (!await confirmModal("删除此对话？", "删除后，这条对话记录将无法找回。确定删除此对话？")) return;
   try {
     await sessionStore.removeSession(id);
+    await chatHeader.value?.reloadSessions?.();
     if (String(chatStore.aiSessionId) === String(id)) chatStore.resetConversation();
     uni.showToast({ title: t("delete-success"), icon: "none" });
   } catch (error) {
@@ -295,6 +301,7 @@ async function onSessionDeleteBatch(ids: Array<string | number>) {
   if (!await confirmModal("批量删除选中对话？", "删除后，选中对话记录将无法找回。确定删除选中对话？")) return;
   try {
     await sessionStore.removeSessions(uniqueIds);
+    await chatHeader.value?.reloadSessions?.();
     if (chatStore.aiSessionId && uniqueIds.includes(String(chatStore.aiSessionId))) {
       chatStore.resetConversation();
     }
@@ -331,34 +338,6 @@ async function loadAwakeningPrompt() {
   }
 }
 
-async function loadTodayListenBroadcast() {
-  if (!isDemoPage) return;
-  listenBroadcastLoading.value = true;
-  try {
-    listenBroadcast.value = await getTodayListenBroadcast();
-    saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
-  } catch (error) {
-    logger.warn("failed to load today listen broadcast", error);
-    listenBroadcast.value = null;
-  } finally {
-    listenBroadcastLoading.value = false;
-  }
-}
-
-function syncPageStage() {
-  if (isDemoPage) {
-    pageStage.value = "chat";
-    return;
-  }
-  try {
-    if (!userStore.isVisitor && uni.getStorageSync(AI_ASK_WELCOME_DONE_KEY)) {
-      pageStage.value = "chat";
-    }
-  } catch (error) {
-    logger.error("caught error", error);
-  }
-}
-
 async function onScrollTop() {
   if (!chatStore.aiSessionId) return;
   try {
@@ -369,43 +348,53 @@ async function onScrollTop() {
   }
 }
 
+/** 演示页 URL 参数 step（1~15）：page query 优先，其次容错解析 location 上的 search/hash */
+function readDemoStepParam(options?: Record<string, string | undefined>): number {
+  const queryValue = String(options?.step ?? "");
+  if (queryValue) return normalizeDemoStep(Number(queryValue));
+  if (typeof location !== "undefined") {
+    const source = `${location.search || ""}${location.hash || ""}`;
+    const matched = /[?&]step=([^&#]*)/.exec(source);
+    if (matched) return normalizeDemoStep(Number(decodeURIComponent(matched[1])));
+  }
+  return 1;
+}
+
 onLoad((options) => {
-  isDemoPage = options?.mode === "demo";
-  syncPageStage();
-  void loadTodayListenBroadcast();
+  syncWindowHeight();
+  // 进入即固定作业指导身份，并起一轮干净会话（返回首页再进会重新开一轮）
+  chatStore.resetConversation();
+  chatStore.setSubagent("guide");
+  // —— 开发演示：注入「底部回答卡片」模拟会话（含"其他"输入型选项）——
+  // 用 URL 参数 step=1~15 切换演示阶段（默认 1）；后端流式联调后删除以下 3 行与
+  // 顶部 buildDemoConversation / normalizeDemoStep 的 import
+  chatStore.messages.push(...buildDemoConversation(readDemoStepParam(options)));
+  chatStore.showQuickPrompts = false;
+  chatStore.showQuickList = false;
 });
 
 onMounted(() => {
   syncWindowHeight();
   loadAwakeningPrompt();
-  uni.$on("listen-report-marked", refreshListenReportState);
 });
-function refreshListenReportState() {
-  listenReportRefreshKey.value += 1;
-}
 
 onShow(() => {
   syncWindowHeight();
-  syncPageStage();
-  refreshListenReportState();
 });
-onBeforeUnmount(() => {
-  uni.$off("listen-report-marked", refreshListenReportState);
+
+onUnload(() => {
   cancelActiveStream();
 });
 </script>
 
 <template>
   <view class="ai-page">
-    <!-- 欢迎页 -->
-    <AiWelcome v-if="pageStage === 'welcome'" @start-chat="goToChat" />
-
-    <!-- 问答页 -->
-    <view v-else class="ai-page__chat" :style="chatViewportStyle">
+    <view class="ai-page__chat" :style="chatViewportStyle">
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
       <!-- Header -->
       <AiChatHeader
+        ref="chatHeader"
         v-model:sessions="sessions"
         class="ai-page__header"
         :load-sessions="getAISessionList"
@@ -415,7 +404,7 @@ onBeforeUnmount(() => {
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
         :share-selected-round-count="shareSelectedRoundCount"
-        @back="backToWelcome"
+        @back="onBack"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"
         @session-delete="onSessionDelete"
@@ -425,9 +414,10 @@ onBeforeUnmount(() => {
       />
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
-        :messages="messages"
+        :messages="bubbleMessages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
+        :show-business-overview="false"
         :scroll-into-view="scrollIntoView"
         :show-quick-list="showQuickList"
         :selected-indexes="shareSelectedIndexes"
@@ -436,28 +426,32 @@ onBeforeUnmount(() => {
         :bottom-inset="messageBottomInset"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
-        :listen-broadcast="listenBroadcast"
-        :listen-broadcast-loading="listenBroadcastLoading"
-        :listen-report-refresh-key="listenReportRefreshKey"
         :pinned-to-bottom="pinnedToBottom"
         :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
         :realtime-tts-playing="realtimeTts.playing.value"
         @quick-prompt="sendQuickPrompt"
-        @suggestion-tap="sendQuickPrompt"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
         @copy-click="onCopyMessage"
         @select-toggle="onShareSelectToggle"
-        @listen-report="onGoListenReport"
         @scroll-top="onScrollTop"
         @pinned-change="chatStore.setPinnedToBottom"
       />
       <AiChatNav
         :visible="showQuickPrompts"
-        :active-key="navActiveKey"
+        :active-key="GUIDE_NAV_KEY"
         :style="navOffsetStyle"
         @item-click="onNavItemClick"
+      />
+      <!-- 回答卡片：AI 回答末尾的选项，固定浮层盖在输入栏上（发送下一条后自动收起） -->
+      <AiReplyCard
+        v-if="replyOptions"
+        :key="replyOptions.key"
+        :payload="replyOptions.payload"
+        @submit="sendQuickPrompt"
+        @close="closeReplyCard"
+        @height-change="onReplyCardHeightChange"
       />
 
       <view v-if="isSessionSwitching" class="session-loading">
@@ -501,7 +495,7 @@ onBeforeUnmount(() => {
         </view>
       </view>
 
-      <!-- 分享图片预览/生成（Figma: 495:809） -->
+      <!-- 分享图片预览/生成 -->
       <view v-else-if="sharePosterVisible" class="share-poster-modal">
         <view class="share-poster-modal__mask" @tap="closeSharePosterModal" />
         <view class="share-poster-modal__card" @tap.stop>
@@ -559,8 +553,14 @@ onBeforeUnmount(() => {
         </view>
       </view>
 
+      <!--
+        底部对话框输入栏：仅在没有回答卡片、分享面板/海报时渲染。
+        卡片（AiReplyCard）盖住输入栏期间，主输入框必须从 DOM 移除，
+        否则点击卡片内「其他输入」input 会被全局 focusin 误判为对话框输入、
+        触发底层主输入栏的键盘抬升联动。
+      -->
       <AiChatInput
-        v-else
+        v-else-if="!replyOptions"
         v-model="inputText"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
@@ -587,59 +587,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
-/* Design tokens from Ardot */
-$color-text-primary: #1a1a1a;       // r:0.102
-$color-text-secondary: #6b6b6b;     // r:0.420
-$color-text-muted: #bababa;         // r:0.729
+$color-text-primary: #1a1a1a;
+$color-text-secondary: #6b6b6b;
+$color-text-muted: #bababa;
 $color-red-accent: #ff0000;
-$color-red-btn: #fe0000;             // r:0.996 g:0 b:0
-$color-bg-phone: #fafafa;           // r:0.98
-$color-bg-voice: #f5f5f5;           // r:0.96
-$color-border-light: #efefef;       // r:0.937
+$color-red-btn: #fe0000;
+$color-bg-phone: #fafafa;
+$color-bg-voice: #f5f5f5;
+$color-border-light: #efefef;
 $color-white: #ffffff;
-
-/* Background */
-.phone-bg {
-  position: absolute;
-  inset: 0;
-  background-color: $color-bg-phone;
-  z-index: 0;
-}
-
-/* Decorative glows — top corners */
-.glow {
-  position: absolute;
-  z-index: 1;
-  pointer-events: none;
-}
-
-.glow-blue {
-  left: -40px;
-  top: -20px;
-  width: 280px;
-  height: 180px;
-  background: radial-gradient(
-    ellipse 80% 60% at 40% 40%,
-    rgba(123, 167, 217, 0.10) 0%,
-    rgba(123, 167, 217, 0.04) 50%,
-    rgba(123, 167, 217, 0) 70%
-  );
-  filter: blur(8px);
-}
-
-.glow-red {
-  left: 44px;
-  top: -20px;
-  width: 380px;
-  height: 180px;
-  background: radial-gradient(
-    ellipse 70% 55% at 60% 35%,
-    rgba(255, 80, 80, 0.08) 0%,
-    rgba(255, 80, 80, 0.03) 50%,
-    rgba(255, 80, 80, 0) 70%
-  );
-  filter: blur(10px);
-}
 
 .ai-page {
   min-height: 100vh;
@@ -730,7 +686,7 @@ $color-white: #ffffff;
   }
 }
 
-/* Share sheet (495:759) */
+/* Share sheet */
 .share-sheet-modal {
   position: fixed;
   inset: 0;
@@ -866,11 +822,6 @@ $color-white: #ffffff;
   overflow: hidden;
 }
 
-.share-poster-modal__img-wrap {
-  width: 100%;
-  height: 100%;
-}
-
 .share-poster-modal__loading {
   display: flex;
   align-items: center;
@@ -970,15 +921,6 @@ $color-white: #ffffff;
   font-weight: 500;
   line-height: 40rpx;
   color: #999999;
-}
-
-.share-poster {
-  width: 656rpx;
-  margin: 0 auto;
-  background: #ffffff;
-  border-radius: 24rpx;
-  padding: 24rpx 30rpx 30rpx;
-  box-sizing: border-box;
 }
 
 .share-poster-modal__img {

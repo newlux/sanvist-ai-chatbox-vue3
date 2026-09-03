@@ -4,13 +4,15 @@ import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
 import iconVox from "@/assets/img/icon-vox.svg";
 
-/** 快捷入口。subagent 随请求透传给算法侧；mode=page 另开会话页，inline 就地高亮 */
+/** 快捷入口。subagent 随请求透传给算法侧；mode=page 另开页面（url 优先，缺省走智能体会话页） */
 export interface NavItem {
   key: string;
   title: string;
   icon: string;
   subagent?: string;
   mode?: "page" | "inline";
+  /** mode=page 时优先跳转的目标页面，不传则回退到 /pages/chat/index?subagent=... */
+  url?: string;
 }
 
 defineOptions({
@@ -26,7 +28,7 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
-  /** 当前高亮的智能体（作业指导这类不跳转、就地选中的入口） */
+  /** 当前高亮的智能体（如作业指导页进入即高亮「作业指导」入口） */
   activeKey: {
     type: String,
     default: "",
@@ -40,10 +42,18 @@ const navItems = computed(() => {
     return props.items;
   }
 
-  // subagent 随 inputs 透传给算法侧；mode=page 的入口另开会话页，inline 的就地高亮
+  // subagent 随 inputs 透传给算法侧；三个入口都另开页面，
+  // 作业指导带专属页面 url，听汇报 / 任务协同走通用智能体会话页
   return [
     { key: "vox-core", title: "听汇报", icon: iconVox, subagent: "report", mode: "page" },
-    { key: "fix-master-ai", title: "作业指导", icon: iconHelp, subagent: "guide", mode: "inline" },
+    {
+      key: "fix-master-ai",
+      title: "作业指导",
+      icon: iconHelp,
+      subagent: "guide",
+      mode: "page",
+      url: "/pages/guide/index",
+    },
     { key: "ai-form", title: "任务协同", icon: iconForm, subagent: "task", mode: "page" },
   ];
 });
@@ -133,7 +143,7 @@ function onItemTap(item: NavItem) {
   white-space: nowrap;
 }
 
-// 就地选中的智能体（作业指导）：选中后本轮提问都带它的 subagent
+// 高亮的智能体入口：当前页对应的场景项（如作业指导页）
 .ai-chat-nav__chip--active {
   border-color: #fe0000;
   background: #fff2f3;
