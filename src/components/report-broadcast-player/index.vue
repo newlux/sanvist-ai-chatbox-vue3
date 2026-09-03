@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import type { ListenBroadcastHistoryItem, PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
+import type {
+  ListenBroadcastHistoryItem,
+  PlayListenBroadcastParams,
+} from "@/api/listen-broadcast/types";
 import { computed, onMounted, ref } from "vue";
 import { getListenBroadcastHistory } from "@/api/listen-broadcast";
 import ReportQaAnswer from "@/components/report-qa-answer/index.vue";
@@ -110,5 +113,13 @@ defineExpose({ pause, resume, stop });
 </template>
 
 <style scoped lang="scss">
-.report-broadcast-player { display: flex; width: 100%; height: 100%; flex-direction: column; overflow: hidden; box-sizing: border-box; background: #fff; }
+.report-broadcast-player {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: #fff;
+}
 </style>

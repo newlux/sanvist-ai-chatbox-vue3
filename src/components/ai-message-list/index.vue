@@ -3,7 +3,7 @@ import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { UiChatMessage } from "@/stores/chat-types";
 import moment from "moment";
 import { computed, ref, watch } from "vue";
-import { LISTEN_REPORT_DATE_KEY } from "@/config";
+import { isListenReportListened } from "@/utils/listen-report";
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
 
 defineOptions({
@@ -62,6 +62,10 @@ const props = defineProps({
   listenBroadcastLoading: {
     type: Boolean,
     default: false,
+  },
+  listenReportRefreshKey: {
+    type: Number,
+    default: 0,
   },
   realtimeTtsMessageKey: {
     type: null,
@@ -208,37 +212,18 @@ function onCopyClick(index, message) {
   emit("copy-click", { index, msg: message });
 }
 
-function getListenReportDate() {
-  try {
-    return String(uni.getStorageSync(LISTEN_REPORT_DATE_KEY) || "");
-  } catch {
-    return "";
-  }
-}
+const listenedReport = ref(isListenReportListened(props.listenBroadcast?.bizDate));
 
-function isListenedToday() {
-  const listenedDate = getListenReportDate();
-  const bizDate = props.listenBroadcast?.bizDate;
-  return Boolean(listenedDate && bizDate && listenedDate === bizDate);
-}
-
-const listenedReport = ref(isListenedToday());
-
-watch(() => props.listenBroadcast?.bizDate, () => {
-  listenedReport.value = isListenedToday();
+watch([
+  () => props.listenBroadcast?.bizDate,
+  () => props.listenReportRefreshKey,
+], ([bizDate]) => {
+  listenedReport.value = isListenReportListened(bizDate);
 }, { immediate: true });
 
-/** “去收听”：首次点击标记当前早报已收听，并跳转到汇报会话页。 */
+/** “去收听”：仅在整段播放完成后标记已收听。 */
 function onListenReport() {
-  if (!listenedReport.value) {
-    try {
-      uni.setStorageSync(LISTEN_REPORT_DATE_KEY, props.listenBroadcast?.bizDate || "");
-    } catch {
-      // 本地存储不可用时仍允许进入汇报会话。
-    }
-    listenedReport.value = true;
-  }
-  emit("listen-report");
+  emit("listen-report", listenedReport.value);
 }
 const listPadStyle = computed(() =>
   (props.bottomInset ? { paddingBottom: props.bottomInset } : {}),

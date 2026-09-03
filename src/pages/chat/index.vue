@@ -12,7 +12,8 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { loadReportStyle } from "@/hooks/useReportStyle";
 import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { provideChatScope, useChatStore } from "@/stores";
+import { provideChatScope, useChatStore, useUserStore } from "@/stores";
+import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
 
 /**
  * 智能体会话页（听汇报 / 任务协同）。
@@ -25,6 +26,7 @@ defineOptions({ name: "SubagentChatPage" });
 // 智能体会话独立成域：底部输入栏仍使用独立会话状态。
 const chatScope = provideChatScope("subagent");
 const chatStore = useChatStore(chatScope);
+const userStore = useUserStore();
 const { inputText, isLoading } = storeToRefs(chatStore);
 const { safeAreaStyle, safeTopPx } = useSafeArea();
 
@@ -60,12 +62,25 @@ const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> 
 const showReportVoiceSelector = ref(false);
 const reportBroadcastParams = ref<PlayListenBroadcastParams | null>(null);
 const reportBroadcastPortrait = ref("");
+const reportBizDate = ref("");
+
+function startReportVoiceSelection() {
+  reportBroadcastParams.value = null;
+  reportBroadcastPortrait.value = "";
+  showReportVoiceSelector.value = true;
+}
 
 function restoreReportBroadcast() {
+  // 游客首次收听必须重新选择；已收听状态允许直接复用上次配置。
+  if (userStore.isVisitor === true && !isListenReportListened(reportBizDate.value)) {
+    startReportVoiceSelection();
+    return;
+  }
+
   const voice = loadReportVoice();
   const style = loadReportStyle();
   if (!voice || !style || !style.moduleCodes.length) {
-    showReportVoiceSelector.value = true;
+    startReportVoiceSelection();
     return;
   }
   reportBroadcastParams.value = {
@@ -92,7 +107,14 @@ function confirmReportVoice(voice: ReportVoiceOption, style: ListenBroadcastStyl
   showReportVoiceSelector.value = false;
 }
 
+function markCurrentReportListened(): boolean {
+  if (!isReport.value || !reportBroadcastParams.value) return false;
+  markListenReportListened(getCurrentListenReportDate());
+  return true;
+}
+
 function closeReportBroadcast() {
+  if (markCurrentReportListened()) uni.$emit("listen-report-marked");
   reportBroadcastParams.value = null;
   onBack();
 }
@@ -136,6 +158,7 @@ function onRecognizeFail() {
 onLoad((query?: Record<string, string>) => {
   syncWindowHeight();
   isReport.value = String(query?.subagent || "") === "report";
+  reportBizDate.value = getCurrentListenReportDate();
   reportQaAnswer.value = "";
   reportQaLoading.value = false;
   if (isReport.value) restoreReportBroadcast();
@@ -147,6 +170,7 @@ onLoad((query?: Record<string, string>) => {
 });
 
 onUnload(() => {
+  if (markCurrentReportListened()) uni.$emit("listen-report-marked");
   cancelActiveStream();
   chatStore.setSubagent("");
 });
