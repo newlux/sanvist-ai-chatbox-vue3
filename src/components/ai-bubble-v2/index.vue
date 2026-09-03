@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOff from "@/assets/img/icon-action-radio-off.svg";
@@ -13,7 +13,7 @@ import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
-import { toInlineImageUrl } from "@/utils/image-preview";
+import { fetchFilePreviewBlobUrl, toInlineImageUrl } from "@/utils/image-preview";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
@@ -97,6 +97,37 @@ async function copyText(text) {
 
 /** 图片加载失败时的 blob 兜底地址（按附件下标记录，避免重复请求） */
 const fileImageFallback = ref<Record<number, string>>({});
+
+/**
+ * 用户消息里的图片附件（Dify 文件）需要鉴权才能取到内容：
+ * 有 fileId 时主动请求 GET /files/{file_id}/preview，把真实字节转成 blob 展示，
+ * 避免直接拿 source_url 让 `<img>` 无凭证加载失败。
+ */
+watch(
+  () => props.attachments
+    .map(file => `${file.type}:${file.fileId || ""}:${file.url || ""}`)
+    .join("|"),
+  () => {
+    props.attachments.forEach((file, fileIndex) => {
+      if (file.type === "image" && file.fileId && !fileImageFallback.value[fileIndex]) {
+        void fetchFilePreviewBlobUrl(file.fileId, file.mimeType).then(inline => {
+          if (inline) fileImageFallback.value = { ...fileImageFallback.value, [fileIndex]: inline };
+        });
+      }
+    });
+  },
+  { immediate: true },
+);
+
+/**
+ * 图片附件 src：鉴权预览 blob 解析后优先；
+ * 有 fileId 但预览尚未解析完成时返回空占位，避免 img 无凭证打 source_url 失败闪断。
+ */
+function fileImageSrc(file: ChatMessageAttachment, fileIndex: number) {
+  if (fileImageFallback.value[fileIndex]) return fileImageFallback.value[fileIndex];
+  if (file.fileId) return "";
+  return file.previewPath || file.url || "";
+}
 
 /**
  * 点开大图。同一条消息里的图片一起进预览，可以左右翻。
@@ -293,8 +324,8 @@ function onNegativeFeedback() {
           v-if="file.type === 'image'"
           class="ai-bubble-v2__file-image"
           mode="aspectFill"
-          :src="fileImageFallback[fileIndex] || file.previewPath || file.url"
-          @tap.stop="onPreviewImage(fileImageFallback[fileIndex] || file.previewPath || file.url)"
+          :src="fileImageSrc(file, fileIndex)"
+          @tap.stop="onPreviewImage(fileImageSrc(file, fileIndex))"
           @error="onFileImageError(file, fileIndex)"
         />
         <view v-else class="ai-bubble-v2__file-card">

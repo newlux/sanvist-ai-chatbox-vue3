@@ -239,16 +239,37 @@ export interface UploadChatFileParams {
   timeout?: number;
 }
 
-/** 与网关 FileUploadResponse 对齐 */
+/**
+ * 文件上传接口（项目内 POST /proxy/v1/files/upload，代理 Dify POST /v1/files/upload）响应。
+ * Dify 原生字段为 snake_case，网关透传时不带 code/data 包装壳；
+ * 图片预览走 GET /files/{file_id}/preview（需鉴权），本响应的 id 即 file_id。
+ * 末尾保留旧网关 camelCase 字段作为兼容兜底。
+ */
 export interface ChatFileUploadResult {
-  fileId: string;
+  /** 文件的唯一标识（file_id），预览与引用都靠它 */
+  id: string;
+  reference?: string | null;
   name: string;
   size: number;
   extension: string;
-  mimeType: string;
+  mime_type?: string;
+  created_by?: string | null;
+  created_at?: number | null;
+  /** 预览地址（可能为空或需额外鉴权，不作为回显来源） */
+  preview_url?: string | null;
+  /** 文件源地址：可被服务端拉取，作为发送消息 remote_url 的 url */
+  source_url?: string | null;
+  original_url?: string | null;
+  user_id?: string | null;
+  tenant_id?: string | null;
+  conversation_id?: string | null;
+  file_key?: string | null;
+  /** 兼容旧网关 camelCase 形态（仅兜底） */
+  fileId?: string;
+  mimeType?: string;
+  url?: string;
   createdBy?: string;
   createdAt?: number;
-  url: string;
 }
 
 export interface TextToSpeechResult {
