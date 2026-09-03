@@ -20,6 +20,7 @@ export interface ChatStreamSnapshot {
   messageId?: Identifier;
   taskId?: Identifier;
   metadata?: MessageEndEvent["metadata"];
+  processSubtitle?: string | null;
   processStatus?: {
     phase: "thinking" | "succeeded" | "failed" | "stopped";
     title?: string;
@@ -58,6 +59,7 @@ export async function consumeChatStream(
     if (update.messageId) snapshot.messageId = update.messageId;
     if (update.taskId) snapshot.taskId = update.taskId;
     if (update.metadata) snapshot.metadata = update.metadata;
+    if (update.processSubtitle !== undefined) snapshot.processSubtitle = update.processSubtitle;
     if (update.processStatus) snapshot.processStatus = update.processStatus;
     if (event.event === "message_end") snapshot.ended = true;
   }

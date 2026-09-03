@@ -26,6 +26,7 @@ export interface StreamBlockUpdate {
   messageId?: Identifier;
   taskId?: Identifier;
   metadata?: MessageEndEvent["metadata"];
+  processSubtitle?: string | null;
   processStatus?: {
     phase: "thinking" | "succeeded" | "failed" | "stopped";
     title?: string;
@@ -129,6 +130,7 @@ export function applyEventToBlocks(
         ...base,
         blocks: completeBlocks(blocks),
         metadata: event.metadata,
+        processSubtitle: null,
         processStatus: {
           phase: event.metadata.status === "failed"
             ? "failed"
@@ -160,6 +162,11 @@ export function applyEventToBlocks(
         receivedContent: true,
       };
     }
+    case "subtitle":
+      return {
+        ...base,
+        processSubtitle: event.message,
+      };
     case "table":
     case "metric":
     case "tool_call":

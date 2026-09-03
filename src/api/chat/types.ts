@@ -78,6 +78,15 @@ export interface MessageEvent {
   replace?: boolean;
 }
 
+/** SANVIST 自定义流事件中的执行说明，只展示当前一条。 */
+export interface SubtitleEvent {
+  event: "subtitle";
+  conversationId: Identifier;
+  messageId: Identifier;
+  taskId?: Identifier;
+  message: string;
+}
+
 export interface RichContentEvent {
   event: "suggestion" | "table" | "chart" | "metric";
   conversationId: Identifier;
@@ -108,6 +117,7 @@ export type ChatStreamEvent =
   | ThinkEvent
   | ToolCallEvent
   | MessageEvent
+  | SubtitleEvent
   | RichContentEvent
   | MessageEndEvent;
 

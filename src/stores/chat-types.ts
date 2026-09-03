@@ -38,6 +38,8 @@ export interface UiChatMessage {
   waitingText?: string;
   durationMs?: number | null;
   processStatus?: ChatProcessStatus | null;
+  /** SANVIST 自定义状态事件的当前子标题。 */
+  processSubtitle?: string | null;
   positive?: boolean | null;
   feedbackValue?: string;
   feedbackRemark?: string;
