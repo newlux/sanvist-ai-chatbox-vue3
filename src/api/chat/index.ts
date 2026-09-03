@@ -211,7 +211,7 @@ export function getTextToSpeech(conversationId: Identifier, messageId: Identifie
  * 返回的 url 直接作为 Dify `/chat-messages` 的 files[].url（transfer_method=remote_url）。
  */
 export function uploadChatFile(params: UploadChatFileParams) {
-  return request.upload<ChatFileUploadResult>("/files/upload", {
+  return request.upload<ChatFileUploadResult>("/proxy/v1/files/upload", {
     filePath: params.filePath,
     file: params.file,
     name: "file",
