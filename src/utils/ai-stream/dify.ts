@@ -54,11 +54,16 @@ function isFailedSanvistEvent(event: Record<string, unknown>, data: Record<strin
 export function extractSanvistAnswer(value: unknown) {
   const source = String(value || "");
   const pattern = /<SANVIST>([\s\S]*?)<\/SANVIST>/g;
-  let found = false;
+  let foundProtocol = false;
+  let foundAnswer = false;
   let answer = "";
+  let plainText = "";
+  let cursor = 0;
   while (true) {
     const match = pattern.exec(source);
     if (!match) break;
+    plainText += source.slice(cursor, match.index);
+    cursor = match.index + match[0].length;
     try {
       const customEvent = asRecord(JSON.parse(match[1]));
       const difyEvent = String(customEvent?.dify_event || "");
@@ -67,16 +72,20 @@ export function extractSanvistAnswer(value: unknown) {
       if (!customEvent || (!isLegacyEvent && !isDifyNodeEvent)) {
         continue;
       }
-      found = true;
+      foundProtocol = true;
       if (customEvent.event !== "answer") continue;
       const data = asRecord(customEvent.data) || {};
       const content = String(data.content || "");
+      foundAnswer = true;
       answer = data.is_delta === false ? content : `${answer}${content}`;
     } catch {
       // 非法的协议块不进入历史正文。
     }
   }
-  return found ? answer : source;
+  plainText += source.slice(cursor);
+  // 只有自定义 answer 事件才用其累积正文；节点状态协议不能吞掉标签外的标准 Dify 回答。
+  if (foundAnswer) return answer;
+  return foundProtocol ? plainText : source;
 }
 
 /** 将页面内部的 camelCase 参数转换成 Dify 标准请求格式。 */
