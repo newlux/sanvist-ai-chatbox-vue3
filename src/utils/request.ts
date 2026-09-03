@@ -25,6 +25,11 @@ interface JsonRequest<T> {
 
 interface UploadOptions {
   filePath: string;
+  /**
+   * 优先上传的文件对象。H5 下 uni.uploadFile 直接接收原生 File，
+   * 避免它对 blob URL 二次转换时文件名退化（file-<时间戳> 无扩展名）导致网关判空。
+   */
+  file?: File;
   name?: string;
   formData?: Record<string, string>;
   /** 支付宝必填；老版本只认 image，音频也会被映射成 image */
@@ -148,11 +153,13 @@ function createUploadRequest<T>(path: string, options: UploadOptions): JsonReque
       logger.info("upload", {
         url,
         filePath: options.filePath,
+        fileProvided: Boolean(options.file),
         fileType: options.fileType,
       });
       const response = await platformUploadFile({
         url,
         filePath: options.filePath,
+        file: options.file,
         name: options.name || "file",
         fileType: options.fileType || "image",
         formData: options.formData,

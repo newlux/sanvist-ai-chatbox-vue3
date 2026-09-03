@@ -5,7 +5,6 @@ import type {
   ChatFileUploadResult,
   ChatMessage,
   Conversation,
-  CosPresignedUrlVO,
   CursorPage,
   Identifier,
   InterruptChatParams,
@@ -214,27 +213,11 @@ export function getTextToSpeech(conversationId: Identifier, messageId: Identifie
 export function uploadChatFile(params: UploadChatFileParams) {
   return request.upload<ChatFileUploadResult>("/files/upload", {
     filePath: params.filePath,
+    file: params.file,
     name: "file",
     fileType: params.fileType || "image",
     formData: { user: params.user },
     timeout: params.timeout,
-  }).json();
-}
-
-/**
- * 获取 COS 下载/读取预签名 URL。
- * 上传返回的 url 可能带 Content-Disposition: attachment 导致无法内联预览，
- * 前端用 objectKey 换预签名地址用于图片预览/下载。
- */
-export function getCosPresignedDownloadUrl(objectKey: string) {
-  // 该服务与主对话 API 不同域、不同前缀：固定走
-  // https://sanvist-api-test.sany.com.cn/ 网关（/hfle 服务前缀），
-  // 不随宿主注入的 baseUrl / setRequestBaseURL 变化
-  // 登录凭证（Authorization）由 request 层统一注入：App.vue 启动时通过 setRequestAuth 写入，
-  // getRequestHeaders 会自动带上，这里无需重复声明
-  return request.get<CosPresignedUrlVO>("/hfle/v1/cos/presigned/download", { objectKey }, {
-    baseURL: "https://sanvist-api-test.sany.com.cn/",
-    headers: { Accept: "application/json" },
   }).json();
 }
 

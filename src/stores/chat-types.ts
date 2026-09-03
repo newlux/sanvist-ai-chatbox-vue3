@@ -14,6 +14,8 @@ export interface ChatProcessStatus {
 /** 用户消息里随行展示的附件 */
 export interface ChatMessageAttachment {
   url: string;
+  /** 可内联预览地址：COS 预签名 URL 或 blob 兜底地址，优先于 url 展示 */
+  previewPath?: string;
   name: string;
   /** image / audio / video / document */
   type: string;
@@ -36,6 +38,8 @@ export interface UiChatMessage {
   waitingText?: string;
   durationMs?: number | null;
   processStatus?: ChatProcessStatus | null;
+  /** SANVIST 自定义状态事件的当前子标题。 */
+  processSubtitle?: string | null;
   positive?: boolean | null;
   feedbackValue?: string;
   feedbackRemark?: string;

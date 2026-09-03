@@ -2,10 +2,9 @@ import type { ChatFile } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { getCosPresignedDownloadUrl, uploadChatFile } from "@/api/chat";
+import { uploadChatFile } from "@/api/chat";
 import { useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
-import { getRequestHeaders } from "@/utils/request";
 
 import {
   chooseNativeFiles,
@@ -21,6 +20,16 @@ const logger = createLogger("attachments");
 export const MAX_ATTACHMENT_COUNT = 3;
 /** 低版本降级路径（uni.chooseImage / chooseFile）的本地文件大小上限 */
 const MAX_LOCAL_FILE_SIZE = 50 * 1024 * 1024;
+
+/**
+ * 是否强制走 H5 低版本自定义上传（uni.chooseImage / uni.chooseFile + /files/upload）。
+ *
+ * 当前需求：附件上传一律走 H5 上传，不再走原生 imageChoose（原生选择 + 原生上传 + COS 预签名）；
+ * 回显直接用 /files/upload 返回的 url，不再调 COS 预签名 download 接口。
+ * 原生相关代码（chooseNativeFiles / appendNativeUploadedFiles 等）全部保留备用，
+ * 后续要恢复「原生优先」时改回 false 即可。
+ */
+const FORCE_H5_UPLOAD = true;
 
 /**
  * 允许上传的文件后缀白名单。
@@ -57,8 +66,8 @@ export interface ComposerAttachment {
   /** 发送时作为 files[].url */
   url: string;
   /**
-   * 预览回显地址：由 COS 预签名接口换取的可内联显示地址。
-   * 上传返回的 url 可能带 Content-Disposition: attachment 无法内联预览。
+   * 预览回显地址。现在直接使用上传返回的 url 回显（不再走 COS 预签名接口），
+   * 该字段保留以兼容历史消息里已有的预签名/blob 地址。
    */
   previewPath?: string;
   name: string;
@@ -69,6 +78,11 @@ export interface ComposerAttachment {
   /** 原生路径恒为 uploaded（原生已完成上传）；低版本降级路径维护真实上传状态 */
   status: AttachmentStatus;
   error?: string;
+  /**
+   * H5 选择时保留的原生 File 对象：上传时直接透传给 uni.uploadFile，
+   * 保证 multipart 里的文件名与 MIME 完整（避免 blob URL 二次转换退化）。
+   */
+  nativeFile?: File;
 }
 
 interface LocalSelectedFile {
@@ -76,6 +90,8 @@ interface LocalSelectedFile {
   name: string;
   size: number;
   mimeType?: string;
+  /** H5 选择器（uni.chooseFile / uni.chooseImage）回参里的原生 File 对象 */
+  file?: File;
 }
 
 /**
@@ -117,28 +133,6 @@ function getFileExtension(name: string, path = "") {
   const source = String(name || path).split(/[?#]/)[0];
   const matched = /\.([^./]+)$/.exec(source);
   return String(matched?.[1] || "").trim().toLowerCase();
-}
-
-/**
- * 从原生 imageChoose 返回值中取出 objectKey（文件在存储桶里的路径+文件名）。
- *
- * 宿主回参有两种形态，都要兼容：
- * - 完整 URL：https://xxx.oss-cn-shanghai.aliyuncs.com/ai-files/2026/08/28/a.png
- *   → ai-files/2026/08/28/a.png（取路径部分）
- * - 纯对象路径：ai-files/2026/08/28/a.png 或 /ai-files/2026/08/28/a.png
- *   → 去掉开头 / 后原样返回（它本身就是 objectKey）
- */
-function extractObjectKey(value: string) {
-  if (!value) return "";
-  const raw = String(value).split(/[?#]/)[0];
-  // 没有协议头的就是对象路径本身，直接作为 objectKey
-  if (!/^https?:\/\//i.test(raw)) return raw.replace(/^\//, "");
-  try {
-    const pathname = new URL(raw).pathname;
-    return pathname.replace(/^\//, "");
-  } catch {
-    return raw.replace(/^\//, "");
-  }
 }
 
 const DOCUMENT_MIME_HINTS = [
@@ -234,67 +228,6 @@ export function useComposerAttachments() {
     return attachments.value.find(item => item.localId === localId);
   }
 
-  /**
-   * 通过 COS 预签名接口换取可内联预览的实际图片地址。
-   * 上传返回的 url 可能带 Content-Disposition: attachment 导致浏览器不渲染，
-   * 预签名 URL 用于缩略图与大图预览。
-   */
-  async function refreshAttachmentPreviewUrl(localId: string) {
-    const attachment = findAttachment(localId);
-    if (!attachment?.url || attachment.previewPath) return;
-    const objectKey = extractObjectKey(attachment.url);
-    logger.info("[attachment] refresh preview url start", {
-      localId,
-      url: attachment.url,
-      objectKey,
-    });
-    if (!objectKey) {
-      logger.warn("[attachment] refresh preview url skipped: empty objectKey", {
-        localId,
-        url: attachment.url,
-      });
-      return;
-    }
-    // 确认请求确实带上了登录凭证（只打印前缀与长度，不输出完整 token）
-    const headers = getRequestHeaders() as Record<string, string>;
-    const authValue = String(headers.Authorization || "");
-    logger.info("[attachment] presigned request auth", {
-      hasAuthorization: Boolean(authValue),
-      scheme: authValue.split(" ")[0] || "",
-      tokenLength: authValue.split(" ")[1]?.length || 0,
-    });
-
-    try {
-      const presigned = await getCosPresignedDownloadUrl(objectKey);
-      logger.info("[attachment] presigned url response", {
-        localId,
-        objectKey,
-        bucket: presigned?.bucket,
-        region: presigned?.region,
-        fileUrl: presigned?.fileUrl,
-        expireTime: presigned?.expireTime,
-        hasPresignedUrl: Boolean(presigned?.presignedUrl),
-      });
-      const current = findAttachment(localId);
-      if (!current) return;
-      // 预览地址优先用带签名的 presignedUrl（响应 data.presignedUrl）；
-      // 缺失时回退 fileUrl（响应 data.fileUrl，不带签名的原始对象地址）
-      const previewUrl = presigned?.presignedUrl || presigned?.fileUrl || "";
-      if (!previewUrl) {
-        logger.warn("[attachment] presigned url missing, keep original url", { localId });
-        return;
-      }
-      current.previewPath = previewUrl;
-      logger.info("[attachment] preview url refreshed", {
-        localId,
-        from: presigned?.presignedUrl ? "presignedUrl" : "fileUrl",
-        previewPath: current.previewPath,
-      });
-    } catch (error) {
-      logger.warn("[attachment] fetch presigned url failed", { localId, objectKey, error });
-    }
-  }
-
   /** 低版本降级路径：把本地选择的文件走 /files/upload 上传到网关，维护真实上传状态 */
   async function uploadAttachment(localId: string) {
     const attachment = findAttachment(localId);
@@ -306,6 +239,8 @@ export function useComposerAttachments() {
     try {
       const uploaded = await uploadChatFile({
         filePath: attachment.localPath,
+        // H5 下优先透传原生 File，保证文件名/MIME 完整，避免网关「file不能为空」
+        file: attachment.nativeFile,
         // 网关校验非空：游客态没有用户 ID 时用固定占位
         user: String(userStore.userId || "guest"),
         fileType: toUploadFileType(attachment.type),
@@ -379,6 +314,7 @@ export function useComposerAttachments() {
         mimeType: file.mimeType || "",
         type,
         status: "uploading",
+        nativeFile: file.file,
       });
       void uploadAttachment(localId);
     });
@@ -455,8 +391,6 @@ export function useComposerAttachments() {
         size: file.size,
         total: attachments.value.length,
       });
-      // 换取 COS 预签名地址用于可内联预览
-      void refreshAttachmentPreviewUrl(localId);
     });
   }
 
@@ -475,7 +409,13 @@ export function useComposerAttachments() {
       sourceType,
       sizeType: ["compressed", "original"],
       success: (result) => {
-        const tempFiles = (result.tempFiles || []) as Array<{ path?: string; size?: number; name?: string; type?: string }>;
+        // H5 下 tempFiles 元素就是原生 File 对象：保留引用，上传时透传避免文件名退化
+        const tempFiles = (result.tempFiles || []) as Array<{
+          path?: string;
+          size?: number;
+          name?: string;
+          type?: string;
+        }>;
         const paths = Array.isArray(result.tempFilePaths)
           ? result.tempFilePaths
           : [result.tempFilePaths].filter(Boolean) as string[];
@@ -484,6 +424,7 @@ export function useComposerAttachments() {
           name: String(tempFiles[index]?.name || ""),
           size: Number(tempFiles[index]?.size) || 0,
           mimeType: String(tempFiles[index]?.type || "image/*"),
+          file: tempFiles[index] as unknown as File | undefined,
         })));
       },
       fail: error => logger.warn("chooseImage failed", error),
@@ -514,6 +455,8 @@ export function useComposerAttachments() {
           name: String(file.name || ""),
           size: Number(file.size) || 0,
           mimeType: String(file.type || ""),
+          // H5 下 tempFiles 元素就是原生 File 对象本身，直接透传
+          file: file as unknown as File | undefined,
         })));
       },
       fail: (error: unknown) => logger.warn("chooseFile failed", error),
@@ -522,8 +465,9 @@ export function useComposerAttachments() {
   // #endif
 
   /**
-   * 选择照片/拍照：优先走原生 imageChoose（showFile=false，仅图片，原生完成上传）；
+   * 选择照片/拍照：默认优先走原生 imageChoose（showFile=false，仅图片，原生完成上传）；
    * 原生不可用（低版本容器 / 普通 H5）时降级到 uni.chooseImage + /files/upload。
+   * FORCE_H5_UPLOAD=true 时强制走 uni.chooseImage（原生分支保留备用）。
    */
   async function chooseImages(sourceType: Array<"album" | "camera">) {
     const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
@@ -533,6 +477,13 @@ export function useComposerAttachments() {
       limit: MAX_ATTACHMENT_COUNT,
       requestCount: count,
     });
+
+    // 强制 H5 上传：直接走 uni.chooseImage（拍照/相册）+ /files/upload
+    if (FORCE_H5_UPLOAD) {
+      logger.warn("[attachment] FORCE_H5_UPLOAD, skip native imageChoose", { sourceType });
+      await chooseImagesViaUni(sourceType);
+      return;
+    }
 
     // 等待 bridge 注入窗口，避免用户点击时 bridge 尚未就绪而白白错过原生弹窗
     const bridge = await waitForMpaas(2000);
@@ -565,8 +516,9 @@ export function useComposerAttachments() {
   }
 
   /**
-   * 文件/图片混合选择：优先走原生 imageChoose（showFile=true + fileTypes 白名单，原生完成上传）；
+   * 文件/图片混合选择：默认优先走原生 imageChoose（showFile=true + fileTypes 白名单，原生完成上传）；
    * 原生不可用（低版本容器 / 普通 H5）时降级到 H5 文件选择 + /files/upload。
+   * FORCE_H5_UPLOAD=true 时强制走 H5 文件选择（原生分支保留备用）。
    */
   async function chooseFilesFromNative() {
     const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
@@ -575,6 +527,15 @@ export function useComposerAttachments() {
       limit: MAX_ATTACHMENT_COUNT,
       requestCount: count,
     });
+
+    // 强制 H5 上传：直接走 H5 通用文件选择 + /files/upload（原生 imageChoose 分支保留备用）
+    // #ifdef H5
+    if (FORCE_H5_UPLOAD) {
+      logger.warn("[attachment] FORCE_H5_UPLOAD, skip native imageChoose");
+      await chooseFilesViaUni();
+      return;
+    }
+    // #endif
 
     // 等待 bridge 注入窗口
     const bridge = await waitForMpaas(2000);
@@ -611,8 +572,12 @@ export function useComposerAttachments() {
   /**
    * 原生 imageChoose 是否可用（等待 bridge 注入窗口）。
    * 用于组件决定：优先触发原生弹窗（imageChoose 自带拍照/相册/文件），还是回退到前端三选项弹窗。
+   * FORCE_H5_UPLOAD=true 时恒为 false：一律走前端三选项弹窗（拍照/相册/文件，
+   * 分别落到 uni.chooseImage 的 camera/album 与 uni.chooseFile）。
    */
   function isNativePickerAvailable() {
+    // 强制 H5 上传期间，不让 UI 直接触发原生弹窗，改由前端三选项弹窗分发到 H5 选择器
+    if (FORCE_H5_UPLOAD) return Promise.resolve(false);
     return waitForMpaas(2000).then(Boolean);
   }
 

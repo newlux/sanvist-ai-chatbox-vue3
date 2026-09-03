@@ -111,7 +111,7 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
       }
       receivedEvent = true;
       armIdleTimer();
-      queue.push({ result: event });
+      (Array.isArray(event) ? event : [event]).forEach(item => queue.push({ result: item }));
     }
 
     // 浏览器环境：fetch 原生支持分块读取，直接消费 SSE，不需要 WebSocket 通道

@@ -84,6 +84,7 @@ export function useChatSend(scope?: string, handlers?: {
       taskId?: Identifier;
       metadata?: { duration_ms?: number | null; status?: string };
       processStatus?: { phase: "thinking" | "succeeded" | "failed" | "stopped"; title?: string; elapsedSeconds?: number };
+      processSubtitle?: string | null;
       ended?: boolean;
     },
   ) {
@@ -99,6 +100,9 @@ export function useChatSend(scope?: string, handlers?: {
       taskId: snapshot.taskId ?? aiMessage.taskId,
       durationMs: snapshot.metadata?.duration_ms ?? aiMessage.durationMs,
       processStatus: snapshot.processStatus ?? aiMessage.processStatus,
+      processSubtitle: snapshot.processSubtitle === undefined
+        ? aiMessage.processSubtitle
+        : snapshot.processSubtitle,
       loading: !snapshot.ended,
       interrupted: snapshot.metadata?.status === "stopped",
       ttsEnabled: Boolean(

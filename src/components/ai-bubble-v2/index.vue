@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
 import { computed, nextTick, ref } from "vue";
 
@@ -12,7 +13,7 @@ import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
-import type { ChatMessageAttachment } from "@/stores/chat-types";
+import { toInlineImageUrl } from "@/utils/image-preview";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
@@ -28,10 +29,11 @@ const props = defineProps({
   showActions: { type: Boolean, default: false },
   waitingText: { type: String, default: "" },
   /** 用户消息随行的附件：图片直接出图，其它文件出卡片 */
-  attachments: { type: Array, default: () => [] },
+  attachments: { type: Array as () => ChatMessageAttachment[], default: () => [] },
   interrupted: { type: Boolean, default: false },
   durationMs: { type: Number, default: null },
   processStatus: { type: Object, default: null },
+  processSubtitle: { type: String, default: "" },
   positive: { type: Boolean, default: null },
   selected: { type: Boolean, default: false },
   suppressHighlight: { type: Boolean, default: false },
@@ -93,13 +95,37 @@ async function copyText(text) {
   return false;
 }
 
-/** 点开大图。同一条消息里的图片一起进预览，可以左右翻 */
+/** 图片加载失败时的 blob 兜底地址（按附件下标记录，避免重复请求） */
+const fileImageFallback = ref<Record<number, string>>({});
+
+/**
+ * 点开大图。同一条消息里的图片一起进预览，可以左右翻。
+ * urls 必须用可内联地址（previewPath / blob 兜底），
+ * 否则原始 url 带 Content-Disposition: attachment 时，
+ * 部分浏览器（Firefox/Safari）会提示下载而不是显示图片。
+ */
 function onPreviewImage(url) {
   const urls = props.attachments
-    .filter(item => item?.type === "image" && item?.url)
-    .map(item => item.url);
+    .map((item, index) => item?.type === "image"
+      ? fileImageFallback.value[index] || item.previewPath || item.url
+      : "")
+    .filter(Boolean);
   if (!urls.length) return;
   uni.previewImage({ current: url, urls });
+}
+
+/**
+ * 图片加载失败兜底：把带 attachment 头/Content-Type 异常的原始地址
+ * 用 fetch + blob 换成一定能被 img 渲染的本地地址。
+ */
+async function onFileImageError(file, fileIndex) {
+  if (fileImageFallback.value[fileIndex]) return;
+  const source = file.previewPath || file.url;
+  if (!source) return;
+  const inline = await toInlineImageUrl(source);
+  if (inline !== source) {
+    fileImageFallback.value = { ...fileImageFallback.value, [fileIndex]: inline };
+  }
 }
 
 const USER_MENU_GAP_PX = 12;
@@ -172,6 +198,7 @@ const processStatusText = computed(() => {
 
 const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusText.value));
 const hasProcessContent = computed(() => Boolean(visibleBlocks.value.length || props.content));
+const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(props.processSubtitle?.trim()));
 
 function onSelectTap() {
   if (props.selectMode && !props.disabled) emit("select-toggle");
@@ -266,8 +293,9 @@ function onNegativeFeedback() {
           v-if="file.type === 'image'"
           class="ai-bubble-v2__file-image"
           mode="aspectFill"
-          :src="file.previewPath || file.url"
-          @tap.stop="onPreviewImage(file.previewPath || file.url)"
+          :src="fileImageFallback[fileIndex] || file.previewPath || file.url"
+          @tap.stop="onPreviewImage(fileImageFallback[fileIndex] || file.previewPath || file.url)"
+          @error="onFileImageError(file, fileIndex)"
         />
         <view v-else class="ai-bubble-v2__file-card">
           <image
@@ -320,7 +348,10 @@ function onNegativeFeedback() {
           class="ai-bubble-v2__process-status"
           :class="[
             `ai-bubble-v2__process-status--${props.processStatus?.phase}`,
-            { 'ai-bubble-v2__process-status--with-content': hasProcessContent },
+            {
+              'ai-bubble-v2__process-status--with-content': hasProcessContent && !showProcessSubtitle,
+              'ai-bubble-v2__process-status--with-subtitle': showProcessSubtitle,
+            },
           ]"
         >
           <text v-if="props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-icon">
@@ -331,6 +362,15 @@ function onNegativeFeedback() {
           </text>
           <text v-if="durationSeconds != null && props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-duration">
             耗时 {{ durationSeconds }} 秒
+          </text>
+        </view>
+        <view
+          v-if="showProcessSubtitle"
+          class="ai-bubble-v2__process-subtitle"
+          :class="{ 'ai-bubble-v2__process-subtitle--with-content': hasProcessContent }"
+        >
+          <text :key="props.processSubtitle" class="ai-bubble-v2__process-subtitle-text">
+            {{ props.processSubtitle }}
           </text>
         </view>
         <view
@@ -668,6 +708,37 @@ function onNegativeFeedback() {
   margin-bottom: 32rpx;
   padding-bottom: 24rpx;
   border-bottom: 1rpx solid #eeeeee;
+}
+.ai-bubble-v2__process-status--with-subtitle {
+  margin-bottom: 20rpx;
+  padding-bottom: 24rpx;
+  border-bottom: 1rpx solid #eeeeee;
+}
+.ai-bubble-v2__process-subtitle {
+  display: block;
+  min-width: 0;
+  height: 36rpx;
+  margin-top: 0;
+  overflow: hidden;
+  color: #999999;
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+.ai-bubble-v2__process-subtitle--with-content {
+  margin-bottom: 32rpx;
+}
+.ai-bubble-v2__process-subtitle-text {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: ai-bubble-subtitle-enter 0.28s ease-out both;
+}
+@keyframes ai-bubble-subtitle-enter {
+  from { opacity: 0; transform: translateY(24rpx); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .ai-bubble-v2__process-icon {
   flex-shrink: 0;

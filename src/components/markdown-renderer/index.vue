@@ -61,12 +61,12 @@ const rawTagStyle = {
   h4: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 600; line-height: 1.4;",
   h5: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 600; line-height: 1.4;",
   h6: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 600; line-height: 1.4;",
-  p: "margin: 0 0 12rpx; color: #2f323c; font-size: 28rpx; line-height: 42rpx;",
+  p: "margin: 0 0 12rpx; color: #2f323c; font-size: 28rpx; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
   strong: "font-weight: 600; color: #1a1a1e;",
   em: "font-style: italic;",
-  ul: "margin: 0 0 12rpx; padding-left: 34rpx; list-style: disc;",
-  ol: "margin: 0 0 12rpx; padding-left: 34rpx; list-style: decimal;",
-  li: "margin: 4rpx 0; color: #2f323c; font-size: 28rpx; line-height: 42rpx;",
+  ul: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 34rpx; list-style: disc;",
+  ol: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 34rpx; list-style: decimal;",
+  li: "margin: 4rpx 0; color: #2f323c; font-size: 28rpx; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
   blockquote: "margin: 12rpx 0; padding: 12rpx 20rpx; border-left: 6rpx solid #e4e9f0; color: #5f6775; background: #f6f7f9; border-radius: 8rpx;",
   hr: "margin: 16rpx 0; height: 1px; border: 0; background: #e4e9f0;",
   a: "color: #f12832; text-decoration: underline; word-break: break-all;",
@@ -96,6 +96,8 @@ const LONG_STREAM_RENDER_INTERVAL_MS = 200;
 const VERY_LONG_STREAM_RENDER_INTERVAL_MS = 300;
 
 const renderedHtml = ref("");
+/** 分片中的 Markdown 结构可能暂时不完整；HTML 更新后重建 mp-html，避免残留临时列表/换行节点。 */
+const renderVersion = ref(0);
 let pendingContent = "";
 let lastRenderedContent = "";
 let renderTimer = null;
@@ -131,6 +133,7 @@ function renderLatest() {
   // 有正文却解析不出任何标签，说明 markdown-it 在当前运行环境失效了，
   // 直接把原文交给 mp-html，至少不会白屏
   renderedHtml.value = !html && pendingContent ? pendingContent : html;
+  renderVersion.value += 1;
   lastRenderedContent = pendingContent;
   lastRenderAt = Date.now();
 
@@ -185,6 +188,7 @@ function onParseError(e) {
 
 <template>
   <mpHtml
+    :key="renderVersion"
     class="markdown-renderer"
     :content="renderedHtml"
     :tag-style="tagStyle"
@@ -211,6 +215,8 @@ function onParseError(e) {
 .markdown-renderer {
   display: block;
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   color: #2f323c;
   font-size: 28rpx;
   line-height: 42rpx;
