@@ -9,7 +9,8 @@ import ReportBroadcastPlayer from "@/components/report-broadcast-player/index.vu
 import ReportVoiceSelector from "@/components/report-voice-selector/index.vue";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatViewport } from "@/hooks/useChatViewport";
-import { loadReportStyle } from "@/hooks/useReportStyle";
+import { useReportAdjustmentActions } from "@/hooks/useReportAdjustmentActions";
+import { loadReportStyle, saveReportStyle } from "@/hooks/useReportStyle";
 import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useUserStore } from "@/stores";
@@ -47,22 +48,35 @@ const {
 } = useChatViewport();
 const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
-const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
-  onReportQa(answer) {
-    reportQaLoading.value = false;
-    reportQaAnswer.value = answer;
-  },
-  onReportBlockingComplete() {
-    reportQaLoading.value = false;
-  },
-});
-
 const isReport = ref(false);
 const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> | null>(null);
 const showReportVoiceSelector = ref(false);
 const reportBroadcastParams = ref<PlayListenBroadcastParams | null>(null);
 const reportBroadcastPortrait = ref("");
 const reportBizDate = ref("");
+const reportAdjustmentActions = useReportAdjustmentActions({
+  getParams: () => reportBroadcastParams.value,
+  setParams: (params) => { reportBroadcastParams.value = params; },
+  saveReportStyle,
+  getPlayer: () => reportBroadcastPlayerRef.value,
+});
+const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+  onReportQa(answer) {
+    reportQaLoading.value = false;
+    reportQaAnswer.value = answer;
+  },
+  onReportAdjustment(action) {
+    reportQaLoading.value = false;
+    reportQaAnswer.value = "";
+    reportAdjustmentActions.execute(action);
+  },
+  onReportBlockingComplete() {
+    reportQaLoading.value = false;
+  },
+  getReportCheckedModules() {
+    return reportBroadcastParams.value?.checkedModules || [];
+  },
+});
 
 function startReportVoiceSelection() {
   reportBroadcastParams.value = null;
@@ -114,9 +128,11 @@ function markCurrentReportListened(): boolean {
 }
 
 function closeReportBroadcast() {
+  reportAdjustmentActions.dispose();
   if (markCurrentReportListened()) uni.$emit("listen-report-marked");
   reportBroadcastParams.value = null;
-  onBack();
+  const homeUrl = userStore.isVisitor ? "/pages/index/index?mode=demo" : "/pages/index/index";
+  uni.redirectTo({ url: homeUrl });
 }
 
 function pauseReportBroadcast() {
@@ -175,11 +191,10 @@ onUnload(() => {
   chatStore.setSubagent("");
 });
 
-onBeforeUnmount(cancelActiveStream);
-
-function onBack() {
-  uni.navigateBack({ delta: 1 });
-}
+onBeforeUnmount(() => {
+  reportAdjustmentActions.dispose();
+  cancelActiveStream();
+});
 </script>
 
 <template>
