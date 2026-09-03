@@ -85,5 +85,5 @@ function onSuggestionTap(suggestion) {
 </template>
 
 <style lang="scss" scoped>
-.ai-content-blocks { display: flex; flex-direction: column; gap: 0; }
+.ai-content-blocks { display: flex; flex-direction: column; width: 100%; min-width: 0; gap: 0; }
 </style>

@@ -57,7 +57,6 @@ const textTextareaHeight = computed(() => {
 
 const {
   attachments,
-  hasAttachments,
   hasIncompleteAttachments,
   hasFailedAttachments,
   openAttachmentPicker,
@@ -69,8 +68,12 @@ const {
   takeUploadedFiles,
 } = useComposerAttachments();
 
-const canSend = computed(() => Boolean(draft.value.trim() || hasAttachments.value));
-/** 有东西可发才显示发送按钮，此时让位给它的是语音/键盘切换按钮 */
+/**
+ * 发送按钮只由「文字」驱动：仅有附件不亮起发送键（保持语音/键盘切换按钮原样），
+ * 附件作为附带内容，随输入框文字或语音识别文本一起发送。
+ */
+const canSend = computed(() => Boolean(draft.value.trim()));
+/** 有文字可发才显示发送按钮，此时让位给它的是语音/键盘切换按钮 */
 const showSendButton = computed(() => !props.isLoading && canSend.value);
 
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
@@ -138,12 +141,13 @@ function onMaskTap() {}
 
 /**
  * 统一的发送出口（文本回车 / 发送按钮 / 语音识别结果确认）。
- * 附件与文本一起提交，随后立刻清空输入框与附件栏。
+ * 必须有文字（或语音识别文本）才发送；附件仅作附带，随文字一起提交，
+ * 随后立刻清空输入框与附件栏。
  */
 function submitMessage(rawText?: string) {
   if (props.isLoading) return;
   const text = String(rawText ?? draft.value).trim();
-  if (!text && !hasAttachments.value) return;
+  if (!text) return;
 
   if (hasIncompleteAttachments.value) {
     uni.showToast({
@@ -252,7 +256,7 @@ function onTrySend() {
   submitMessage();
 }
 
-/** 附件来源弹窗：拍照 / 相册 / 文件 三选一（仅作为原生 imageChoose 不可用时的兜底） */
+/** 附件来源弹窗：拍照 / 相册 / 文件 三选一（强制 H5 上传期间为唯一入口） */
 const isAttachmentPickerOpen = ref(false);
 
 async function onOpenAttachmentPicker() {
@@ -268,7 +272,8 @@ async function onOpenAttachmentPicker() {
     return;
   }
 
-  // 容器内优先触发原生 imageChoose：原生自带自定义弹窗（拍照/相册/文件）
+  // FORCE_H5_UPLOAD 期间 isNativePickerAvailable 恒为 false，走前端三选项弹窗：
+  // 拍照/相册 → uni.chooseImage，文件 → uni.chooseFile（均走 /files/upload）
   const nativeReady = await isNativePickerAvailable();
   logger.info("[picker] native picker available", { nativeReady });
   if (nativeReady) {
@@ -277,7 +282,7 @@ async function onOpenAttachmentPicker() {
     return;
   }
 
-  // 原生不可用（Web/H5 等）时才用前端三选项弹窗兜底
+  // 原生不可用（Web/H5 等）时用前端三选项弹窗
   logger.info("[picker] -> show fallback sheet");
   isAttachmentPickerOpen.value = true;
 }
