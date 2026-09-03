@@ -158,8 +158,8 @@ function startNewConversation() {
 }
 
 /**
- * 快捷入口：听汇报 / 任务协同各自另开一个会话页，
- * 作业指导不跳转，就地高亮，之后的提问都带上它的 subagent。
+ * 快捷入口：听汇报另开通用智能体会话页。
+ * 作业指导等带专属页面 url 的入口由 onNavItemClick 优先跳专属页（url 优先）。
  */
 function enterListenReport() {
   saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
@@ -168,7 +168,7 @@ function enterListenReport() {
   });
 }
 
-function onNavItemClick(item: { key?: string; title?: string; subagent?: string; mode?: string }) {
+function onNavItemClick(item: { key?: string; title?: string; subagent?: string; mode?: string; url?: string }) {
   const subagent = String(item?.subagent || "");
   if (!subagent) return;
 
@@ -176,6 +176,13 @@ function onNavItemClick(item: { key?: string; title?: string; subagent?: string;
     const nextKey = navActiveKey.value === item.key ? "" : String(item.key || "");
     navActiveKey.value = nextKey;
     chatStore.setSubagent(nextKey ? subagent : "");
+    return;
+  }
+
+  // 带专属页面 url 的入口（如作业指导 → /pages/guide/index）优先跳专属页
+  const targetUrl = String(item?.url || "");
+  if (targetUrl) {
+    uni.navigateTo({ url: targetUrl });
     return;
   }
 

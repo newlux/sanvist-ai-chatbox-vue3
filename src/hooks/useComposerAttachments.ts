@@ -61,6 +61,8 @@ type AttachmentStatus = "uploading" | "uploaded" | "failed";
 
 export interface ComposerAttachment {
   localId: string;
+  /** Dify 文件 id：上传接口回填，图片展示走 GET /files/{file_id}/preview 鉴权拉取 */
+  fileId: string;
   /** 原生上传完成后是可访问地址；低版本降级上传是本地临时路径，用于缩略图预览与失败重传 */
   localPath: string;
   /** 发送时作为 files[].url */
@@ -248,13 +250,17 @@ export function useComposerAttachments() {
       // 上传期间用户可能已移除该附件
       const current = findAttachment(localId);
       if (!current) return;
-      if (!uploaded?.url) throw new Error(t("upload-result-missing-url"));
+      // Dify 上传响应：id（file_id）+ source_url；无 id 也无 url 视为失败
+      const uploadedId = String(uploaded?.id || uploaded?.fileId || "");
+      const uploadedUrl = uploaded?.source_url || uploaded?.url || "";
+      if (!uploadedId && !uploadedUrl) throw new Error(t("upload-result-missing-url"));
 
-      current.url = uploaded.url;
+      current.fileId = uploadedId;
+      current.url = uploadedUrl;
       current.name = uploaded.name || current.name;
       current.size = Number(uploaded.size) || current.size;
       current.extension = uploaded.extension || current.extension;
-      current.mimeType = uploaded.mimeType || current.mimeType;
+      current.mimeType = uploaded.mime_type || uploaded.mimeType || current.mimeType;
       current.type = inferAttachmentKind(current.extension, current.mimeType);
       current.status = "uploaded";
     } catch (error) {
@@ -306,6 +312,7 @@ export function useComposerAttachments() {
 
       attachments.value.push({
         localId,
+        fileId: "",
         localPath: file.path,
         url: "",
         name: file.name || fallbackName,
@@ -373,6 +380,7 @@ export function useComposerAttachments() {
       attachments.value.push({
         localId,
         // 原生已上传，localPath 与 url 都指向最终地址，预览与发送直接可用
+        fileId: "",
         localPath: file.url,
         url: file.url,
         name: file.name || fallbackName,
@@ -619,6 +627,7 @@ export function useComposerAttachments() {
       url: item.url,
     }));
     const meta = uploaded.map(item => ({
+      fileId: item.fileId,
       url: item.url,
       previewPath: item.previewPath,
       name: item.name,
