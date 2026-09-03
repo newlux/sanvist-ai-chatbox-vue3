@@ -34,6 +34,33 @@ function getReferences(payload: Record<string, unknown>) {
   };
 }
 
+/**
+ * 历史消息是一段完整文本，不需要处理跨 SSE 分片；仅提取 SANVIST answer 事件的正文。
+ * 若不包含有效 SANVIST 事件，按普通 Dify answer 原样返回。
+ */
+export function extractSanvistAnswer(value: unknown) {
+  const source = String(value || "");
+  const pattern = /<SANVIST>([\s\S]*?)<\/SANVIST>/g;
+  let found = false;
+  let answer = "";
+  while (true) {
+    const match = pattern.exec(source);
+    if (!match) break;
+    try {
+      const customEvent = asRecord(JSON.parse(match[1]));
+      if (!customEvent || !["status", "answer", "done"].includes(String(customEvent.event || ""))) continue;
+      found = true;
+      if (customEvent.event !== "answer") continue;
+      const data = asRecord(customEvent.data) || {};
+      const content = String(data.content || "");
+      answer = data.is_delta === false ? content : `${answer}${content}`;
+    } catch {
+      // 非法的协议块不进入历史正文。
+    }
+  }
+  return found ? answer : source;
+}
+
 /** 将页面内部的 camelCase 参数转换成 Dify 标准请求格式。 */
 export function toDifyChatMessagesRequest(params: SendChatMessageParams): DifyChatMessagesRequest {
   return {
@@ -121,6 +148,9 @@ export function createDifyEventNormalizer() {
         } else if (customEvent?.event === "answer") {
           receivedSanvistEvent = true;
           appendAnswer(customData.content, customData.is_delta === false);
+        } else if (customEvent?.event === "done") {
+          receivedSanvistEvent = true;
+          events.push({ event: "subtitle", ...references, message: "" });
         }
       } catch {
         // 自定义标记内容不完整或不合法时直接忽略，避免协议文本泄漏到用户回答。
