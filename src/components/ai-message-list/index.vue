@@ -359,6 +359,7 @@ const listPadStyle = computed(() =>
               :interrupted="!!msg.interrupted"
               :duration-ms="msg.durationMs"
               :process-status="msg.processStatus"
+              :process-subtitle="msg.processSubtitle"
               :positive="resolvePositive(msg)"
               :selected="selectedIndexes.includes(index)"
               :suppress-highlight="suppressHighlight"

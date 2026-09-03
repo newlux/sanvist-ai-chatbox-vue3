@@ -54,6 +54,8 @@ export function toDifyChatMessagesRequest(params: SendChatMessageParams): DifyCh
 export function createDifyEventNormalizer() {
   let receivedAgentMessage = false;
   let isWorkflowStream = false;
+  let sanvistBuffer = "";
+  let receivedSanvistEvent = false;
   /** Chatflow 通常先发 message_end，后发 workflow_finished；先暂存，等待后者提供总耗时。 */
   let pendingMessageEnd: {
     conversationId: Identifier;
@@ -61,7 +63,70 @@ export function createDifyEventNormalizer() {
     taskId?: Identifier;
   } | null = null;
 
-  return (payload: unknown): ChatStreamEvent | Error | null => {
+  function extractSanvistEvents(
+    value: string,
+    references: { conversationId: Identifier; messageId: Identifier; taskId?: Identifier },
+    replaceFirstAnswer: boolean,
+  ): ChatStreamEvent[] {
+    const events: ChatStreamEvent[] = [];
+    let shouldReplace = replaceFirstAnswer;
+    const appendAnswer = (content: unknown, replace = false) => {
+      const answer = String(content || "");
+      if (!answer) return;
+      // 自定义事件包尾通常会带一个协议换行符；它不是回答内容，不能创建空 answer block。
+      if (receivedSanvistEvent && !answer.trim()) return;
+      events.push({
+        event: "message",
+        ...references,
+        answer,
+        replace: shouldReplace || replace,
+      });
+      shouldReplace = false;
+    };
+
+    sanvistBuffer += value;
+    while (sanvistBuffer) {
+      const start = sanvistBuffer.indexOf("<SANVIST>");
+      if (start < 0) {
+        // 标签可能刚好被 SSE 分片切开，保留与起始标签相符的末尾，不能渲染到正文。
+        const marker = "<SANVIST>";
+        const suffixLength = Array.from({ length: marker.length - 1 }, (_, index) => index + 1)
+          .reverse()
+          .find(length => sanvistBuffer.endsWith(marker.slice(0, length))) || 0;
+        appendAnswer(sanvistBuffer.slice(0, -suffixLength || undefined));
+        sanvistBuffer = suffixLength ? sanvistBuffer.slice(-suffixLength) : "";
+        break;
+      }
+
+      if (start > 0) {
+        appendAnswer(sanvistBuffer.slice(0, start));
+        sanvistBuffer = sanvistBuffer.slice(start);
+      }
+
+      const end = sanvistBuffer.indexOf("</SANVIST>");
+      if (end < 0) break;
+
+      const raw = sanvistBuffer.slice("<SANVIST>".length, end);
+      sanvistBuffer = sanvistBuffer.slice(end + "</SANVIST>".length);
+      try {
+        const customEvent = asRecord(JSON.parse(raw));
+        const customData = asRecord(customEvent?.data) || {};
+        if (customEvent?.event === "status") {
+          receivedSanvistEvent = true;
+          const message = String(customData.message || "").trim();
+          if (message) events.push({ event: "subtitle", ...references, message });
+        } else if (customEvent?.event === "answer") {
+          receivedSanvistEvent = true;
+          appendAnswer(customData.content, customData.is_delta === false);
+        }
+      } catch {
+        // 自定义标记内容不完整或不合法时直接忽略，避免协议文本泄漏到用户回答。
+      }
+    }
+    return events;
+  }
+
+  return (payload: unknown): ChatStreamEvent | ChatStreamEvent[] | Error | null => {
     const data = asRecord(payload);
     if (!data) return null;
 
@@ -142,20 +207,17 @@ export function createDifyEventNormalizer() {
 
     if (event === "agent_message") {
       receivedAgentMessage = true;
-      return { event: "message", conversationId, messageId, taskId, answer: String(data.answer || "") };
+      return extractSanvistEvents(String(data.answer || ""), { conversationId, messageId, taskId }, false);
     }
     if (event === "message") {
-      return {
-        event: "message",
-        conversationId,
-        messageId,
-        taskId,
-        answer: String(data.answer || ""),
-        replace: receivedAgentMessage,
-      };
+      return extractSanvistEvents(
+        String(data.answer || ""),
+        { conversationId, messageId, taskId },
+        receivedAgentMessage,
+      );
     }
     if (event === "message_replace") {
-      return { event: "message", conversationId, messageId, taskId, answer: String(data.answer || ""), replace: true };
+      return extractSanvistEvents(String(data.answer || ""), { conversationId, messageId, taskId }, true);
     }
     if (event === "agent_thought") {
       const message = String(data.thought || data.observation || "");

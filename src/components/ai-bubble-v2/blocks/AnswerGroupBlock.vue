@@ -34,6 +34,8 @@ defineProps({
 .answer-group-block {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
   gap: 32rpx;
 }
 </style>

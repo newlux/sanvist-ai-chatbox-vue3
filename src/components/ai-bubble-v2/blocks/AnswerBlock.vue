@@ -19,6 +19,9 @@ defineProps({
 
 <style lang="scss" scoped>
 .answer-block {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   background: #F9F9F9;
   border-radius: 20rpx;
   padding: 24rpx 32rpx;

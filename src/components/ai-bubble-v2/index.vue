@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
 import { computed, nextTick, ref } from "vue";
 
@@ -12,7 +13,6 @@ import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
-import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { toInlineImageUrl } from "@/utils/image-preview";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
@@ -33,6 +33,7 @@ const props = defineProps({
   interrupted: { type: Boolean, default: false },
   durationMs: { type: Number, default: null },
   processStatus: { type: Object, default: null },
+  processSubtitle: { type: String, default: "" },
   positive: { type: Boolean, default: null },
   selected: { type: Boolean, default: false },
   suppressHighlight: { type: Boolean, default: false },
@@ -94,6 +95,9 @@ async function copyText(text) {
   return false;
 }
 
+/** 图片加载失败时的 blob 兜底地址（按附件下标记录，避免重复请求） */
+const fileImageFallback = ref<Record<number, string>>({});
+
 /**
  * 点开大图。同一条消息里的图片一起进预览，可以左右翻。
  * urls 必须用可内联地址（previewPath / blob 兜底），
@@ -109,9 +113,6 @@ function onPreviewImage(url) {
   if (!urls.length) return;
   uni.previewImage({ current: url, urls });
 }
-
-/** 图片加载失败时的 blob 兜底地址（按附件下标记录，避免重复请求） */
-const fileImageFallback = ref<Record<number, string>>({});
 
 /**
  * 图片加载失败兜底：把带 attachment 头/Content-Type 异常的原始地址
@@ -197,6 +198,7 @@ const processStatusText = computed(() => {
 
 const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusText.value));
 const hasProcessContent = computed(() => Boolean(visibleBlocks.value.length || props.content));
+const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(props.processSubtitle?.trim()));
 
 function onSelectTap() {
   if (props.selectMode && !props.disabled) emit("select-toggle");
@@ -346,7 +348,10 @@ function onNegativeFeedback() {
           class="ai-bubble-v2__process-status"
           :class="[
             `ai-bubble-v2__process-status--${props.processStatus?.phase}`,
-            { 'ai-bubble-v2__process-status--with-content': hasProcessContent },
+            {
+              'ai-bubble-v2__process-status--with-content': hasProcessContent && !showProcessSubtitle,
+              'ai-bubble-v2__process-status--with-subtitle': showProcessSubtitle,
+            },
           ]"
         >
           <text v-if="props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-icon">
@@ -357,6 +362,15 @@ function onNegativeFeedback() {
           </text>
           <text v-if="durationSeconds != null && props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-duration">
             耗时 {{ durationSeconds }} 秒
+          </text>
+        </view>
+        <view
+          v-if="showProcessSubtitle"
+          class="ai-bubble-v2__process-subtitle"
+          :class="{ 'ai-bubble-v2__process-subtitle--with-content': hasProcessContent }"
+        >
+          <text :key="props.processSubtitle" class="ai-bubble-v2__process-subtitle-text">
+            {{ props.processSubtitle }}
           </text>
         </view>
         <view
@@ -694,6 +708,37 @@ function onNegativeFeedback() {
   margin-bottom: 32rpx;
   padding-bottom: 24rpx;
   border-bottom: 1rpx solid #eeeeee;
+}
+.ai-bubble-v2__process-status--with-subtitle {
+  margin-bottom: 20rpx;
+  padding-bottom: 24rpx;
+  border-bottom: 1rpx solid #eeeeee;
+}
+.ai-bubble-v2__process-subtitle {
+  display: block;
+  min-width: 0;
+  height: 36rpx;
+  margin-top: 0;
+  overflow: hidden;
+  color: #999999;
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+.ai-bubble-v2__process-subtitle--with-content {
+  margin-bottom: 32rpx;
+}
+.ai-bubble-v2__process-subtitle-text {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: ai-bubble-subtitle-enter 0.28s ease-out both;
+}
+@keyframes ai-bubble-subtitle-enter {
+  from { opacity: 0; transform: translateY(24rpx); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .ai-bubble-v2__process-icon {
   flex-shrink: 0;
