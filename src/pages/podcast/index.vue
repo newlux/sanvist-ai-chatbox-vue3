@@ -17,15 +17,14 @@ import { provideChatScope, useChatStore, useUserStore } from "@/stores";
 import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
 
 /**
- * 智能体会话页（听汇报）。
+ * 听汇报页（播报播放器 + 底部输入栏）。
  *
- * 复用底部输入栏；进页面先起一轮干净的会话，
- * 并把 subagent 挂进 chatStore —— 发送时由 useChatSend 塞进 inputs 透传给算法侧。
+ * 独立会话域 "podcast"；发送时固定透传 inputs.scene=PODCAST。
+ * 进页即按听汇报处理，不再依赖 query 参数。
  */
-defineOptions({ name: "SubagentChatPage" });
+defineOptions({ name: "AiPodcastPage" });
 
-// 智能体会话独立成域：底部输入栏仍使用独立会话状态。
-const chatScope = provideChatScope("subagent");
+const chatScope = provideChatScope("podcast");
 const chatStore = useChatStore(chatScope);
 const userStore = useUserStore();
 const { inputText, isLoading } = storeToRefs(chatStore);
@@ -48,7 +47,6 @@ const {
 } = useChatViewport();
 const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
-const isReport = ref(false);
 const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> | null>(null);
 const showReportVoiceSelector = ref(false);
 const reportBroadcastParams = ref<PlayListenBroadcastParams | null>(null);
@@ -62,6 +60,7 @@ const reportAdjustmentActions = useReportAdjustmentActions({
   openInsight: () => { uni.navigateTo({ url: "/pages/report-insight/index" }); },
 });
 const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+  scene: "PODCAST",
   onReportQa(answer) {
     reportQaLoading.value = false;
     reportQaAnswer.value = answer;
@@ -128,7 +127,7 @@ function confirmReportVoice(voice: ReportVoiceOption, style: ListenBroadcastStyl
 }
 
 function markCurrentReportListened(): boolean {
-  if (!isReport.value || !reportBroadcastParams.value) return false;
+  if (!reportBroadcastParams.value) return false;
   markListenReportListened(getCurrentListenReportDate());
   return true;
 }
@@ -137,12 +136,12 @@ function closeReportBroadcast() {
   reportAdjustmentActions.dispose();
   if (markCurrentReportListened()) uni.$emit("listen-report-marked");
   reportBroadcastParams.value = null;
-  const homeUrl = userStore.isVisitor ? "/pages/index/index?mode=demo" : "/pages/index/index";
+  const homeUrl = userStore.isVisitor ? "/pages/home/index?mode=demo" : "/pages/home/index";
   uni.redirectTo({ url: homeUrl });
 }
 
 function pauseReportBroadcast() {
-  if (isReport.value) reportBroadcastPlayerRef.value?.pause();
+  reportBroadcastPlayerRef.value?.pause();
 }
 
 function dismissReportQa() {
@@ -151,13 +150,11 @@ function dismissReportQa() {
 }
 
 function enterReportQaLoading() {
-  if (!isReport.value) return;
   reportQaAnswer.value = "";
   reportQaLoading.value = true;
-  chatStore.setSubagent("report");
 }
 
-function sendSubagentMessage(payload?: Parameters<typeof sendMessage>[0]) {
+function sendPodcastMessage(payload?: Parameters<typeof sendMessage>[0]) {
   enterReportQaLoading();
   pauseReportBroadcast();
   return sendMessage(payload);
@@ -177,24 +174,21 @@ function onRecognizeFail() {
   discardAsrPlaceholder();
 }
 
-onLoad((query?: Record<string, string>) => {
+onLoad(() => {
   syncWindowHeight();
-  isReport.value = String(query?.subagent || "") === "report";
   reportBizDate.value = getCurrentListenReportDate();
   reportQaAnswer.value = "";
   reportQaLoading.value = false;
-  if (isReport.value) restoreReportBroadcast();
-  // 每次进来都是全新一轮
+  restoreReportBroadcast();
+  // 每次进来都是全新一轮；发送场景由 useChatSend 固定为 PODCAST。
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
-  chatStore.setSubagent(String(query?.subagent || ""));
 });
 
 onUnload(() => {
   if (markCurrentReportListened()) uni.$emit("listen-report-marked");
   cancelActiveStream();
-  chatStore.setSubagent("");
 });
 
 onBeforeUnmount(() => {
@@ -204,18 +198,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <view class="subagent-page" :style="safeAreaStyle">
+  <view class="podcast-page" :style="safeAreaStyle">
     <!-- 所有页面共用宿主安全区；系统状态栏由手机原生绘制。 -->
     <view class="chat-header__statusbar" :style="statusbarStyle" />
     <ReportVoiceSelector
-      v-if="isReport && showReportVoiceSelector"
+      v-if="showReportVoiceSelector"
       @confirm="confirmReportVoice"
       @close="closeReportVoiceSelector"
     />
-    <view v-else class="subagent-page__chat" :style="chatViewportStyle">
+    <view v-else class="podcast-page__chat" :style="chatViewportStyle">
       <!-- 听汇报专用播放视图：QA 仅替换其内部主体区域，不替换页面根结构。 -->
       <ReportBroadcastPlayer
-        v-if="isReport && reportBroadcastParams"
+        v-if="reportBroadcastParams"
         ref="reportBroadcastPlayerRef"
         :params="reportBroadcastParams"
         :portrait="reportBroadcastPortrait"
@@ -230,7 +224,7 @@ onBeforeUnmount(() => {
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
-        @send="sendSubagentMessage"
+        @send="sendPodcastMessage"
         @stop="stopGenerating"
         @voice-start="onVoiceStart"
         @recognize-begin="onRecognizeBegin"
@@ -246,7 +240,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
-.subagent-page {
+.podcast-page {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -264,7 +258,7 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
-.subagent-page__chat {
+.podcast-page__chat {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;

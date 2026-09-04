@@ -14,16 +14,6 @@ const logger = createLogger("chat");
 
 type ChatScene = "ASK" | "GUIDE" | "TASK" | "PODCAST";
 
-const DIFY_SCENE_BY_SUBAGENT: Record<string, ChatScene> = {
-  guide: "GUIDE",
-  task: "TASK",
-  report: "PODCAST",
-};
-
-function getDifyScene(subagent: string) {
-  return DIFY_SCENE_BY_SUBAGENT[subagent] || "ASK";
-}
-
 function isAbortError(error: unknown) {
   if (!error) return false;
   const err = error as { name?: string; message?: string };
@@ -33,7 +23,7 @@ function isAbortError(error: unknown) {
 }
 
 export function useChatSend(scope?: string, handlers?: {
-  /** 页面明确指定的 Dify 场景；未指定时兼容旧的 subagent 映射。 */
+  /** 页面明确指定的 Dify 场景；未指定时默认为 ASK。 */
   scene?: ChatScene;
   onReportQa?: (answer: string) => void;
   onReportAdjustment?: (action: ReportAdjustmentAction) => void;
@@ -141,7 +131,7 @@ export function useChatSend(scope?: string, handlers?: {
   }
 
   function createChatRequest(content: string, files: ChatFile[]) {
-    const scene = handlers?.scene ?? getDifyScene(chatStore.subagent);
+    const scene = handlers?.scene ?? "ASK";
     const checkedModules = handlers?.getReportCheckedModules?.() || [];
     return {
       query: content,
@@ -329,7 +319,7 @@ export function useChatSend(scope?: string, handlers?: {
     chatStore.activeMessageId = aiMsgId;
     chatStore.scrollToBottom(true);
     const options = { aiMsgId, userMsgId, content: query, files, hadSessionId, requestSeq };
-    if (chatStore.subagent === "report") await sendBlockingAiFlow(options);
+    if (handlers?.scene === "PODCAST") await sendBlockingAiFlow(options);
     else await sendAiFlow(options);
   }
 

@@ -20,7 +20,7 @@ import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@
 import { createLogger } from "@/utils/logger";
 
 /**
- * 作业指导页（基于首页 index 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
+ * 作业指导页（基于首页 home 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
  *
  * 与首页 / 听汇报的区别：
  * - 独立会话域 "guide"，不与首页主会话互相污染；
@@ -170,7 +170,7 @@ function startNewConversation() {
 }
 
 /**
- * 快捷入口：听汇报 / 任务协同各自另开一个会话页（任务协同走专属页）；
+ * 快捷入口：听汇报 / 任务协同各自另开专属页；
  * 作业指导已在当前页（高亮），点了不重复入栈。
  */
 function onNavItemClick(item: { key?: string; title?: string; subagent?: string; url?: string }) {
@@ -178,15 +178,7 @@ function onNavItemClick(item: { key?: string; title?: string; subagent?: string;
   if (subagent === "guide") return;
 
   const targetUrl = String(item?.url || "");
-  if (targetUrl) {
-    uni.navigateTo({ url: targetUrl });
-    return;
-  }
-  if (!subagent) return;
-
-  uni.navigateTo({
-    url: `/pages/chat/index?subagent=${encodeURIComponent(subagent)}&title=${encodeURIComponent(item?.title || "")}`,
-  });
+  if (targetUrl) uni.navigateTo({ url: targetUrl });
 }
 
 function onBack() {

@@ -1,7 +1,7 @@
 {
   "pages": [
     {
-      "path": "pages/index/index",
+      "path": "pages/home/index",
       "style": {
         "navigationStyle": "custom",
         "navigationBarTextStyle": "black",
@@ -13,7 +13,7 @@
       }
     },
     {
-      "path": "pages/chat/index",
+      "path": "pages/podcast/index",
       "style": {
         "navigationStyle": "custom",
         "navigationBarTextStyle": "black",
