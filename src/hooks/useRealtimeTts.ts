@@ -4,7 +4,6 @@ import type { Identifier, RealtimeTtsChunk } from "@/api/chat/types";
 import type { UiChatMessage } from "@/stores/chat-types";
 import { onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { getMessage } from "@/api/chat";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { useChatStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
@@ -20,6 +19,14 @@ interface AudioItem {
 function guessAudioMime(base64: string) {
   if (base64.startsWith("UklGR")) return "audio/wav";
   return "audio/mpeg";
+}
+
+function extractAnswerText(message: UiChatMessage): string {
+  const fromBlocks = (message.blocks || [])
+    .filter(block => block.type === "answer")
+    .map(block => String(block.payload?.content || ""))
+    .join("");
+  return fromBlocks || String(message.content || "");
 }
 
 /**
@@ -75,7 +82,7 @@ function cleanAnswerText(raw: string): string {
 
 /**
  * 实时 TTS（分句并发合成，SSE 流式）。只在用户点击新对话消息的播音按钮时触发：
- * 先 GET /messages/{messageId} 取权威 answer，再 POST /speech/tts/stream 逐句流式播放。
+ * 直接取当前消息对象里已经渲染好的 content 文本，再 POST /speech/tts/stream 逐句流式播放。
  * audio_chunk 按到达顺序（即原文句序）排进单一队列，逐条播放；
  * dataUrl/audioBase64 都为空的占位/失败句直接跳过，继续播下一句。
  *
@@ -96,9 +103,16 @@ export function useRealtimeTts() {
 
   function patchMessage(messageId: Identifier, patch: { ttsLoading?: boolean; ttsPlaying?: boolean }) {
     const key = String(messageId);
-    const index = chatStore.messages.findIndex(message => String(message.messageId) === key);
-    if (index < 0) return;
-    chatStore.replaceMessage(index, { ...chatStore.messages[index], ...patch });
+    const messages = chatStore.messages;
+    let index = messages.findIndex(message => String(message.messageId) === key);
+    if (index < 0) {
+      index = messages.findIndex(message => String(message.id) === key);
+    }
+    if (index < 0) {
+      logger.warn("patch tts state failed: message not found", { messageId: key });
+      return;
+    }
+    chatStore.replaceMessage(index, { ...messages[index], ...patch });
   }
 
   function releaseAudio() {
@@ -195,11 +209,10 @@ export function useRealtimeTts() {
     playNext(messageId, seq);
   }
 
-  /** 点击播音按钮：同一条消息再点一次则停止；否则拉取 answer 并流式播放。 */
+  /** 点击播音按钮：同一条消息再点一次则停止；否则取当前消息 content 并流式播放。 */
   async function togglePlay(message: UiChatMessage) {
     const messageId = message?.messageId;
-    const conversationId = message?.sessionId;
-    if (messageId == null || conversationId == null) return;
+    if (messageId == null || message?.sessionId == null) return;
 
     if (playingMessageId.value === messageId) {
       stop();
@@ -216,9 +229,7 @@ export function useRealtimeTts() {
     patchMessage(messageId, { ttsLoading: true, ttsPlaying: false });
 
     try {
-      const detail = await getMessage(messageId, { conversationId });
-      if (seq !== sessionSeq) return;
-      const text = cleanAnswerText(detail?.answer);
+      const text = cleanAnswerText(extractAnswerText(message));
       if (!text) {
         finishRequest(messageId, seq);
         playingMessageId.value = null;

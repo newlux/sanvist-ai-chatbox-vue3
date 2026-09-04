@@ -128,7 +128,7 @@ function resolvePositive(message: UiChatMessage) {
 
 function isActiveRealtimeTts(message: UiChatMessage) {
   return props.realtimeTtsMessageKey != null
-    && String(message.id) === String(props.realtimeTtsMessageKey);
+    && String(message.id ?? message.messageId) === String(props.realtimeTtsMessageKey);
 }
 
 function isMessageDisabled(index: number, message: UiChatMessage) {

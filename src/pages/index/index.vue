@@ -17,7 +17,6 @@ import { AI_ASK_WELCOME_DONE_KEY, LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
-import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
@@ -90,7 +89,6 @@ const {
   onCopySharePoster,
 } = useChatShare(sharePosterWrap);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback();
-const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts();
 const realtimeTts = useRealtimeTts();
 
 const messageBottomInset = computed(() => {
@@ -101,7 +99,7 @@ const messageBottomInset = computed(() => {
 });
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 
-/** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
+/** 消息播音统一走实时 TTS。 */
 function onTtsClick(index: number) {
   const msg = chatStore.messages[index];
   const messageId = msg?.messageId;
@@ -111,18 +109,9 @@ function onTtsClick(index: number) {
     realtimeTts.stop();
     return;
   }
-  if (historyTtsMessageId.value === messageId) {
-    stopHistoryTts();
-    return;
-  }
 
   realtimeTts.stop();
-  stopHistoryTts();
-  if (msg.ttsPlaybackMode === "realtime") {
-    void realtimeTts.togglePlay(msg);
-    return;
-  }
-  void onHistoryTtsClick(index);
+  void realtimeTts.togglePlay(msg);
 }
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));

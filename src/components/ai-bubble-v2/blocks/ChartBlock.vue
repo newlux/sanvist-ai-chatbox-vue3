@@ -1,14 +1,6 @@
 <script setup lang="ts">
 import type { EChartsType } from "echarts/core";
-import {
-  computed,
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  toRaw,
-  watch,
-} from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from "vue";
 import { clone, init } from "@/utils/echarts";
 import { createLogger } from "@/utils/logger";
 
@@ -23,6 +15,7 @@ const props = defineProps({
 
 const logger = createLogger("chart");
 const chartEl = ref<unknown>(null);
+const chartWidth = ref(320);
 const failed = ref(false);
 
 let chart: EChartsType | null = null;
@@ -37,16 +30,17 @@ const MAX_SIZE_RETRY = 8;
 /** 分类轴每项默认占用宽度；兼顾移动端可读性和横向滑动距离。 */
 const DEFAULT_CATEGORY_WIDTH = 96;
 const MIN_CATEGORY_WIDTH = 72;
-const DEFAULT_FONT_SIZE = 12;
+const DEFAULT_FONT_SIZE = 11;
 const DEFAULT_FONT_FAMILY = "sans-serif";
 const DEFAULT_GRID_SIDE = 16;
-const DEFAULT_GRID_TOP = 24;
+const DEFAULT_GRID_TOP = 12;
 const DEFAULT_GRID_BOTTOM = 24;
-const DEFAULT_AXIS_NAME_GAP = 32;
-const TITLE_SPACE = 36;
-const LEGEND_SPACE = 32;
-const AXIS_NAME_TOP_SPACE = 16;
-const EMBEDDED_MIN_HEIGHT = "240px";
+const DEFAULT_AXIS_NAME_GAP = 24;
+const TITLE_VERTICAL_PADDING = 8;
+const LEGEND_LINE_HEIGHT = 20;
+const LEGEND_ITEM_MIN_WIDTH = 64;
+const AXIS_NAME_TOP_SPACE = 12;
+const EMBEDDED_MIN_HEIGHT = "280px";
 
 interface ChartLayout {
   minHeight?: string;
@@ -62,10 +56,16 @@ function textOf(value: any) {
   return String(value?.value ?? value ?? "");
 }
 
-function estimateTextWidth(text: unknown, fontSize = DEFAULT_FONT_SIZE, fontFamily = DEFAULT_FONT_FAMILY, fontWeight: string | number = "normal") {
+function estimateTextWidth(
+  text: unknown,
+  fontSize = DEFAULT_FONT_SIZE,
+  fontFamily = DEFAULT_FONT_FAMILY,
+  fontWeight: string | number = "normal",
+) {
   const content = String(text ?? "");
   if (typeof document !== "undefined") {
-    if (textMeasureContext === undefined) textMeasureContext = document.createElement("canvas").getContext("2d");
+    if (textMeasureContext === undefined)
+      textMeasureContext = document.createElement("canvas").getContext("2d");
     if (textMeasureContext) {
       textMeasureContext.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
       return textMeasureContext.measureText(content).width;
@@ -80,7 +80,12 @@ function longestLineWidth(text: unknown, textStyle: Record<string, any> = {}) {
   const fontSize = Number(textStyle.fontSize) || DEFAULT_FONT_SIZE;
   const fontFamily = textStyle.fontFamily || DEFAULT_FONT_FAMILY;
   const fontWeight = textStyle.fontWeight || "normal";
-  return Math.max(0, ...String(text ?? "").split("\n").map(line => estimateTextWidth(line, fontSize, fontFamily, fontWeight)));
+  return Math.max(
+    0,
+    ...String(text ?? "")
+      .split("\n")
+      .map(line => estimateTextWidth(line, fontSize, fontFamily, fontWeight)),
+  );
 }
 
 function normalizeSeries(series: any[]) {
@@ -94,9 +99,8 @@ function normalizeSeries(series: any[]) {
       ...item,
       itemStyle: { ...item.itemStyle, color: undefined },
       data: data.map((point: any, index: number) => {
-        const pointStyle = point && typeof point === "object" && !Array.isArray(point)
-          ? point.itemStyle
-          : null;
+        const pointStyle =
+          point && typeof point === "object" && !Array.isArray(point) ? point.itemStyle : null;
         const itemStyle = { ...pointStyle, color: colors[index % colors.length] };
         return point && typeof point === "object" && !Array.isArray(point)
           ? { ...point, itemStyle }
@@ -106,28 +110,64 @@ function normalizeSeries(series: any[]) {
   });
 }
 
+function titleHeight(title: any) {
+  return toArray(title).reduce((height, item) => {
+    if (item?.show === false || !String(item?.text || "").trim()) return height;
+    const textStyle = { fontSize: DEFAULT_FONT_SIZE + 2, ...item?.textStyle };
+    const subtextStyle = { fontSize: DEFAULT_FONT_SIZE, ...item?.subtextStyle };
+    const titleLines = String(item.text).split("\n").length;
+    const subtext = String(item?.subtext || "").trim();
+    const subtextLines = subtext ? subtext.split("\n").length : 0;
+    return height + titleLines * (Number(textStyle.lineHeight) || Number(textStyle.fontSize) * 1.4)
+      + subtextLines * (Number(subtextStyle.lineHeight) || Number(subtextStyle.fontSize) * 1.4)
+      + TITLE_VERTICAL_PADDING;
+  }, 0);
+}
+
+function legendHeight(legend: any, series: any[], chartWidth: number) {
+  return toArray(legend).reduce((height, item) => {
+    const names = Array.isArray(item?.data) ? item.data : series.map(seriesItem => seriesItem?.name).filter(Boolean);
+    if (item?.show === false || !names.length) return height;
+    const fontSize = Number(item?.textStyle?.fontSize) || DEFAULT_FONT_SIZE;
+    const itemGap = Number(item?.itemGap) || 12;
+    const totalWidth = names.reduce((sum, name) => sum + Math.max(
+      LEGEND_ITEM_MIN_WIDTH,
+      estimateTextWidth(name, fontSize) + 30,
+    ), 0) + Math.max(0, names.length - 1) * itemGap;
+    return height + Math.max(1, Math.ceil(totalWidth / Math.max(chartWidth, LEGEND_ITEM_MIN_WIDTH))) * LEGEND_LINE_HEIGHT;
+  }, 0);
+}
+
 function normalizeTitle(title: any) {
   return toArray(title).map(item => ({
     ...item,
     left: item?.left ?? "center",
+    top: 0,
     textStyle: {
+      fontSize: DEFAULT_FONT_SIZE + 2,
+      fontWeight: 600,
       overflow: "break",
       ...item?.textStyle,
     },
     subtextStyle: {
+      fontSize: DEFAULT_FONT_SIZE,
       overflow: "break",
       ...item?.subtextStyle,
     },
   }));
 }
 
-function normalizeLegend(legend: any) {
+function normalizeLegend(legend: any, top: number) {
   return toArray(legend).map(item => ({
     ...item,
     left: item?.left ?? "center",
-    top: item?.top ?? 12,
+    top,
+    itemWidth: item?.itemWidth ?? 12,
+    itemHeight: item?.itemHeight ?? 8,
+    itemGap: item?.itemGap ?? 12,
     type: item?.type ?? "scroll",
     textStyle: {
+      fontSize: DEFAULT_FONT_SIZE,
       overflow: "break",
       ...item?.textStyle,
     },
@@ -135,10 +175,7 @@ function normalizeLegend(legend: any) {
 }
 
 function resolveCategoryWidth(layout: ChartLayout | null | undefined) {
-  return Math.max(
-    MIN_CATEGORY_WIDTH,
-    Number(layout?.categoryWidth) || DEFAULT_CATEGORY_WIDTH,
-  );
+  return Math.max(MIN_CATEGORY_WIDTH, Number(layout?.categoryWidth) || DEFAULT_CATEGORY_WIDTH);
 }
 
 function normalizeCategoryAxis(axis: any, categoryWidth?: number) {
@@ -146,9 +183,7 @@ function normalizeCategoryAxis(axis: any, categoryWidth?: number) {
 
   const axisLabel = axis.axisLabel || {};
   const fontSize = Number(axisLabel.fontSize) || DEFAULT_FONT_SIZE;
-  const labelWidth = categoryWidth
-    ? Math.max(48, categoryWidth - 16)
-    : axisLabel.width;
+  const labelWidth = categoryWidth ? Math.max(48, categoryWidth - 16) : axisLabel.width;
 
   return {
     ...axis,
@@ -193,18 +228,9 @@ function axisBottomSpace(axis: any) {
   return Math.ceil(labelHeight + axisNameSpace + 12);
 }
 
-function isVisibleTitle(title: any) {
-  return toArray(title).some(item => item?.show !== false && String(item?.text || "").trim());
-}
-
-function isVisibleLegend(legend: any, series: any[]) {
-  const hasNamedSeries = series.some(item => String(item?.name || "").trim());
-  return toArray(legend).some(item => item?.show !== false && (Array.isArray(item?.data) ? item.data.length > 0 : hasNamedSeries));
-}
-
-function resolveTopSpace(option: any, xAxes: any[], yAxes: any[], series: any[]) {
-  const titleSpace = isVisibleTitle(option.title) ? TITLE_SPACE : 0;
-  const legendSpace = isVisibleLegend(option.legend, series) ? LEGEND_SPACE : 0;
+function resolveTopSpace(option: any, xAxes: any[], yAxes: any[], series: any[], chartWidth: number) {
+  const titleSpace = titleHeight(option.title);
+  const legendSpace = legendHeight(option.legend, series, chartWidth);
   const hasYAxisName = yAxes.some(axis => String(axis?.name || "").trim());
   const topAxes = xAxes.filter(axis => axis?.position === "top");
   const topAxisSpace = Math.max(0, ...topAxes.map(axisBottomSpace));
@@ -212,18 +238,28 @@ function resolveTopSpace(option: any, xAxes: any[], yAxes: any[], series: any[])
   return Math.max(DEFAULT_GRID_TOP + titleSpace + legendSpace + axisNameSpace, topAxisSpace);
 }
 
-function createDefaultGrid(option: any, xAxes: any[], yAxes: any[], series: any[]) {
+function createDefaultGrid(option: any, xAxes: any[], yAxes: any[], series: any[], chartWidth: number) {
   const leftAxes = yAxes.filter(axis => axis?.position !== "right");
   const rightAxes = yAxes.filter(axis => axis?.position === "right");
   const bottomAxes = xAxes.filter(axis => axis?.position !== "top");
 
-  const requiredLeft = Math.max(DEFAULT_GRID_SIDE, ...leftAxes.map(axis => axisLabelExtent(axis) + (axis?.name ? DEFAULT_AXIS_NAME_GAP : 0) + 12));
-  const requiredRight = Math.max(DEFAULT_GRID_SIDE, ...rightAxes.map(axis => axisLabelExtent(axis) + (axis?.name ? DEFAULT_AXIS_NAME_GAP : 0) + 12));
+  const requiredLeft = Math.max(
+    DEFAULT_GRID_SIDE,
+    ...leftAxes.map(
+      axis => axisLabelExtent(axis) + (axis?.name ? DEFAULT_AXIS_NAME_GAP : 0) + 12,
+    ),
+  );
+  const requiredRight = Math.max(
+    DEFAULT_GRID_SIDE,
+    ...rightAxes.map(
+      axis => axisLabelExtent(axis) + (axis?.name ? DEFAULT_AXIS_NAME_GAP : 0) + 12,
+    ),
+  );
   const horizontalInset = Math.ceil(Math.max(requiredLeft, requiredRight));
   const bottom = Math.max(DEFAULT_GRID_BOTTOM, ...bottomAxes.map(axisBottomSpace));
 
   return {
-    top: resolveTopSpace(option, xAxes, yAxes, series),
+    top: resolveTopSpace(option, xAxes, yAxes, series, chartWidth),
     right: horizontalInset,
     bottom,
     left: horizontalInset,
@@ -243,7 +279,7 @@ function centerPolarSeries(series: any[]) {
  * 将后端 option 转为稳定的展示配置：业务样式原样保留，仅补齐缺失的布局规则。
  * 默认内容以画布中线为基准；分类标签保持横向，通过画布宽度和动态边距完整展示。
  */
-function normalizeOption(raw: Record<string, any> | null, layout?: ChartLayout | null) {
+function normalizeOption(raw: Record<string, any> | null, layout?: ChartLayout | null, width = 320) {
   if (!raw) return raw;
   const option = clone(toRaw(raw));
   const sourceSeries = Array.isArray(option.series) ? option.series : [];
@@ -260,19 +296,23 @@ function normalizeOption(raw: Record<string, any> | null, layout?: ChartLayout |
     const title = normalizeTitle(option.title);
     next.title = Array.isArray(option.title) ? title : title[0];
   }
+  const titleSpace = titleHeight(option.title);
   if (option.legend) {
-    const legend = normalizeLegend(option.legend);
+    const legend = normalizeLegend(option.legend, titleSpace);
     next.legend = Array.isArray(option.legend) ? legend : legend[0];
   }
   if (option.xAxis) next.xAxis = Array.isArray(option.xAxis) ? xAxes : xAxes[0];
   if (option.yAxis) next.yAxis = Array.isArray(option.yAxis) ? yAxes : yAxes[0];
   if (option.xAxis || option.yAxis) {
+    const defaultGrid = createDefaultGrid(option, xAxes, yAxes, series, width);
     if (!option.grid) {
-      next.grid = createDefaultGrid(option, xAxes, yAxes, series);
-    }
-    else if (!Array.isArray(option.grid) && option.grid.top == null) {
-      // 后端显式给了 grid 但漏掉 top：补齐动态顶部空间，避免落到 ECharts 默认的 60px 造成大量留白
-      next.grid = { ...option.grid, top: resolveTopSpace(option, xAxes, yAxes, series) };
+      next.grid = defaultGrid;
+    } else if (!Array.isArray(option.grid)) {
+      next.grid = {
+        ...option.grid,
+        top: defaultGrid.top,
+        bottom: Math.max(Number(option.grid.bottom) || 0, defaultGrid.bottom),
+      };
     }
   }
 
@@ -292,12 +332,13 @@ function normalizeOption(raw: Record<string, any> | null, layout?: ChartLayout |
 }
 
 const chartLayout = computed(() => props.layout as ChartLayout | null);
-const chartOption = computed(() => normalizeOption(props.option, chartLayout.value));
-const chartMinHeight = computed(() => chartLayout.value?.minHeight || (props.embedded ? EMBEDDED_MIN_HEIGHT : undefined));
+const chartOption = computed(() => normalizeOption(props.option, chartLayout.value, chartWidth.value));
+const chartMinHeight = computed(
+  () => chartLayout.value?.minHeight || (props.embedded ? EMBEDDED_MIN_HEIGHT : undefined),
+);
 
 function categoryAxis(option: any) {
-  return toArray(option?.xAxis).find(isCategoryAxis)
-    ?? toArray(option?.yAxis).find(isCategoryAxis);
+  return toArray(option?.xAxis).find(isCategoryAxis) ?? toArray(option?.yAxis).find(isCategoryAxis);
 }
 
 function horizontalCategoryAxis(option: any) {
@@ -312,15 +353,16 @@ const chartMinWidth = computed(() => {
 
   const categoryWidth = resolveCategoryWidth(chartLayout.value);
   const labelWidth = Number(axis?.axisLabel?.width) || categoryWidth;
-  const labelWidths = categories.map((category: any) => Math.min(
-    labelWidth,
-    longestLineWidth(textOf(category), axis.axisLabel),
-  ));
+  const labelWidths = categories.map((category: any) =>
+    Math.min(labelWidth, longestLineWidth(textOf(category), axis.axisLabel)),
+  );
   const slotsWidth = categories.length * categoryWidth;
   const grid = option?.grid && !Array.isArray(option.grid) ? option.grid : {};
   const gridLeft = typeof grid.left === "number" ? grid.left : DEFAULT_GRID_SIDE;
   const gridRight = typeof grid.right === "number" ? grid.right : DEFAULT_GRID_SIDE;
-  const edgeSpace = Math.ceil((labelWidths[0] || 0) / 2 + (labelWidths[labelWidths.length - 1] || 0) / 2);
+  const edgeSpace = Math.ceil(
+    (labelWidths[0] || 0) / 2 + (labelWidths[labelWidths.length - 1] || 0) / 2,
+  );
 
   return `${Math.ceil(gridLeft + slotsWidth + gridRight + edgeSpace)}px`;
 });
@@ -334,7 +376,8 @@ function readSeriesValue(item: any) {
 }
 
 function readSeriesLabel(item: any, index: number, categories: string[]) {
-  if (item && typeof item === "object" && !Array.isArray(item) && item.name) return String(item.name);
+  if (item && typeof item === "object" && !Array.isArray(item) && item.name)
+    return String(item.name);
   if (Array.isArray(item) && item.length > 1) return String(item[0]);
   return String(categories[index] ?? `#${index + 1}`);
 }
@@ -402,8 +445,7 @@ function renderDomChart() {
     if (sizeRetry < MAX_SIZE_RETRY) {
       sizeRetry += 1;
       scheduleRenderChart();
-    }
-    else {
+    } else {
       logger.warn("容器尺寸为 0，降级为数据清单");
       failed.value = true;
     }
@@ -411,6 +453,7 @@ function renderDomChart() {
   }
 
   sizeRetry = 0;
+  chartWidth.value = element.clientWidth;
   if (!chart) chart = init(element);
   chart.setOption(chartOption.value, { notMerge: true, lazyUpdate: false, silent: true });
   chart.resize();
@@ -421,8 +464,7 @@ function renderChart() {
   failed.value = false;
   try {
     renderDomChart();
-  }
-  catch (error) {
+  } catch (error) {
     logger.error("render failed", error);
     failed.value = true;
     chart?.dispose();
@@ -455,6 +497,7 @@ function disposeChart() {
 }
 
 watch(() => props.option, scheduleRenderChart, { deep: true });
+watch(chartOption, scheduleRenderChart);
 
 onMounted(async () => {
   disposed = false;
@@ -463,8 +506,7 @@ onMounted(async () => {
   if (typeof ResizeObserver !== "undefined" && element) {
     resizeObserver = new ResizeObserver(scheduleRenderChart);
     resizeObserver.observe(element);
-  }
-  else if (typeof window !== "undefined") {
+  } else if (typeof window !== "undefined") {
     windowResizeHandler = scheduleRenderChart;
     window.addEventListener("resize", windowResizeHandler);
   }
@@ -483,7 +525,11 @@ onBeforeUnmount(disposeChart);
       :show-scrollbar="false"
       :style="{ minHeight: chartMinHeight }"
     >
-      <view ref="chartEl" class="chart-block__canvas" :style="{ minWidth: chartMinWidth, minHeight: chartMinHeight }" />
+      <view
+        ref="chartEl"
+        class="chart-block__canvas"
+        :style="{ minWidth: chartMinWidth, minHeight: chartMinHeight }"
+      />
     </scroll-view>
     <view v-if="failed && hasFallbackData" class="chart-block__data">
       <text v-if="fallbackTitle" class="chart-block__data-title">
@@ -510,19 +556,94 @@ onBeforeUnmount(disposeChart);
 </template>
 
 <style lang="scss" scoped>
-.chart-block { width: 100%; padding: 32rpx; box-sizing: border-box; border-radius: 20rpx; background: #fff; }
-.chart-block--embedded { padding: 0; border-radius: 0; background: transparent; }
-.chart-block__scroll { width: 100%; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
-.chart-block__canvas { width: 100%; overflow: hidden; aspect-ratio: 3 / 2; }
-.chart-block--embedded .chart-block__scroll { aspect-ratio: 4 / 3; }
-.chart-block--embedded .chart-block__canvas { height: 100%; min-height: inherit; aspect-ratio: auto; }
-.chart-block__fallback { display: block; padding: 48rpx 0; color: #8a8f99; font-size: 26rpx; text-align: center; }
-.chart-block__data { display: flex; flex-direction: column; padding: 8rpx 0; }
-.chart-block__data-title { display: block; margin-bottom: 12rpx; color: #1a1a1a; font-size: 28rpx; font-weight: 600; line-height: 40rpx; }
-.chart-block__data-series { display: flex; flex-direction: column; margin-bottom: 8rpx; }
-.chart-block__data-series-name { display: block; margin: 8rpx 0 4rpx; color: #8a8f99; font-size: 24rpx; line-height: 34rpx; }
-.chart-block__data-row { display: flex; align-items: center; justify-content: space-between; padding: 10rpx 0; border-bottom: 1rpx solid #f0f1f3; }
-.chart-block__data-row:last-child { border-bottom: none; }
-.chart-block__data-label { flex: 1; min-width: 0; color: #4a4f57; font-size: 26rpx; line-height: 36rpx; }
-.chart-block__data-value { margin-left: 24rpx; color: #1a1a1a; font-size: 26rpx; font-weight: 600; line-height: 36rpx; }
+.chart-block {
+  width: 100%;
+  margin-top: 24rpx;
+  padding: 32rpx;
+  box-sizing: border-box;
+  border-radius: 20rpx;
+  background: #fff;
+}
+.chart-block--embedded {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.chart-block__scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.chart-block__canvas {
+  width: 100%;
+  min-height: 280px;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+}
+.chart-block--embedded .chart-block__scroll {
+  min-height: 280px;
+  aspect-ratio: 4 / 3;
+}
+.chart-block--embedded .chart-block__canvas {
+  height: 100%;
+  min-height: inherit;
+  aspect-ratio: auto;
+}
+.chart-block__fallback {
+  display: block;
+  padding: 48rpx 0;
+  color: #8a8f99;
+  font-size: 26rpx;
+  text-align: center;
+}
+.chart-block__data {
+  display: flex;
+  flex-direction: column;
+  padding: 8rpx 0;
+}
+.chart-block__data-title {
+  display: block;
+  margin-bottom: 12rpx;
+  color: #1a1a1a;
+  font-size: 28rpx;
+  font-weight: 600;
+  line-height: 40rpx;
+}
+.chart-block__data-series {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8rpx;
+}
+.chart-block__data-series-name {
+  display: block;
+  margin: 8rpx 0 4rpx;
+  color: #8a8f99;
+  font-size: 24rpx;
+  line-height: 34rpx;
+}
+.chart-block__data-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10rpx 0;
+  border-bottom: 1rpx solid #f0f1f3;
+}
+.chart-block__data-row:last-child {
+  border-bottom: none;
+}
+.chart-block__data-label {
+  flex: 1;
+  min-width: 0;
+  color: #4a4f57;
+  font-size: 26rpx;
+  line-height: 36rpx;
+}
+.chart-block__data-value {
+  margin-left: 24rpx;
+  color: #1a1a1a;
+  font-size: 26rpx;
+  font-weight: 600;
+  line-height: 36rpx;
+}
 </style>

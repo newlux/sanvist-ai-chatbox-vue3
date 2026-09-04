@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import aiChatIcon from "@/assets/img/report-broadcast/ai-chat.png";
-import closeIcon from "@/assets/img/voice-assistant/voice-close.svg";
+import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
 
 defineProps<{
   status: string;
