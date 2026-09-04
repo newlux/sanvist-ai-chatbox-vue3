@@ -59,6 +59,7 @@ const reportAdjustmentActions = useReportAdjustmentActions({
   setParams: (params) => { reportBroadcastParams.value = params; },
   saveReportStyle,
   getPlayer: () => reportBroadcastPlayerRef.value,
+  openInsight: () => { uni.navigateTo({ url: "/pages/report-insight/index" }); },
 });
 const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   onReportQa(answer) {
@@ -69,6 +70,11 @@ const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating,
     reportQaLoading.value = false;
     reportQaAnswer.value = "";
     reportAdjustmentActions.execute(action);
+  },
+  onReportNavigation(action) {
+    reportQaLoading.value = false;
+    reportQaAnswer.value = "";
+    reportAdjustmentActions.executeNavigation(action);
   },
   onReportBlockingComplete() {
     reportQaLoading.value = false;

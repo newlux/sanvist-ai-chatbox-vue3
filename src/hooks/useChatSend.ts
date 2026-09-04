@@ -1,6 +1,6 @@
 import type { ChatFile, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
-import type { ReportAdjustmentAction } from "@/utils/ai-stream";
+import type { ReportAdjustmentAction, ReportNavigationAction } from "@/utils/ai-stream";
 import { useI18n } from "vue-i18n";
 import { interruptChat, sendBlockingChatMessage } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
@@ -33,6 +33,7 @@ function isAbortError(error: unknown) {
 export function useChatSend(scope?: string, handlers?: {
   onReportQa?: (answer: string) => void;
   onReportAdjustment?: (action: ReportAdjustmentAction) => void;
+  onReportNavigation?: (action: ReportNavigationAction) => void;
   onReportBlockingComplete?: () => void;
   getReportCheckedModules?: () => string[];
 }) {
@@ -212,6 +213,9 @@ export function useChatSend(scope?: string, handlers?: {
       }
       if (reportInteraction?.interactionType === "adjustment") {
         handlers?.onReportAdjustment?.(reportInteraction.action);
+      }
+      if (reportInteraction?.interactionType === "navigation") {
+        handlers?.onReportNavigation?.(reportInteraction.action);
       }
 
       applySnapshot(aiMsgId, userMsgId, {

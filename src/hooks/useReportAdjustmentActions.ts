@@ -1,5 +1,5 @@
 import type { PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
-import type { ReportAdjustmentAction } from "@/utils/ai-stream/report-interaction";
+import type { ReportAdjustmentAction, ReportNavigationAction } from "@/utils/ai-stream/report-interaction";
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("report-adjustment-actions");
@@ -15,6 +15,7 @@ export interface UseReportAdjustmentActionsOptions {
   setParams: (params: PlayListenBroadcastParams) => void;
   saveReportStyle: (styleCode: string, moduleCodes: string[]) => void;
   getPlayer: () => ReportPlaybackController | null;
+  openInsight: () => void;
 }
 
 export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOptions) {
@@ -32,6 +33,10 @@ export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOp
       options.saveReportStyle(params.styleCode, params.checkedModules);
     }
     options.getPlayer()?.restart(params);
+  }
+
+  function executeNavigation(action: ReportNavigationAction) {
+    if (action.type === "open_insight") options.openInsight();
   }
 
   function execute(action: ReportAdjustmentAction) {
@@ -79,6 +84,7 @@ export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOp
 
   return {
     execute,
+    executeNavigation,
     dispose: clearDelayedPause,
   };
 }

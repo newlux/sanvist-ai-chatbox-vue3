@@ -5,11 +5,11 @@ import { ref } from "vue";
 export type VisitorRole = "OWNER" | "OPERATOR" | "ADMIN" | "MAINTAINER" | "PURCHASER";
 
 export const VISITOR_ROLE_ACCOUNTS: Record<VisitorRole, string> = {
-  OWNER: "mock-boss-001",
-  ADMIN: "mock-dispatcher-001",
-  MAINTAINER: "mock-maintainer-001",
-  PURCHASER: "mock-purchaser-001",
-  OPERATOR: "mock-operator-001",
+  OWNER: "BOSS-001",
+  ADMIN: "DISPATCHER-001",
+  MAINTAINER: "MAINTAINER-001",
+  PURCHASER: "PURCHASER-001",
+  OPERATOR: "OPERATOR-001",
 };
 
 export const useUserStore = defineStore("user", () => {

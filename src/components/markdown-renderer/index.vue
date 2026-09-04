@@ -73,9 +73,9 @@ const rawTagStyle = {
   code: "padding: 2rpx 6rpx; border-radius: 4rpx; background: #f3f5f7; color: #d63200; font-size: 24rpx;",
   pre: "margin: 8rpx 0; padding: 16rpx; border-radius: 12rpx; background: #fff; overflow-x: auto; font-size: 24rpx; line-height: 36rpx; white-space: pre;",
   img: "max-width: 100%; height: auto; display: block; margin: 12rpx 0; border-radius: 8rpx;",
-  table: "width: 100%; margin: 12rpx 0; border-collapse: collapse; background: #fff; font-size: 24rpx;",
-  th: "padding: 10rpx 12rpx; border: 1px solid #e4e9f0; font-weight: 600; text-align: left; vertical-align: top;",
-  td: "padding: 10rpx 12rpx; border: 1px solid #e4e9f0; text-align: left; vertical-align: top;",
+  table: "width: max-content; min-width: 100%; margin: 12rpx 0; border-collapse: collapse; background: #fff; font-size: 24rpx; white-space: nowrap;",
+  th: "min-width: 160rpx; padding: 10rpx 12rpx; border: 1px solid #e4e9f0; font-weight: 600; text-align: left; vertical-align: top; white-space: nowrap; word-break: keep-all;",
+  td: "min-width: 160rpx; padding: 10rpx 12rpx; border: 1px solid #e4e9f0; text-align: left; vertical-align: top; white-space: nowrap; word-break: keep-all;",
 };
 
 // 首次渲染时才计算：根字号是 uni 启动后设的，模块加载期取到的可能还是浏览器默认值

@@ -6,7 +6,7 @@ export type { ChunkData, ChunkDecoder } from "./chunkDecoder";
 
 export { createChunkDecoder } from "./chunkDecoder";
 export { createDifyEventNormalizer, toDifyChatMessagesRequest } from "./dify";
-export type { ReportAdjustmentAction, ReportInteraction, ReportModuleCode, ReportQaInteraction } from "./report-interaction";
+export type { ReportAdjustmentAction, ReportInteraction, ReportModuleCode, ReportNavigationAction, ReportQaInteraction } from "./report-interaction";
 export { parseReportInteraction } from "./report-interaction";
 
 export type { SseSession, SseSessionOptions } from "./sseSession";

@@ -301,11 +301,11 @@ $color-text-warning: #a31717;
   display: flex;
   box-sizing: border-box;
   width: 630rpx;
-  height: 244rpx;
+  min-height: 244rpx;
   align-items: flex-start;
-  gap: 26rpx;
+  gap: 20rpx;
   margin-bottom: 20rpx;
-  padding: 36rpx 28rpx 32rpx;
+  padding: 28rpx;
   border: 2rpx solid transparent;
   border-radius: 24rpx;
   background: $color-card-bg;
@@ -331,14 +331,16 @@ $color-text-warning: #a31717;
 }
 
 .card-info {
+  display: flex;
   min-width: 0;
   flex: 1;
-  padding-top: 4rpx;
+  flex-direction: column;
+  padding-top: 2rpx;
 }
 
 .card-name {
   display: block;
-  margin-bottom: 14rpx;
+  margin-bottom: 8rpx;
   color: $color-text-primary;
   font-size: 32rpx;
   font-weight: 700;
@@ -347,7 +349,7 @@ $color-text-warning: #a31717;
 
 .card-desc {
   display: block;
-  margin-bottom: 10rpx;
+  margin-bottom: 6rpx;
   color: $color-text-secondary;
   font-size: 22rpx;
   font-weight: 500;
