@@ -9,7 +9,7 @@ import capsuleGlowOff from "@/assets/img/voice-assistant/voice-capsule-glow-off.
 import capsuleGlowOn from "@/assets/img/voice-assistant/voice-capsule-glow-on.png";
 import checkOffIcon from "@/assets/img/voice-assistant/voice-check-off.svg";
 import checkOnIcon from "@/assets/img/voice-assistant/voice-check-on.svg";
-import closeIcon from "@/assets/img/voice-assistant/voice-close.svg";
+import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
 import { useReportStyle } from "@/hooks/useReportStyle";
 import { createLogger } from "@/utils/logger";
 

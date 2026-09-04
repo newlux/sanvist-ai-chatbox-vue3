@@ -110,7 +110,7 @@ watch(
   () => {
     props.attachments.forEach((file, fileIndex) => {
       if (file.type === "image" && file.fileId && !fileImageFallback.value[fileIndex]) {
-        void fetchFilePreviewBlobUrl(file.fileId, file.mimeType).then(inline => {
+        void fetchFilePreviewBlobUrl(file.fileId, file.mimeType).then((inline) => {
           if (inline) fileImageFallback.value = { ...fileImageFallback.value, [fileIndex]: inline };
         });
       }

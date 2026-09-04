@@ -4,7 +4,7 @@ import { computed } from "vue";
 import activeLightningIcon from "@/assets/img/report-broadcast/insight-lightning-active.svg";
 import defaultLightningIcon from "@/assets/img/report-broadcast/insight-lightning-default.svg";
 import operatorNextIcon from "@/assets/img/report-broadcast/insight-operator-next.svg";
-import closeIcon from "@/assets/img/voice-assistant/voice-close.svg";
+import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
 import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 

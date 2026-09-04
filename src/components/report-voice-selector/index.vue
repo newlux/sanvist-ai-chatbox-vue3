@@ -4,7 +4,7 @@ import type { ReportVoiceOption } from "@/config/report-voices";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import microphoneBadge from "@/assets/img/voice-assistant/report-microphone-badge.png";
 import smallWave from "@/assets/img/voice-assistant/report-small-wave.png";
-import closeIcon from "@/assets/img/voice-assistant/voice-close.svg";
+import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
 import ReportStyleSelector from "@/components/report-style-selector/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";

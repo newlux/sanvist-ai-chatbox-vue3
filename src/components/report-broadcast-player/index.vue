@@ -72,6 +72,17 @@ function playHistory(item: ListenBroadcastHistoryItem) {
   play({ ...props.params, bizDate: item.bizDate });
 }
 
+function onPlayPause() {
+  if (loading.value) return;
+  if (playing.value) {
+    pause();
+  } else if (paused.value) {
+    resume();
+  } else {
+    play(props.params);
+  }
+}
+
 function exitReport() {
   stop();
   emit("exit-report");
@@ -99,6 +110,7 @@ defineExpose({ pause, resume, restart: play, stop });
       :next-text="nextText"
       :transcript-segments="transcriptSegments"
       @open-history="openHistory"
+      @play-pause="onPlayPause"
     />
     <ReportBroadcastHistory
       v-if="showHistory"
