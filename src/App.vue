@@ -6,7 +6,7 @@ import { useSystemStore, useUserStore } from "@/stores";
 import { setupDebugConsole } from "@/utils/debug-console";
 import { createLogger } from "@/utils/logger";
 import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
-import { setAuthFailureHandler, setRequestAuth, setRequestBaseURL } from "@/utils/request";
+import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
 const logger = createLogger("app");
 // 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
@@ -44,6 +44,8 @@ function initializeSystem(query: StartupQuery) {
 
   setRequestAuth(authorization);
   setRequestBaseURL(baseUrl);
+  userStore.restoreVisitorRole();
+  if (userStore.visitorRole) setGuestRole(userStore.visitorRole);
 
   userStore.setIsVisitor(true);
   systemStore.setHeader({
