@@ -1,6 +1,7 @@
 import type { AwakeningPrompt } from "@/api/user-role/role-options";
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { VISITOR_ROLE_CACHE_KEY } from "@/config";
 
 export type VisitorRole = "OWNER" | "OPERATOR" | "ADMIN" | "MAINTAINER" | "PURCHASER";
 
@@ -28,6 +29,16 @@ export const useUserStore = defineStore("user", () => {
     visitorRole.value = value;
     if (value) {
       userId.value = VISITOR_ROLE_ACCOUNTS[value];
+      uni.setStorageSync(VISITOR_ROLE_CACHE_KEY, value);
+    } else {
+      uni.removeStorageSync(VISITOR_ROLE_CACHE_KEY);
+    }
+  }
+
+  function restoreVisitorRole() {
+    const cachedRole = uni.getStorageSync(VISITOR_ROLE_CACHE_KEY);
+    if (typeof cachedRole === "string" && cachedRole in VISITOR_ROLE_ACCOUNTS) {
+      setVisitorRole(cachedRole as VisitorRole);
     }
   }
 
@@ -56,6 +67,7 @@ export const useUserStore = defineStore("user", () => {
     awakeningPrompt,
     setIsVisitor,
     setVisitorRole,
+    restoreVisitorRole,
     setUserId,
     setUsername,
     setUserInfo,
