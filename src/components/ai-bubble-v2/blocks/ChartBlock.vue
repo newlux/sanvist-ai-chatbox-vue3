@@ -34,8 +34,9 @@ let disposed = false;
 let textMeasureContext: CanvasRenderingContext2D | null | undefined;
 
 const MAX_SIZE_RETRY = 8;
-const MIN_CATEGORY_WIDTH = 64;
-const CATEGORY_HORIZONTAL_PADDING = 32;
+/** 分类轴每项默认占用宽度；兼顾移动端可读性和横向滑动距离。 */
+const DEFAULT_CATEGORY_WIDTH = 96;
+const MIN_CATEGORY_WIDTH = 72;
 const DEFAULT_FONT_SIZE = 12;
 const DEFAULT_FONT_FAMILY = "sans-serif";
 const DEFAULT_GRID_SIDE = 16;
@@ -133,8 +134,21 @@ function normalizeLegend(legend: any) {
   }));
 }
 
-function normalizeCategoryAxis(axis: any) {
+function resolveCategoryWidth(layout: ChartLayout | null | undefined) {
+  return Math.max(
+    MIN_CATEGORY_WIDTH,
+    Number(layout?.categoryWidth) || DEFAULT_CATEGORY_WIDTH,
+  );
+}
+
+function normalizeCategoryAxis(axis: any, categoryWidth?: number) {
   if (!Array.isArray(axis?.data)) return axis;
+
+  const axisLabel = axis.axisLabel || {};
+  const fontSize = Number(axisLabel.fontSize) || DEFAULT_FONT_SIZE;
+  const labelWidth = categoryWidth
+    ? Math.max(48, categoryWidth - 16)
+    : axisLabel.width;
 
   return {
     ...axis,
@@ -142,7 +156,9 @@ function normalizeCategoryAxis(axis: any) {
       interval: 0,
       hideOverlap: false,
       overflow: "break",
-      ...axis.axisLabel,
+      lineHeight: Math.ceil(fontSize * 1.35),
+      ...axisLabel,
+      ...(labelWidth ? { width: labelWidth } : {}),
       rotate: 0,
     },
   };
@@ -161,7 +177,16 @@ function axisLabelExtent(axis: any) {
 function axisBottomSpace(axis: any) {
   const labels = Array.isArray(axis?.data) ? axis.data.map(textOf) : [];
   const fontSize = Number(axis?.axisLabel?.fontSize) || DEFAULT_FONT_SIZE;
-  const labelHeight = fontSize * Math.max(1, ...labels.map(label => label.split("\n").length));
+  const lineHeight = Number(axis?.axisLabel?.lineHeight) || Math.ceil(fontSize * 1.35);
+  const labelWidth = Number(axis?.axisLabel?.width) || 0;
+  const lineCount = (label: string) => {
+    const explicitLines = label.split("\n");
+    if (!labelWidth) return explicitLines.length;
+    return explicitLines.reduce((count, line) => {
+      return count + Math.max(1, Math.ceil(longestLineWidth(line, axis.axisLabel) / labelWidth));
+    }, 0);
+  };
+  const labelHeight = lineHeight * Math.max(1, ...labels.map(lineCount));
   const axisNameSpace = String(axis?.name || "").trim()
     ? Number(axis?.nameGap) || DEFAULT_AXIS_NAME_GAP
     : 0;
@@ -218,13 +243,14 @@ function centerPolarSeries(series: any[]) {
  * 将后端 option 转为稳定的展示配置：业务样式原样保留，仅补齐缺失的布局规则。
  * 默认内容以画布中线为基准；分类标签保持横向，通过画布宽度和动态边距完整展示。
  */
-function normalizeOption(raw: Record<string, any> | null) {
+function normalizeOption(raw: Record<string, any> | null, layout?: ChartLayout | null) {
   if (!raw) return raw;
   const option = clone(toRaw(raw));
   const sourceSeries = Array.isArray(option.series) ? option.series : [];
   const sourceXAxes = toArray(option.xAxis);
   const sourceYAxes = toArray(option.yAxis);
-  const xAxes = sourceXAxes.map(normalizeCategoryAxis);
+  const categoryWidth = resolveCategoryWidth(layout);
+  const xAxes = sourceXAxes.map(axis => normalizeCategoryAxis(axis, categoryWidth));
   const yAxes = sourceYAxes.map(normalizeCategoryAxis);
   const series = centerPolarSeries(normalizeSeries(sourceSeries));
 
@@ -265,8 +291,8 @@ function normalizeOption(raw: Record<string, any> | null) {
   return next;
 }
 
-const chartOption = computed(() => normalizeOption(props.option));
 const chartLayout = computed(() => props.layout as ChartLayout | null);
+const chartOption = computed(() => normalizeOption(props.option, chartLayout.value));
 const chartMinHeight = computed(() => chartLayout.value?.minHeight || (props.embedded ? EMBEDDED_MIN_HEIGHT : undefined));
 
 function categoryAxis(option: any) {
@@ -284,11 +310,13 @@ const chartMinWidth = computed(() => {
   const categories = Array.isArray(axis?.data) ? axis.data : [];
   if (!categories.length) return undefined;
 
-  const categoryWidth = Math.max(MIN_CATEGORY_WIDTH, Number(chartLayout.value?.categoryWidth) || 0);
-  const labelWidths = categories.map((category: any) => longestLineWidth(textOf(category), axis.axisLabel));
-  const slotsWidth = labelWidths.reduce((total: number, textWidth: number) => {
-    return total + Math.max(categoryWidth, Math.ceil(textWidth) + CATEGORY_HORIZONTAL_PADDING);
-  }, 0);
+  const categoryWidth = resolveCategoryWidth(chartLayout.value);
+  const labelWidth = Number(axis?.axisLabel?.width) || categoryWidth;
+  const labelWidths = categories.map((category: any) => Math.min(
+    labelWidth,
+    longestLineWidth(textOf(category), axis.axisLabel),
+  ));
+  const slotsWidth = categories.length * categoryWidth;
   const grid = option?.grid && !Array.isArray(option.grid) ? option.grid : {};
   const gridLeft = typeof grid.left === "number" ? grid.left : DEFAULT_GRID_SIDE;
   const gridRight = typeof grid.right === "number" ? grid.right : DEFAULT_GRID_SIDE;
