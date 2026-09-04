@@ -26,7 +26,16 @@ export interface ReportAdjustmentInteraction {
   action: ReportAdjustmentAction;
 }
 
-export type ReportInteraction = ReportQaInteraction | ReportAdjustmentInteraction;
+export interface ReportNavigationAction {
+  type: "open_insight";
+}
+
+export interface ReportNavigationInteraction {
+  interactionType: "navigation";
+  action: ReportNavigationAction;
+}
+
+export type ReportInteraction = ReportQaInteraction | ReportAdjustmentInteraction | ReportNavigationInteraction;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -43,6 +52,11 @@ function parseSelectedModules(value: unknown): ReportModuleCode[] | null {
     typeof item === "string" && REPORT_MODULE_CODES.includes(item as ReportModuleCode),
   );
   return modules.length === value.length && new Set(modules).size === modules.length ? modules : null;
+}
+
+function parseNavigationAction(value: unknown): ReportNavigationAction | null {
+  if (!isRecord(value) || !isRecord(value.params)) return null;
+  return value.type === "open_insight" ? { type: value.type } : null;
 }
 
 function parseAdjustmentAction(value: unknown): ReportAdjustmentAction | null {
@@ -86,9 +100,17 @@ export function parseReportInteraction(rawAnswer: string): ReportInteraction | n
       return answer ? { interactionType: "qa", answer } : null;
     }
 
-    if (payload.interaction_type !== "adjustment") return null;
-    const action = parseAdjustmentAction(payload.action);
-    return action ? { interactionType: "adjustment", action } : null;
+    if (payload.interaction_type === "adjustment") {
+      const action = parseAdjustmentAction(payload.action);
+      return action ? { interactionType: "adjustment", action } : null;
+    }
+
+    if (payload.interaction_type === "navigation") {
+      const action = parseNavigationAction(payload.action);
+      return action ? { interactionType: "navigation", action } : null;
+    }
+
+    return null;
   } catch {
     return null;
   }
