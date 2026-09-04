@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref } from "vue";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOff from "@/assets/img/icon-action-radio-off.svg";
@@ -13,7 +13,7 @@ import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
-import { fetchFilePreviewBlobUrl, toInlineImageUrl } from "@/utils/image-preview";
+import { toInlineImageUrl } from "@/utils/image-preview";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
@@ -99,46 +99,14 @@ async function copyText(text) {
 const fileImageFallback = ref<Record<number, string>>({});
 
 /**
- * 用户消息里的图片附件（Dify 文件）需要鉴权才能取到内容：
- * 有 fileId 时主动请求 GET /files/{file_id}/preview，把真实字节转成 blob 展示，
- * 避免直接拿 source_url 让 `<img>` 无凭证加载失败。
- */
-watch(
-  () => props.attachments
-    .map(file => `${file.type}:${file.fileId || ""}:${file.url || ""}`)
-    .join("|"),
-  () => {
-    props.attachments.forEach((file, fileIndex) => {
-      if (file.type === "image" && file.fileId && !fileImageFallback.value[fileIndex]) {
-        void fetchFilePreviewBlobUrl(file.fileId, file.mimeType).then(inline => {
-          if (inline) fileImageFallback.value = { ...fileImageFallback.value, [fileIndex]: inline };
-        });
-      }
-    });
-  },
-  { immediate: true },
-);
-
-/**
- * 图片附件 src：鉴权预览 blob 解析后优先；
- * 有 fileId 但预览尚未解析完成时返回空占位，避免 img 无凭证打 source_url 失败闪断。
- */
-function fileImageSrc(file: ChatMessageAttachment, fileIndex: number) {
-  if (fileImageFallback.value[fileIndex]) return fileImageFallback.value[fileIndex];
-  if (file.fileId) return "";
-  return file.previewPath || file.url || "";
-}
-
-/**
  * 点开大图。同一条消息里的图片一起进预览，可以左右翻。
- * urls 必须用可内联地址（previewPath / blob 兜底），
- * 否则原始 url 带 Content-Disposition: attachment 时，
- * 部分浏览器（Firefox/Safari）会提示下载而不是显示图片。
+ * 大图用服务端原图直链（http）优先：uni.previewImage 在 H5 端对 blob: 地址
+ * 支持不稳定，缩略图小图走 localPath 本地渲染，这里用可访问的 https 原图最稳。
  */
 function onPreviewImage(url) {
   const urls = props.attachments
     .map((item, index) => item?.type === "image"
-      ? fileImageFallback.value[index] || item.previewPath || item.url
+      ? fileImageFallback.value[index] || item.previewPath || item.url || item.localPath
       : "")
     .filter(Boolean);
   if (!urls.length) return;
@@ -214,8 +182,22 @@ const visibleBlocks = computed(() =>
  * 被中断后不撤掉，只把状态字改成「已停止」——否则没来得及出内容的那一轮
  * 会变成一个空气泡，用户看不出这轮发生了什么。
  */
+/**
+ * Guide 攒包态：后端把 answer+evidence 整包 JSON 分帧下发，整包到齐前
+ * 不展示半截 JSON，只给一行「回答整合中」占位；整包齐了 pending 块消失，
+ * 自动切到正常 blocks 渲染。普通流式回答不含 pending 块，此态恒为 false。
+ */
+const isPackingAnswer = computed(() =>
+  !isUser.value
+  && !props.interrupted
+  && Boolean((props.blocks || []).some(block => block?.type === "pending")),
+);
+
+// 攒包期间只留「回答整合中」一行：隐藏等待条/过程状态，避免和占位提示叠行
 const showWaiting = computed(
-  () => Boolean(props.waitingText) && (props.loading || props.interrupted),
+  () => !isPackingAnswer.value
+    && Boolean(props.waitingText)
+    && (props.loading || props.interrupted),
 );
 
 const processStatusText = computed(() => {
@@ -227,7 +209,9 @@ const processStatusText = computed(() => {
   return status.title ? `${status.title}...` : "正在思考...";
 });
 
-const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusText.value));
+const showProcessStatus = computed(
+  () => !isUser.value && !isPackingAnswer.value && Boolean(processStatusText.value),
+);
 const hasProcessContent = computed(() => Boolean(visibleBlocks.value.length || props.content));
 const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(props.processSubtitle?.trim()));
 
@@ -324,8 +308,8 @@ function onNegativeFeedback() {
           v-if="file.type === 'image'"
           class="ai-bubble-v2__file-image"
           mode="aspectFill"
-          :src="fileImageSrc(file, fileIndex)"
-          @tap.stop="onPreviewImage(fileImageSrc(file, fileIndex))"
+          :src="fileImageFallback[fileIndex] || file.localPath || file.previewPath || file.url"
+          @tap.stop="onPreviewImage(fileImageFallback[fileIndex] || file.localPath || file.previewPath || file.url)"
           @error="onFileImageError(file, fileIndex)"
         />
         <view v-else class="ai-bubble-v2__file-card">
@@ -422,11 +406,21 @@ function onNegativeFeedback() {
             努力链接中
           </text>
         </view>
+        <!-- Guide 整包 JSON 还在拼接：不展示任何正文，只提示「回答整合中」 -->
+        <view v-if="isPackingAnswer" class="ai-bubble-v2__packing">
+          <text class="ai-bubble-v2__packing-text">回答整合中</text>
+          <view class="ai-bubble-v2__packing-dots">
+            <text class="ai-bubble-v2__packing-dot" />
+            <text class="ai-bubble-v2__packing-dot" />
+            <text class="ai-bubble-v2__packing-dot" />
+          </view>
+        </view>
         <!-- 流式失败等场景只有纯文本没有 blocks，不兜住就是一个空气泡 -->
-        <text v-if="!visibleBlocks.length && props.content" class="ai-bubble-v2__ai-content">
+        <text v-if="!isPackingAnswer && !visibleBlocks.length && props.content" class="ai-bubble-v2__ai-content">
           {{ props.content }}
         </text>
         <AiContentBlocks
+          v-if="!isPackingAnswer"
           :blocks="visibleBlocks"
           :force-thinking-expanded="props.forceThinkingExpanded"
           :no-answer-group="props.noAnswerGroup"
@@ -725,6 +719,32 @@ function onNegativeFeedback() {
 .ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-mark,
 .ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-label {
   color: #7b7b7b;
+}
+.ai-bubble-v2__packing {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  color: #a5a5a5;
+  font-size: 26rpx;
+  line-height: 36rpx;
+}
+.ai-bubble-v2__packing-dots {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6rpx;
+}
+.ai-bubble-v2__packing-dot {
+  width: 8rpx;
+  height: 8rpx;
+  border-radius: 50%;
+  background: #a5a5a5;
+  animation: typing-blink 1.2s infinite;
+}
+.ai-bubble-v2__packing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.ai-bubble-v2__packing-dot:nth-child(3) {
+  animation-delay: 0.4s;
 }
 .ai-bubble-v2__process-status {
   display: flex;

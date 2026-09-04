@@ -6,13 +6,16 @@ import { interruptChat, sendBlockingChatMessage } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { buildInitialBlocks, consumeChatStream, parseReportInteraction } from "@/utils/ai-stream";
+import { resolveAnswerText } from "@/utils/ai-stream/answerEnvelope";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("chat");
 
-const DIFY_SCENE_BY_SUBAGENT: Record<string, "ASK" | "GUIDE" | "TASK" | "PODCAST"> = {
+export type DifyScene = "ASK" | "GUIDE" | "TASK" | "PODCAST";
+
+const DIFY_SCENE_BY_SUBAGENT: Record<string, DifyScene> = {
   guide: "GUIDE",
   task: "TASK",
   report: "PODCAST",
@@ -20,6 +23,11 @@ const DIFY_SCENE_BY_SUBAGENT: Record<string, "ASK" | "GUIDE" | "TASK" | "PODCAST
 
 function getDifyScene(subagent: string) {
   return DIFY_SCENE_BY_SUBAGENT[subagent] || "ASK";
+}
+
+/** 发送元信息：scene 允许调用方显式指定（如 guide 页固定 GUIDE），不依赖 subagent 推导 */
+export interface ChatSendMeta {
+  scene?: DifyScene;
 }
 
 function isAbortError(error: unknown) {
@@ -133,7 +141,7 @@ export function useChatSend(scope?: string, handlers?: {
       query: content,
       user: userStore.userId,
       conversationId: chatStore.aiSessionId,
-      // Dify 开始节点通过 inputs 接收场景。
+      // Dify 开始节点通过 inputs 接收场景；调用方可显式指定，否则按 subagent 推导。
       inputs: {
         scene,
         ...(scene === "PODCAST" ? { checkedModules: JSON.stringify(checkedModules) } : {}),
@@ -214,10 +222,19 @@ export function useChatSend(scope?: string, handlers?: {
         handlers?.onReportAdjustment?.(reportInteraction.action);
       }
 
+      // 阻塞响应可能携带 guide 整包包装（answer+evidence 序列化），统一解包后再建块
+      const resolvedAnswer = reportInteraction || !response.answer
+        ? null
+        : resolveAnswerText(response.answer);
       applySnapshot(aiMsgId, userMsgId, {
-        blocks: reportInteraction || !response.answer
+        blocks: !resolvedAnswer
           ? buildInitialBlocks()
-          : [{ id: "answer-0", type: "answer", payload: { content: response.answer }, complete: true }],
+          : [
+              { id: "answer-0", type: "answer", payload: { content: resolvedAnswer.content }, complete: true },
+              ...(resolvedAnswer.evidence.length
+                ? [{ id: "evidence-0", type: "evidence" as const, payload: { items: resolvedAnswer.evidence }, complete: true }]
+                : []),
+            ],
         conversationId: response.conversationId,
         messageId: response.messageId,
         taskId: response.taskId,

@@ -3,11 +3,9 @@ import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
-import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import AiReplyCard from "@/components/ai-reply-card/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
@@ -17,27 +15,29 @@ import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
-import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { provideChatScope, useChatStore, useSessionStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { buildDemoConversation, normalizeDemoStep } from "./demo-conversation";
 
 /**
- * 作业指导页（基于首页 index 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
+ * 作业指导页（基于首页 index 的聊天 UI：Header 历史会话 + 消息列表 + 输入栏）。
+ * 专注作业指导问答，不展示听汇报 / 任务协同等切换入口。
  *
  * 与首页 / 听汇报的区别：
  * - 独立会话域 "guide"，不与首页主会话互相污染；
- * - 进入即固定 subagent=guide，发送时由 useChatSend 透传 inputs.subagent；
+ * - 进入即固定 subagent=guide，发送时场景固定为 GUIDE（useChatSend 显式传入）；
  * - 每次进入起一轮干净会话（与听汇报一致），返回再进时重新开一轮。
+ *
+ * 两种形态：
+ * - 默认不带 step 参数：正常对话页（干净会话 + 输入栏），对话走真实接口；
+ * - 带 step=1~15：注入「底部回答卡片」开发演示帧（后端流式联调后删除注入逻辑）。
  */
 defineOptions({ name: "AiGuidePage" });
 
-/** 作业指导对应的导航项 key（与 ai-chat-nav 默认数据一致），本页内导航高亮该项 */
-const GUIDE_NAV_KEY = "fix-master-ai";
 const logger = createLogger("guide-page");
 const { t } = useI18n();
 
 const chatScope = provideChatScope("guide");
-const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
 const sessionStore = useSessionStore();
 const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
@@ -49,9 +49,6 @@ const {
   inputText,
   isLoading,
   aiSessionId,
-  showQuickPrompts,
-  showQuickList,
-  awakeningLoading,
   scrollIntoView,
   pinnedToBottom,
 } = storeToRefs(chatStore);
@@ -62,13 +59,13 @@ const {
   keyboardHeight,
   voiceKeyboardHeight,
   composerBottomInset,
-  composerDockOffset,
   syncWindowHeight,
   setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
+// 作业指导固定为 GUIDE 场景：发起的对话（输入栏 / 快捷问题 / 回答卡选项）一律走 guide 接口
+const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend("guide", undefined, { scene: "GUIDE" });
 const {
   iconCopyImage,
   iconSaveImage,
@@ -104,11 +101,9 @@ const messageBottomInset = computed(() => {
       ? `calc(${replyCardHeightPx.value}px + 24rpx)`
       : `calc(${composerBottomInset.value} + 800rpx)`;
   }
-  // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
-  if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
+  // 输入栏是 fixed，列表要用 padding 把最后一条抬到它上方
   return composerBottomInset.value;
 });
-const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 /** 底部回答卡片实测高度（px），用于给消息列表垫底 */
 const replyCardHeightPx = ref(0);
 
@@ -181,8 +176,6 @@ function onTtsClick(index: number) {
   void onHistoryTtsClick(index);
 }
 
-const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
-
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
 
 watch(shareSheetVisible, async (visible) => {
@@ -213,26 +206,6 @@ function startNewConversation() {
   nextTick(() => chatStore.scrollToBottom(true));
 }
 
-/**
- * 快捷入口：听汇报 / 任务协同各自另开一个会话页；
- * 作业指导已在当前页（高亮），点了不重复入栈。
- */
-function onNavItemClick(item: { key?: string; title?: string; subagent?: string; url?: string }) {
-  const subagent = String(item?.subagent || "");
-  if (subagent === "guide") return;
-
-  const targetUrl = String(item?.url || "");
-  if (targetUrl) {
-    uni.navigateTo({ url: targetUrl });
-    return;
-  }
-  if (!subagent) return;
-
-  uni.navigateTo({
-    url: `/pages/chat/index?subagent=${encodeURIComponent(subagent)}&title=${encodeURIComponent(item?.title || "")}`,
-  });
-}
-
 function onBack() {
   uni.navigateBack({ delta: 1 });
 }
@@ -244,17 +217,10 @@ function getAISessionList(pageNo = 1, pageSize = 20) {
   return sessionStore.loadSessions(pageNo, pageSize);
 }
 
-function toggleQuickList(show: boolean) {
-  if (chatStore.messages.length > 0 && show) return;
-  chatStore.showQuickList = show;
-}
-
 async function onSessionClick(session: { sessionId?: string | number; id?: string | number }) {
   const id = session?.sessionId || session?.id;
   if (!id || chatStore.aiSessionId === id) return;
   cancelActiveStream();
-  chatStore.showQuickPrompts = false;
-  chatStore.showQuickList = false;
   chatStore.messages = [];
   sessionStore.isSessionSwitching = true;
   chatStore.aiSessionId = id;
@@ -325,19 +291,6 @@ async function onSessionRename(session: { id?: string | number; name?: string })
   }
 }
 
-async function loadAwakeningPrompt() {
-  if (!userStore.visitorRole || userStore.awakeningPrompt) return;
-  chatStore.awakeningLoading = true;
-  try {
-    userStore.setAwakeningPrompt(await getTodayAwakeningPrompt() ?? null);
-  } catch (error) {
-    logger.warn("failed to load awakening prompt", error);
-    userStore.setAwakeningPrompt(null);
-  } finally {
-    chatStore.awakeningLoading = false;
-  }
-}
-
 async function onScrollTop() {
   if (!chatStore.aiSessionId) return;
   try {
@@ -348,8 +301,8 @@ async function onScrollTop() {
   }
 }
 
-/** 演示页 URL 参数 step（1~15）：page query 优先，其次容错解析 location 上的 search/hash */
-function readDemoStepParam(options?: Record<string, string | undefined>): number {
+/** 演示 URL 参数 step（1~15）：page query 优先，其次容错解析 location 上的 search/hash；未带 step 返回 undefined（正常对话页） */
+function readDemoStepParam(options?: Record<string, string | undefined>): number | undefined {
   const queryValue = String(options?.step ?? "");
   if (queryValue) return normalizeDemoStep(Number(queryValue));
   if (typeof location !== "undefined") {
@@ -357,7 +310,7 @@ function readDemoStepParam(options?: Record<string, string | undefined>): number
     const matched = /[?&]step=([^&#]*)/.exec(source);
     if (matched) return normalizeDemoStep(Number(decodeURIComponent(matched[1])));
   }
-  return 1;
+  return undefined;
 }
 
 onLoad((options) => {
@@ -365,17 +318,18 @@ onLoad((options) => {
   // 进入即固定作业指导身份，并起一轮干净会话（返回首页再进会重新开一轮）
   chatStore.resetConversation();
   chatStore.setSubagent("guide");
-  // —— 开发演示：注入「底部回答卡片」模拟会话（含"其他"输入型选项）——
-  // 用 URL 参数 step=1~15 切换演示阶段（默认 1）；后端流式联调后删除以下 3 行与
-  // 顶部 buildDemoConversation / normalizeDemoStep 的 import
-  chatStore.messages.push(...buildDemoConversation(readDemoStepParam(options)));
+  // 作业指导页不展示快捷入口 / 切换导航，只保留对话
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
+  // 带 step=1~15 时注入「底部回答卡片」开发演示帧；不带 step 即正常对话页
+  const demoStep = readDemoStepParam(options);
+  if (demoStep == null) return;
+  // —— 开发演示（后端流式联调后删除以下注入与 demo-conversation 引用）——
+  chatStore.messages.push(...buildDemoConversation(demoStep));
 });
 
 onMounted(() => {
   syncWindowHeight();
-  loadAwakeningPrompt();
 });
 
 onShow(() => {
@@ -415,21 +369,15 @@ onUnload(() => {
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
         :messages="bubbleMessages"
-        :quick-prompts="localizedQuickPrompts"
-        :show-quick-prompts="showQuickPrompts"
         :show-business-overview="false"
         :scroll-into-view="scrollIntoView"
-        :show-quick-list="showQuickList"
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
         :bottom-inset="messageBottomInset"
-        :awakening="userStore.awakeningPrompt"
-        :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"
         :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
         :realtime-tts-playing="realtimeTts.playing.value"
-        @quick-prompt="sendQuickPrompt"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
@@ -437,12 +385,6 @@ onUnload(() => {
         @select-toggle="onShareSelectToggle"
         @scroll-top="onScrollTop"
         @pinned-change="chatStore.setPinnedToBottom"
-      />
-      <AiChatNav
-        :visible="showQuickPrompts"
-        :active-key="GUIDE_NAV_KEY"
-        :style="navOffsetStyle"
-        @item-click="onNavItemClick"
       />
       <!-- 回答卡片：AI 回答末尾的选项，固定浮层盖在输入栏上（发送下一条后自动收起） -->
       <AiReplyCard
@@ -569,7 +511,6 @@ onUnload(() => {
         @stop="stopGenerating"
         @recognize-begin="beginAsrPlaceholder"
         @recognize-fail="discardAsrPlaceholder"
-        @toggle-quick-list="toggleQuickList"
         @input-focus="setTextInputFocused(true)"
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
