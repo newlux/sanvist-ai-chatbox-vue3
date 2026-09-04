@@ -11,6 +11,7 @@ import {
   renameConversation,
 } from "@/api/chat";
 import { extractDifyHistoryBlocks } from "@/utils/ai-stream/dify";
+import { isPodcastSession } from "@/utils/session-scene";
 
 type ChatStore = ReturnType<typeof useChatStore>;
 
@@ -114,10 +115,11 @@ export const useSessionStore = defineStore("session", () => {
     const rows = Array.isArray(page?.data) ? page.data : [];
     lastId.value = rows.at(-1)?.id || null;
     hasMore.value = Boolean(page?.hasMore);
+    const visible = rows.filter(session => !isPodcastSession(session));
     sessions.value = pageNo === 1
-      ? rows
-      : [...sessions.value, ...rows.filter(session => !sessions.value.some(item => item.id === session.id))];
-    return { data: rows, hasMore: hasMore.value };
+      ? visible
+      : [...sessions.value, ...visible.filter(session => !sessions.value.some(item => item.id === session.id))];
+    return { data: visible, hasMore: hasMore.value };
   }
 
   /**

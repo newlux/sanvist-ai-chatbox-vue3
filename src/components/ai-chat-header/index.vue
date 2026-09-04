@@ -5,12 +5,14 @@ import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { createLogger } from "@/utils/logger";
+import { getSessionSceneLabel, isPodcastSession } from "@/utils/session-scene";
 
 /** 历史会话条目：字段与网关 Conversation 对齐，这里只取用到的几个 */
 interface SessionItem {
   id?: string | number;
   sessionId?: string | number;
   name?: string;
+  inputs?: Record<string, unknown>;
   createdAt?: number;
   updatedAt?: number;
 }
@@ -57,7 +59,7 @@ const isSessionListScrolling = ref(false);
 let sessionScrollIdleTimer;
 
 const sessionList = computed({
-  get: () => props.sessions,
+  get: () => (props.sessions || []).filter(session => !isPodcastSession(session)),
   set: sessions => emit("update:sessions", sessions),
 });
 const actionMenuStyle = computed(() => ({ top: `${actionMenuTop.value}px` }));
@@ -495,6 +497,9 @@ onBeforeUnmount(() => {
                     <text class="history-drawer_item-label">
                       {{ session.name || "新对话" }}
                     </text>
+                    <text class="history-drawer_item-tag">
+                      {{ getSessionSceneLabel(session) }}
+                    </text>
                   </view>
                   <view v-if="editingMode" class="history-drawer__check">
                     <image
@@ -929,11 +934,28 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 .history-drawer_item-label {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+  color: #1a1a1a;
   font-size: 28rpx;
   line-height: 40rpx;
-  color: #1a1a1a;
-  flex: 1;
-  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-drawer_item-tag {
+  flex-shrink: 0;
+  height: 36rpx;
+  margin-left: 16rpx;
+  padding: 0 12rpx;
+  border-radius: 8rpx;
+  background: #fff2f3;
+  color: #fe0000;
+  font-size: 20rpx;
+  font-weight: 500;
+  line-height: 36rpx;
+  white-space: nowrap;
 }
 
 .history-drawer__rename-input {

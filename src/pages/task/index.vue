@@ -4,11 +4,13 @@ import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
+import iconForm from "@/assets/img/icon-form.svg";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
+import AiSceneWelcome from "@/components/ai-scene-welcome/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
@@ -18,6 +20,7 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
+import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
 /**
  * 任务协同页（基于首页 home 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
@@ -138,6 +141,7 @@ function onTtsClick(index: number) {
 }
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
+const showSceneWelcome = computed(() => !messages.value.length && !isSessionSwitching.value);
 
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
 
@@ -197,9 +201,8 @@ function toggleQuickList(show: boolean) {
   chatStore.showQuickList = show;
 }
 
-async function onSessionClick(session: { sessionId?: string | number; id?: string | number }) {
-  const id = session?.sessionId || session?.id;
-  if (!id || chatStore.aiSessionId === id) return;
+async function openLocalHistory(id: string | number, force = false) {
+  if (!force && String(chatStore.aiSessionId) === String(id) && chatStore.messages.length) return;
   cancelActiveStream();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
@@ -214,6 +217,14 @@ async function onSessionClick(session: { sessionId?: string | number; id?: strin
   } finally {
     sessionStore.isSessionSwitching = false;
   }
+}
+
+function onSessionClick(session: { sessionId?: string | number; id?: string | number; inputs?: Record<string, unknown> }) {
+  const id = getSessionId(session);
+  if (!id) return;
+  if (navigateToSessionScene(session, "TASK")) return;
+  if (String(chatStore.aiSessionId) === String(id)) return;
+  void openLocalHistory(id);
 }
 
 async function confirmModal(title: string, content: string) {
@@ -296,8 +307,13 @@ async function onScrollTop() {
   }
 }
 
-onLoad(() => {
+onLoad((options) => {
   syncWindowHeight();
+  const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("TASK");
+  if (sessionId) {
+    void openLocalHistory(consumePendingHistorySession("TASK") || sessionId, true);
+    return;
+  }
   // 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 TASK。
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
@@ -311,6 +327,8 @@ onMounted(() => {
 
 onShow(() => {
   syncWindowHeight();
+  const sessionId = consumePendingHistorySession("TASK");
+  if (sessionId) void openLocalHistory(sessionId, true);
 });
 
 onUnload(() => {
@@ -343,6 +361,12 @@ onUnload(() => {
         @session-delete-batch="onSessionDeleteBatch"
         @session-rename="onSessionRename"
         @share-select-all="onShareSelectAll"
+      />
+      <AiSceneWelcome
+        v-if="showSceneWelcome"
+        title="欢迎使用任务协同助手"
+        subtitle="说清目标和现场变化，我来帮你协同安排。"
+        :icon="iconForm"
       />
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
