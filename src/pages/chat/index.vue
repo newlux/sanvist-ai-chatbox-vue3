@@ -17,9 +17,9 @@ import { provideChatScope, useChatStore, useUserStore } from "@/stores";
 import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
 
 /**
- * 智能体会话页（听汇报 / 任务协同）。
+ * 智能体会话页（听汇报）。
  *
- * 复用首页那套消息列表与底部输入栏，区别只在于：进页面先起一轮干净的会话，
+ * 复用底部输入栏；进页面先起一轮干净的会话，
  * 并把 subagent 挂进 chatStore —— 发送时由 useChatSend 塞进 inputs 透传给算法侧。
  */
 defineOptions({ name: "SubagentChatPage" });

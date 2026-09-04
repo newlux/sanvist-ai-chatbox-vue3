@@ -29,7 +29,7 @@ function closeInsight() {
 
 function openOperatorItem(item: ReportInsightItem) {
   uni.navigateTo({
-    url: `/pages/chat/index?subagent=${encodeURIComponent("task")}&eventId=${encodeURIComponent(item.id)}&title=${encodeURIComponent(item.title)}`,
+    url: `/pages/task/index?eventId=${encodeURIComponent(item.id)}&title=${encodeURIComponent(item.title)}`,
   });
 }
 

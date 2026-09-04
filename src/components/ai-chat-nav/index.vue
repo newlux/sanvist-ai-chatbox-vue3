@@ -43,7 +43,7 @@ const navItems = computed(() => {
   }
 
   // subagent 随 inputs 透传给算法侧；三个入口都另开页面，
-  // 作业指导带专属页面 url，听汇报 / 任务协同走通用智能体会话页
+  // 作业指导 / 任务协同带专属页面 url，听汇报走通用智能体会话页
   return [
     { key: "vox-core", title: "听汇报", icon: iconVox, subagent: "report", mode: "page" },
     {
@@ -54,7 +54,14 @@ const navItems = computed(() => {
       mode: "page",
       url: "/pages/guide/index",
     },
-    { key: "ai-form", title: "任务协同", icon: iconForm, subagent: "task", mode: "page" },
+    {
+      key: "ai-form",
+      title: "任务协同",
+      icon: iconForm,
+      subagent: "task",
+      mode: "page",
+      url: "/pages/task/index",
+    },
   ];
 });
 

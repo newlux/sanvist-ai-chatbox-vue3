@@ -170,7 +170,7 @@ function startNewConversation() {
 }
 
 /**
- * 快捷入口：听汇报 / 任务协同各自另开一个会话页；
+ * 快捷入口：听汇报 / 任务协同各自另开一个会话页（任务协同走专属页）；
  * 作业指导已在当前页（高亮），点了不重复入栈。
  */
 function onNavItemClick(item: { key?: string; title?: string; subagent?: string; url?: string }) {

@@ -148,7 +148,7 @@ function startNewConversation() {
 
 /**
  * 快捷入口：听汇报另开通用智能体会话页。
- * 作业指导等带专属页面 url 的入口由 onNavItemClick 优先跳专属页（url 优先）。
+ * 作业指导 / 任务协同等带专属页面 url 的入口由 onNavItemClick 优先跳专属页（url 优先）。
  */
 function enterListenReport() {
   saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
@@ -168,7 +168,7 @@ function onNavItemClick(item: { key?: string; title?: string; subagent?: string;
     return;
   }
 
-  // 带专属页面 url 的入口（如作业指导 → /pages/guide/index）优先跳专属页
+  // 带专属页面 url 的入口（作业指导 / 任务协同）优先跳专属页
   const targetUrl = String(item?.url || "");
   if (targetUrl) {
     uni.navigateTo({ url: targetUrl });
