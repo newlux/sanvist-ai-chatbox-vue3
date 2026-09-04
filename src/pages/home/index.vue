@@ -147,42 +147,32 @@ function startNewConversation() {
 }
 
 /**
- * 快捷入口：听汇报另开通用智能体会话页。
- * 作业指导 / 任务协同等带专属页面 url 的入口由 onNavItemClick 优先跳专属页（url 优先）。
+ * 快捷入口：听汇报 / 作业指导 / 任务协同都走专属页（url 优先）。
+ * 听汇报跳转前先记下当天早报日期，供播报页判断是否已收听。
  */
 function enterListenReport() {
   saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
-  uni.navigateTo({
-    url: `/pages/chat/index?subagent=${encodeURIComponent("report")}&title=${encodeURIComponent("听汇报")}`,
-  });
+  uni.navigateTo({ url: "/pages/podcast/index" });
 }
 
 function onNavItemClick(item: { key?: string; title?: string; subagent?: string; mode?: string; url?: string }) {
-  const subagent = String(item?.subagent || "");
-  if (!subagent) return;
-
   if (item?.mode === "inline") {
+    const subagent = String(item?.subagent || "");
+    if (!subagent) return;
     const nextKey = navActiveKey.value === item.key ? "" : String(item.key || "");
     navActiveKey.value = nextKey;
     chatStore.setSubagent(nextKey ? subagent : "");
     return;
   }
 
-  // 带专属页面 url 的入口（作业指导 / 任务协同）优先跳专属页
   const targetUrl = String(item?.url || "");
-  if (targetUrl) {
-    uni.navigateTo({ url: targetUrl });
-    return;
-  }
-
-  if (subagent === "report") {
+  if (targetUrl === "/pages/podcast/index") {
     enterListenReport();
     return;
   }
-
-  uni.navigateTo({
-    url: `/pages/chat/index?subagent=${encodeURIComponent(subagent)}&title=${encodeURIComponent(item?.title || "")}`,
-  });
+  if (targetUrl) {
+    uni.navigateTo({ url: targetUrl });
+  }
 }
 
 /**

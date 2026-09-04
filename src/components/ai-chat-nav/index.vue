@@ -4,14 +4,14 @@ import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
 import iconVox from "@/assets/img/icon-vox.svg";
 
-/** 快捷入口。subagent 随请求透传给算法侧；mode=page 另开页面（url 优先，缺省走智能体会话页） */
+/** 快捷入口。mode=page 另开专属页面（url 指向对应场景页） */
 export interface NavItem {
   key: string;
   title: string;
   icon: string;
   subagent?: string;
   mode?: "page" | "inline";
-  /** mode=page 时优先跳转的目标页面，不传则回退到 /pages/chat/index?subagent=... */
+  /** mode=page 时跳转的目标页面 */
   url?: string;
 }
 
@@ -42,10 +42,16 @@ const navItems = computed(() => {
     return props.items;
   }
 
-  // subagent 随 inputs 透传给算法侧；三个入口都另开页面，
-  // 作业指导 / 任务协同带专属页面 url，听汇报走通用智能体会话页
+  // 三个入口都另开专属页面：听汇报 / 作业指导 / 任务协同
   return [
-    { key: "vox-core", title: "听汇报", icon: iconVox, subagent: "report", mode: "page" },
+    {
+      key: "vox-core",
+      title: "听汇报",
+      icon: iconVox,
+      subagent: "report",
+      mode: "page",
+      url: "/pages/podcast/index",
+    },
     {
       key: "fix-master-ai",
       title: "作业指导",

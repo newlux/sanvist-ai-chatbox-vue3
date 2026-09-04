@@ -248,7 +248,7 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 /* —— ① 根容器(940:130 画布 375×812，白底，flex 纵向流，内容居中) ——
-   普通文档流（非 fixed 覆盖层），由外层 subagent-page flex 撑满；
+   普通文档流（非 fixed 覆盖层），由外层 podcast-page flex 撑满；
    relative 仅为内部 absolute 子元素提供定位参照。顶部安全区由外层 statusbar 占位统一负责 */
 .report-style-selector {
   position: relative;

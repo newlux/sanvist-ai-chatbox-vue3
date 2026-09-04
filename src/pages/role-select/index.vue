@@ -108,12 +108,12 @@ async function startChat() {
     // 设置身份后立刻预取今日觉醒内容，进入首页即可直接展示
     const result = await getTodayAwakeningPrompt();
     userStore.setAwakeningPrompt(result ?? null);
-    uni.redirectTo({ url: "/pages/index/index?mode=demo" });
+    uni.redirectTo({ url: "/pages/home/index?mode=demo" });
   } catch (error) {
     logger.warn("failed to prefetch awakening prompt", error);
     // 预取失败仍允许进入首页，首页会兜底重试
     userStore.setAwakeningPrompt(null);
-    uni.redirectTo({ url: "/pages/index/index?mode=demo" });
+    uni.redirectTo({ url: "/pages/home/index?mode=demo" });
   } finally {
     submitting.value = false;
   }

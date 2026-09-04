@@ -269,7 +269,7 @@ function closeSelector() {
 </template>
 
 <style lang="scss" scoped>
-/* 根容器：普通文档流（非 fixed 覆盖层），由外层 subagent-page flex 撑满；
+/* 根容器：普通文档流（非 fixed 覆盖层），由外层 podcast-page flex 撑满；
    relative 仅为内部 absolute 子元素提供定位参照。顶部安全区由外层 statusbar 占位统一负责 */
 .report-voice-selector {
   position: relative;
