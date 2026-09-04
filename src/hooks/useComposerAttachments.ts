@@ -1,18 +1,17 @@
 import type { ChatFile } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
+import type { NativeSelectedFile } from "@/utils/platform/mpaas";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { uploadChatFile } from "@/api/chat";
 import { useUserStore } from "@/stores";
-import { createLogger } from "@/utils/logger";
 
+import { createLogger } from "@/utils/logger";
 import {
   chooseNativeFiles,
   ensureNativePermission,
-  isMpaasReady,
   permissionDeniedMessage,
   waitForMpaas,
-  type NativeSelectedFile,
 } from "@/utils/platform/mpaas";
 
 const logger = createLogger("attachments");
@@ -25,7 +24,7 @@ const MAX_LOCAL_FILE_SIZE = 50 * 1024 * 1024;
  * 是否强制走 H5 低版本自定义上传（uni.chooseImage / uni.chooseFile + /files/upload）。
  *
  * 当前需求：附件上传一律走 H5 上传，不再走原生 imageChoose（原生选择 + 原生上传 + COS 预签名）；
- * 回显直接用 /files/upload 返回的 url，不再调 COS 预签名 download 接口。
+ * 回显始终使用选择器返回的本地路径，不再调 preview 或 COS 预签名下载接口。
  * 原生相关代码（chooseNativeFiles / appendNativeUploadedFiles 等）全部保留备用，
  * 后续要恢复「原生优先」时改回 false 即可。
  */
@@ -37,14 +36,37 @@ const FORCE_H5_UPLOAD = true;
  * 原生选择器（imageChoose.fileTypes）与前端本地校验共用这一份清单。
  */
 export const DEFAULT_ALLOWED_EXTENSIONS = [
-  "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "svg",
   "pdf",
-  "doc", "docx",
-  "xls", "xlsx",
-  "ppt", "pptx",
-  "txt", "md", "csv",
-  "mp3", "wav", "m4a", "aac", "ogg", "flac", "wma",
-  "mp4", "mov", "avi", "mkv", "webm", "flv", "wmv",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "txt",
+  "md",
+  "csv",
+  "mp3",
+  "wav",
+  "m4a",
+  "aac",
+  "ogg",
+  "flac",
+  "wma",
+  "mp4",
+  "mov",
+  "avi",
+  "mkv",
+  "webm",
+  "flv",
+  "wmv",
 ] as const;
 
 /** 原生选择器 fileTypes：逗号分隔的完整白名单（文件选择用） */
@@ -61,16 +83,13 @@ type AttachmentStatus = "uploading" | "uploaded" | "failed";
 
 export interface ComposerAttachment {
   localId: string;
-  /** Dify 文件 id：上传接口回填，图片展示走 GET /files/{file_id}/preview 鉴权拉取 */
+  /** Dify 文件 id：上传接口回填，仅用于发送与后续历史预览。 */
   fileId: string;
   /** 原生上传完成后是可访问地址；低版本降级上传是本地临时路径，用于缩略图预览与失败重传 */
   localPath: string;
   /** 发送时作为 files[].url */
   url: string;
-  /**
-   * 预览回显地址。现在直接使用上传返回的 url 回显（不再走 COS 预签名接口），
-   * 该字段保留以兼容历史消息里已有的预签名/blob 地址。
-   */
+  /** 兼容旧数据的预览地址；本次选择的图片始终使用 localPath 展示。 */
   previewPath?: string;
   name: string;
   size: number;
@@ -613,23 +632,29 @@ export function useComposerAttachments() {
 
   /**
    * 取出可提交的附件并清空输入栏。
-   * files 按网关的 SendFile 契约（type/transferMethod/url）；
-   * meta 多带名称体积，用于消息气泡展示和 inputs 透传。
+   * 上传接口返回 fileId 时按 Dify local_file 契约发送；旧原生路径没有 fileId 时
+   * 才以 remote_url 兼容。meta 多带本地路径与名称体积，用于当前消息气泡展示。
    */
   function takeUploadedFiles(): { files: ChatFile[]; meta: ChatMessageAttachment[] } {
     logger.info("[attachment] takeUploadedFiles start", { total: attachments.value.length });
-    const uploaded = attachments.value.filter(item => item.status === "uploaded" && item.url);
-    // type 直接用归类结果（含 custom），transferMethod 固定 remote_url——
-    // 文件已上传过，这里给的是可访问地址
-    const files = uploaded.map(item => ({
-      type: item.type,
-      transferMethod: "remote_url" as const,
-      url: item.url,
-    }));
+    const uploaded = attachments.value.filter(item =>
+      item.status === "uploaded" && Boolean(item.fileId || item.url),
+    );
+    const files: ChatFile[] = uploaded.map(item => item.fileId
+      ? {
+          type: item.type,
+          transferMethod: "local_file",
+          uploadFileId: item.fileId,
+        }
+      : {
+          type: item.type,
+          transferMethod: "remote_url",
+          url: item.url,
+        });
     const meta = uploaded.map(item => ({
       fileId: item.fileId,
       url: item.url,
-      previewPath: item.previewPath,
+      localPath: item.localPath,
       name: item.name,
       type: item.type,
       size: item.size,

@@ -179,8 +179,8 @@ function onQuickPrompt(prompt) {
   emit("quick-prompt", prompt);
 }
 
-function onSuggestionTap(suggestion) {
-  emit("suggestion-tap", suggestion);
+function onSuggestionTap(suggestion, messageIndex: number) {
+  emit("suggestion-tap", suggestion, messageIndex);
 }
 
 function onTtsClick(index) {
@@ -357,7 +357,7 @@ const listPadStyle = computed(() =>
               :disabled="isMessageDisabled(index, msg)"
               :no-answer-group="!!msg.noAnswerGroup"
               :asr-pending="!!msg.asrPending"
-              @suggestion-tap="onSuggestionTap"
+              @suggestion-tap="onSuggestionTap($event, index)"
               @tts-click="onTtsClick(index)"
               @share-click="onShareClick(index, msg)"
               @select-toggle="onSelectToggle(index)"

@@ -4,7 +4,7 @@ import type {
   MessageEndEvent,
 } from "@/api/chat/types";
 
-export type AiBlockType = "answer" | "think" | "suggestion" | "chart" | "table" | "metric" | "status" | "tool_call" | "error";
+export type AiBlockType = "answer" | "think" | "suggestion" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error";
 
 /** 深度思考步骤：由 status 事件按 node 聚合而来 */
 export interface ThinkStep {
@@ -61,6 +61,11 @@ function upsertBlock(
 function readThinkSteps(blocks: AiBlock[]): ThinkStep[] {
   const steps = blocks.find(block => block.id === "think-0")?.payload.steps;
   return Array.isArray(steps) ? steps as ThinkStep[] : [];
+}
+
+function stablePayloadId(prefix: string, values: unknown[], fallbackIndex: number) {
+  const parts = values.map(value => String(value || "").trim()).filter(Boolean);
+  return parts.length ? `${prefix}-${parts.join("-")}` : `${prefix}-${fallbackIndex}`;
 }
 
 export function buildInitialBlocks(): AiBlock[] {
@@ -177,6 +182,35 @@ export function applyEventToBlocks(
       return {
         ...base,
         blocks: upsertBlock(blocks, `table-${tableIndex}`, "table", event.data, true),
+        receivedContent: true,
+      };
+    }
+    case "image": {
+      const imageIndex = blocks.filter(block => block.type === "image").length;
+      const items = Array.isArray(event.data?.items) ? event.data.items : [];
+      const imageId = stablePayloadId("image", items.map(item => (item as Record<string, unknown>)?.chunk_id), imageIndex);
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, imageId, "image", event.data, true),
+        receivedContent: true,
+      };
+    }
+    case "video": {
+      const videoIndex = blocks.filter(block => block.type === "video").length;
+      const videoId = stablePayloadId("video", [event.data?.chunk_id], videoIndex);
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, videoId, "video", event.data, true),
+        receivedContent: true,
+      };
+    }
+    case "source": {
+      const sourceIndex = blocks.filter(block => block.type === "source").length;
+      const evidence = Array.isArray(event.data?.evidence) ? event.data.evidence : [];
+      const sourceId = stablePayloadId("source", evidence.map(item => (item as Record<string, unknown>)?.chunk_id), sourceIndex);
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, sourceId, "source", event.data, true),
         receivedContent: true,
       };
     }

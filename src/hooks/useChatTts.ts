@@ -12,9 +12,9 @@ function guessAudioMime(base64: string) {
   return "audio/mpeg";
 }
 
-export function useChatTts() {
+export function useChatTts(scope?: string) {
   const { t } = useI18n();
-  const chatStore = useChatStore();
+  const chatStore = useChatStore(scope);
   const activeMessageId = ref<string | number | null>(null);
   let audioCtx: ReturnType<typeof uni.createInnerAudioContext> | null = null;
   let requestSequence = 0;

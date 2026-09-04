@@ -8,7 +8,6 @@ const props = defineProps({
 });
 const emit = defineEmits(["suggestion-tap"]);
 
-const DEFAULT_TITLE = "你还可以继续问";
 const DEFAULT_PLACEHOLDER = "其他情况，请补充描述";
 
 interface SuggestionItem {
@@ -21,7 +20,6 @@ interface SuggestionItem {
   placeholder?: string;
 }
 
-const title = computed(() => String(props.payload?.title || props.payload?.header || DEFAULT_TITLE));
 const items = computed<SuggestionItem[]>(() =>
   Array.isArray(props.payload?.items) ? props.payload.items : [],
 );
@@ -90,9 +88,6 @@ function submitInput(index: number) {
 
 <template>
   <view v-if="items.length" class="suggestion-block">
-    <text class="suggestion-block__title">
-      {{ title }}
-    </text>
     <template v-for="(item, index) in items" :key="itemKey(item, index)">
       <!-- 普通选项：点击即发送 -->
       <view
@@ -103,7 +98,6 @@ function submitInput(index: number) {
         <text class="suggestion-block__text">
           {{ itemText(item) }}
         </text>
-        <image src="@/assets/img/icon-right.png" mode="aspectFit" class="suggestion-block__arrow" />
       </view>
 
       <!-- 输入型选项 · 占位外观（如「其他 + 内容」，点击后输入） -->
@@ -115,7 +109,6 @@ function submitInput(index: number) {
         <text class="suggestion-block__text suggestion-block__text--placeholder">
           {{ itemPlaceholder(item) }}
         </text>
-        <image src="@/assets/img/icon-right.png" mode="aspectFit" class="suggestion-block__arrow" />
       </view>
 
       <!-- 输入型选项 · 编辑态：输入框 + 右侧发送箭头 -->
@@ -135,7 +128,7 @@ function submitInput(index: number) {
           @input="onInputChange(index, $event)"
           @blur="onInputBlur(index)"
           @confirm="onInputConfirm(index)"
-        />
+        >
         <view
           class="suggestion-block__send"
           :class="{
@@ -154,46 +147,45 @@ function submitInput(index: number) {
 .suggestion-block {
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
+  align-items: flex-start;
+  gap: 16rpx;
   background: transparent;
-}
-.suggestion-block__title {
-  color: #bbc0c9;
-  font-size: 28rpx;
-  line-height: 48rpx;
 }
 .suggestion-block__item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12rpx;
-  padding: 12rpx 24rpx;
-  border-radius: 8rpx;
-  background: #f9f9f9;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 16rpx 24rpx;
+  border: 1rpx solid #e3e3e3;
+  border-radius: 16rpx;
+  background: #ffffff;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.06);
+}
+.suggestion-block__item:active {
+  background: #f7f7f7;
 }
 .suggestion-block__item--input {
-  border: 2rpx dashed #e1e3e8;
   background: #ffffff;
 }
 .suggestion-block__item--editing {
+  align-self: stretch;
+  width: 100%;
   padding: 8rpx 12rpx 8rpx 24rpx;
   border: 2rpx solid #c8201e;
   background: #ffffff;
+  box-shadow: none;
 }
 .suggestion-block__text {
-  flex: 1;
-  color: #5f6775;
-  font-size: 24rpx;
-  line-height: 36rpx;
+  color: #333333;
+  font-size: 28rpx;
+  line-height: 40rpx;
   word-break: break-word;
 }
 .suggestion-block__text--placeholder {
   color: #b9bec7;
-}
-.suggestion-block__arrow {
-  width: 16rpx;
-  height: 16rpx;
-  flex-shrink: 0;
 }
 .suggestion-block__input {
   flex: 1;

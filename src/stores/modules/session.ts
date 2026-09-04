@@ -14,6 +14,34 @@ import { extractDifyHistoryBlocks } from "@/utils/ai-stream/dify";
 
 type ChatStore = ReturnType<typeof useChatStore>;
 
+/** Dify 历史文件的 url 是 preview 地址；其中的路径 ID 比 message_file 记录 ID 更可靠。 */
+function getPreviewFileId(value: unknown) {
+  const matched = /\/files\/([^/?#]+)\/(?:preview|file-preview)(?:[/?#]|$)/i.exec(String(value || ""));
+  if (!matched?.[1]) return "";
+  try {
+    return decodeURIComponent(matched[1]);
+  } catch {
+    return matched[1];
+  }
+}
+
+/** 历史消息没有本地临时路径，图片由气泡组件根据 fileId 请求 preview 接口。 */
+function mapHistoryAttachments(value: unknown) {
+  return (Array.isArray(value) ? value : []).map((raw) => {
+    const file = raw as Record<string, unknown>;
+    const type = String(file.type || "document").toLowerCase();
+    const url = String(file.url || "");
+    return {
+      fileId: String(file.upload_file_id || file.file_id || getPreviewFileId(url) || file.id || ""),
+      url,
+      name: String(file.name || file.filename || (type === "image" ? "图片" : "附件")),
+      type,
+      size: Number(file.size) || undefined,
+      mimeType: String(file.mime_type || file.mimeType || ""),
+    };
+  }).filter(file => file.fileId || file.url);
+}
+
 export function mapHistoryMessages(
   list: unknown[],
   fallbackSessionId: Identifier | null,
@@ -24,7 +52,8 @@ export function mapHistoryMessages(
     const sessionId = (item?.conversationId ?? fallbackSessionId ?? null) as Identifier | null;
     const messageId = (item?.id ?? null) as Identifier | null;
     const userText = String(item?.query || "").trim();
-    // 标准 Dify answer 中可能内嵌 SANVIST/ASK 协议，按原顺序还原文本、表格和图表。
+    const attachments = mapHistoryAttachments(item?.messageFiles);
+    // 标准 Dify answer 中可能内嵌 SANVIST/ASK/GUIDE 协议，按原顺序还原文本与富内容卡片。
     const blocks = extractDifyHistoryBlocks(item?.answer)
       .filter(block => block.type !== "answer" || String(block.payload.content || "").trim())
       .map((block, index) => ({
@@ -33,8 +62,8 @@ export function mapHistoryMessages(
         payload: block.payload,
         complete: true,
       }));
-    if (userText) {
-      mapped.push({ role: "user", content: userText, sessionId, messageId });
+    if (userText || attachments.length) {
+      mapped.push({ role: "user", content: userText, attachments, sessionId, messageId });
     }
     if (blocks.length) {
       const feedback = item?.feedback as { rating?: string; content?: string } | undefined;

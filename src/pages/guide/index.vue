@@ -9,7 +9,6 @@ import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
-import AiReplyCard from "@/components/ai-reply-card/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
@@ -19,14 +18,13 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
-import { buildDemoConversation, normalizeDemoStep } from "./demo-conversation";
 
 /**
  * 作业指导页（基于首页 index 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
  *
  * 与首页 / 听汇报的区别：
  * - 独立会话域 "guide"，不与首页主会话互相污染；
- * - 进入即固定 subagent=guide，发送时由 useChatSend 透传 inputs.subagent；
+ * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=GUIDE；
  * - 每次进入起一轮干净会话（与听汇报一致），返回再进时重新开一轮。
  */
 defineOptions({ name: "AiGuidePage" });
@@ -68,7 +66,9 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
+const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+  scene: "GUIDE",
+});
 const {
   iconCopyImage,
   iconSaveImage,
@@ -91,72 +91,28 @@ const {
   closeSharePosterModal,
   onSaveSharePoster,
   onCopySharePoster,
-} = useChatShare(sharePosterWrap);
-const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback();
-const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts();
-const realtimeTts = useRealtimeTts();
+} = useChatShare(sharePosterWrap, chatScope);
+const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback(chatScope);
+const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
+const realtimeTts = useRealtimeTts(chatScope);
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
-  // 回答卡片盖住输入栏时，列表要抬到卡片上方（测量值未回传前按估算垫高）
-  if (replyOptions.value) {
-    return replyCardHeightPx.value
-      ? `calc(${replyCardHeightPx.value}px + 24rpx)`
-      : `calc(${composerBottomInset.value} + 800rpx)`;
-  }
   // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
   if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
   return composerBottomInset.value;
 });
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
-/** 底部回答卡片实测高度（px），用于给消息列表垫底 */
-const replyCardHeightPx = ref(0);
 
-function onReplyCardHeightChange(height: number) {
-  replyCardHeightPx.value = Number(height) || 0;
-}
-
-/** 点回答卡片右上角关闭：移除最后一条已完成 AI 消息里的 suggestion 块，卡片随之收起 */
-function closeReplyCard() {
-  for (let index = chatStore.messages.length - 1; index >= 0; index--) {
-    const message = chatStore.messages[index];
-    if (message.role !== "ai" || !Array.isArray(message.blocks)) continue;
+/** 点击追问后先移除它所属回答的追问列表，再按普通问题走完整发送链路。 */
+function onGuideSuggestionTap(suggestion: string, messageIndex: number) {
+  const message = chatStore.messages[messageIndex];
+  if (message?.role === "ai" && Array.isArray(message.blocks)) {
     const blockIndex = message.blocks.findIndex(block => block.type === "suggestion");
-    if (blockIndex < 0) continue;
-    message.blocks.splice(blockIndex, 1);
-    return;
+    if (blockIndex >= 0) message.blocks.splice(blockIndex, 1);
   }
+  sendQuickPrompt(suggestion);
 }
-
-/**
- * 回答卡片数据来源：AI 回答末尾的选项以底部浮层展示（盖住输入栏），
- * 不再渲染进气泡正文。取最后一条已完成 AI 消息的 suggestion 块作为当前卡片：
- * - 生成中/被中断或该消息没有选项时返回 null（不出现卡片，输入栏恢复可用）；
- * - 选项被消费（发送下一条消息）后 loading 消息置顶，卡片随之收起。
- */
-const replyOptions = computed<{ key: string; payload: Record<string, unknown> } | null>(() => {
-  for (let index = chatStore.messages.length - 1; index >= 0; index--) {
-    const message = chatStore.messages[index];
-    if (message.role !== "ai") continue;
-    if (message.loading || message.interrupted) return null;
-    const suggestion = (message.blocks || []).find(block => block.type === "suggestion" && block.complete);
-    return suggestion
-      ? { key: String(message.id || index), payload: (suggestion.payload || {}) as Record<string, unknown> }
-      : null;
-  }
-  return null;
-});
-
-/** 传给消息列表的气泡数据：suggestion 已上浮为底部回答卡片，气泡内不再重复渲染 */
-const bubbleMessages = computed(() =>
-  chatStore.messages.map(message => {
-    if (message.role !== "ai" || !Array.isArray(message.blocks)) return message;
-    const hasSuggestion = message.blocks.some(block => block.type === "suggestion");
-    if (!hasSuggestion) return message;
-    return { ...message, blocks: message.blocks.filter(block => block.type !== "suggestion") };
-  }),
-);
-
 /** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
 function onTtsClick(index: number) {
   const msg = chatStore.messages[index];
@@ -348,27 +304,10 @@ async function onScrollTop() {
   }
 }
 
-/** 演示页 URL 参数 step（1~15）：page query 优先，其次容错解析 location 上的 search/hash */
-function readDemoStepParam(options?: Record<string, string | undefined>): number {
-  const queryValue = String(options?.step ?? "");
-  if (queryValue) return normalizeDemoStep(Number(queryValue));
-  if (typeof location !== "undefined") {
-    const source = `${location.search || ""}${location.hash || ""}`;
-    const matched = /[?&]step=([^&#]*)/.exec(source);
-    if (matched) return normalizeDemoStep(Number(decodeURIComponent(matched[1])));
-  }
-  return 1;
-}
-
-onLoad((options) => {
+onLoad(() => {
   syncWindowHeight();
-  // 进入即固定作业指导身份，并起一轮干净会话（返回首页再进会重新开一轮）
+  // 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 GUIDE。
   chatStore.resetConversation();
-  chatStore.setSubagent("guide");
-  // —— 开发演示：注入「底部回答卡片」模拟会话（含"其他"输入型选项）——
-  // 用 URL 参数 step=1~15 切换演示阶段（默认 1）；后端流式联调后删除以下 3 行与
-  // 顶部 buildDemoConversation / normalizeDemoStep 的 import
-  chatStore.messages.push(...buildDemoConversation(readDemoStepParam(options)));
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
 });
@@ -404,6 +343,7 @@ onUnload(() => {
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
         :share-selected-round-count="shareSelectedRoundCount"
+        back-only
         @back="onBack"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"
@@ -414,7 +354,7 @@ onUnload(() => {
       />
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
-        :messages="bubbleMessages"
+        :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
         :show-business-overview="false"
@@ -430,6 +370,7 @@ onUnload(() => {
         :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
         :realtime-tts-playing="realtimeTts.playing.value"
         @quick-prompt="sendQuickPrompt"
+        @suggestion-tap="onGuideSuggestionTap"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
@@ -444,16 +385,6 @@ onUnload(() => {
         :style="navOffsetStyle"
         @item-click="onNavItemClick"
       />
-      <!-- 回答卡片：AI 回答末尾的选项，固定浮层盖在输入栏上（发送下一条后自动收起） -->
-      <AiReplyCard
-        v-if="replyOptions"
-        :key="replyOptions.key"
-        :payload="replyOptions.payload"
-        @submit="sendQuickPrompt"
-        @close="closeReplyCard"
-        @height-change="onReplyCardHeightChange"
-      />
-
       <view v-if="isSessionSwitching" class="session-loading">
         <view class="session-loading__spinner" />
       </view>
@@ -553,14 +484,8 @@ onUnload(() => {
         </view>
       </view>
 
-      <!--
-        底部对话框输入栏：仅在没有回答卡片、分享面板/海报时渲染。
-        卡片（AiReplyCard）盖住输入栏期间，主输入框必须从 DOM 移除，
-        否则点击卡片内「其他输入」input 会被全局 focusin 误判为对话框输入、
-        触发底层主输入栏的键盘抬升联动。
-      -->
       <AiChatInput
-        v-else-if="!replyOptions"
+        v-else
         v-model="inputText"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"

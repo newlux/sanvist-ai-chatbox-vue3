@@ -68,9 +68,9 @@ async function copyTextToClipboard(text: string) {
   return false;
 }
 
-export function useChatShare(posterEl: Ref<unknown>) {
+export function useChatShare(posterEl: Ref<unknown>, scope?: string) {
   const { t } = useI18n();
-  const chatStore = useChatStore();
+  const chatStore = useChatStore(scope);
   const shareSheetVisible = ref(false);
   const shareSelectedIndexes = ref<number[]>([]);
   const shareSuppressHighlight = ref(false);

@@ -1,57 +1,16 @@
 <script setup lang="ts">
 import type { ComposerAttachment } from "@/hooks/useComposerAttachments";
 import { formatAttachmentStatus } from "@/hooks/useComposerAttachments";
-import { ref, watch } from "vue";
-import { fetchFilePreviewBlobUrl, toInlineImageUrl } from "@/utils/image-preview";
 
-const props = defineProps<{ attachments: ComposerAttachment[] }>();
+defineProps<{ attachments: ComposerAttachment[] }>();
 
 const emit = defineEmits<{
   remove: [localId: string];
   retry: [localId: string];
 }>();
 
-/** 图片加载失败时的 blob 兜底地址（按附件 localId 记录，避免重复请求） */
-const imageFallback = ref<Record<string, string>>({});
-
-/**
- * 图片附件上传完成后：Dify 文件需走鉴权预览接口才能拿到内容，
- * 这里把真实字节拉回转成 blob URL 交给缩略图/大图渲染。
- */
-async function resolvePreview(attachment: ComposerAttachment) {
-  const localId = attachment.localId;
-  if (imageFallback.value[localId]) return;
-  const fileId = attachment.fileId;
-  if (!fileId) return;
-  const inline = await fetchFilePreviewBlobUrl(fileId, attachment.mimeType);
-  if (inline) {
-    imageFallback.value = { ...imageFallback.value, [localId]: inline };
-  }
-}
-
-watch(
-  () => props.attachments
-    .filter(item => item.type === "image" && item.status === "uploaded" && item.fileId)
-    .map(item => `${item.localId}:${item.fileId}`)
-    .join("|"),
-  () => {
-    props.attachments
-      .filter(item => item.type === "image" && item.status === "uploaded" && item.fileId)
-      .forEach(item => void resolvePreview(item));
-  },
-  { immediate: true },
-);
-
-/**
- * 缩略图展示地址：预览 blob 解析成功即用它；
- * 已上传但鉴权预览尚未解析完成时保持本地原图，避免 source_url 直链闪断/报错。
- */
 function thumbSrc(attachment: ComposerAttachment) {
-  if (imageFallback.value[attachment.localId]) return imageFallback.value[attachment.localId];
-  if (attachment.status === "uploaded" && attachment.fileId) {
-    return attachment.localPath || attachment.previewPath || attachment.url;
-  }
-  return attachment.previewPath || attachment.url || attachment.localPath;
+  return attachment.localPath || attachment.previewPath || attachment.url;
 }
 
 /**
@@ -64,15 +23,16 @@ function onItemTap(attachment: ComposerAttachment) {
     return;
   }
   if (attachment.type === "image") {
+    const localPath = thumbSrc(attachment);
+    if (!localPath) return;
     uni.previewImage({
-      // 预览 blob 解析成功后即真实图；解析前回退本地原图，避免 source_url 直链加载失败
-      urls: [imageFallback.value[attachment.localId] || attachment.localPath || attachment.previewPath || attachment.url],
+      urls: [localPath],
       current: 0,
     });
   }
 }
 
-/** 图片加载失败时打印排查（预签名地址失效 / 防盗链 / 404 等） */
+/** 本次选择的图片只使用本地路径；失败时记录信息，不回退调用 preview 接口。 */
 function onImageError(attachment: ComposerAttachment) {
   console.warn("[attachment] image load failed", {
     name: attachment.name,
@@ -81,30 +41,14 @@ function onImageError(attachment: ComposerAttachment) {
     previewPath: attachment.previewPath,
     localPath: attachment.localPath,
   });
-  // Dify 文件优先走鉴权预览接口拉取内容；无 fileId 时回退到直链 fetch + blob 兜底
-  if (attachment.fileId) {
-    void resolvePreview(attachment);
-    return;
-  }
-  void resolveImageFallback(attachment);
-}
-
-async function resolveImageFallback(attachment: ComposerAttachment) {
-  if (imageFallback.value[attachment.localId]) return;
-  const source = attachment.previewPath || attachment.url || attachment.localPath;
-  if (!source) return;
-  const inline = await toInlineImageUrl(source);
-  if (inline !== source) {
-    imageFallback.value = { ...imageFallback.value, [attachment.localId]: inline };
-  }
 }
 
 /** 图片加载成功：确认最终生效的是哪个地址（url / 本地） */
 function onImageLoad(attachment: ComposerAttachment) {
   console.log("[attachment] image load success", {
     name: attachment.name,
-    src: attachment.previewPath || attachment.url || attachment.localPath,
-    from: attachment.previewPath ? "previewPath(历史兼容)" : "url/localPath",
+    src: thumbSrc(attachment),
+    from: attachment.localPath ? "localPath" : "url",
   });
 }
 </script>

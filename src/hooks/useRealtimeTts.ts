@@ -88,9 +88,9 @@ function cleanAnswerText(raw: string): string {
  *
  * 历史对话仍走 useChatTts + GET /chat/tts，本引擎不影响它。
  */
-export function useRealtimeTts() {
+export function useRealtimeTts(scope?: string) {
   const { locale } = useI18n();
-  const chatStore = useChatStore();
+  const chatStore = useChatStore(scope);
   const playing = ref(false);
   const playingMessageId = ref<Identifier | null>(null);
   const playingMessageKey = ref<string | null>(null);
