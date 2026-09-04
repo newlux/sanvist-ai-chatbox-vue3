@@ -23,6 +23,7 @@ import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, us
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady } from "@/utils/platform/mpaas";
+import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
 defineOptions({ name: "AiChatPage" });
 const logger = createLogger("chat-page");
@@ -223,9 +224,8 @@ function backToWelcome() {
   if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
 }
 
-async function onSessionClick(session: { sessionId?: string | number; id?: string | number }) {
-  const id = session?.sessionId || session?.id;
-  if (!id || chatStore.aiSessionId === id) return;
+async function openLocalHistory(id: string | number, force = false) {
+  if (!force && String(chatStore.aiSessionId) === String(id) && chatStore.messages.length) return;
   cancelActiveStream();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
@@ -240,6 +240,14 @@ async function onSessionClick(session: { sessionId?: string | number; id?: strin
   } finally {
     sessionStore.isSessionSwitching = false;
   }
+}
+
+function onSessionClick(session: { sessionId?: string | number; id?: string | number; inputs?: Record<string, unknown> }) {
+  const id = getSessionId(session);
+  if (!id) return;
+  if (navigateToSessionScene(session, "ASK")) return;
+  if (String(chatStore.aiSessionId) === String(id)) return;
+  void openLocalHistory(id);
 }
 
 async function confirmModal(title: string, content: string) {
@@ -351,6 +359,11 @@ async function onScrollTop() {
 onLoad((options) => {
   isDemoPage = options?.mode === "demo";
   syncPageStage();
+  const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("ASK", "PODCAST");
+  if (sessionId) {
+    pageStage.value = "chat";
+    void openLocalHistory(consumePendingHistorySession("ASK", "PODCAST") || sessionId, true);
+  }
   void loadTodayListenBroadcast();
 });
 
@@ -365,6 +378,11 @@ function refreshListenReportState() {
 
 onShow(() => {
   syncWindowHeight();
+  const sessionId = consumePendingHistorySession("ASK", "PODCAST");
+  if (sessionId) {
+    pageStage.value = "chat";
+    void openLocalHistory(sessionId, true);
+  }
   syncPageStage();
   refreshListenReportState();
 });
