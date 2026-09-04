@@ -20,21 +20,21 @@ import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@
 import { createLogger } from "@/utils/logger";
 
 /**
- * 作业指导页（基于首页 index 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
+ * 任务协同页（基于首页 index 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
  *
  * 与首页 / 听汇报的区别：
- * - 独立会话域 "guide"，不与首页主会话互相污染；
- * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=GUIDE；
- * - 每次进入起一轮干净会话（与听汇报一致），返回再进时重新开一轮。
+ * - 独立会话域 "task"，不与首页主会话互相污染；
+ * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=TASK；
+ * - 每次进入起一轮干净会话（与作业指导一致），返回再进时重新开一轮。
  */
-defineOptions({ name: "AiGuidePage" });
+defineOptions({ name: "AiTaskPage" });
 
-/** 作业指导对应的导航项 key（与 ai-chat-nav 默认数据一致），本页内导航高亮该项 */
-const GUIDE_NAV_KEY = "fix-master-ai";
-const logger = createLogger("guide-page");
+/** 任务协同对应的导航项 key（与 ai-chat-nav 默认数据一致），本页内导航高亮该项 */
+const TASK_NAV_KEY = "ai-form";
+const logger = createLogger("task-page");
 const { t } = useI18n();
 
-const chatScope = provideChatScope("guide");
+const chatScope = provideChatScope("task");
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
 const sessionStore = useSessionStore();
@@ -67,7 +67,7 @@ const {
   setVoiceInputFocused,
 } = useChatViewport();
 const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
-  scene: "GUIDE",
+  scene: "TASK",
 });
 const {
   iconCopyImage,
@@ -105,7 +105,7 @@ const messageBottomInset = computed(() => {
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 
 /** 点击追问后先移除它所属回答的追问列表，再按普通问题走完整发送链路。 */
-function onGuideSuggestionTap(suggestion: string, messageIndex: number) {
+function onTaskSuggestionTap(suggestion: string, messageIndex: number) {
   const message = chatStore.messages[messageIndex];
   if (message?.role === "ai" && Array.isArray(message.blocks)) {
     const blockIndex = message.blocks.findIndex(block => block.type === "suggestion");
@@ -170,12 +170,12 @@ function startNewConversation() {
 }
 
 /**
- * 快捷入口：听汇报 / 任务协同各自另开一个会话页（任务协同走专属页）；
- * 作业指导已在当前页（高亮），点了不重复入栈。
+ * 快捷入口：听汇报 / 作业指导各自另开一个会话页；
+ * 任务协同已在当前页（高亮），点了不重复入栈。
  */
 function onNavItemClick(item: { key?: string; title?: string; subagent?: string; url?: string }) {
   const subagent = String(item?.subagent || "");
-  if (subagent === "guide") return;
+  if (subagent === "task") return;
 
   const targetUrl = String(item?.url || "");
   if (targetUrl) {
@@ -306,7 +306,7 @@ async function onScrollTop() {
 
 onLoad(() => {
   syncWindowHeight();
-  // 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 GUIDE。
+  // 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 TASK。
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
@@ -370,7 +370,7 @@ onUnload(() => {
         :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
         :realtime-tts-playing="realtimeTts.playing.value"
         @quick-prompt="sendQuickPrompt"
-        @suggestion-tap="onGuideSuggestionTap"
+        @suggestion-tap="onTaskSuggestionTap"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
@@ -381,7 +381,7 @@ onUnload(() => {
       />
       <AiChatNav
         :visible="showQuickPrompts"
-        :active-key="GUIDE_NAV_KEY"
+        :active-key="TASK_NAV_KEY"
         :style="navOffsetStyle"
         @item-click="onNavItemClick"
       />
