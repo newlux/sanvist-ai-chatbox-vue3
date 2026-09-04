@@ -2,7 +2,6 @@
 import AnswerBlock from "./blocks/AnswerBlock.vue";
 import ChartBlock from "./blocks/ChartBlock.vue";
 import ErrorBlock from "./blocks/ErrorBlock.vue";
-import EvidenceBlock from "./blocks/EvidenceBlock.vue";
 import MetricBlock from "./blocks/MetricBlock.vue";
 import StatusBlock from "./blocks/StatusBlock.vue";
 import SuggestionBlock from "./blocks/SuggestionBlock.vue";
@@ -61,7 +60,6 @@ function onSuggestionTap(suggestion: unknown) {
   />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
-  <EvidenceBlock v-else-if="block.type === 'evidence'" :items="block.payload.items" />
   <ErrorBlock v-else-if="block.type === 'error'" :payload="block.payload" />
   <SuggestionBlock v-else-if="block.type === 'suggestion'" :payload="block.payload" @suggestion-tap="onSuggestionTap" />
 </template>

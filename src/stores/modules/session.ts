@@ -11,7 +11,6 @@ import {
   renameConversation,
 } from "@/api/chat";
 import { extractSanvistAnswer } from "@/utils/ai-stream/dify";
-import { resolveAnswerText } from "@/utils/ai-stream/answerEnvelope";
 
 type ChatStore = ReturnType<typeof useChatStore>;
 
@@ -27,24 +26,13 @@ export function mapHistoryMessages(
     const userText = String(item?.query || "").trim();
     // 标准 Dify `/v1/messages` 的回答正文固定使用 answer；其中的 SANVIST 协议块需还原为实际 answer 内容。
     const answer = extractSanvistAnswer(item?.answer).trim();
-    const resolved = resolveAnswerText(answer);
-    const baseId = `history-${messageId ?? "message"}`;
-    const blocks = resolved.content
-      ? [
-          {
-            id: `${baseId}-answer`,
-            type: "answer" as const,
-            payload: { content: resolved.content },
-            complete: true,
-          },
-          // 作业指导把 answer+evidence 整体序列化进回答正文，历史回放时一并还原证据
-          ...(resolved.evidence.length ? [{
-            id: `${baseId}-evidence`,
-            type: "evidence" as const,
-            payload: { items: resolved.evidence },
-            complete: true,
-          }] : []),
-        ]
+    const blocks = answer
+      ? [{
+          id: `history-${messageId ?? "message"}-answer`,
+          type: "answer" as const,
+          payload: { content: answer },
+          complete: true,
+        }]
       : [];
     if (userText) {
       mapped.push({ role: "user", content: userText, sessionId, messageId });

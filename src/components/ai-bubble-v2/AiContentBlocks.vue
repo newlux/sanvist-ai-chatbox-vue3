@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { expandChartFences } from "@/utils/ai-stream";
-import type { AiBlock } from "@/utils/ai-stream";
 import AiBlockRenderer from "./AiBlockRenderer.vue";
 import AnswerGroupBlock from "./blocks/AnswerGroupBlock.vue";
 
@@ -27,11 +26,8 @@ const props = defineProps({
 
 const emit = defineEmits(["suggestion-tap"]);
 
-// 正文里内联的 ```echarts 围栏在这里展开成 chart 块，与后端单独推的 chart 事件同路渲染；
-// pending 是「整包 JSON 还在攒」的占位块，不进渲染层（攒包提示由 AiBubbleV2 负责）
-const normalizedBlocks = computed<AiBlock[]>(() =>
-  expandChartFences(props.blocks as AiBlock[]).filter(block => block?.type !== "pending"),
-);
+// 正文里内联的 ```echarts 围栏在这里展开成 chart 块，与后端单独推的 chart 事件同路渲染
+const normalizedBlocks = computed(() => expandChartFences(props.blocks || []));
 
 const renderItems = computed(() => {
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
