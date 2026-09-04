@@ -33,8 +33,7 @@ const selectedMessages = computed(() => {
         ? block.payload.blocks
         : [block],
     ).filter(
-      // evidence（参考资料）不进分享海报：转发对象未必需要引用原文，且图片/文件会撑爆卡片
-      block => !["think", "tool_call", "status", "suggestion", "evidence"].includes(block.type),
+      block => !["think", "tool_call", "status", "suggestion"].includes(block.type),
     );
     return { ...message, blocks };
   });
