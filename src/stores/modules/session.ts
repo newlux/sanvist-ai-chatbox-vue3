@@ -10,7 +10,7 @@ import {
   getMessages,
   renameConversation,
 } from "@/api/chat";
-import { extractSanvistAnswer } from "@/utils/ai-stream/dify";
+import { extractDifyHistoryBlocks } from "@/utils/ai-stream/dify";
 
 type ChatStore = ReturnType<typeof useChatStore>;
 
@@ -24,16 +24,15 @@ export function mapHistoryMessages(
     const sessionId = (item?.conversationId ?? fallbackSessionId ?? null) as Identifier | null;
     const messageId = (item?.id ?? null) as Identifier | null;
     const userText = String(item?.query || "").trim();
-    // 标准 Dify `/v1/messages` 的回答正文固定使用 answer；其中的 SANVIST 协议块需还原为实际 answer 内容。
-    const answer = extractSanvistAnswer(item?.answer).trim();
-    const blocks = answer
-      ? [{
-          id: `history-${messageId ?? "message"}-answer`,
-          type: "answer" as const,
-          payload: { content: answer },
-          complete: true,
-        }]
-      : [];
+    // 标准 Dify answer 中可能内嵌 SANVIST/ASK 协议，按原顺序还原文本、表格和图表。
+    const blocks = extractDifyHistoryBlocks(item?.answer)
+      .filter(block => block.type !== "answer" || String(block.payload.content || "").trim())
+      .map((block, index) => ({
+        id: `history-${messageId ?? "message"}-${block.type}-${index}`,
+        type: block.type,
+        payload: block.payload,
+        complete: true,
+      }));
     if (userText) {
       mapped.push({ role: "user", content: userText, sessionId, messageId });
     }

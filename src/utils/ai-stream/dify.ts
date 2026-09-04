@@ -47,6 +47,95 @@ function isFailedSanvistEvent(event: Record<string, unknown>, data: Record<strin
   return ["failed", "failure", "error", "exception"].includes(phase);
 }
 
+function splitMarkdownTableRow(line: string) {
+  return line.trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map(cell => cell.trim());
+}
+
+function parseMarkdownTable(content: unknown) {
+  const lines = String(content || "")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return null;
+  const columns = splitMarkdownTableRow(lines[0]);
+  const separator = splitMarkdownTableRow(lines[1]);
+  if (!columns.length || separator.length !== columns.length
+    || !separator.every(cell => /^:?-{3,}:?$/.test(cell))) {
+    return null;
+  }
+  return {
+    columns,
+    rows: lines.slice(2).map(splitMarkdownTableRow),
+  };
+}
+
+export interface DifyHistoryBlockData {
+  type: "answer" | "table" | "chart";
+  payload: Record<string, unknown>;
+}
+
+/** 将完整历史 answer 中的 SANVIST/ASK 协议按原顺序还原为 UI blocks。 */
+export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[] {
+  const source = String(value || "");
+  const pattern = /<(SANVIST|ASK)>([\s\S]*?)<\/\1>/g;
+  const blocks: DifyHistoryBlockData[] = [];
+  let cursor = 0;
+  let foundProtocol = false;
+
+  const appendAnswer = (content: unknown) => {
+    const text = String(content || "");
+    if (!text.trim()) return;
+    const previous = blocks.at(-1);
+    if (previous?.type === "answer") {
+      previous.payload.content = `${String(previous.payload.content || "")}${text}`;
+    } else {
+      blocks.push({ type: "answer", payload: { content: text } });
+    }
+  };
+
+  while (true) {
+    const match = pattern.exec(source);
+    if (!match) break;
+    appendAnswer(source.slice(cursor, match.index));
+    cursor = match.index + match[0].length;
+    try {
+      const payload = asRecord(JSON.parse(match[2]));
+      if (!payload) continue;
+      if (match[1] === "ASK") {
+        const type = String(payload.type || "").toLowerCase();
+        const data = asRecord(payload.data) || {};
+        if (type === "table") {
+          const table = String(data.format || "").toLowerCase() === "markdown"
+            ? parseMarkdownTable(data.content)
+            : { columns: data.columns, rows: data.rows };
+          if (table) blocks.push({ type: "table", payload: table });
+          foundProtocol = true;
+        } else if (type === "echarts") {
+          blocks.push({ type: "chart", payload: { option: data } });
+          foundProtocol = true;
+        }
+        continue;
+      }
+
+      const difyEvent = String(payload.dify_event || "");
+      const event = String(payload.event || "");
+      const known = ["status", "answer", "done"].includes(event)
+        || ["node_started", "node_retry", "node_finished", "workflow_finished"].includes(difyEvent);
+      if (!known) continue;
+      foundProtocol = true;
+      if (event === "answer") appendAnswer(asRecord(payload.data)?.content);
+    } catch {
+      // 历史中的非法协议块不参与渲染。
+    }
+  }
+  appendAnswer(source.slice(cursor));
+  return foundProtocol ? blocks : [{ type: "answer", payload: { content: source } }];
+}
+
 /**
  * 历史消息是一段完整文本，不需要处理跨 SSE 分片；仅提取 SANVIST answer 事件的正文。
  * 若不包含有效 SANVIST 事件，按普通 Dify answer 原样返回。
@@ -111,7 +200,7 @@ export function toDifyChatMessagesRequest(params: SendChatMessageParams): DifyCh
 export function createDifyEventNormalizer() {
   let receivedAgentMessage = false;
   let isWorkflowStream = false;
-  let sanvistBuffer = "";
+  let protocolBuffer = "";
   let receivedSanvistEvent = false;
   /** Chatflow 通常先发 message_end，后发 workflow_finished；先暂存，等待后者提供总耗时。 */
   let pendingMessageEnd: {
@@ -141,32 +230,52 @@ export function createDifyEventNormalizer() {
       shouldReplace = false;
     };
 
-    sanvistBuffer += value;
-    while (sanvistBuffer) {
-      const start = sanvistBuffer.indexOf("<SANVIST>");
+    protocolBuffer += value;
+    while (protocolBuffer) {
+      const sanvistStart = protocolBuffer.indexOf("<SANVIST>");
+      const askStart = protocolBuffer.indexOf("<ASK>");
+      const starts = [sanvistStart, askStart].filter(index => index >= 0);
+      const start = starts.length ? Math.min(...starts) : -1;
       if (start < 0) {
-        // 标签可能刚好被 SSE 分片切开，保留与起始标签相符的末尾，不能渲染到正文。
-        const marker = "<SANVIST>";
-        const suffixLength = Array.from({ length: marker.length - 1 }, (_, index) => index + 1)
-          .reverse()
-          .find(length => sanvistBuffer.endsWith(marker.slice(0, length))) || 0;
-        appendAnswer(sanvistBuffer.slice(0, -suffixLength || undefined));
-        sanvistBuffer = suffixLength ? sanvistBuffer.slice(-suffixLength) : "";
+        // 标签可能刚好被 SSE 分片切开，保留与任一起始标签相符的末尾。
+        const suffixLength = ["<SANVIST>", "<ASK>"]
+          .flatMap(marker => Array.from({ length: marker.length - 1 }, (_, index) => index + 1)
+            .map(length => protocolBuffer.endsWith(marker.slice(0, length)) ? length : 0))
+          .reduce((max, length) => Math.max(max, length), 0);
+        appendAnswer(protocolBuffer.slice(0, -suffixLength || undefined));
+        protocolBuffer = suffixLength ? protocolBuffer.slice(-suffixLength) : "";
         break;
       }
 
       if (start > 0) {
-        appendAnswer(sanvistBuffer.slice(0, start));
-        sanvistBuffer = sanvistBuffer.slice(start);
+        appendAnswer(protocolBuffer.slice(0, start));
+        protocolBuffer = protocolBuffer.slice(start);
       }
 
-      const end = sanvistBuffer.indexOf("</SANVIST>");
+      const isAsk = protocolBuffer.startsWith("<ASK>");
+      const openMarker = isAsk ? "<ASK>" : "<SANVIST>";
+      const closeMarker = isAsk ? "</ASK>" : "</SANVIST>";
+      const end = protocolBuffer.indexOf(closeMarker);
       if (end < 0) break;
 
-      const raw = sanvistBuffer.slice("<SANVIST>".length, end);
-      sanvistBuffer = sanvistBuffer.slice(end + "</SANVIST>".length);
+      const raw = protocolBuffer.slice(openMarker.length, end);
+      protocolBuffer = protocolBuffer.slice(end + closeMarker.length);
       try {
         const customEvent = asRecord(JSON.parse(raw));
+        if (isAsk) {
+          const type = String(customEvent?.type || "").toLowerCase();
+          const askData = asRecord(customEvent?.data) || {};
+          if (type === "table") {
+            const table = String(askData.format || "").toLowerCase() === "markdown"
+              ? parseMarkdownTable(askData.content)
+              : { columns: askData.columns, rows: askData.rows };
+            if (table) events.push({ event: "table", ...references, data: table });
+          } else if (type === "echarts") {
+            events.push({ event: "chart", ...references, data: { option: askData } });
+          }
+          receivedSanvistEvent = true;
+          continue;
+        }
         const customData = asRecord(customEvent?.data) || {};
         const difyEvent = String(customEvent?.dify_event || "");
         const title = getSanvistNodeTitle(customEvent || {}, customData);
