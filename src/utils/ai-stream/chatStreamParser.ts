@@ -95,13 +95,18 @@ export function applyEventToBlocks(
     }
     case "message": {
       if (!event.answer) return base;
-      const answerIndex = blocks.findIndex(block => block.id === "answer-0");
+      const answerBlocks = blocks.filter(block => block.type === "answer");
+      const lastBlock = blocks.at(-1);
+      const answerId = !event.replace && lastBlock?.type === "answer"
+        ? lastBlock.id
+        : `answer-${answerBlocks.length}`;
+      const answerIndex = blocks.findIndex(block => block.id === answerId);
       const previousContent = answerIndex < 0
         ? ""
         : String(blocks[answerIndex].payload.content || "");
       return {
         ...base,
-        blocks: upsertBlock(blocks, "answer-0", "answer", {
+        blocks: upsertBlock(blocks, answerId, "answer", {
           content: event.replace ? event.answer : `${previousContent}${event.answer}`,
         }),
         receivedContent: true,
@@ -167,7 +172,14 @@ export function applyEventToBlocks(
         ...base,
         processSubtitle: event.message,
       };
-    case "table":
+    case "table": {
+      const tableIndex = blocks.filter(block => block.type === "table").length;
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, `table-${tableIndex}`, "table", event.data, true),
+        receivedContent: true,
+      };
+    }
     case "metric":
     case "tool_call":
       return base;
