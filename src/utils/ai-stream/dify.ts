@@ -9,11 +9,10 @@ export interface DifyChatMessagesRequest {
   response_mode: ChatResponseMode;
   /** 空字符串代表开启一轮新会话；后续请求传服务端返回的 conversation_id。 */
   conversation_id: Identifier | "";
-  files: Array<{
-    type: string;
-    transfer_method: "remote_url";
-    url: string;
-  }>;
+  files: Array<
+    | { type: string; transfer_method: "local_file"; upload_file_id: string }
+    | { type: string; transfer_method: "remote_url"; url: string }
+  >;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -74,14 +73,41 @@ function parseMarkdownTable(content: unknown) {
 }
 
 export interface DifyHistoryBlockData {
-  type: "answer" | "table" | "chart";
+  type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion";
   payload: Record<string, unknown>;
+}
+
+type GuideBlockType = "image" | "video" | "source" | "suggestion";
+
+function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBlockType; payload: Record<string, unknown> } | null {
+  const type = String(value?.type || "").toLowerCase();
+  const data = asRecord(value?.data) || {};
+  if (type === "image") {
+    const items = Array.isArray(data.items) ? data.items.filter(item => asRecord(item)?.url).slice(0, 2) : [];
+    return items.length ? { type: "image", payload: { items } } : null;
+  }
+  if (type === "video") {
+    return data.url ? { type: "video", payload: data } : null;
+  }
+  if (type === "source") {
+    const evidence = Array.isArray(data.evidence) ? data.evidence.filter(item => asRecord(item)?.url) : [];
+    return evidence.length ? { type: "source", payload: { evidence } } : null;
+  }
+  if (type === "options") {
+    const items = Array.isArray(data.items)
+      ? data.items.filter(item => String(asRecord(item)?.label || "").trim()).slice(0, 4)
+      : [];
+    return items.length
+      ? { type: "suggestion", payload: { title: "你还可以继续问", ...data, items } }
+      : null;
+  }
+  return null;
 }
 
 /** 将完整历史 answer 中的 SANVIST/ASK 协议按原顺序还原为 UI blocks。 */
 export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[] {
   const source = String(value || "");
-  const pattern = /<(SANVIST|ASK)>([\s\S]*?)<\/\1>/g;
+  const pattern = /<(SANVIST|ASK|GUIDE)>([\s\S]*?)<\/\1>/g;
   const blocks: DifyHistoryBlockData[] = [];
   let cursor = 0;
   let foundProtocol = false;
@@ -105,6 +131,12 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
     try {
       const payload = asRecord(JSON.parse(match[2]));
       if (!payload) continue;
+      if (match[1] === "GUIDE") {
+        const guideBlock = parseGuideBlock(payload);
+        if (guideBlock) blocks.push(guideBlock);
+        foundProtocol = true;
+        continue;
+      }
       if (match[1] === "ASK") {
         const type = String(payload.type || "").toLowerCase();
         const data = asRecord(payload.data) || {};
@@ -185,11 +217,17 @@ export function toDifyChatMessagesRequest(params: SendChatMessageParams): DifyCh
     query: params.query,
     response_mode: params.responseMode ?? "streaming",
     conversation_id: params.conversationId ?? "",
-    files: (params.files || []).map(file => ({
-      type: file.type,
-      transfer_method: file.transferMethod,
-      url: file.url,
-    })),
+    files: (params.files || []).map(file => file.transferMethod === "local_file"
+      ? {
+          type: file.type,
+          transfer_method: file.transferMethod,
+          upload_file_id: file.uploadFileId,
+        }
+      : {
+          type: file.type,
+          transfer_method: file.transferMethod,
+          url: file.url,
+        }),
   };
 }
 
@@ -234,11 +272,12 @@ export function createDifyEventNormalizer() {
     while (protocolBuffer) {
       const sanvistStart = protocolBuffer.indexOf("<SANVIST>");
       const askStart = protocolBuffer.indexOf("<ASK>");
-      const starts = [sanvistStart, askStart].filter(index => index >= 0);
+      const guideStart = protocolBuffer.indexOf("<GUIDE>");
+      const starts = [sanvistStart, askStart, guideStart].filter(index => index >= 0);
       const start = starts.length ? Math.min(...starts) : -1;
       if (start < 0) {
         // 标签可能刚好被 SSE 分片切开，保留与任一起始标签相符的末尾。
-        const suffixLength = ["<SANVIST>", "<ASK>"]
+        const suffixLength = ["<SANVIST>", "<ASK>", "<GUIDE>"]
           .flatMap(marker => Array.from({ length: marker.length - 1 }, (_, index) => index + 1)
             .map(length => protocolBuffer.endsWith(marker.slice(0, length)) ? length : 0))
           .reduce((max, length) => Math.max(max, length), 0);
@@ -253,8 +292,9 @@ export function createDifyEventNormalizer() {
       }
 
       const isAsk = protocolBuffer.startsWith("<ASK>");
-      const openMarker = isAsk ? "<ASK>" : "<SANVIST>";
-      const closeMarker = isAsk ? "</ASK>" : "</SANVIST>";
+      const isGuide = protocolBuffer.startsWith("<GUIDE>");
+      const openMarker = isGuide ? "<GUIDE>" : isAsk ? "<ASK>" : "<SANVIST>";
+      const closeMarker = isGuide ? "</GUIDE>" : isAsk ? "</ASK>" : "</SANVIST>";
       const end = protocolBuffer.indexOf(closeMarker);
       if (end < 0) break;
 
@@ -262,6 +302,14 @@ export function createDifyEventNormalizer() {
       protocolBuffer = protocolBuffer.slice(end + closeMarker.length);
       try {
         const customEvent = asRecord(JSON.parse(raw));
+        if (isGuide) {
+          const guideBlock = parseGuideBlock(customEvent);
+          if (guideBlock) {
+            events.push({ event: guideBlock.type, ...references, data: guideBlock.payload });
+          }
+          receivedSanvistEvent = true;
+          continue;
+        }
         if (isAsk) {
           const type = String(customEvent?.type || "").toLowerCase();
           const askData = asRecord(customEvent?.data) || {};

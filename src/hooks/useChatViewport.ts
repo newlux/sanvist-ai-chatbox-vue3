@@ -11,16 +11,7 @@ const KEYBOARD_COLLAPSE_DELAY_MS = 160;
 /** 低于这个高度不算键盘：地址栏收缩、工具条变化也会让可视视口变矮 */
 const MIN_KEYBOARD_HEIGHT_PX = 80;
 /**
- * 兜底键盘高度：部分安卓 WebView 既不支持 visualViewport，也不会缩布局视口，
- * 高度就完全测不出来。与其让输入框被盖住，不如按屏高比例估一个。
- */
-const FALLBACK_KEYBOARD_RATIO = 0.42;
-const FALLBACK_KEYBOARD_RANGE = { min: 260, max: 360 };
-/** 聚焦后等这么久还测不到高度，就认为这台设备测不出来，启用兜底值 */
-const FALLBACK_DELAY_MS = 450;
-
-/**
- * 键盘高度来源与 ea39b9e 一致：visualViewport 反推 + 宿主推送 + 估高兜底。
+ * 键盘高度来源：visualViewport 反推 + 宿主推送。
  * 页面高度不随键盘压缩；输入栏用 bottom 抬到键盘上方。
  */
 export function useChatViewport() {
@@ -34,10 +25,7 @@ export function useChatViewport() {
   const measuredKeyboardHeight = ref(0);
   const focusOwner = ref<FocusOwner>("none");
   let collapseTimer: ReturnType<typeof setTimeout> | null = null;
-  let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
   let inputFocused = false;
-  let usingFallbackHeight = false;
-  let nativeKeyboardSupported = false;
   let h5KeyboardAuthoritative = false;
   let disposeNativeKeyboard: (() => void) | null = null;
   let disposeH5Keyboard: (() => void) | null = null;
@@ -108,7 +96,6 @@ export function useChatViewport() {
   function applyKeyboardHeight(height: unknown, fromNative = false) {
     if (h5KeyboardAuthoritative && !fromNative) return;
     const next = normalizeKeyboardHeight(height);
-    if (next > 0) usingFallbackHeight = false;
     if (collapseTimer) {
       clearTimeout(collapseTimer);
       collapseTimer = null;
@@ -127,13 +114,6 @@ export function useChatViewport() {
       measuredKeyboardHeight.value = live > 0 ? live : 0;
       if (live <= 0) focusOwner.value = "none";
     }, KEYBOARD_COLLAPSE_DELAY_MS);
-  }
-
-  function estimateKeyboardHeight() {
-    const base = windowHeight.value || window.innerHeight || 0;
-    if (!base) return FALLBACK_KEYBOARD_RANGE.min;
-    const estimated = Math.round(base * FALLBACK_KEYBOARD_RATIO);
-    return Math.min(FALLBACK_KEYBOARD_RANGE.max, Math.max(FALLBACK_KEYBOARD_RANGE.min, estimated));
   }
 
   function readViewportKeyboardHeight() {
@@ -188,32 +168,10 @@ export function useChatViewport() {
         applyKeyboardHeight(readViewportKeyboardHeight());
       }, delay);
     });
-
-    if (fallbackTimer) clearTimeout(fallbackTimer);
-    fallbackTimer = setTimeout(() => {
-      fallbackTimer = null;
-      if (!inputFocused || measuredKeyboardHeight.value > 0 || nativeKeyboardSupported) return;
-      const estimated = estimateKeyboardHeight();
-      usingFallbackHeight = true;
-      measuredKeyboardHeight.value = estimated;
-      logger.warn("量不到键盘高度，启用兜底估算值", {
-        estimated,
-        windowHeight: windowHeight.value,
-        hasVisualViewport: Boolean(window.visualViewport),
-      });
-    }, FALLBACK_DELAY_MS);
   }
 
   function onFocusOut() {
     inputFocused = false;
-    if (fallbackTimer) {
-      clearTimeout(fallbackTimer);
-      fallbackTimer = null;
-    }
-    if (usingFallbackHeight) {
-      usingFallbackHeight = false;
-      applyKeyboardHeight(0);
-    }
   }
 
   function onWindowScroll() {
@@ -222,7 +180,6 @@ export function useChatViewport() {
 
   function forceCollapse() {
     if (measuredKeyboardHeight.value <= 0) return;
-    usingFallbackHeight = false;
     inputFocused = false;
     h5KeyboardAuthoritative = false;
     measuredKeyboardHeight.value = 0;
@@ -246,7 +203,6 @@ export function useChatViewport() {
   function onNativeKeyboardHeight(payload: { height?: number | string }) {
     const height = Number(payload?.height);
     if (!Number.isFinite(height)) return;
-    nativeKeyboardSupported = true;
     if (height <= 0) {
       forceCollapse();
       return;
@@ -279,7 +235,6 @@ export function useChatViewport() {
       logger.warn("[h5KeyboardChange] payload 缺少 visible 字段，直接忽略", payload);
       return;
     }
-    nativeKeyboardSupported = true;
     if (!payload.visible) {
       logger.info("[h5KeyboardChange] 键盘收起，forceCollapse");
       forceCollapse();
@@ -369,7 +324,6 @@ export function useChatViewport() {
 
   onBeforeUnmount(() => {
     if (collapseTimer) clearTimeout(collapseTimer);
-    if (fallbackTimer) clearTimeout(fallbackTimer);
     uni.offKeyboardHeightChange?.(onKeyboardHeightChange);
     if (typeof window !== "undefined") {
       window.removeEventListener("scroll", onWindowScroll);

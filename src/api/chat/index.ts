@@ -62,6 +62,8 @@ interface DifyChatMessage {
   query?: string;
   answer?: string;
   message_files?: ChatMessage["messageFiles"];
+  /** 兼容部分网关已经转成 camelCase 的返回。 */
+  messageFiles?: ChatMessage["messageFiles"];
   feedback?: ChatMessage["feedback"];
   retriever_resources?: ChatMessage["retrieverResources"];
   created_at?: number;
@@ -87,7 +89,7 @@ function toChatMessage(item: DifyChatMessage): ChatMessage {
     inputs: item.inputs || {},
     query: item.query || "",
     answer: item.answer || "",
-    messageFiles: item.message_files || [],
+    messageFiles: item.message_files || item.messageFiles || [],
     feedback: item.feedback || null,
     retrieverResources: item.retriever_resources || [],
     createdAt: Number(item.created_at || 0),
@@ -208,7 +210,8 @@ export function getTextToSpeech(conversationId: Identifier, messageId: Identifie
 
 /**
  * 对话附件上传。契约：multipart 字段名固定为 `file`，`user` 走表单字段且不能为空。
- * 返回的 url 直接作为 Dify `/chat-messages` 的 files[].url（transfer_method=remote_url）。
+ * 返回的 id 作为 Dify `/chat-messages` 的 files[].upload_file_id
+ *（transfer_method=local_file）。
  */
 export function uploadChatFile(params: UploadChatFileParams) {
   return request.upload<ChatFileUploadResult>("/proxy/v1/files/upload", {

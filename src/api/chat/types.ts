@@ -10,11 +10,20 @@ export interface ChatInput extends Record<string, unknown> {
   deviceList?: DeviceInfo[];
 }
 
-export interface ChatFile {
+interface RemoteChatFile {
   type: string;
   transferMethod: "remote_url";
   url: string;
 }
+
+interface LocalChatFile {
+  type: string;
+  transferMethod: "local_file";
+  uploadFileId: string;
+}
+
+/** Dify files 参数：上传文件传 upload_file_id，外部资源才传 url。 */
+export type ChatFile = LocalChatFile | RemoteChatFile;
 
 export type ChatResponseMode = "streaming" | "blocking";
 
@@ -102,7 +111,7 @@ export interface SubtitleEvent {
 }
 
 export interface RichContentEvent {
-  event: "suggestion" | "table" | "chart" | "metric";
+  event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source";
   conversationId: Identifier;
   messageId: Identifier;
   taskId?: Identifier;
@@ -176,7 +185,15 @@ export interface ListMessagesParams {
 }
 
 export interface MessageFile extends Record<string, unknown> {
+  id?: string;
+  type?: string;
   url?: string;
+  name?: string;
+  filename?: string;
+  upload_file_id?: string;
+  file_id?: string;
+  mime_type?: string;
+  size?: number;
 }
 
 export interface Feedback {

@@ -2,6 +2,9 @@
 import AnswerBlock from "./blocks/AnswerBlock.vue";
 import ChartBlock from "./blocks/ChartBlock.vue";
 import ErrorBlock from "./blocks/ErrorBlock.vue";
+import GuideImageBlock from "./blocks/GuideImageBlock.vue";
+import GuideSourceBlock from "./blocks/GuideSourceBlock.vue";
+import GuideVideoBlock from "./blocks/GuideVideoBlock.vue";
 import MetricBlock from "./blocks/MetricBlock.vue";
 import StatusBlock from "./blocks/StatusBlock.vue";
 import SuggestionBlock from "./blocks/SuggestionBlock.vue";
@@ -60,6 +63,9 @@ function onSuggestionTap(suggestion: unknown) {
   />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
+  <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />
+  <GuideVideoBlock v-else-if="block.type === 'video'" :payload="block.payload" />
+  <GuideSourceBlock v-else-if="block.type === 'source'" :payload="block.payload" />
   <ErrorBlock v-else-if="block.type === 'error'" :payload="block.payload" />
   <SuggestionBlock v-else-if="block.type === 'suggestion'" :payload="block.payload" @suggestion-tap="onSuggestionTap" />
 </template>

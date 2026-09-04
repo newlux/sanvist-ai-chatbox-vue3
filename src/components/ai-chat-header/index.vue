@@ -25,6 +25,7 @@ const props = defineProps({
   shareSelectAllDisabled: { type: Boolean, default: false },
   shareAllChecked: { type: Boolean, default: false },
   shareSelectedRoundCount: { type: Number, default: 0 },
+  backOnly: { type: Boolean, default: false },
 });
 const emit = defineEmits([
   "back",
@@ -301,7 +302,15 @@ onBeforeUnmount(() => {
       <!-- 头部（Figma: 50px, padding 13/16） -->
       <view class="chat-header__bar">
         <template v-if="!shareMode">
-          <view class="chat-header__icon-btn" @tap="openHistoryDrawer">
+          <view v-if="props.backOnly" class="chat-header__icon-btn" @tap="onBackTap">
+            <image
+              src="@/assets/img/voice-assistant/voice-back.svg"
+              mode="aspectFit"
+              class="chat-header__icon-back-img"
+            />
+          </view>
+
+          <view v-else class="chat-header__icon-btn" @tap="openHistoryDrawer">
             <view class="chat-header__icon-history">
               <image
                 src="@/assets/img/icon-list.svg"
@@ -327,7 +336,7 @@ onBeforeUnmount(() => {
             </text>
           </view>
 
-          <view class="chat-header__icon-btn" @tap="onBackTap">
+          <view v-if="!props.backOnly" class="chat-header__icon-btn" @tap="onBackTap">
             <view class="chat-header__icon-atlas">
               <image
                 src="@/assets/img/icon-home.svg"
@@ -336,6 +345,7 @@ onBeforeUnmount(() => {
               />
             </view>
           </view>
+          <view v-else class="chat-header__icon-spacer" />
         </template>
 
         <template v-else>
@@ -628,6 +638,12 @@ onBeforeUnmount(() => {
   }
 }
 
+.chat-header__icon-spacer {
+  width: 48rpx;
+  height: 48rpx;
+  flex: 0 0 48rpx;
+}
+
 .chat-header__title-wrap {
   display: flex;
   align-items: center;
@@ -750,6 +766,10 @@ onBeforeUnmount(() => {
 }
 
 .chat-header__icon-history-img {
+  width: 48rpx;
+  height: 48rpx;
+}
+.chat-header__icon-back-img {
   width: 48rpx;
   height: 48rpx;
 }

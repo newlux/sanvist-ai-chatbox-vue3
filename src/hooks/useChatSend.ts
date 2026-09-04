@@ -12,7 +12,9 @@ import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("chat");
 
-const DIFY_SCENE_BY_SUBAGENT: Record<string, "ASK" | "GUIDE" | "TASK" | "PODCAST"> = {
+type ChatScene = "ASK" | "GUIDE" | "TASK" | "PODCAST";
+
+const DIFY_SCENE_BY_SUBAGENT: Record<string, ChatScene> = {
   guide: "GUIDE",
   task: "TASK",
   report: "PODCAST",
@@ -31,6 +33,8 @@ function isAbortError(error: unknown) {
 }
 
 export function useChatSend(scope?: string, handlers?: {
+  /** 页面明确指定的 Dify 场景；未指定时兼容旧的 subagent 映射。 */
+  scene?: ChatScene;
   onReportQa?: (answer: string) => void;
   onReportAdjustment?: (action: ReportAdjustmentAction) => void;
   onReportNavigation?: (action: ReportNavigationAction) => void;
@@ -47,7 +51,7 @@ export function useChatSend(scope?: string, handlers?: {
     },
   });
 
-  function cancelActiveStream() {
+  function cancelActiveStream(markStopped = false) {
     const activeId = String(chatStore.activeMessageId || "");
     const index = chatStore.findMessageIndex(activeId);
     const activeMessage = index >= 0 ? chatStore.messages[index] : null;
@@ -66,7 +70,16 @@ export function useChatSend(scope?: string, handlers?: {
     }
 
     if (activeMessage?.loading) {
-      chatStore.patchMessageById(activeId, { loading: false, interrupted: true });
+      chatStore.patchMessageById(activeId, {
+        loading: false,
+        interrupted: true,
+        ...(markStopped
+          ? {
+              processStatus: { ...activeMessage.processStatus, phase: "stopped" as const },
+              processSubtitle: null,
+            }
+          : {}),
+      });
     }
     chatStore.activeMessageId = "";
     chatStore.isLoading = false;
@@ -74,7 +87,7 @@ export function useChatSend(scope?: string, handlers?: {
 
   function stopGenerating() {
     if (!chatStore.isLoading) return;
-    cancelActiveStream();
+    cancelActiveStream(true);
     chatStore.scrollToBottom();
   }
 
@@ -128,7 +141,7 @@ export function useChatSend(scope?: string, handlers?: {
   }
 
   function createChatRequest(content: string, files: ChatFile[]) {
-    const scene = getDifyScene(chatStore.subagent);
+    const scene = handlers?.scene ?? getDifyScene(chatStore.subagent);
     const checkedModules = handlers?.getReportCheckedModules?.() || [];
     return {
       query: content,

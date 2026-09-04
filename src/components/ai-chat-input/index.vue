@@ -6,8 +6,6 @@ import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { createLogger } from "@/utils/logger";
 
-const logger = createLogger("chat-input");
-
 const props = defineProps({
   modelValue: { type: String, default: "" },
   isLoading: { type: Boolean, default: false },
@@ -34,6 +32,8 @@ const emit = defineEmits([
   "recognize-begin",
   "recognize-fail",
 ]);
+
+const logger = createLogger("chat-input");
 
 const { t } = useI18n();
 
@@ -69,11 +69,9 @@ const {
 } = useComposerAttachments();
 
 /**
- * 发送按钮只由「文字」驱动：仅有附件不亮起发送键（保持语音/键盘切换按钮原样），
- * 附件作为附带内容，随输入框文字或语音识别文本一起发送。
+ * 输入文字或添加附件后都进入可发送状态；上传未完成时点击发送会给出状态提示。
  */
-const canSend = computed(() => Boolean(draft.value.trim()));
-/** 有文字可发才显示发送按钮，此时让位给它的是语音/键盘切换按钮 */
+const canSend = computed(() => Boolean(draft.value.trim() || attachments.value.length));
 const showSendButton = computed(() => !props.isLoading && canSend.value);
 
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
@@ -147,7 +145,7 @@ function onMaskTap() {}
 function submitMessage(rawText?: string) {
   if (props.isLoading) return;
   const text = String(rawText ?? draft.value).trim();
-  if (!text) return;
+  if (!text && !attachments.value.length) return;
 
   if (hasIncompleteAttachments.value) {
     uni.showToast({
@@ -158,6 +156,7 @@ function submitMessage(rawText?: string) {
   }
 
   const { files, meta } = takeUploadedFiles();
+  if (!text && !files.length) return;
   draft.value = "";
   emit("update:modelValue", "");
   emit("send", { text, files, attachments: meta });

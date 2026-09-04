@@ -13,9 +13,9 @@ interface FeedbackContext {
   messageId: Identifier;
 }
 
-export function useChatFeedback() {
+export function useChatFeedback(scope?: string) {
   const { t } = useI18n();
-  const chatStore = useChatStore();
+  const chatStore = useChatStore(scope);
   const sheetVisible = ref(false);
   const context = ref<FeedbackContext | null>(null);
   let closeTimer: ReturnType<typeof setTimeout> | null = null;

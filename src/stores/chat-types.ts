@@ -13,9 +13,11 @@ export interface ChatProcessStatus {
 
 /** 用户消息里随行展示的附件 */
 export interface ChatMessageAttachment {
-  /** 上传接口返回的 Dify 文件 id：图片展示走 GET /files/{file_id}/preview 鉴权拉取 */
+  /** 上传接口返回的 Dify 文件 id：仅历史图片展示时走 GET /files/{file_id}/preview */
   fileId?: string;
   url: string;
+  /** 本次选择附件的本地临时路径；新消息优先使用它展示，历史消息没有该字段。 */
+  localPath?: string;
   /** 可内联预览地址：COS 预签名 URL 或 blob 兜底地址，优先于 url 展示 */
   previewPath?: string;
   name: string;

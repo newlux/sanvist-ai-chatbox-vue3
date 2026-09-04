@@ -99,17 +99,16 @@ async function copyText(text) {
 const fileImageFallback = ref<Record<number, string>>({});
 
 /**
- * 用户消息里的图片附件（Dify 文件）需要鉴权才能取到内容：
- * 有 fileId 时主动请求 GET /files/{file_id}/preview，把真实字节转成 blob 展示，
- * 避免直接拿 source_url 让 `<img>` 无凭证加载失败。
+ * 新发送的图片带 localPath，直接展示本地文件；只有历史图片没有 localPath，
+ * 才按 fileId 请求 GET /files/{file_id}/preview。
  */
 watch(
   () => props.attachments
-    .map(file => `${file.type}:${file.fileId || ""}:${file.url || ""}`)
+    .map(file => `${file.type}:${file.localPath || ""}:${file.fileId || ""}:${file.url || ""}`)
     .join("|"),
   () => {
     props.attachments.forEach((file, fileIndex) => {
-      if (file.type === "image" && file.fileId && !fileImageFallback.value[fileIndex]) {
+      if (file.type === "image" && !file.localPath && file.fileId && !fileImageFallback.value[fileIndex]) {
         void fetchFilePreviewBlobUrl(file.fileId, file.mimeType).then((inline) => {
           if (inline) fileImageFallback.value = { ...fileImageFallback.value, [fileIndex]: inline };
         });
@@ -124,6 +123,7 @@ watch(
  * 有 fileId 但预览尚未解析完成时返回空占位，避免 img 无凭证打 source_url 失败闪断。
  */
 function fileImageSrc(file: ChatMessageAttachment, fileIndex: number) {
+  if (file.localPath) return file.localPath;
   if (fileImageFallback.value[fileIndex]) return fileImageFallback.value[fileIndex];
   if (file.fileId) return "";
   return file.previewPath || file.url || "";
@@ -138,7 +138,7 @@ function fileImageSrc(file: ChatMessageAttachment, fileIndex: number) {
 function onPreviewImage(url) {
   const urls = props.attachments
     .map((item, index) => item?.type === "image"
-      ? fileImageFallback.value[index] || item.previewPath || item.url
+      ? item.localPath || fileImageFallback.value[index] || item.previewPath || item.url
       : "")
     .filter(Boolean);
   if (!urls.length) return;
@@ -150,6 +150,7 @@ function onPreviewImage(url) {
  * 用 fetch + blob 换成一定能被 img 渲染的本地地址。
  */
 async function onFileImageError(file, fileIndex) {
+  if (file.localPath) return;
   if (fileImageFallback.value[fileIndex]) return;
   const source = file.previewPath || file.url;
   if (!source) return;
@@ -208,6 +209,12 @@ const visibleBlocks = computed(() =>
     ? props.blocks.filter(block => block && block.type !== "suggestion")
     : props.blocks,
 );
+const contentBlocks = computed(() =>
+  visibleBlocks.value.filter(block => block && block.type !== "suggestion"),
+);
+const suggestionBlocks = computed(() =>
+  visibleBlocks.value.filter(block => block && block.type === "suggestion"),
+);
 
 /**
  * 等待条：模型还没吐出内容时的占位。
@@ -228,7 +235,7 @@ const processStatusText = computed(() => {
 });
 
 const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusText.value));
-const hasProcessContent = computed(() => Boolean(visibleBlocks.value.length || props.content));
+const hasProcessContent = computed(() => Boolean(contentBlocks.value.length || props.content));
 const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(props.processSubtitle?.trim()));
 
 function onSelectTap() {
@@ -273,6 +280,7 @@ function onNegativeFeedback() {
       'ai-bubble-v2--disabled': props.disabled,
       'ai-bubble-v2--user': isUser,
       'ai-bubble-v2--no-answer-group': props.noAnswerGroup,
+      'ai-bubble-v2--with-suggestions': !isUser && suggestionBlocks.length,
     }"
     @tap="onSelectTap"
   >
@@ -423,11 +431,11 @@ function onNegativeFeedback() {
           </text>
         </view>
         <!-- 流式失败等场景只有纯文本没有 blocks，不兜住就是一个空气泡 -->
-        <text v-if="!visibleBlocks.length && props.content" class="ai-bubble-v2__ai-content">
+        <text v-if="!contentBlocks.length && props.content" class="ai-bubble-v2__ai-content">
           {{ props.content }}
         </text>
         <AiContentBlocks
-          :blocks="visibleBlocks"
+          :blocks="contentBlocks"
           :force-thinking-expanded="props.forceThinkingExpanded"
           :no-answer-group="props.noAnswerGroup"
           @suggestion-tap="onSuggestionTap"
@@ -477,6 +485,15 @@ function onNegativeFeedback() {
         </view>
       </template>
     </view>
+    <!-- 追问属于当前回答，但不放进回答卡片；与卡片保持独立且紧邻的视觉关系。 -->
+    <view v-if="!isUser && suggestionBlocks.length" class="ai-bubble-v2__suggestions">
+      <AiContentBlocks
+        :blocks="suggestionBlocks"
+        :force-thinking-expanded="props.forceThinkingExpanded"
+        :no-answer-group="true"
+        @suggestion-tap="onSuggestionTap"
+      />
+    </view>
   </view>
 </template>
 
@@ -485,6 +502,19 @@ function onNegativeFeedback() {
   display: flex;
   margin-bottom: 40rpx;
   gap: 16rpx;
+}
+.ai-bubble-v2--with-suggestions {
+  flex-wrap: wrap;
+  row-gap: 24rpx;
+}
+.ai-bubble-v2__suggestions {
+  flex: 0 0 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.ai-bubble-v2--selected .ai-bubble-v2__suggestions {
+  flex-basis: calc(100% - 48rpx);
+  margin-left: 48rpx;
 }
 
 .ai-bubble-v2--selected {
