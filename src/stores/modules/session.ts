@@ -26,21 +26,54 @@ function getPreviewFileId(value: unknown) {
   }
 }
 
+function readHistoryFileType(value: unknown) {
+  const raw = String(value || "").toLowerCase();
+  if (!raw) return "document";
+  if (raw === "image" || raw.startsWith("image/")) return "image";
+  if (raw === "audio" || raw.startsWith("audio/")) return "audio";
+  if (raw === "video" || raw.startsWith("video/")) return "video";
+  return raw;
+}
+
+/** 历史 / 网关可能把附件放在 message_files、messageFiles 或发送回显的 files。空数组不能当有值。 */
+function pickHistoryFileList(item: Record<string, unknown>) {
+  const inputs = item.inputs && typeof item.inputs === "object"
+    ? item.inputs as Record<string, unknown>
+    : {};
+  const candidates = [item.messageFiles, item.message_files, item.files, inputs.files];
+  for (const value of candidates) {
+    if (Array.isArray(value) && value.length) return value;
+  }
+  return [];
+}
+
 /** 历史消息没有本地临时路径，图片由气泡组件根据 fileId 请求 preview 接口。 */
 function mapHistoryAttachments(value: unknown) {
   return (Array.isArray(value) ? value : []).map((raw) => {
     const file = raw as Record<string, unknown>;
-    const type = String(file.type || "document").toLowerCase();
-    const url = String(file.url || "");
+    const belongsTo = String(file.belongs_to || file.belongsTo || "user").toLowerCase();
+    if (belongsTo === "assistant") return null;
+    const type = readHistoryFileType(file.type);
+    const url = String(file.url || file.source_url || file.sourceUrl || file.preview_url || file.previewUrl || "");
     return {
-      fileId: String(file.upload_file_id || file.file_id || getPreviewFileId(url) || file.id || ""),
+      fileId: String(
+        file.upload_file_id
+        || file.uploadFileId
+        || file.related_id
+        || file.relatedId
+        || file.file_id
+        || file.fileId
+        || getPreviewFileId(url)
+        || file.id
+        || "",
+      ),
       url,
       name: String(file.name || file.filename || (type === "image" ? "图片" : "附件")),
       type,
       size: Number(file.size) || undefined,
       mimeType: String(file.mime_type || file.mimeType || ""),
     };
-  }).filter(file => file.fileId || file.url);
+  }).filter((file): file is NonNullable<typeof file> => Boolean(file && (file.fileId || file.url)));
 }
 
 export function mapHistoryMessages(
@@ -50,10 +83,10 @@ export function mapHistoryMessages(
   const mapped: UiChatMessage[] = [];
   (Array.isArray(list) ? list : []).forEach((raw) => {
     const item = raw as Record<string, unknown>;
-    const sessionId = (item?.conversationId ?? fallbackSessionId ?? null) as Identifier | null;
+    const sessionId = (item?.conversationId || fallbackSessionId || null) as Identifier | null;
     const messageId = (item?.id ?? null) as Identifier | null;
     const userText = String(item?.query || "").trim();
-    const attachments = mapHistoryAttachments(item?.messageFiles);
+    const attachments = mapHistoryAttachments(pickHistoryFileList(item));
     // 标准 Dify answer 中可能内嵌 SANVIST/ASK/GUIDE 协议，按原顺序还原文本与富内容卡片。
     const blocks = extractDifyHistoryBlocks(item?.answer)
       .filter(block => block.type !== "answer" || String(block.payload.content || "").trim())

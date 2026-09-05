@@ -191,8 +191,15 @@ export interface MessageFile extends Record<string, unknown> {
   name?: string;
   filename?: string;
   upload_file_id?: string;
+  uploadFileId?: string;
+  related_id?: string;
+  relatedId?: string;
   file_id?: string;
+  fileId?: string;
   mime_type?: string;
+  mimeType?: string;
+  belongs_to?: string;
+  belongsTo?: string;
   size?: number;
 }
 

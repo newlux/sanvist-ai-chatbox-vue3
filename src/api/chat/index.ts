@@ -41,7 +41,8 @@ const jsonDeleteOptions = {
 /** Dify 原生字段使用 snake_case；在 API 边界转换为页面沿用的 camelCase。 */
 interface DifyCursorPage<T> {
   limit: number;
-  has_more: boolean;
+  has_more?: boolean;
+  hasMore?: boolean;
   data: T[];
 }
 
@@ -57,17 +58,30 @@ interface DifyConversation {
 
 interface DifyChatMessage {
   id: Identifier;
-  conversation_id: Identifier;
+  conversation_id?: Identifier;
+  conversationId?: Identifier;
   inputs?: Record<string, unknown>;
   query?: string;
   answer?: string;
   message_files?: ChatMessage["messageFiles"];
   /** 兼容部分网关已经转成 camelCase 的返回。 */
   messageFiles?: ChatMessage["messageFiles"];
+  /** 部分网关 / 发送回显把附件放在 files，而不是 message_files。 */
+  files?: ChatMessage["messageFiles"];
   feedback?: ChatMessage["feedback"];
   retriever_resources?: ChatMessage["retrieverResources"];
+  retrieverResources?: ChatMessage["retrieverResources"];
   created_at?: number;
+  createdAt?: number;
   status?: string;
+}
+
+/** `[]` 在 JS 里是 truthy，不能用 `a || b` 取附件列表。 */
+function firstNonEmptyList<T>(...candidates: Array<T[] | undefined | null>): T[] {
+  for (const value of candidates) {
+    if (Array.isArray(value) && value.length) return value;
+  }
+  return [];
 }
 
 function toConversation(item: DifyConversation): Conversation {
@@ -85,14 +99,14 @@ function toConversation(item: DifyConversation): Conversation {
 function toChatMessage(item: DifyChatMessage): ChatMessage {
   return {
     id: item.id,
-    conversationId: item.conversation_id,
+    conversationId: (item.conversation_id ?? item.conversationId) as ChatMessage["conversationId"],
     inputs: item.inputs || {},
     query: item.query || "",
     answer: item.answer || "",
-    messageFiles: item.message_files || item.messageFiles || [],
+    messageFiles: firstNonEmptyList(item.message_files, item.messageFiles, item.files),
     feedback: item.feedback || null,
-    retrieverResources: item.retriever_resources || [],
-    createdAt: Number(item.created_at || 0),
+    retrieverResources: item.retriever_resources || item.retrieverResources || [],
+    createdAt: Number(item.created_at ?? item.createdAt ?? 0),
     status: item.status,
   };
 }
@@ -122,7 +136,7 @@ function toBlockingChatMessageResponse(item: DifyBlockingChatMessageResponse): B
 function toCursorPage<T, R>(page: DifyCursorPage<T>, mapper: (item: T) => R): CursorPage<R> {
   return {
     limit: Number(page?.limit || 0),
-    hasMore: Boolean(page?.has_more),
+    hasMore: Boolean(page?.has_more ?? page?.hasMore),
     data: Array.isArray(page?.data) ? page.data.map(mapper) : [],
   };
 }

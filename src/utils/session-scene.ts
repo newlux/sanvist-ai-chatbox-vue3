@@ -14,9 +14,9 @@ const SCENE_PAGE: Record<ChatScene, string> = {
 
 const SCENE_LABEL: Record<ChatScene, string> = {
   ASK: "问答",
-  GUIDE: "作业指导",
-  TASK: "任务协同",
-  PODCAST: "听汇报",
+  GUIDE: "指导",
+  TASK: "任务",
+  PODCAST: "问答",
 };
 
 export function getSessionScene(session?: { inputs?: Record<string, unknown> } | null): ChatScene {

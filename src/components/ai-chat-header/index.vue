@@ -950,8 +950,8 @@ onBeforeUnmount(() => {
   margin-left: 16rpx;
   padding: 0 12rpx;
   border-radius: 8rpx;
-  background: #fff2f3;
-  color: #fe0000;
+  background: #eef1f5;
+  color: #8a919c;
   font-size: 20rpx;
   font-weight: 500;
   line-height: 36rpx;
