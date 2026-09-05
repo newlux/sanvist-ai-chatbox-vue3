@@ -136,7 +136,7 @@ function closeReportBroadcast() {
   reportAdjustmentActions.dispose();
   if (markCurrentReportListened()) uni.$emit("listen-report-marked");
   reportBroadcastParams.value = null;
-  const homeUrl = userStore.isVisitor ? "/pages/home/index?mode=demo" : "/pages/home/index";
+  const homeUrl = userStore.isVisitor ? "/pages/index/index?mode=demo" : "/pages/index/index";
   uni.redirectTo({ url: homeUrl });
 }
 
