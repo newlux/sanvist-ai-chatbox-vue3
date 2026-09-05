@@ -83,7 +83,7 @@
   "h5": {
     "router": {
       "base": "/",
-      "mode": "history"
+      "mode": "hash"
     },
     "meta": {
       "viewport": "width=device-width, initial-scale=1.0, viewport-fit=cover"
