@@ -5,11 +5,11 @@ export type ChatScene = "ASK" | "GUIDE" | "TASK" | "PODCAST";
 const PENDING_HISTORY_SESSION_KEY = "pending-history-session";
 
 const SCENE_PAGE: Record<ChatScene, string> = {
-  ASK: "/pages/home/index",
+  ASK: "/pages/index/index",
   GUIDE: "/pages/guide/index",
   TASK: "/pages/task/index",
   // 听汇报页没有消息列表，历史问答仍回首页展示
-  PODCAST: "/pages/home/index",
+  PODCAST: "/pages/index/index",
 };
 
 const SCENE_LABEL: Record<ChatScene, string> = {
@@ -106,7 +106,7 @@ export function navigateToSessionScene(
 
   stashPendingHistorySession(scene, id);
   const url = `${page}?sessionId=${encodeURIComponent(String(id))}`;
-  if (page === "/pages/home/index") uni.redirectTo({ url });
+  if (page === "/pages/index/index") uni.redirectTo({ url });
   else uni.navigateTo({ url });
   return true;
 }
