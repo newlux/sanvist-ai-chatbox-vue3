@@ -1,0 +1,1661 @@
+app:
+  description: Sanvist AI Assistant 总入口：按业务分类，直接调用 AI 问问、任务协同和新手引导后端接口。
+  icon: 🐼
+  icon_background: '#FFF4E5'
+  icon_type: emoji
+  mode: advanced-chat
+  name: Sanvist AI Assistant 总入口
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: package
+  value:
+    plugin_unique_identifier: sanvist/sanvist_stream_router:0.3.0@b49074648e239d3f6bc86c42ca81be2957bbd19a09a8e9106be1deab9765f8f2
+    version: null
+- current_identifier: null
+  type: package
+  value:
+    plugin_unique_identifier: sanvist/sanvist_dify_stream:0.3.0@a0afc145a673c2f179326add4be3342804b77d3095dd903a863c31da2606a577
+    version: null
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables:
+  - description: 运营助手-Mock 子应用的会话 ID，用于跨轮次复用同一子会话以保留追问记忆
+    id: 55d99919-abe4-4505-85d3-b2ab62389389
+    name: ops_conversation_id
+    selector:
+    - conversation
+    - ops_conversation_id
+    value: ''
+    value_type: string
+  environment_variables:
+  - description: sanvist-ai-agent 服务地址；Dify 必须能访问，末尾不要带斜杠。
+    id: 784795cc-63db-45f0-a836-2d8628291001
+    name: sanvist_agent_base_url
+    selector:
+    - env
+    - sanvist_agent_base_url
+    value: https://sanvist-agent-dev.etripon.com
+    value_type: string
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 20
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: 你好，我是 Sanvist AI Assistant。可以帮你处理设备运营、任务协同和新手引导问题。
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions:
+    - BC5230CG1881 当前是否在线？
+    - 查询 BC5230CG1881 近7天工时和能耗趋势
+    - 我的设备最近有哪些连续3天未工作？
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: true
+      language: zh-Hans
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: if-else
+      id: 100-source-1788245761602-target
+      source: '100'
+      sourceHandle: source
+      target: '1788245761602'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: code
+      id: 1788245761602-5b2207ca-96f5-41e6-a8a7-151b11513881-320-target
+      source: '1788245761602'
+      sourceHandle: 5b2207ca-96f5-41e6-a8a7-151b11513881
+      target: '320'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: code
+      id: 1788245761602-80d5dba1-0531-4219-a4a1-692335d120ce-1788319066230-target
+      source: '1788245761602'
+      sourceHandle: 80d5dba1-0531-4219-a4a1-692335d120ce
+      target: '1788319066230'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: tool
+      id: 1788245761602-c6cde7bb-41f5-433e-8795-0bab20f6ef47-1788534263256-target
+      source: '1788245761602'
+      sourceHandle: c6cde7bb-41f5-433e-8795-0bab20f6ef47
+      target: '1788534263256'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: code
+      id: 1788245761602-false-700-target
+      source: '1788245761602'
+      sourceHandle: 'false'
+      target: '700'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: if-else
+      id: 1788245761602-true-1788399944226-target
+      selected: false
+      source: '1788245761602'
+      sourceHandle: 'true'
+      target: '1788399944226'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: 1788319066230-source-1788319153946-target
+      source: '1788319066230'
+      sourceHandle: source
+      target: '1788319153946'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: answer
+      id: 1788319153946-source-1788319233188-target
+      source: '1788319153946'
+      sourceHandle: source
+      target: '1788319233188'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: tool
+      id: 1788399944226-false-1788510703694-target
+      source: '1788399944226'
+      sourceHandle: 'false'
+      target: '1788510703694'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: tool
+      id: 1788399944226-true-1788406745705-target
+      selected: false
+      source: '1788399944226'
+      sourceHandle: 'true'
+      target: '1788406745705'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: answer
+        targetType: assigner
+      id: 1788402182125-source-1788500000001-target
+      source: '1788402182125'
+      sourceHandle: source
+      target: '1788500000001'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: tool
+        targetType: answer
+      id: 1788406745705-source-1788402182125-target
+      source: '1788406745705'
+      sourceHandle: source
+      target: '1788402182125'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: tool
+        targetType: answer
+      id: 1788510703694-source-600-target
+      source: '1788510703694'
+      sourceHandle: source
+      target: '600'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: tool
+        targetType: answer
+      id: 1788534263256-source-610-target
+      source: '1788534263256'
+      sourceHandle: source
+      target: '610'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: 320-420
+      source: '320'
+      sourceHandle: source
+      target: '420'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: 420-520
+      selected: false
+      source: '420'
+      sourceHandle: source
+      target: '520'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: 520-620
+      source: '520'
+      sourceHandle: source
+      target: '620'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: 700-800
+      selected: false
+      source: '700'
+      sourceHandle: source
+      target: '800'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: 用户问题使用 sys.query；身份、角色和设备权限应由可信的 Sanvist 网关注入。
+        selected: false
+        title: '[HIDDEN]用户输入 + 可信上下文'
+        type: start
+        variables:
+        - label: 对话上下文
+          max_length: 8000
+          options: []
+          required: false
+          type: paragraph
+          variable: context
+        - default: demo-user
+          label: 用户 ID
+          max_length: 128
+          options: []
+          required: true
+          type: text-input
+          variable: user_id
+        - default: OWNER
+          label: 用户角色
+          max_length: 64
+          options:
+          - OWNER
+          - ADMIN
+          - MAINTAINER
+          - PURCHASER
+          - OPERATOR
+          required: true
+          type: select
+          variable: role_id
+        - default: '[{"deviceId":"BC5230CG1881"}]'
+          label: 权限设备 JSON 数组
+          max_length: 12000
+          options: []
+          required: true
+          type: paragraph
+          variable: device_list
+        - default: '2026-08-25T10:00:00+08:00'
+          label: 参考时间（ISO 8601）
+          max_length: 64
+          options: []
+          required: true
+          type: text-input
+          variable: reference_time
+        - default: 简体中文(zh-CN)
+          label: 回答语言
+          max_length: 64
+          options: []
+          required: true
+          type: text-input
+          variable: language
+        - default: ''
+          hint: ''
+          label: 场景
+          options: []
+          placeholder: ''
+          required: true
+          type: text-input
+          variable: scene
+        - default: '["operation","energy","risk"]'
+          hint: ''
+          label: checkedModules
+          options: []
+          placeholder: ''
+          required: false
+          type: paragraph
+          variable: checkedModules
+        - default: normal
+          hint: ''
+          label: script_version
+          options:
+          - normal
+          - brief
+          placeholder: ''
+          required: false
+          type: select
+          variable: script_version
+        - default: DIFY
+          hint: ''
+          label: ask_backend
+          options:
+          - PYTHON
+          - DIFY
+          placeholder: ''
+          required: false
+          type: select
+          variable: ask_backend
+      height: 387
+      id: '100'
+      position:
+        x: -8.327389330832034
+        y: 332.19507910772893
+      positionAbsolute:
+        x: -8.327389330832034
+        y: 332.19507910772893
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: is
+            id: ff8e8479-7032-4e9b-8941-414653c6d77b
+            value: ASK
+            varType: string
+            variable_selector:
+            - '100'
+            - scene
+          id: 'true'
+          logical_operator: and
+        - case_id: c6cde7bb-41f5-433e-8795-0bab20f6ef47
+          conditions:
+          - comparison_operator: is
+            id: 6f5f49a8-f984-4a82-a02d-4c89a45b35e0
+            value: GUIDE
+            varType: string
+            variable_selector:
+            - '100'
+            - scene
+          id: c6cde7bb-41f5-433e-8795-0bab20f6ef47
+          logical_operator: and
+        - case_id: 5b2207ca-96f5-41e6-a8a7-151b11513881
+          conditions:
+          - comparison_operator: is
+            id: 9f7865bc-e3a2-4672-a56a-216e87631b3c
+            value: TASK
+            varType: string
+            variable_selector:
+            - '100'
+            - scene
+          id: 5b2207ca-96f5-41e6-a8a7-151b11513881
+          logical_operator: and
+        - case_id: 80d5dba1-0531-4219-a4a1-692335d120ce
+          conditions:
+          - comparison_operator: contains
+            id: 91f554ba-4978-4cc8-be8a-f103e3e8f564
+            value: PODCAST
+            varType: string
+            variable_selector:
+            - '100'
+            - scene
+          id: 80d5dba1-0531-4219-a4a1-692335d120ce
+          logical_operator: and
+        selected: false
+        title: '[HIDDEN]条件分支'
+        type: if-else
+      height: 292
+      id: '1788245761602'
+      position:
+        x: 417.4453923872345
+        y: 353.19507910772893
+      positionAbsolute:
+        x: 417.4453923872345
+        y: 353.19507910772893
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        code: "import json\n\n\nALLOWED_MODULES = {\n    \"operation\",\n    \"energy\"\
+          ,\n    \"risk\",\n}\n\n\ndef main(\n    query: str = \"\",\n    selected_modules:\
+          \ str = \"\",\n    script_version: str = \"normal\",\n) -> dict:\n    query\
+          \ = str(query or \"\").strip()\n\n    if not query:\n        raise ValueError(\"\
+          query 不能为空\")\n\n    try:\n        modules = json.loads(\n            str(\n\
+          \                selected_modules\n                or '[\"operation\",\"\
+          energy\",\"risk\"]'\n            )\n        )\n    except Exception as exc:\n\
+          \        raise ValueError(\n            f\"selected_modules 不是合法 JSON：{exc}\"\
+          \n        )\n\n    if not isinstance(modules, list) or not modules:\n  \
+          \      raise ValueError(\n            \"selected_modules 必须是非空数组\"\n   \
+          \     )\n\n    invalid_modules = [\n        module\n        for module in\
+          \ modules\n        if module not in ALLOWED_MODULES\n    ]\n\n    if invalid_modules:\n\
+          \        raise ValueError(\n            \"不支持的模块：\"\n            + \",\"\
+          .join(invalid_modules)\n        )\n\n    version = str(\n        script_version\
+          \ or \"normal\"\n    ).strip().lower()\n\n    if version not in {\"normal\"\
+          , \"brief\"}:\n        raise ValueError(\n            \"script_version 仅支持\
+          \ normal 或 brief\"\n        )\n\n    payload = {\n        \"query\": query,\n\
+          \        \"selected_modules\": modules,\n        \"script_version\": version,\n\
+          \    }\n\n    return {\n        \"request_json\": json.dumps(\n        \
+          \    payload,\n            ensure_ascii=False,\n        )\n    }"
+        code_language: python3
+        outputs:
+          request_json:
+            children: null
+            type: string
+        selected: false
+        title: '[HIDDEN]组装 AI 听播请求'
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          value_type: string
+          variable: query
+        - value_selector:
+          - '100'
+          - checkedModules
+          value_type: string
+          variable: selected_modules
+        - value_selector:
+          - '100'
+          - script_version
+          value_type: string
+          variable: script_version
+      height: 52
+      id: '1788319066230'
+      position:
+        x: 1140.0057747791568
+        y: 889.2666887313242
+      positionAbsolute:
+        x: 1140.0057747791568
+        y: 889.2666887313242
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-406
+            key: ''
+            type: text
+            value: '{{#1788319066230.request_json#}}'
+          type: raw-text
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          connect: 10
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+          read: 300
+          write: 10
+        title: 处理 AI 听播
+        type: http-request
+        url: '{{#env.sanvist_agent_base_url#}}/ai-agent/broadcast/interaction'
+        variables: []
+      height: 141
+      id: '1788319153946'
+      position:
+        x: 1492.547998111197
+        y: 889.2666887313242
+      positionAbsolute:
+        x: 1492.547998111197
+        y: 889.2666887313242
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        answer: <PODCAST>{{#1788319153946.body#}}</PODCAST>
+        selected: false
+        title: 返回 AI 听播结果
+        type: answer
+        variables: []
+      height: 102
+      id: '1788319233188'
+      position:
+        x: 1800
+        y: 889.2666887313242
+      positionAbsolute:
+        x: 1800
+        y: 889.2666887313242
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: is
+            id: 8f7c9fb0-053f-45ca-aed6-3e765328ab2a
+            value: DIFY
+            varType: string
+            variable_selector:
+            - '100'
+            - ask_backend
+          id: 'true'
+          logical_operator: and
+        selected: false
+        title: '[HIDDEN]条件分支 2'
+        type: if-else
+      height: 148
+      id: '1788399944226'
+      position:
+        x: 1109.691443448949
+        y: -261.4481704291985
+      positionAbsolute:
+        x: 1109.691443448949
+        y: -261.4481704291985
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        answer: '{{#1788406745705.response_stream#}}'
+        selected: false
+        title: '[HIDDEN]返回 AI 问问答案'
+        type: answer
+        variables: []
+      height: 102
+      id: '1788402182125'
+      position:
+        x: 1959.4774730265108
+        y: -417.07126347699045
+      positionAbsolute:
+        x: 1959.4774730265108
+        y: -417.07126347699045
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        is_team_authorization: false
+        meta: null
+        paramSchemas:
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: The complete current user question.
+            ja_JP: The complete current user question.
+            pt_BR: The complete current user question.
+            zh_Hans: 用户本次输入的完整问题。
+          input_schema: null
+          label:
+            en_US: User question
+            ja_JP: User question
+            pt_BR: User question
+            zh_Hans: 用户问题
+          llm_description: Preserve identifiers, dates, and units in the complete
+            question.
+          max: null
+          min: null
+          multiple: false
+          name: query
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Use the ID returned by this target app. Leave empty on the first
+              turn.
+            ja_JP: Use the ID returned by this target app. Leave empty on the first
+              turn.
+            pt_BR: Use the ID returned by this target app. Leave empty on the first
+              turn.
+            zh_Hans: 使用该目标应用上一轮返回的 ID；首轮留空。
+          input_schema: null
+          label:
+            en_US: Target Dify conversation ID
+            ja_JP: Target Dify conversation ID
+            pt_BR: Target Dify conversation ID
+            zh_Hans: 目标 Dify 会话 ID
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: conversation_id
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Stable user identifier supplied by the frontend.
+            ja_JP: Stable user identifier supplied by the frontend.
+            pt_BR: Stable user identifier supplied by the frontend.
+            zh_Hans: 前端提供的稳定用户标识。
+          input_schema: null
+          label:
+            en_US: User ID
+            ja_JP: User ID
+            pt_BR: User ID
+            zh_Hans: 用户 ID
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: user_id
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: OWNER
+          form: form
+          human_description:
+            en_US: Trusted Sanvist role mapped to the target Dify role.
+            ja_JP: Trusted Sanvist role mapped to the target Dify role.
+            pt_BR: Trusted Sanvist role mapped to the target Dify role.
+            zh_Hans: 映射到目标 Dify 角色的可信 Sanvist 用户角色。
+          input_schema: null
+          label:
+            en_US: Role ID
+            ja_JP: Role ID
+            pt_BR: Role ID
+            zh_Hans: 用户角色
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: role_id
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: '[]'
+          form: form
+          human_description:
+            en_US: JSON array containing devices available to the current user.
+            ja_JP: JSON array containing devices available to the current user.
+            pt_BR: JSON array containing devices available to the current user.
+            zh_Hans: 当前用户有权访问的设备 JSON 数组。
+          input_schema: null
+          label:
+            en_US: Allowed devices JSON
+            ja_JP: Allowed devices JSON
+            pt_BR: Allowed devices JSON
+            zh_Hans: 权限设备 JSON 数组
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: device_list
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Current reference time.
+            ja_JP: Current reference time.
+            pt_BR: Current reference time.
+            zh_Hans: 当前参考时间。
+          input_schema: null
+          label:
+            en_US: Reference time
+            ja_JP: Reference time
+            pt_BR: Reference time
+            zh_Hans: 参考时间
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: reference_time
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: 简体中文(zh-CN)
+          form: form
+          human_description:
+            en_US: Answer language.
+            ja_JP: Answer language.
+            pt_BR: Answer language.
+            zh_Hans: 回答语言。
+          input_schema: null
+          label:
+            en_US: Language
+            ja_JP: Language
+            pt_BR: Language
+            zh_Hans: 回答语言
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: language
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        params:
+          conversation_id: ''
+          device_list: ''
+          language: ''
+          query: ''
+          reference_time: ''
+          role_id: ''
+          user_id: ''
+        plugin_id: sanvist/sanvist_dify_stream
+        plugin_unique_identifier: sanvist/sanvist_dify_stream:0.1.0@8a40afd25ffec2f21a4f4b7fd082826bea2335f50ceb171bbce1a71713d9c71d
+        provider_icon: https://dify-sanvist.etripon.com/console/api/workspaces/current/plugin/icon?tenant_id=f2ba9739-73d2-499a-9b24-fdd10749f8ca&filename=6bfd45887e651cfa023d9250c84a5f2fe5c707be772c09b53c20c2738f9a19b1.svg
+        provider_icon_dark: null
+        provider_id: sanvist/sanvist_dify_stream/sanvist_dify_stream
+        provider_name: sanvist/sanvist_dify_stream/sanvist_dify_stream
+        provider_show_name: Sanvist Dify 流式调用
+        provider_type: builtin
+        selected: false
+        title: 查询AI运营助手
+        tool_configurations:
+          conversation_id:
+            type: mixed
+            value: '{{#conversation.ops_conversation_id#}}'
+          device_list:
+            type: mixed
+            value: '{{#100.device_list#}}'
+          language:
+            type: mixed
+            value: '{{#100.language#}}'
+          reference_time:
+            type: mixed
+            value: '{{#100.reference_time#}}'
+          role_id:
+            type: mixed
+            value: '{{#100.role_id#}}'
+          user_id:
+            type: mixed
+            value: '{{#100.user_id#}}'
+        tool_description: 流式输出目标 Dify 应用回答和扁平 SANVIST 节点进度帧。
+        tool_label: 调用 Dify 运营助手
+        tool_name: sanvist_dify_ask
+        tool_node_version: '2'
+        tool_parameters:
+          query:
+            type: mixed
+            value: '{{#sys.query#}}'
+        type: tool
+      height: 218
+      id: '1788406745705'
+      position:
+        x: 1508.3820930404718
+        y: -511.3327506998834
+      positionAbsolute:
+        x: 1508.3820930404718
+        y: -511.3327506998834
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        desc: 把运营助手返回的子会话 ID 存入会话变量，供下一轮复用
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1788406745705'
+          - target_conversation_id
+          variable_selector:
+          - conversation
+          - ops_conversation_id
+          write_mode: over-write
+        selected: false
+        title: '[HIDDEN]记录运营助手会话ID'
+        type: assigner
+        version: '2'
+      height: 128
+      id: '1788500000001'
+      position:
+        x: 2343.448841198867
+        y: -417.07126347699045
+      positionAbsolute:
+        x: 2343.448841198867
+        y: -417.07126347699045
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        is_team_authorization: true
+        meta: null
+        paramSchemas:
+        - auto_generate: null
+          default: ASK
+          form: form
+          human_description:
+            en_US: ASK, GUIDE, TASK, or PODCAST. Empty and unknown values default
+              to ASK.
+            ja_JP: ASK, GUIDE, TASK, or PODCAST. Empty and unknown values default
+              to ASK.
+            pt_BR: ASK, GUIDE, TASK, or PODCAST. Empty and unknown values default
+              to ASK.
+            zh_Hans: ASK、GUIDE、TASK 或 PODCAST；空值和未知值默认按 ASK 处理。
+          input_schema: null
+          label:
+            en_US: Scene
+            ja_JP: Scene
+            pt_BR: Scene
+            zh_Hans: 业务场景
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: scene
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: The complete current user question.
+            ja_JP: The complete current user question.
+            pt_BR: The complete current user question.
+            zh_Hans: 用户本次输入的完整问题。
+          input_schema: null
+          label:
+            en_US: User question
+            ja_JP: User question
+            pt_BR: User question
+            zh_Hans: 用户问题
+          llm_description: The complete current user question. Preserve identifiers,
+            dates, and units.
+          max: null
+          min: null
+          multiple: false
+          name: query
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Trusted chat history JSON used by ASK.
+            ja_JP: Trusted chat history JSON used by ASK.
+            pt_BR: Trusted chat history JSON used by ASK.
+            zh_Hans: ASK 使用的可信聊天历史 JSON。
+          input_schema: null
+          label:
+            en_US: Conversation context
+            ja_JP: Conversation context
+            pt_BR: Conversation context
+            zh_Hans: 对话上下文
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: context
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Stable user identifier supplied by the frontend.
+            ja_JP: Stable user identifier supplied by the frontend.
+            pt_BR: Stable user identifier supplied by the frontend.
+            zh_Hans: 前端提供的稳定用户标识。
+          input_schema: null
+          label:
+            en_US: User ID
+            ja_JP: User ID
+            pt_BR: User ID
+            zh_Hans: 用户 ID
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: user_id
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: OWNER
+          form: form
+          human_description:
+            en_US: Trusted Sanvist role used by ASK.
+            ja_JP: Trusted Sanvist role used by ASK.
+            pt_BR: Trusted Sanvist role used by ASK.
+            zh_Hans: ASK 使用的可信 Sanvist 用户角色。
+          input_schema: null
+          label:
+            en_US: Role ID
+            ja_JP: Role ID
+            pt_BR: Role ID
+            zh_Hans: 用户角色
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: role_id
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: '[]'
+          form: form
+          human_description:
+            en_US: JSON array containing devices available to the current user.
+            ja_JP: JSON array containing devices available to the current user.
+            pt_BR: JSON array containing devices available to the current user.
+            zh_Hans: 当前用户有权访问的设备 JSON 数组。
+          input_schema: null
+          label:
+            en_US: Allowed devices JSON
+            ja_JP: Allowed devices JSON
+            pt_BR: Allowed devices JSON
+            zh_Hans: 权限设备 JSON 数组
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: device_list
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Current reference time. Reserved for compatible business requests.
+            ja_JP: Current reference time. Reserved for compatible business requests.
+            pt_BR: Current reference time. Reserved for compatible business requests.
+            zh_Hans: 当前参考时间，保留给兼容业务请求使用。
+          input_schema: null
+          label:
+            en_US: Reference time
+            ja_JP: Reference time
+            pt_BR: Reference time
+            zh_Hans: 参考时间
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: reference_time
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: 简体中文(zh-CN)
+          form: form
+          human_description:
+            en_US: Answer language used by ASK.
+            ja_JP: Answer language used by ASK.
+            pt_BR: Answer language used by ASK.
+            zh_Hans: ASK 使用的回答语言。
+          input_schema: null
+          label:
+            en_US: Language
+            ja_JP: Language
+            pt_BR: Language
+            zh_Hans: 回答语言
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: language
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Complete JSON object supplied by the frontend for the PODCAST endpoint.
+            ja_JP: Complete JSON object supplied by the frontend for the PODCAST endpoint.
+            pt_BR: Complete JSON object supplied by the frontend for the PODCAST endpoint.
+            zh_Hans: 前端为 PODCAST 接口提供的完整 JSON 对象字符串。
+          input_schema: null
+          label:
+            en_US: Podcast request JSON
+            ja_JP: Podcast request JSON
+            pt_BR: Podcast request JSON
+            zh_Hans: PODCAST 请求 JSON
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: podcast_payload
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        params:
+          context: ''
+          device_list: ''
+          language: ''
+          podcast_payload: ''
+          query: ''
+          reference_time: ''
+          role_id: ''
+          scene: ''
+          user_id: ''
+        plugin_id: sanvist/sanvist_stream_router
+        plugin_unique_identifier: sanvist/sanvist_stream_router:0.3.0@b49074648e239d3f6bc86c42ca81be2957bbd19a09a8e9106be1deab9765f8f2
+        provider_icon: https://dify-sanvist.etripon.com/console/api/workspaces/current/plugin/icon?tenant_id=f2ba9739-73d2-499a-9b24-fdd10749f8ca&filename=fbc78830240211ab9e3e55e9daafb3f25529537252071d7842096f05d56a31a0.svg
+        provider_icon_dark: null
+        provider_id: sanvist/sanvist_stream_router/sanvist_stream_router
+        provider_name: sanvist/sanvist_stream_router/sanvist_stream_router
+        provider_show_name: Sanvist 流式业务路由
+        provider_type: builtin
+        selected: false
+        title: Sanvist python路由
+        tool_configurations:
+          context:
+            type: mixed
+            value: ''
+          device_list:
+            type: mixed
+            value: '{{#100.device_list#}}'
+          language:
+            type: mixed
+            value: '{{#100.language#}}'
+          podcast_payload:
+            type: mixed
+            value: null
+          reference_time:
+            type: mixed
+            value: ''
+          role_id:
+            type: mixed
+            value: '{{#100.role_id#}}'
+          scene:
+            type: mixed
+            value: ASK
+          user_id:
+            type: mixed
+            value: '{{#100.user_id#}}'
+        tool_description: 将业务场景路由到 Python 服务，并通过 SANVIST 事件流按原顺序转发上游事件。
+        tool_label: Sanvist 业务路由
+        tool_name: sanvist_stream_router
+        tool_node_version: '2'
+        tool_parameters:
+          query:
+            type: mixed
+            value: '{{#sys.query#}}'
+        type: tool
+      height: 270
+      id: '1788510703694'
+      position:
+        x: 1508.3820930404718
+        y: -243.41580248155051
+      positionAbsolute:
+        x: 1508.3820930404718
+        y: -243.41580248155051
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        is_team_authorization: true
+        meta: null
+        paramSchemas:
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: The complete current work-guide question.
+            ja_JP: The complete current work-guide question.
+            pt_BR: The complete current work-guide question.
+            zh_Hans: 用户本次输入的完整作业指导问题。
+          input_schema: null
+          label:
+            en_US: User question
+            ja_JP: User question
+            pt_BR: User question
+            zh_Hans: 用户问题
+          llm_description: Preserve model names, operation names, identifiers, and
+            units.
+          max: null
+          min: null
+          multiple: false
+          name: query
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Stable user identifier supplied by the frontend.
+            ja_JP: Stable user identifier supplied by the frontend.
+            pt_BR: Stable user identifier supplied by the frontend.
+            zh_Hans: 前端提供的稳定用户标识。
+          input_schema: null
+          label:
+            en_US: User ID
+            ja_JP: User ID
+            pt_BR: User ID
+            zh_Hans: 用户 ID
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: user_id
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: SCC4000A-8
+          form: form
+          human_description:
+            en_US: Device model passed to the work-guide Dify app.
+            ja_JP: Device model passed to the work-guide Dify app.
+            pt_BR: Device model passed to the work-guide Dify app.
+            zh_Hans: 传给作业指导 Dify 应用的设备型号。
+          input_schema: null
+          label:
+            en_US: Device model
+            ja_JP: Device model
+            pt_BR: Device model
+            zh_Hans: 设备型号
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: device_model
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Use the ID returned by this target app. Leave empty on the first
+              turn.
+            ja_JP: Use the ID returned by this target app. Leave empty on the first
+              turn.
+            pt_BR: Use the ID returned by this target app. Leave empty on the first
+              turn.
+            zh_Hans: 使用该作业指导应用上一轮返回的 ID；首轮留空。
+          input_schema: null
+          label:
+            en_US: Target Dify conversation ID
+            ja_JP: Target Dify conversation ID
+            pt_BR: Target Dify conversation ID
+            zh_Hans: 目标 Dify 会话 ID
+          llm_description: ''
+          max: null
+          min: null
+          multiple: false
+          name: conversation_id
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: string
+        params:
+          conversation_id: ''
+          device_model: ''
+          query: ''
+          user_id: ''
+        plugin_id: sanvist/sanvist_dify_stream
+        plugin_unique_identifier: sanvist/sanvist_dify_stream:0.3.0@a0afc145a673c2f179326add4be3342804b77d3095dd903a863c31da2606a577
+        provider_icon: https://dify-sanvist.etripon.com/console/api/workspaces/current/plugin/icon?tenant_id=f2ba9739-73d2-499a-9b24-fdd10749f8ca&filename=dcd2a95648692a0548a1c0ebde55d203aa985597533987b73888603ee46b9eee.svg
+        provider_icon_dark: null
+        provider_id: sanvist/sanvist_dify_stream/sanvist_dify_stream
+        provider_name: sanvist/sanvist_dify_stream/sanvist_dify_stream
+        provider_show_name: Sanvist Dify 流式调用
+        provider_type: builtin
+        selected: false
+        title: 调用 Dify 作业指导
+        tool_configurations:
+          conversation_id:
+            type: mixed
+            value: null
+          device_model:
+            type: mixed
+            value: SCC4000A-8
+          user_id:
+            type: mixed
+            value: '{{#100.user_id#}}'
+        tool_description: 调用 Dify 作业指导对话应用，并流式输出扁平 SANVIST 工作流进度。
+        tool_label: 调用 Dify 作业指导
+        tool_name: sanvist_dify_guide
+        tool_node_version: '2'
+        tool_parameters:
+          query:
+            type: mixed
+            value: '{{#sys.query#}}'
+        type: tool
+      height: 140
+      id: '1788534263256'
+      position:
+        x: 1154.62055028953
+        y: 334.9970065041159
+      positionAbsolute:
+        x: 1154.62055028953
+        y: 334.9970065041159
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        code: "import json\nimport uuid\nfrom datetime import datetime, timedelta,\
+          \ timezone\n\ndef main(query: str, user_id: str) -> dict:\n    request_id\
+          \ = uuid.uuid4().hex\n    china_tz = timezone(timedelta(hours=8))\n    plan_date\
+          \ = (\n        datetime.now(china_tz) + timedelta(days=1)\n    ).date().isoformat()\n\
+          \n    payload = {\n        \"schema_version\": \"1.0\",\n        \"delegation_id\"\
+          : \"delegate-\" + request_id,\n        \"division\": \"pump\",\n       \
+          \ \"capability\": \"dispatch.generate_plan\",\n        \"task_id\": \"task-\"\
+          \ + request_id,\n        \"conversation_id\": \"conversation-\" + request_id,\n\
+          \        \"user_id\": str(user_id or \"\").strip() or \"dify-demo-user\"\
+          ,\n        \"role_id\": \"dispatcher\",\n        \"task_input\": {\n   \
+          \         \"plan_date\": plan_date\n        },\n        \"question\": str(query\
+          \ or \"\").strip(),\n        \"trace_id\": \"trace-\" + request_id\n   \
+          \ }\n\n    return {\n        \"request_json\": json.dumps(payload, ensure_ascii=False)\n\
+          \    }"
+        code_language: python3
+        desc: 组装任务协同接口的 JSON 请求；当前后端接收任意 JSON，但业务处理尚未实现。
+        outputs:
+          request_json:
+            children: null
+            type: string
+        selected: false
+        title: '[HIDDEN]组装任务协同请求'
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          variable: query
+        - value_selector:
+          - '100'
+          - user_id
+          variable: user_id
+      height: 112
+      id: '320'
+      position:
+        x: 1134.7166031085499
+        y: 612.6897362848729
+      positionAbsolute:
+        x: 1134.7166031085499
+        y: 612.6897362848729
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: task-body
+            key: ''
+            type: text
+            value: '{{#320.request_json#}}'
+          type: json
+        desc: 直接调用 README 中的任务协同接口。
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 1
+          retry_enabled: true
+          retry_interval: 500
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 10
+          max_read_timeout: 120
+          max_write_timeout: 10
+          read: 120
+        title: 正在调用子任务
+        type: http-request
+        url: '{{#env.sanvist_agent_base_url#}}/ai-agent/task-collaboration/tasks/start'
+        variables: []
+      height: 185
+      id: '420'
+      position:
+        x: 1492.547998111197
+        y: 625.2555407473
+      positionAbsolute:
+        x: 1492.547998111197
+        y: 625.2555407473
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        code: "import json\n\ndef main(body: str, status_code=None) -> dict:\n   \
+          \ try:\n        payload = json.loads(str(body or \"{}\"))\n    except Exception:\n\
+          \        return {\"answer\": \"LangGraph 启动响应无法解析\"}\n\n    delegation_id\
+          \ = str(payload.get(\"delegation_id\") or \"\")\n    workflow_run_id = str(payload.get(\"\
+          workflow_run_id\") or \"\")\n    stage = str(payload.get(\"current_stage\"\
+          ) or \"\")\n    message = str(payload.get(\"message\") or \"\")\n\n    if\
+          \ not delegation_id:\n        return {\n            \"answer\": \"LangGraph\
+          \ 启动失败：\" +\n            json.dumps(payload, ensure_ascii=False)\n     \
+          \   }\n\n    answer = (\n        \"任务已经通过 LangGraph 启动。\\n\"\n        f\"\
+          - 当前阶段：{stage}\\n\"\n        f\"- 状态说明：{message}\\n\"\n        f\"- delegation_id：{delegation_id}\\\
+          n\"\n        f\"- workflow_run_id：{workflow_run_id}\"\n    )\n\n    return\
+          \ {\"answer\": answer}"
+        code_language: python3
+        desc: 兼容任务协同未来可能返回的 answer/content/message/result JSON。
+        outputs:
+          answer:
+            children: null
+            type: string
+        selected: false
+        title: '[HIDDEN]解析任务协同响应'
+        type: code
+        variables:
+        - value_selector:
+          - '420'
+          - body
+          variable: body
+        - value_selector:
+          - '420'
+          - status_code
+          value_type: number
+          variable: status_code
+      height: 96
+      id: '520'
+      position:
+        x: 1800
+        y: 625.2555407473
+      positionAbsolute:
+        x: 1800
+        y: 625.2555407473
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        answer: '{{#1788510703694.event_stream#}}'
+        desc: 原样返回 AI 问问答案，避免改变设备编号、时间、单位和数值。
+        selected: false
+        title: '[HIDDEN]返回 AI 问问答案'
+        type: answer
+        variables: []
+      height: 146
+      id: '600'
+      position:
+        x: 1953.8359529522818
+        y: -168.95024439733447
+      positionAbsolute:
+        x: 1953.8359529522818
+        y: -168.95024439733447
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        answer: '{{#1788534263256.response_stream#}}'
+        desc: 原样返回新手引导答案。
+        selected: false
+        title: '[HIDDEN]返回新手引导答案'
+        type: answer
+        variables: []
+      height: 130
+      id: '610'
+      position:
+        x: 1603.6132353195958
+        y: 334.9970065041159
+      positionAbsolute:
+        x: 1603.6132353195958
+        y: 334.9970065041159
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        answer: '{{#520.answer#}}'
+        desc: 原样返回任务协同响应。
+        selected: false
+        title: '[HIDDEN]返回任务协同答案'
+        type: answer
+        variables: []
+      height: 130
+      id: '620'
+      position:
+        x: 2150
+        y: 625.2555407473
+      positionAbsolute:
+        x: 2150
+        y: 625.2555407473
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        code: "def main(class_name: str) -> dict:\n    name = str(class_name or '')\n\
+          \    messages = {\n        '通用对话 / 其他': '你好，我是 Sanvist AI Assistant。你可以询问设备运营、任务协同或产品使用问题。',\n\
+          \    }\n    return {'answer': messages.get(name, '当前业务模块尚未接入。')}"
+        code_language: python3
+        desc: 非 AI 问问分支先返回明确占位提示，避免误调用设备数据能力。
+        outputs:
+          answer:
+            children: null
+            type: string
+        selected: false
+        title: '[HIDDEN]其他业务占位回复'
+        type: code
+        variables:
+        - value_selector:
+          - '100'
+          - scene
+          value_type: string
+          variable: class_name
+      height: 96
+      id: '700'
+      position:
+        x: 1140.0057747791568
+        y: 1158.1838093772835
+      positionAbsolute:
+        x: 1140.0057747791568
+        y: 1158.1838093772835
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        answer: '{{#700.answer#}}'
+        desc: ''
+        selected: false
+        title: 返回其他业务提示
+        type: answer
+        variables: []
+      height: 102
+      id: '800'
+      position:
+        x: 1492.547998111197
+        y: 1158.1838093772835
+      positionAbsolute:
+        x: 1492.547998111197
+        y: 1158.1838093772835
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    viewport:
+      x: -440.280618293172
+      y: -151.82678797616086
+      zoom: 0.7620726730939279
+  rag_pipeline_variables: []
