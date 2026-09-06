@@ -209,9 +209,12 @@ const visibleBlocks = computed(() =>
     ? props.blocks.filter(block => block && block.type !== "suggestion")
     : props.blocks,
 );
-const contentBlocks = computed(() =>
-  visibleBlocks.value.filter(block => block && block.type !== "suggestion"),
-);
+const contentBlocks = computed(() => {
+  const blocks = visibleBlocks.value.filter(block => block && block.type !== "suggestion");
+  return blocks.length || !props.content
+    ? blocks
+    : [{ id: "content-fallback", type: "answer", payload: { content: props.content }, complete: true }];
+});
 const suggestionBlocks = computed(() =>
   visibleBlocks.value.filter(block => block && block.type === "suggestion"),
 );
@@ -430,10 +433,6 @@ function onNegativeFeedback() {
             努力链接中
           </text>
         </view>
-        <!-- 流式失败等场景只有纯文本没有 blocks，不兜住就是一个空气泡 -->
-        <text v-if="!contentBlocks.length && props.content" class="ai-bubble-v2__ai-content">
-          {{ props.content }}
-        </text>
         <AiContentBlocks
           :blocks="contentBlocks"
           :force-thinking-expanded="props.forceThinkingExpanded"

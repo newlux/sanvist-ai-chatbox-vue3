@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { expandChartFences } from "@/utils/ai-stream";
+import { expandChartFences, expandMarkdownTables } from "@/utils/ai-stream";
 import AiBlockRenderer from "./AiBlockRenderer.vue";
 import AnswerGroupBlock from "./blocks/AnswerGroupBlock.vue";
 
@@ -26,8 +26,8 @@ const props = defineProps({
 
 const emit = defineEmits(["suggestion-tap"]);
 
-// 正文里内联的 ```echarts 围栏在这里展开成 chart 块，与后端单独推的 chart 事件同路渲染
-const normalizedBlocks = computed(() => expandChartFences(props.blocks || []));
+// 回答正文里的 Markdown 表格与 ECharts 围栏都在此转换为独立 block，统一走专用组件。
+const normalizedBlocks = computed(() => expandChartFences(expandMarkdownTables(props.blocks || [])));
 
 const renderItems = computed(() => {
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，

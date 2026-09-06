@@ -5,7 +5,7 @@ export { applyEventToBlocks, buildInitialBlocks } from "./chatStreamParser";
 export type { ChunkData, ChunkDecoder } from "./chunkDecoder";
 
 export { createChunkDecoder } from "./chunkDecoder";
-export { createDifyEventNormalizer, toDifyChatMessagesRequest } from "./dify";
+export { createDifyEventNormalizer, extractDifyHistoryBlocks, toDifyChatMessagesRequest } from "./dify";
 export type { ReportAdjustmentAction, ReportInteraction, ReportModuleCode, ReportNavigationAction, ReportQaInteraction } from "./report-interaction";
 export { parseReportInteraction } from "./report-interaction";
 
@@ -17,3 +17,4 @@ export { consumeChatStream } from "./streamConsumer";
 
 export type { StreamFlusher, StreamFlusherOptions } from "./streamFlusher";
 export { createStreamFlusher } from "./streamFlusher";
+export { expandMarkdownTables } from "./tableFence";
