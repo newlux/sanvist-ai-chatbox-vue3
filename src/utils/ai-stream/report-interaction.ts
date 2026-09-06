@@ -92,7 +92,13 @@ function parseAdjustmentAction(value: unknown): ReportAdjustmentAction | null {
 /** 只消费协议约定且参数完整的汇报交互，其他内容由原有普通回答链路处理。 */
 export function parseReportInteraction(rawAnswer: string): ReportInteraction | null {
   try {
-    const payload = getPayload(JSON.parse(rawAnswer));
+    const trimmedAnswer = rawAnswer.trim();
+    const podcastStart = /^<PODCAST>/i;
+    const podcastEnd = /<\/PODCAST>$/i;
+    const normalizedAnswer = podcastStart.test(trimmedAnswer) && podcastEnd.test(trimmedAnswer)
+      ? trimmedAnswer.replace(podcastStart, "").replace(podcastEnd, "").trim()
+      : trimmedAnswer;
+    const payload = getPayload(JSON.parse(normalizedAnswer));
     if (!payload) return null;
 
     if (payload.interaction_type === "qa") {

@@ -54,7 +54,7 @@ function splitMarkdownTableRow(line: string) {
     .map(cell => cell.trim());
 }
 
-function parseMarkdownTable(content: unknown) {
+export function parseMarkdownTable(content: unknown) {
   const lines = String(content || "")
     .split(/\r?\n/)
     .map(line => line.trim())
@@ -70,6 +70,44 @@ function parseMarkdownTable(content: unknown) {
     columns,
     rows: lines.slice(2).map(splitMarkdownTableRow),
   };
+}
+
+/** 把一段普通 Markdown 文本中内嵌的表格拆成 answer/table 段落。 */
+export function splitMarkdownTables(source: string): DifyHistoryBlockData[] {
+  const lines = source.split(/\r?\n/);
+  const segments: DifyHistoryBlockData[] = [];
+  const textLines: string[] = [];
+  function flushText() {
+    if (!textLines.length) return;
+    const content = textLines.join("\n");
+    textLines.length = 0;
+    if (content.trim()) {
+      segments.push({ type: "answer", payload: { content } });
+    }
+  }
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    const next = lines[index + 1];
+    if (next && line.includes("|") && next.includes("|")) {
+      let end = index + 2;
+      while (end < lines.length && lines[end].includes("|")) {
+        end += 1;
+      }
+      const candidate = lines.slice(index, end).join("\n");
+      const table = parseMarkdownTable(candidate);
+      if (table) {
+        flushText();
+        segments.push({ type: "table", payload: table });
+        index = end;
+        continue;
+      }
+    }
+    textLines.push(line);
+    index += 1;
+  }
+  flushText();
+  return segments;
 }
 
 export interface DifyHistoryBlockData {
@@ -110,7 +148,6 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
   const pattern = /<(SANVIST|ASK|GUIDE)>([\s\S]*?)<\/\1>/g;
   const blocks: DifyHistoryBlockData[] = [];
   let cursor = 0;
-  let foundProtocol = false;
 
   const appendAnswer = (content: unknown) => {
     const text = String(content || "");
@@ -134,7 +171,6 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
       if (match[1] === "GUIDE") {
         const guideBlock = parseGuideBlock(payload);
         if (guideBlock) blocks.push(guideBlock);
-        foundProtocol = true;
         continue;
       }
       if (match[1] === "ASK") {
@@ -145,10 +181,8 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
             ? parseMarkdownTable(data.content)
             : { columns: data.columns, rows: data.rows };
           if (table) blocks.push({ type: "table", payload: table });
-          foundProtocol = true;
         } else if (type === "echarts") {
           blocks.push({ type: "chart", payload: { option: data } });
-          foundProtocol = true;
         }
         continue;
       }
@@ -158,14 +192,21 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
       const known = ["status", "answer", "done"].includes(event)
         || ["node_started", "node_retry", "node_finished", "workflow_finished"].includes(difyEvent);
       if (!known) continue;
-      foundProtocol = true;
       if (event === "answer") appendAnswer(asRecord(payload.data)?.content);
     } catch {
       // 历史中的非法协议块不参与渲染。
     }
   }
   appendAnswer(source.slice(cursor));
-  return foundProtocol ? blocks : [{ type: "answer", payload: { content: source } }];
+  const result: DifyHistoryBlockData[] = [];
+  for (const block of blocks) {
+    if (block.type === "answer") {
+      result.push(...splitMarkdownTables(String(block.payload.content || "")));
+    } else {
+      result.push(block);
+    }
+  }
+  return result.length ? result : [{ type: "answer", payload: { content: source } }];
 }
 
 /**

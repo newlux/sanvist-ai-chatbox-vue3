@@ -7,13 +7,25 @@ const props = defineProps({
   payload: { type: Object, default: () => ({}) },
 });
 
-const columnCount = computed(() => {
-  const headerCount = Array.isArray(props.payload?.columns) ? props.payload.columns.length : 0;
-  const rowCount = Array.isArray(props.payload?.rows)
-    ? Math.max(...props.payload.rows.map((row: unknown) => (Array.isArray(row) ? row.length : 0)), 0)
-    : 0;
-  return Math.max(headerCount, rowCount, 1);
-});
+const rawColumns = computed(() =>
+  Array.isArray(props.payload?.columns) ? props.payload.columns : [],
+);
+const rawRows = computed(() =>
+  Array.isArray(props.payload?.rows) ? props.payload.rows.filter(Array.isArray) : [],
+);
+const columnCount = computed(() => Math.max(
+  rawColumns.value.length,
+  ...rawRows.value.map(row => row.length),
+  1,
+));
+const columns = computed(() => Array.from(
+  { length: columnCount.value },
+  (_, index) => String(rawColumns.value[index] ?? ""),
+));
+const rows = computed(() => rawRows.value.map(row => Array.from(
+  { length: columnCount.value },
+  (_, index) => String(row[index] ?? ""),
+)));
 const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
 </script>
 
@@ -22,14 +34,14 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
     <view class="table-block__table" :style="{ width: tableWidth }">
       <view class="table-block__row table-block__row--head">
         <text
-          v-for="(column, index) in payload.columns || []"
+          v-for="(column, index) in columns"
           :key="`${column}-${index}`"
           class="table-block__cell"
         >
           {{ column }}
         </text>
       </view>
-      <view v-for="(row, rowIndex) in payload.rows || []" :key="rowIndex" class="table-block__row">
+      <view v-for="(row, rowIndex) in rows" :key="rowIndex" class="table-block__row">
         <text v-for="(cell, cellIndex) in row" :key="cellIndex" class="table-block__cell">
           {{ cell }}
         </text>

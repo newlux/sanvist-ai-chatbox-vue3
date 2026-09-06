@@ -5,7 +5,7 @@ import { useI18n } from "vue-i18n";
 import { interruptChat, sendBlockingChatMessage } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { buildInitialBlocks, consumeChatStream, parseReportInteraction } from "@/utils/ai-stream";
+import { buildInitialBlocks, consumeChatStream, extractDifyHistoryBlocks, parseReportInteraction } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
 import { createLogger } from "@/utils/logger";
@@ -224,7 +224,11 @@ export function useChatSend(scope?: string, handlers?: {
       applySnapshot(aiMsgId, userMsgId, {
         blocks: reportInteraction || !response.answer
           ? buildInitialBlocks()
-          : [{ id: "answer-0", type: "answer", payload: { content: response.answer }, complete: true }],
+          : extractDifyHistoryBlocks(response.answer).map((block, index) => ({
+              ...block,
+              id: `blocking-${block.type}-${index}`,
+              complete: true,
+            })),
         conversationId: response.conversationId,
         messageId: response.messageId,
         taskId: response.taskId,

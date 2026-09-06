@@ -114,6 +114,7 @@ watch(() => props.currentSeq, updateTranscriptScroll);
           </text>
         </view>
       </scroll-view>
+      <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__top-fade" />
       <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__bottom-fade" />
       <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__feedback-mask">
         <view class="report-broadcast-content__feedback">
@@ -266,6 +267,16 @@ watch(() => props.currentSeq, updateTranscriptScroll);
   font-size: 36rpx;
   font-weight: 700;
   line-height: 50rpx;
+}
+.report-broadcast-content__top-fade {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 160rpx;
+  pointer-events: none;
+  background: linear-gradient(180deg, #fff 0%, rgb(255 255 255 / 86%) 52%, rgb(255 255 255 / 0%) 100%);
 }
 .report-broadcast-content__bottom-fade {
   position: absolute;
