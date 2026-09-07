@@ -352,7 +352,7 @@ onBeforeUnmount(() => {
             :class="{ 'voice-listening__header--cancelling': voice.cancelling }"
           >
             <text class="voice-listening__title">
-              {{ voice.cancelling ? '松开取消语音' : 'Noii正在听，请说话' }}
+              {{ voice.cancelling ? '松开取消语音' : 'Sanii正在听，请说话' }}
             </text>
             <text class="voice-listening__hint">
               {{ voice.cancelling ? '松开手指取消识别' : '说完松手' }}

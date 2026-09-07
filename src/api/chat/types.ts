@@ -222,7 +222,8 @@ export interface ChatMessage {
 }
 
 export interface SubmitFeedbackParams {
-  rating: Feedback["rating"];
+  user: string;
+  rating: Feedback["rating"] | null;
   content?: string;
 }
 
