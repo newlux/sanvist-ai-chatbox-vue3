@@ -44,11 +44,11 @@ const activeHistoryBizDate = ref("");
 
 const isQaVisible = computed(() => props.qaLoading || Boolean(props.qaAnswer));
 const statusText = computed(() => {
-  if (props.qaLoading) return "识别中...";
-  if (props.qaAnswer) return "Noii 说..";
+  if (props.qaLoading) return "识别中";
+  if (props.qaAnswer) return "Sanii 说..";
   if (paused.value) return "已暂停";
-  if (loading.value) return "准备中...";
-  if (playing.value) return "播报中...";
+  if (loading.value) return "准备中";
+  if (playing.value) return "播报中";
   if (error.value) return "播报失败";
   return "播报完成";
 });
@@ -97,8 +97,10 @@ defineExpose({ pause, resume, restart: play, stop });
     <ReportBroadcastHeader
       :status="statusText"
       :qa-visible="isQaVisible"
+      :active="playing"
       @dismiss-qa="emit('dismiss-qa')"
       @exit-report="exitReport"
+      @open-history="openHistory"
     />
     <ReportQaAnswer v-if="isQaVisible" :loading="qaLoading" :answer="qaAnswer" />
     <ReportBroadcastContent
@@ -109,7 +111,6 @@ defineExpose({ pause, resume, restart: play, stop });
       :current-seq="currentSeq"
       :next-text="nextText"
       :transcript-segments="transcriptSegments"
-      @open-history="openHistory"
       @play-pause="onPlayPause"
     />
     <ReportBroadcastHistory

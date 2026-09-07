@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, getCurrentInstance, nextTick, ref, watch } from "vue";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
-import feedbackHistoryIcon from "@/assets/img/report-broadcast/feedback-history.svg";
-import iconVoicePause from "@/assets/img/voice-assistant/voice-off.svg";
-import iconVoicePlay from "@/assets/img/voice-assistant/voice-on.svg";
+import iconVoicePause from "@/assets/img/report-broadcast/pause-control.png";
+import iconVoicePlay from "@/assets/img/report-broadcast/play-control.png";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 
 const props = defineProps<{
@@ -15,7 +14,7 @@ const props = defineProps<{
   transcriptSegments: Array<{ seq: number; text: string }>;
 }>();
 
-const emit = defineEmits<{ "open-history": []; "play-pause": [] }>();
+const emit = defineEmits<{ "play-pause": [] }>();
 const instance = getCurrentInstance();
 const transcriptScrollTop = ref(0);
 const leftWaveBars = [2, 2, 18, 4, 10, 4, 16, 8, 4, 16, 4, 30, 12, 20, 2, 1, 1];
@@ -84,6 +83,13 @@ watch(() => props.currentSeq, updateTranscriptScroll);
       <view class="report-broadcast-content__wave report-broadcast-content__wave--right">
         <ReportWaveform :active="playing" :bars="rightWaveBars" />
       </view>
+      <view class="report-broadcast-content__play-control" @tap="emit('play-pause')">
+        <image
+          class="report-broadcast-content__play-control-icon"
+          :src="playing ? iconVoicePlay : iconVoicePause"
+          mode="aspectFit"
+        />
+      </view>
     </view>
     <view class="report-broadcast-content__transcript">
       <view v-show="showTranscriptSkeleton" class="report-broadcast-content__skeleton">
@@ -117,25 +123,11 @@ watch(() => props.currentSeq, updateTranscriptScroll);
       <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__top-fade" />
       <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__bottom-fade" />
       <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__feedback-mask">
-        <view class="report-broadcast-content__feedback">
-          <view class="report-broadcast-content__play-btn" @tap="emit('play-pause')">
-            <image
-              class="report-broadcast-content__feedback-icon"
-              :src="playing ? iconVoicePause : iconVoicePlay"
-              mode="aspectFit"
-            />
-          </view>
-          <image
-            class="report-broadcast-content__feedback-icon"
-            :src="feedbackHistoryIcon"
-            mode="aspectFit"
-            @tap="emit('open-history')"
-          /><image
-            class="report-broadcast-content__feedback-icon"
-            :src="feedbackGoodIcon"
-            mode="aspectFit"
-          />
-        </view>
+        <image
+          class="report-broadcast-content__feedback-icon"
+          :src="feedbackGoodIcon"
+          mode="aspectFit"
+        />
       </view>
     </view>
   </view>
@@ -161,7 +153,7 @@ watch(() => props.currentSeq, updateTranscriptScroll);
   flex: 0 0 510rpx;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  overflow: visible;
 }
 .report-broadcast-content__wave {
   position: absolute;
@@ -278,6 +270,24 @@ watch(() => props.currentSeq, updateTranscriptScroll);
   pointer-events: none;
   background: linear-gradient(180deg, #fff 0%, rgb(255 255 255 / 86%) 52%, rgb(255 255 255 / 0%) 100%);
 }
+.report-broadcast-content__play-control {
+  position: absolute;
+  z-index: 3;
+  bottom: -24rpx;
+  left: 50%;
+  display: flex;
+  width: 64rpx;
+  height: 64rpx;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-shadow: 0 8rpx 20rpx rgb(0 0 0 / 18%);
+  transform: translateX(-50%);
+}
+.report-broadcast-content__play-control-icon {
+  width: 64rpx;
+  height: 64rpx;
+}
 .report-broadcast-content__bottom-fade {
   position: absolute;
   z-index: 2;
@@ -303,7 +313,7 @@ watch(() => props.currentSeq, updateTranscriptScroll);
   height: 112rpx;
   align-items: center;
   justify-content: flex-end;
-  padding-right: 60rpx;
+  padding-right: 68rpx;
   box-sizing: border-box;
   background: #fff;
 }
