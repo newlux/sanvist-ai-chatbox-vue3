@@ -91,12 +91,17 @@ function longestLineWidth(text: unknown, textStyle: Record<string, any> = {}) {
 function normalizeSeries(series: any[]) {
   return series.map((item) => {
     if (!item || typeof item !== "object") return item;
+    const isBar = item.type === "bar";
+    const label = isBar
+      ? { show: true, position: "top", formatter: "{c}", ...item.label }
+      : item.label;
     const colors = Array.isArray(item.itemStyle?.color) ? [...item.itemStyle.color] : null;
-    if (!colors?.length) return item;
+    if (!colors?.length) return { ...item, label };
 
     const data = Array.isArray(item.data) ? item.data : [];
     return {
       ...item,
+      label,
       itemStyle: { ...item.itemStyle, color: undefined },
       data: data.map((point: any, index: number) => {
         const pointStyle =
@@ -255,14 +260,14 @@ function createDefaultGrid(option: any, xAxes: any[], yAxes: any[], series: any[
       axis => axisLabelExtent(axis) + (axis?.name ? DEFAULT_AXIS_NAME_GAP : 0) + 12,
     ),
   );
-  const horizontalInset = Math.ceil(Math.max(requiredLeft, requiredRight));
   const bottom = Math.max(DEFAULT_GRID_BOTTOM, ...bottomAxes.map(axisBottomSpace));
 
   return {
     top: resolveTopSpace(option, xAxes, yAxes, series, chartWidth),
-    right: horizontalInset,
+    right: Math.ceil(requiredRight),
     bottom,
-    left: horizontalInset,
+    // 额外预留刻度与画布边缘的安全距离，防止首位数字被裁切。
+    left: Math.ceil(requiredLeft + 10),
     containLabel: false,
   };
 }
@@ -311,7 +316,10 @@ function normalizeOption(raw: Record<string, any> | null, layout?: ChartLayout |
       next.grid = {
         ...option.grid,
         top: defaultGrid.top,
+        right: Math.max(Number(option.grid.right) || 0, defaultGrid.right),
         bottom: Math.max(Number(option.grid.bottom) || 0, defaultGrid.bottom),
+        left: Math.max(Number(option.grid.left) || 0, defaultGrid.left + 10),
+        containLabel: true,
       };
     }
   }

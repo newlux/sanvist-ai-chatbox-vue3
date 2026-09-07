@@ -4,12 +4,13 @@ import { computed, onMounted, ref } from "vue";
 import { getListenBroadcastConfig, saveListenBroadcastPreference } from "@/api/listen-broadcast";
 import arrowLeftIcon from "@/assets/img/voice-assistant/voice-arrow-left.svg";
 import arrowRightIcon from "@/assets/img/voice-assistant/voice-arrow-right.svg";
+import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
 import bubbleGlowIcon from "@/assets/img/voice-assistant/voice-bubble-glow.svg";
 import capsuleGlowOff from "@/assets/img/voice-assistant/voice-capsule-glow-off.png";
 import capsuleGlowOn from "@/assets/img/voice-assistant/voice-capsule-glow-on.png";
 import checkOffIcon from "@/assets/img/voice-assistant/voice-check-off.svg";
 import checkOnIcon from "@/assets/img/voice-assistant/voice-check-on.svg";
-import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
+import chevronDownIcon from "@/assets/img/voice-assistant/voice-chevron-down.svg";
 import { useReportStyle } from "@/hooks/useReportStyle";
 import { createLogger } from "@/utils/logger";
 
@@ -23,12 +24,14 @@ const emit = defineEmits<{
 }>();
 
 const logger = createLogger("report-style-selector");
-const { saveReportStyle } = useReportStyle();
+const { saveReportStyle, loadReportStyle } = useReportStyle();
 const config = ref<ListenBroadcastConfig | null>(null);
 const loading = ref(true);
 const submitting = ref(false);
 const styleIndex = ref(0);
 const checkedIds = ref<string[]>([]);
+const reportTime = ref("08:00");
+const reportTimePickerOpen = ref(false);
 const selectionHint = ref("");
 
 const styles = computed(() => config.value?.styles || []);
@@ -65,6 +68,19 @@ function nextStyle() {
   resetChecked();
 }
 
+function onReportTimePickerTap() {
+  if (!loading.value && !submitting.value) reportTimePickerOpen.value = true;
+}
+
+function onReportTimeChange(event: { detail: { value: string } }) {
+  reportTime.value = event.detail.value;
+  reportTimePickerOpen.value = false;
+}
+
+function onReportTimePickerCancel() {
+  reportTimePickerOpen.value = false;
+}
+
 async function confirmStyle() {
   const style = currentStyle.value;
   if (!style || submitting.value) return;
@@ -83,8 +99,9 @@ async function confirmStyle() {
       voiceCode: props.voiceCode,
       styleCode: style.code,
       checkedModules: checkedIds.value,
+      reportTime: reportTime.value,
     });
-    saveReportStyle(style.code, checkedIds.value);
+    saveReportStyle(style.code, checkedIds.value, reportTime.value);
     emit("confirm", style, checkedIds.value);
   } catch (error) {
     logger.error("failed to save listen broadcast preference", error);
@@ -98,6 +115,10 @@ async function loadConfig() {
   loading.value = true;
   try {
     config.value = await getListenBroadcastConfig();
+    const saved = loadReportStyle();
+    if (saved?.reportTime && /^\d{2}:\d{2}$/.test(saved.reportTime)) {
+      reportTime.value = saved.reportTime;
+    }
     styleIndex.value = 0;
     resetChecked();
   } catch (error) {
@@ -138,11 +159,26 @@ onMounted(() => {
     </text>
 
     <!-- ④ 汇报时间行(940:76) -->
-    <view class="report-style-selector__time-row">
-      <text class="report-style-selector__time-text">
-        汇报时间：北京时间 08:00
-      </text>
-    </view>
+    <picker
+      class="report-style-selector__time-picker"
+      mode="time"
+      :value="reportTime"
+      :disabled="loading || submitting"
+      @change="onReportTimeChange"
+      @cancel="onReportTimePickerCancel"
+    >
+      <view class="report-style-selector__time-row" @tap="onReportTimePickerTap">
+        <text class="report-style-selector__time-text">
+          汇报时间： {{ reportTime }}
+        </text>
+        <image
+          class="report-style-selector__time-chevron"
+          :class="{ 'report-style-selector__time-chevron--open': reportTimePickerOpen }"
+          :src="chevronDownIcon"
+          mode="aspectFit"
+        />
+      </view>
+    </picker>
 
     <!-- ⑤ 主体光晕 Bubble(1004:72)：风格名 + 说明 + 左右切换 -->
     <view class="report-style-selector__stage">
@@ -349,13 +385,18 @@ onMounted(() => {
 
 /* —— ④ 汇报时间行(940:76)：13px=26rpx，Inter Regular，#999999 ——
    与标题底(143)间距 gap=157-143=14px=28rpx */
+.report-style-selector__time-picker {
+  margin-top: 28rpx;
+  flex-shrink: 0;
+}
+
 .report-style-selector__time-row {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8rpx;
-  margin-top: 28rpx;
-  flex-shrink: 0;
+  min-height: 48rpx;
+  padding: 0 12rpx;
 }
 
 .report-style-selector__time-text {
@@ -363,6 +404,17 @@ onMounted(() => {
   font-size: 26rpx;
   font-weight: 400;
   line-height: 32rpx;
+}
+
+.report-style-selector__time-chevron {
+  display: block;
+  width: 24rpx;
+  height: 24rpx;
+  transition: transform 160ms ease;
+}
+
+.report-style-selector__time-chevron--open {
+  transform: rotate(180deg);
 }
 
 /* —— ⑤ 主体光晕 Bubble(1004:72 196×196px)：与时间行底(173)间距 gap=186-173=13px=26rpx —— */

@@ -51,7 +51,7 @@ onBeforeUnmount(dispose);
       @urgent-toggle="onLightningTap"
       @load-more="loadMore"
     />
-    <AiChatInput v-model="inputText" />
+    <AiChatInput v-model="inputText" :attachment-disabled="true" />
   </view>
 </template>
 

@@ -69,3 +69,13 @@ export interface ListenBroadcastHistoryItem {
 }
 
 export interface TodayListenBroadcast extends ListenBroadcastHistoryItem {}
+
+/** 听播点赞以业务日期和模块为唯一维度；整篇播报的 module 固定为 null。 */
+export interface ListenBroadcastLikeParams {
+  bizDate: string;
+  module: string | null;
+}
+
+export interface ListenBroadcastLikeResult {
+  liked: boolean;
+}

@@ -13,6 +13,8 @@ const props = defineProps({
   keyboardHeight: { type: Number, default: 0 },
   /** 语音识别结果编辑时的键盘高度。 */
   voiceKeyboardHeight: { type: Number, default: 0 },
+  /** 是否禁用上传附件入口。 */
+  attachmentDisabled: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -264,7 +266,7 @@ async function onOpenAttachmentPicker() {
     isRecognizing: voice.isRecognizing,
     currentCount: attachments.value.length,
   });
-  if (props.isLoading || voice.isRecognizing) return;
+  if (props.attachmentDisabled || props.isLoading || voice.isRecognizing) return;
   if (attachments.value.length >= 3) {
     logger.info("[picker] limit reached", { count: attachments.value.length });
     openAttachmentPicker(); // 触顶提示
@@ -483,7 +485,7 @@ onBeforeUnmount(() => {
         <!-- 左侧：附件入口 -->
         <view
           class="input-bar__plus"
-          :class="{ 'input-bar__plus--disabled': isLoading || voice.isRecognizing }"
+          :class="{ 'input-bar__plus--disabled': attachmentDisabled || isLoading || voice.isRecognizing }"
           @tap="onOpenAttachmentPicker"
         >
           <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
@@ -696,35 +698,43 @@ onBeforeUnmount(() => {
 
 .voice-wave__center {
   flex: 0 0 auto;
-  width: 12rpx; // 6px
-  height: 12rpx;
+  width: 16rpx; // 8px
+  height: 16rpx;
   margin: 0 16rpx;
   border-radius: 50%;
   background: #c8201e;
+  box-shadow: 0 0 14rpx rgba(200, 32, 30, 0.45);
+  animation: voice-wave-center-pulse 0.72s ease-in-out infinite;
 }
 
 .voice-wave__dot {
   flex: 0 0 auto;
-  width: 8rpx; // 4px
-  height: 8rpx;
+  width: 10rpx; // 5px
+  height: 10rpx;
   border-radius: 50%;
   background: #c8201e;
-  animation: voice-wave-breathe 1.1s ease-in-out infinite;
+  transform-origin: center;
+  animation: voice-wave-breathe 0.72s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 
 .voice-wave__dot:nth-child(1) { opacity: 1; animation-delay: 0s; }
-.voice-wave__dot:nth-child(2) { opacity: 0.8; animation-delay: 0.05s; }
-.voice-wave__dot:nth-child(3) { opacity: 0.6; animation-delay: 0.1s; }
-.voice-wave__dot:nth-child(4) { opacity: 0.4; animation-delay: 0.15s; }
-.voice-wave__dot:nth-child(5) { opacity: 0.3; animation-delay: 0.2s; }
-.voice-wave__dot:nth-child(6) { opacity: 0.2; animation-delay: 0.25s; }
-.voice-wave__dot:nth-child(7) { opacity: 0.1; animation-delay: 0.3s; }
-.voice-wave__dot:nth-child(8) { opacity: 0.05; animation-delay: 0.35s; }
-.voice-wave__dot:nth-child(9) { opacity: 0.02; animation-delay: 0.4s; }
+.voice-wave__dot:nth-child(2) { opacity: 0.86; animation-delay: 0.05s; }
+.voice-wave__dot:nth-child(3) { opacity: 0.7; animation-delay: 0.1s; }
+.voice-wave__dot:nth-child(4) { opacity: 0.52; animation-delay: 0.15s; }
+.voice-wave__dot:nth-child(5) { opacity: 0.36; animation-delay: 0.2s; }
+.voice-wave__dot:nth-child(6) { opacity: 0.24; animation-delay: 0.25s; }
+.voice-wave__dot:nth-child(7) { opacity: 0.15; animation-delay: 0.3s; }
+.voice-wave__dot:nth-child(8) { opacity: 0.08; animation-delay: 0.35s; }
+.voice-wave__dot:nth-child(9) { opacity: 0.04; animation-delay: 0.4s; }
 
 @keyframes voice-wave-breathe {
-  0%, 100% { transform: scaleY(1); }
-  50% { transform: scaleY(1.7); }
+  0%, 100% { transform: scaleY(0.75) scaleX(0.85); }
+  50% { transform: scaleY(3) scaleX(1.15); }
+}
+
+@keyframes voice-wave-center-pulse {
+  0%, 100% { transform: scale(0.9); }
+  50% { transform: scale(1.45); }
 }
 
 /* 麦克风（按住说话） */

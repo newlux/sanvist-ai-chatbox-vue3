@@ -6,11 +6,12 @@ const logger = createLogger("report-style");
 export interface SavedReportStyle {
   styleCode: string;
   moduleCodes: string[];
+  reportTime?: string;
 }
 
-export function saveReportStyle(styleCode: string, moduleCodes: string[]) {
+export function saveReportStyle(styleCode: string, moduleCodes: string[], reportTime?: string) {
   try {
-    uni.setStorageSync(REPORT_STYLE_STORAGE_KEY, { styleCode, moduleCodes });
+    uni.setStorageSync(REPORT_STYLE_STORAGE_KEY, { styleCode, moduleCodes, reportTime });
   } catch (error) {
     logger.error("保存报告风格失败", error);
   }
@@ -23,6 +24,7 @@ export function loadReportStyle(): SavedReportStyle | null {
     return {
       styleCode: saved.styleCode,
       moduleCodes: saved.moduleCodes.filter(code => typeof code === "string"),
+      reportTime: typeof saved.reportTime === "string" ? saved.reportTime : undefined,
     };
   } catch (error) {
     logger.error("读取报告风格失败", error);
