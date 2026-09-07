@@ -41,7 +41,7 @@ function goToRoleSelect() {
       <view class="welcome-visitor__title">
         <text>游客模式</text>
         <text>体验AI助手</text>
-        <text>Noii</text>
+        <text>Sanii</text>
       </view>
       <view class="welcome-visitor__note">
         <view class="welcome-visitor__description">
