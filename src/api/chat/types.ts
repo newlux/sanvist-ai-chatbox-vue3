@@ -168,6 +168,8 @@ export interface CursorPage<T> {
 
 export interface BatchDeleteConversationsParams {
   conversationIds: Identifier[];
+  /** Dify 用于校验会话归属的用户标识。 */
+  user: string;
 }
 
 export interface BatchDeleteResult {

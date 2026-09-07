@@ -12,6 +12,7 @@ import {
 } from "@/api/chat";
 import { extractDifyHistoryBlocks } from "@/utils/ai-stream/dify";
 import { isPodcastSession } from "@/utils/session-scene";
+import { useUserStore } from "./user";
 
 type ChatStore = ReturnType<typeof useChatStore>;
 
@@ -207,14 +208,21 @@ export const useSessionStore = defineStore("session", () => {
     }
   }
 
+  function getDifyUser() {
+    const user = String(useUserStore().userId || "").trim();
+    if (!user) throw new Error("缺少 Dify 用户标识");
+    return user;
+  }
+
   async function removeSession(sessionId: Identifier) {
-    await deleteConversation(sessionId);
+    await deleteConversation(sessionId, getDifyUser());
     await loadSessions();
   }
 
   async function removeSessions(ids: Identifier[]) {
     await batchDeleteConversations({
       conversationIds: ids,
+      user: getDifyUser(),
     });
     await loadSessions();
   }

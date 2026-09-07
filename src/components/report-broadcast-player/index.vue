@@ -4,7 +4,8 @@ import type {
   PlayListenBroadcastParams,
 } from "@/api/listen-broadcast/types";
 import { computed, onMounted, ref } from "vue";
-import { getListenBroadcastHistory } from "@/api/listen-broadcast";
+import { getListenBroadcastHistory, getListenBroadcastLikeStatus, toggleListenBroadcastLike } from "@/api/listen-broadcast";
+import { createLogger } from "@/utils/logger";
 import ReportQaAnswer from "@/components/report-qa-answer/index.vue";
 import { useListenBroadcastPlayer } from "@/hooks/useListenBroadcastPlayer";
 import ReportBroadcastContent from "./report-broadcast-content.vue";
@@ -37,10 +38,14 @@ const {
   transcriptSegments,
   error,
 } = useListenBroadcastPlayer();
+const logger = createLogger("report-broadcast-player");
 const showHistory = ref(false);
 const historyLoading = ref(false);
 const historyItems = ref<ListenBroadcastHistoryItem[]>([]);
 const activeHistoryBizDate = ref("");
+const currentBizDate = ref("");
+const liked = ref(false);
+const likeLoading = ref(false);
 
 const isQaVisible = computed(() => props.qaLoading || Boolean(props.qaAnswer));
 const statusText = computed(() => {
@@ -66,9 +71,40 @@ async function openHistory() {
   }
 }
 
+async function loadLikeStatus(bizDate: string) {
+  if (!bizDate) {
+    liked.value = false;
+    return;
+  }
+  try {
+    const result = await getListenBroadcastLikeStatus({ bizDate, module: null });
+    if (currentBizDate.value === bizDate) liked.value = Boolean(result?.liked);
+  } catch (error) {
+    if (currentBizDate.value === bizDate) liked.value = false;
+    logger.warn("failed to load listen broadcast like status", error);
+  }
+}
+
+async function onToggleLike() {
+  const bizDate = currentBizDate.value;
+  if (!bizDate || likeLoading.value) return;
+  likeLoading.value = true;
+  try {
+    const result = await toggleListenBroadcastLike({ bizDate, module: null });
+    liked.value = Boolean(result?.liked);
+  } catch (error) {
+    logger.error("failed to toggle listen broadcast like", error);
+    uni.showToast({ title: "操作失败，请稍后重试", icon: "none" });
+  } finally {
+    likeLoading.value = false;
+  }
+}
+
 function playHistory(item: ListenBroadcastHistoryItem) {
   activeHistoryBizDate.value = item.bizDate;
+  currentBizDate.value = item.bizDate;
   showHistory.value = false;
+  void loadLikeStatus(item.bizDate);
   play({ ...props.params, bizDate: item.bizDate });
 }
 
@@ -79,7 +115,7 @@ function onPlayPause() {
   } else if (paused.value) {
     resume();
   } else {
-    play(props.params);
+    play({ ...props.params, bizDate: currentBizDate.value || props.params.bizDate });
   }
 }
 
@@ -88,7 +124,11 @@ function exitReport() {
   emit("exit-report");
 }
 
-onMounted(() => play(props.params));
+onMounted(() => {
+  currentBizDate.value = props.params.bizDate || "";
+  void loadLikeStatus(currentBizDate.value);
+  play(props.params);
+});
 defineExpose({ pause, resume, restart: play, stop });
 </script>
 
@@ -111,7 +151,10 @@ defineExpose({ pause, resume, restart: play, stop });
       :current-seq="currentSeq"
       :next-text="nextText"
       :transcript-segments="transcriptSegments"
+      :liked="liked"
+      :like-loading="likeLoading"
       @play-pause="onPlayPause"
+      @like="onToggleLike"
     />
     <ReportBroadcastHistory
       v-if="showHistory"

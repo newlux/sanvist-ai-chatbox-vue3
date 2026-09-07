@@ -101,16 +101,17 @@ const emit = defineEmits([
 ]);
 
 const FALLBACK_OVERVIEW = {
-  greeting: "杜老板，你好。",
+  userName: "杜老板",
+  greetingSuffix: "，你好。",
   summary: "7月28日至8月3日设备作业126小时，较前期增加12%，先看整体变化吧！",
 };
 
 const overview = computed(() => {
   const data = props.awakening;
-  if (!data) return FALLBACK_OVERVIEW;
-  const greeting = data.userName ? `${data.userName}，你好。` : FALLBACK_OVERVIEW.greeting;
-  const summary = data.content || FALLBACK_OVERVIEW.summary;
-  return { greeting, summary };
+  console.log("🚀 ~ data:", data)
+  const userName = data?.userName || FALLBACK_OVERVIEW.userName;
+  const summary = data?.content || FALLBACK_OVERVIEW.summary;
+  return { userName, greetingSuffix: FALLBACK_OVERVIEW.greetingSuffix, summary };
 });
 
 const listenBroadcastTitle = computed(() => props.listenBroadcast?.title?.trim() || "");
@@ -271,9 +272,12 @@ const listPadStyle = computed(() =>
             </view>
           </view>
           <template v-else>
-            <text class="business-overview__title">
-              {{ overview.greeting }}
-            </text>
+            <view class="business-overview__title">
+              <text class="business-overview__title-name">
+                {{ overview.userName }}
+              </text>
+              <text>{{ overview.greetingSuffix }}</text>
+            </view>
             <text class="business-overview__summary">
               {{ overview.summary }}
             </text>
@@ -506,6 +510,10 @@ const listPadStyle = computed(() =>
   font-size: 56rpx;
   font-weight: 700;
   line-height: 68rpx;
+}
+
+.business-overview__title-name {
+  color: #c8201e;
 }
 
 .business-overview__summary {

@@ -160,14 +160,18 @@ export function getConversations(params: ListConversationsParams) {
   }).json().then(page => toCursorPage(page, toConversation));
 }
 
-export function deleteConversation(conversationId: Identifier) {
-  return request.delete<null>(`/proxy/v1/conversations/${conversationId}`, jsonDeleteOptions).json();
+export function deleteConversation(conversationId: Identifier, user: string) {
+  // Dify 标准：DELETE /v1/conversations/{conversation_id}，JSON body 中必须包含 user。
+  return request.delete<null>(`/proxy/v1/conversations/${encodeURIComponent(String(conversationId))}`, {
+    ...jsonOptions,
+    data: { user },
+  }).json();
 }
 
 export async function batchDeleteConversations(params: BatchDeleteConversationsParams): Promise<BatchDeleteResult> {
   // Dify 没有批量删除会话接口，保留原有批量操作体验，逐条调用标准 DELETE 接口。
   await Promise.all(params.conversationIds.map(conversationId => (
-    deleteConversation(conversationId)
+    deleteConversation(conversationId, params.user)
   )));
   return { deleted: params.conversationIds.length };
 }

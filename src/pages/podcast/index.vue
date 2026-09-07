@@ -106,6 +106,7 @@ function restoreReportBroadcast() {
     voice: voice.id,
     styleCode: style.styleCode,
     checkedModules: style.moduleCodes,
+    bizDate: reportBizDate.value,
   };
   reportBroadcastPortrait.value = voice.hero;
   showReportVoiceSelector.value = false;
@@ -121,6 +122,7 @@ function confirmReportVoice(voice: ReportVoiceOption, style: ListenBroadcastStyl
     voice: voice.id,
     styleCode: style.code,
     checkedModules: moduleCodes,
+    bizDate: reportBizDate.value,
   };
   reportBroadcastPortrait.value = voice.hero;
   showReportVoiceSelector.value = false;
@@ -221,6 +223,7 @@ onBeforeUnmount(() => {
       />
       <AiChatInput
         v-model="inputText"
+        :attachment-disabled="true"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"

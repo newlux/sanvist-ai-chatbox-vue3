@@ -1,6 +1,8 @@
 import type {
   ListenBroadcastConfig,
   ListenBroadcastHistoryItem,
+  ListenBroadcastLikeParams,
+  ListenBroadcastLikeResult,
   ListenBroadcastPeriod,
   ListenBroadcastPreference,
   SaveListenBroadcastPreferenceParams,
@@ -32,4 +34,14 @@ export function getListenBroadcastConfig() {
 
 export function saveListenBroadcastPreference(params: SaveListenBroadcastPreferenceParams) {
   return request.put<ListenBroadcastPreference>("/listen-broadcast/preference", params, jsonOptions).json();
+}
+
+/** 查询指定日期整篇听播的真实点赞状态。 */
+export function getListenBroadcastLikeStatus(params: ListenBroadcastLikeParams) {
+  return request.get<ListenBroadcastLikeResult>("/listen-broadcast/like/status", params).json();
+}
+
+/** 切换指定日期整篇听播的点赞状态，返回切换后的真实状态。 */
+export function toggleListenBroadcastLike(params: ListenBroadcastLikeParams) {
+  return request.post<ListenBroadcastLikeResult>("/listen-broadcast/like/toggle", params, jsonOptions).json();
 }

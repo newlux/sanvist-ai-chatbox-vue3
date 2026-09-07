@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, getCurrentInstance, nextTick, ref, watch } from "vue";
+import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
 import iconVoicePause from "@/assets/img/report-broadcast/pause-control.png";
 import iconVoicePlay from "@/assets/img/report-broadcast/play-control.png";
@@ -12,9 +13,11 @@ const props = defineProps<{
   currentSeq: number | null;
   nextText: string;
   transcriptSegments: Array<{ seq: number; text: string }>;
+  liked: boolean;
+  likeLoading: boolean;
 }>();
 
-const emit = defineEmits<{ "play-pause": [] }>();
+const emit = defineEmits<{ "play-pause": []; like: [] }>();
 const instance = getCurrentInstance();
 const transcriptScrollTop = ref(0);
 const leftWaveBars = [2, 2, 18, 4, 10, 4, 16, 8, 4, 16, 4, 30, 12, 20, 2, 1, 1];
@@ -123,11 +126,21 @@ watch(() => props.currentSeq, updateTranscriptScroll);
       <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__top-fade" />
       <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__bottom-fade" />
       <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__feedback-mask">
-        <image
-          class="report-broadcast-content__feedback-icon"
-          :src="feedbackGoodIcon"
-          mode="aspectFit"
-        />
+        <view
+          class="report-broadcast-content__feedback-button"
+          :class="{
+            'report-broadcast-content__feedback-button--liked': liked,
+            'report-broadcast-content__feedback-button--loading': likeLoading,
+          }"
+          :aria-disabled="likeLoading"
+          @tap.stop="!likeLoading && emit('like')"
+        >
+          <image
+            class="report-broadcast-content__feedback-icon"
+            :src="liked ? feedbackGoodFilledIcon : feedbackGoodIcon"
+            mode="aspectFit"
+          />
+        </view>
       </view>
     </view>
   </view>
@@ -317,9 +330,21 @@ watch(() => props.currentSeq, updateTranscriptScroll);
   box-sizing: border-box;
   background: #fff;
 }
-.report-broadcast-content__feedback {
+.report-broadcast-content__feedback-button {
   display: flex;
-  gap: 16rpx;
+  width: 72rpx;
+  height: 72rpx;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: transform 0.16s ease, opacity 0.16s ease;
+}
+.report-broadcast-content__feedback-button:active {
+  transform: scale(0.9);
+}
+.report-broadcast-content__feedback-button--loading {
+  pointer-events: none;
+  opacity: 0.45;
 }
 .report-broadcast-content__feedback-icon {
   width: 48rpx;
