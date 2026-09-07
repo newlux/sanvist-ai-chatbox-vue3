@@ -125,7 +125,7 @@ onMounted(() => {
           <text class="report-style-selector__dot" />
           <text class="report-style-selector__dot" />
           <text class="report-style-selector__working-text">
-            Noii 等你选..
+            Sanii 等你选..
           </text>
         </view>
       </view>
