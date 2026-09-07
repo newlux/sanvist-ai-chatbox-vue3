@@ -17,18 +17,22 @@ const { safeBottomPx } = useSafeArea();
       <view class="report-broadcast-history__header">
         <text class="report-broadcast-history__title">
           历史播放列表
-        </text><image
+        </text>
+        <image
           class="report-broadcast-history__close"
           :src="closeIcon"
           mode="aspectFit"
           @tap="emit('close')"
         />
-      </view><view class="report-broadcast-history__tabs">
+      </view>
+      <view class="report-broadcast-history__tabs">
         <view class="report-broadcast-history__tab report-broadcast-history__tab--active">
           <text>日报</text>
-        </view><view class="report-broadcast-history__tab">
+        </view>
+        <view class="report-broadcast-history__tab">
           <text>周报</text>
-        </view><view class="report-broadcast-history__tab">
+        </view>
+        <view class="report-broadcast-history__tab">
           <text>月报</text>
         </view>
       </view><scroll-view class="report-broadcast-history__list" scroll-y>
@@ -36,7 +40,8 @@ const { safeBottomPx } = useSafeArea();
           加载中...
         </view><view v-else-if="!items.length" class="report-broadcast-history__empty">
           暂无日报
-        </view><view
+        </view>
+        <view
           v-for="(item, index) in items"
           v-else
           :key="item.bizDate"
@@ -56,9 +61,10 @@ const { safeBottomPx } = useSafeArea();
             {{ item.bizDate }}
           </text>
         </view>
-      </scroll-view><view
+      </scroll-view>
+      <view
         class="report-broadcast-history__safe-area"
-        :style="{ height: `${safeBottomPx * 2}rpx` }"
+        :style="{ height: `${safeBottomPx}px` }"
       />
     </view>
   </view>
@@ -90,10 +96,9 @@ const { safeBottomPx } = useSafeArea();
 }
 .report-broadcast-history__header {
   display: flex;
-  height: 128rpx;
   align-items: center;
   justify-content: space-between;
-  padding: 0 36rpx 0 52rpx;
+  padding: 32rpx 36rpx 32rpx 52rpx;
 }
 .report-broadcast-history__title {
   color: #666;

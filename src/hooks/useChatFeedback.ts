@@ -2,7 +2,7 @@ import type { Identifier } from "@/api/chat/types";
 import { onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { cancelFeedback, submitFeedback } from "@/api/chat";
-import { useChatStore } from "@/stores";
+import { useChatStore, useUserStore } from "@/stores";
 
 import { createLogger } from "@/utils/logger";
 
@@ -16,6 +16,7 @@ interface FeedbackContext {
 export function useChatFeedback(scope?: string) {
   const { t } = useI18n();
   const chatStore = useChatStore(scope);
+  const userStore = useUserStore();
   const sheetVisible = ref(false);
   const context = ref<FeedbackContext | null>(null);
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -48,7 +49,7 @@ export function useChatFeedback(scope?: string) {
     if (value === "") {
       chatStore.replaceMessage(index, { ...prev, positive: null, feedbackValue: "", feedbackRemark: "" });
       try {
-        await cancelFeedback(messageId);
+        await cancelFeedback(messageId, String(userStore.userId || "guest"));
       } catch (error) {
         logger.error("caught error", error);
         chatStore.replaceMessage(index, { ...prev });
@@ -60,7 +61,7 @@ export function useChatFeedback(scope?: string) {
     if (value === "good") {
       chatStore.replaceMessage(index, { ...prev, positive: true, feedbackValue: "good", feedbackRemark: prev.feedbackRemark || "" });
       try {
-        await submitFeedback(messageId, { rating: "like" });
+        await submitFeedback(messageId, { user: String(userStore.userId || "guest"), rating: "like" });
       } catch (error) {
         logger.error("caught error", error);
         chatStore.replaceMessage(index, { ...prev });
@@ -88,6 +89,7 @@ export function useChatFeedback(scope?: string) {
 
     try {
       await submitFeedback(ctx.messageId, {
+        user: String(userStore.userId || "guest"),
         rating: "dislike",
         content: remark,
       });
