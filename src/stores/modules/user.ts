@@ -10,7 +10,7 @@ export const VISITOR_ROLE_ACCOUNTS: Record<VisitorRole, string> = {
   ADMIN: "DISPATCHER-001",
   MAINTAINER: "MAINTAINER-001",
   PURCHASER: "PURCHASER-001",
-  OPERATOR: "OPERATOR-001",
+  OPERATOR: "DC-OP-CP-01",
 };
 
 export const useUserStore = defineStore("user", () => {

@@ -3,6 +3,7 @@ import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { UiChatMessage } from "@/stores/chat-types";
 import moment from "moment";
 import { computed, ref, watch } from "vue";
+import iconWaveForm from "@/assets/img/icon-waveform.svg";
 import { isListenReportListened } from "@/utils/listen-report";
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
 
@@ -108,7 +109,7 @@ const FALLBACK_OVERVIEW = {
 
 const overview = computed(() => {
   const data = props.awakening;
-  console.log("🚀 ~ data:", data)
+  console.log("🚀 ~ data:", data);
   const userName = data?.userName || FALLBACK_OVERVIEW.userName;
   const summary = data?.content || FALLBACK_OVERVIEW.summary;
   return { userName, greetingSuffix: FALLBACK_OVERVIEW.greetingSuffix, summary };
@@ -299,9 +300,7 @@ const listPadStyle = computed(() =>
               class="business-overview__report"
             >
               <view class="business-overview__sound" aria-hidden="true">
-                <text class="business-overview__sound-bar business-overview__sound-bar--short" />
-                <text class="business-overview__sound-bar business-overview__sound-bar--tall" />
-                <text class="business-overview__sound-bar business-overview__sound-bar--middle" />
+                <image :src="iconWaveForm" mode="aspectFit" />
               </view>
               <view class="business-overview__report-info">
                 <text class="business-overview__report-title">
@@ -544,6 +543,10 @@ const listPadStyle = computed(() =>
   gap: 6rpx;
   width: 40rpx;
   height: 40rpx;
+  uni-image {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 .business-overview__sound-bar {

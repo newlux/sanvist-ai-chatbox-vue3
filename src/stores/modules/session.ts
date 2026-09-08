@@ -147,7 +147,8 @@ export const useSessionStore = defineStore("session", () => {
       sortBy: "-updated_at",
     });
     const rows = Array.isArray(page?.data) ? page.data : [];
-    lastId.value = rows.at(-1)?.id || null;
+    // 低端安卓 WebView 不支持 ES2022 的 Array.prototype.at
+    lastId.value = rows[rows.length - 1]?.id || null;
     hasMore.value = Boolean(page?.hasMore);
     const visible = rows.filter(session => !isPodcastSession(session));
     sessions.value = pageNo === 1

@@ -251,10 +251,6 @@ function closeSelector() {
         </view>
       </view>
 
-      <!-- ⑨ 分页圆点(940:45/46/64) -->
-      <view class="report-voice-selector__dots">
-        <text v-for="index in 3" :key="`dot-${index}`" class="report-voice-selector__page-dot" :class="{ 'report-voice-selector__page-dot--active': index === 2 }" />
-      </view>
       <!-- ⑩ 可滑动切换(940:31) -->
       <text class="report-voice-selector__hint">
         可滑动切换
@@ -574,29 +570,6 @@ function closeSelector() {
   transform: translateX(-50%);
 }
 
-/* —— ⑨ 分页圆点(940:45/46/64)：6×6px=12×12rpx，间距7px=14rpx —— */
-.report-voice-selector__dots {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14rpx;
-  width: 100%;
-  height: 24rpx;
-  margin-top: 47rpx;
-  flex-shrink: 0;
-}
-
-.report-voice-selector__page-dot {
-  width: 12rpx;
-  height: 12rpx;
-  background: rgb(219 20 20 / 14.4%);
-  border-radius: 50%;
-}
-
-.report-voice-selector__page-dot--active {
-  background: #c8201e;
-}
-
 /* —— ⑩ 可滑动切换(940:31)：Inter Regular 12px=24rpx，色 #B5B5B5，与圆点间距 16px=33rpx —— */
 .report-voice-selector__hint {
   display: block;
@@ -619,7 +592,7 @@ function closeSelector() {
   box-sizing: border-box;
   width: 638rpx;
   height: 112rpx;
-  margin-top: 48rpx;
+  margin-top: 64rpx;
   color: #c8201e;
   font-size: 34rpx;
   font-weight: 400;
