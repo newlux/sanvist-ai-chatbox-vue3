@@ -1,7 +1,10 @@
 {
   "extends": "@vue/tsconfig/tsconfig.json",
   "compilerOptions": {
-    "lib": ["esnext", "dom"],
+    // 低端安卓 WebView 兼容目标，锁死 lib 让 .at() 这类 ES2022 API 在编译期就报错，
+    // 而不是等到真机运行才抛 "xxx.at is not a function"
+    "target": "es2018",
+    "lib": ["es2018", "dom"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

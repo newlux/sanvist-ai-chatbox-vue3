@@ -207,14 +207,14 @@ onMounted(() => {
             {{ currentStyle?.name || "" }}
           </text>
           <!-- 分页圆点(940:182 8×6 当前 / 940:183 6×6) -->
-          <view class="report-style-selector__dots">
+          <!-- <view class="report-style-selector__dots">
             <text
               v-for="(_, index) in styles"
               :key="`style-dot-${index}`"
               class="report-style-selector__dot"
               :class="{ 'report-style-selector__dot--active': index === styleIndex }"
             />
-          </view>
+          </view> -->
         </template>
       </view>
       <!-- 右切换箭头(940:134 24×24px 图) -->
@@ -374,7 +374,7 @@ onMounted(() => {
 .report-style-selector__title {
   display: block;
   width: 100%;
-  margin-top: 64rpx;
+  margin-top: 32rpx;
   color: #1a1a1a;
   font-size: 34rpx;
   font-weight: 500;

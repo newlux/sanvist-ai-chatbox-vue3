@@ -152,7 +152,8 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
   const appendAnswer = (content: unknown) => {
     const text = String(content || "");
     if (!text.trim()) return;
-    const previous = blocks.at(-1);
+    // 低端安卓 WebView 不支持 ES2022 的 Array.prototype.at
+    const previous = blocks[blocks.length - 1];
     if (previous?.type === "answer") {
       previous.payload.content = `${String(previous.payload.content || "")}${text}`;
     } else {

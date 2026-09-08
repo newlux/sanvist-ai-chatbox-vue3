@@ -1,9 +1,9 @@
 import bunnyPreview from "@/assets/audio/voice/bunny.mp3";
+import mochiPreview from "@/assets/audio/voice/dylan.wav";
 import ethanPreview from "@/assets/audio/voice/ethan.mp3";
 import kaiPreview from "@/assets/audio/voice/kai.mp3";
 import maiaPreview from "@/assets/audio/voice/maia.mp3";
 import miaPreview from "@/assets/audio/voice/mia.mp3";
-import mochiPreview from "@/assets/audio/voice/mochi.mp3";
 import neilPreview from "@/assets/audio/voice/neil.mp3";
 import serenaPreview from "@/assets/audio/voice/serena.mp3";
 // 8 个 Qwen 音色试听（本地 wav），id 与声音一一对应
@@ -126,7 +126,7 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     preview: maiaPreview,
   },
   {
-    id: "Mochi",
+    id: "Dylan",
     voiceName: "沙小弥",
     name: "聪明伶俐",
     description: "适合日常汇报",

@@ -5,6 +5,7 @@ import { consumeListenBroadcastStream } from "@/api/listen-broadcast/play-stream
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("listen-broadcast-player");
+const PLAYBACK_RATE = 2;
 
 /** 解析音频源并输出诊断摘要，用于定位「格式不匹配」还是「数据不完整」。 */
 function inspectAudioSource(source: string, chunk: ListenBroadcastAudioChunk) {
@@ -133,6 +134,7 @@ export function useListenBroadcastPlayer() {
       playNext(id);
     });
     audio.src = source;
+    audio.playbackRate = PLAYBACK_RATE;
     audio.autoplay = true;
   }
 

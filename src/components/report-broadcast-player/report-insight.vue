@@ -89,7 +89,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
           v-else
           :key="item.id"
           class="report-insight__item"
-          :class="{ 'report-insight__item--urgent': props.canToggleUrgent && item.isUrgent }"
+          :class="{ 'report-insight__item--urgent': item.ownerTag }"
         >
           <view class="report-insight__item-head">
             <text class="report-insight__item-title">
@@ -111,9 +111,9 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
               <image class="report-insight__operator-next-icon" :src="operatorNextIcon" mode="aspectFit" />
             </view>
           </view>
-          <view v-if="props.canToggleUrgent && item.urgentText" class="report-insight__urgent-body">
+          <view v-if="item.ownerTag" class="report-insight__urgent-body">
             <text class="report-insight__urgent-text">
-              {{ item.urgentText }}
+              {{ item.ownerTag }}
             </text>
             <text class="report-insight__description">
               {{ item.description }}

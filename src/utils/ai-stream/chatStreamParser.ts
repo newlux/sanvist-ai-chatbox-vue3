@@ -101,7 +101,8 @@ export function applyEventToBlocks(
     case "message": {
       if (!event.answer) return base;
       const answerBlocks = blocks.filter(block => block.type === "answer");
-      const lastBlock = blocks.at(-1);
+      // 低端安卓 WebView 不支持 ES2022 的 Array.prototype.at
+      const lastBlock = blocks[blocks.length - 1];
       const answerId = !event.replace && lastBlock?.type === "answer"
         ? lastBlock.id
         : `answer-${answerBlocks.length}`;
