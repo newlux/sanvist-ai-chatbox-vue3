@@ -57,6 +57,7 @@ const renameValue = ref("");
 const ignoreNextLongPressReleaseTap = ref(false);
 const isSessionListScrolling = ref(false);
 let sessionScrollIdleTimer;
+let historyReloadTimer;
 
 const sessionList = computed({
   get: () => (props.sessions || []).filter(session => !isPodcastSession(session)),
@@ -129,11 +130,13 @@ function onBackTap() {
 function onShareSelectAllTap() {
   if (!props.shareSelectAllDisabled) emit("share-select-all");
 }
-async function openHistoryDrawer() {
+function openHistoryDrawer() {
   historyLoading.value = true;
   historyPopup.value?.open?.("left");
-  await nextTick();
-  sessionPaging.value?.reload?.();
+  clearTimeout(historyReloadTimer);
+  historyReloadTimer = setTimeout(() => {
+    sessionPaging.value?.reload?.();
+  }, 300);
 }
 async function onSessionQuery(pageNo: number, pageSize: number) {
   try {
@@ -147,6 +150,7 @@ async function onSessionQuery(pageNo: number, pageSize: number) {
   }
 }
 function closeDrawer() {
+  clearTimeout(historyReloadTimer);
   closeActionMenu();
   historyPopup.value?.close?.("left");
 }
@@ -292,6 +296,7 @@ function deleteSelected() {
 
 onBeforeUnmount(() => {
   clearTimeout(sessionScrollIdleTimer);
+  clearTimeout(historyReloadTimer);
 });
 </script>
 
