@@ -49,6 +49,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   "suggestion-tap",
+  "ask-slot-open",
   "tts-click",
   "share-click",
   "feedback-change",
@@ -249,6 +250,10 @@ function onSuggestionTap(event) {
   emit("suggestion-tap", event);
 }
 
+function onAskSlotOpen(payload) {
+  emit("ask-slot-open", payload);
+}
+
 function onShareTap() {
   emit("share-click");
 }
@@ -437,7 +442,9 @@ function onNegativeFeedback() {
           :blocks="contentBlocks"
           :force-thinking-expanded="props.forceThinkingExpanded"
           :no-answer-group="props.noAnswerGroup"
+          :loading="props.loading"
           @suggestion-tap="onSuggestionTap"
+          @ask-slot-open="onAskSlotOpen"
         />
         <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
           <view

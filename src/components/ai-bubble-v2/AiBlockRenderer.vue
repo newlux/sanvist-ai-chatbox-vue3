@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import type { AskSlotPayload } from "@/api/chat/types";
 import AnswerBlock from "./blocks/AnswerBlock.vue";
+import AskSlotBlock from "./blocks/AskSlotBlock.vue";
 import ChartBlock from "./blocks/ChartBlock.vue";
 import ErrorBlock from "./blocks/ErrorBlock.vue";
 import GuideImageBlock from "./blocks/GuideImageBlock.vue";
@@ -29,12 +31,20 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  loading: {
+    type: Boolean,
+    default: false,
+  },
 });
 
-const emit = defineEmits(["suggestion-tap"]);
+const emit = defineEmits(["suggestion-tap", "ask-slot-open"]);
 
 function onSuggestionTap(suggestion: unknown) {
   emit("suggestion-tap", suggestion);
+}
+
+function onAskSlotOpen(payload: AskSlotPayload) {
+  emit("ask-slot-open", payload);
 }
 </script>
 
@@ -61,6 +71,7 @@ function onSuggestionTap(suggestion: unknown) {
     :layout="block.payload.layout"
     :embedded="embedded"
   />
+  <AskSlotBlock v-else-if="block.type === 'ask-slot'" :payload="block.payload" :loading="loading" @open="onAskSlotOpen" />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
   <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />

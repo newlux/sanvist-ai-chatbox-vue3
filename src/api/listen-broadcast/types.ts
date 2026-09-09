@@ -6,6 +6,7 @@ export interface ListenBroadcastModule {
 export interface ListenBroadcastStyle {
   code: string;
   name: string;
+  description?: string;
   defaultModules: string[];
 }
 

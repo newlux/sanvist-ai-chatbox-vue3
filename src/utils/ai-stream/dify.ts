@@ -1,4 +1,4 @@
-import type { ChatResponseMode, ChatStreamEvent, Identifier, SendChatMessageParams } from "@/api/chat/types";
+import type { AskSlotOption, AskSlotPayload, ChatResponseMode, ChatStreamEvent, Identifier, SendChatMessageParams } from "@/api/chat/types";
 
 /** Dify `/chat-messages` 的请求体；只在网络边界使用 snake_case。 */
 export interface DifyChatMessagesRequest {
@@ -23,6 +23,26 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asIdentifier(value: unknown): Identifier | undefined {
   return typeof value === "string" || typeof value === "number" ? value : undefined;
+}
+
+function parseAskSlotPayload(value: Record<string, unknown>): AskSlotPayload | null {
+  const slotName = String(value.slot_name || "").trim();
+  const originalQuery = String(value.original_query || "").trim();
+  const selection = value.selection === "multiple" ? "multiple" : value.selection === "single" ? "single" : "";
+  const options = Array.isArray(value.options)
+    ? value.options
+      .map(asRecord)
+      .filter((item): item is Record<string, unknown> => Boolean(item))
+      .map(item => ({
+        ...item,
+        label: String(item.label || "").trim(),
+        value: String(item.value || "").trim(),
+        device_id: String(item.device_id || "").trim(),
+      }))
+      .filter(item => item.label && item.value && item.device_id) as AskSlotOption[]
+    : [];
+  if (!slotName || !originalQuery || !selection || !options.length) return null;
+  return { ...value, slot_name: slotName, original_query: originalQuery, selection, options };
 }
 
 function getReferences(payload: Record<string, unknown>) {
@@ -111,7 +131,7 @@ export function splitMarkdownTables(source: string): DifyHistoryBlockData[] {
 }
 
 export interface DifyHistoryBlockData {
-  type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion";
+  type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion" | "ask-slot";
   payload: Record<string, unknown>;
 }
 
@@ -184,6 +204,9 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
           if (table) blocks.push({ type: "table", payload: table });
         } else if (type === "echarts") {
           blocks.push({ type: "chart", payload: { option: data } });
+        } else if (type === "slot") {
+          const slot = parseAskSlotPayload(data);
+          if (slot) blocks.push({ type: "ask-slot", payload: slot });
         }
         continue;
       }
@@ -362,6 +385,9 @@ export function createDifyEventNormalizer() {
             if (table) events.push({ event: "table", ...references, data: table });
           } else if (type === "echarts") {
             events.push({ event: "chart", ...references, data: { option: askData } });
+          } else if (type === "slot") {
+            const slot = parseAskSlotPayload(askData);
+            if (slot) events.push({ event: "ask_slot", ...references, data: slot });
           }
           receivedSanvistEvent = true;
           continue;

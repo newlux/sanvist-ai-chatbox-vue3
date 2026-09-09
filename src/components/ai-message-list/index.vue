@@ -93,6 +93,7 @@ const emit = defineEmits([
   "pinned-change",
   "quick-prompt",
   "suggestion-tap",
+  "ask-slot-open",
   "tts-click",
   "share-click",
   "feedback-change",
@@ -109,7 +110,6 @@ const FALLBACK_OVERVIEW = {
 
 const overview = computed(() => {
   const data = props.awakening;
-  console.log("🚀 ~ data:", data);
   const userName = data?.userName || FALLBACK_OVERVIEW.userName;
   const summary = data?.content || FALLBACK_OVERVIEW.summary;
   return { userName, greetingSuffix: FALLBACK_OVERVIEW.greetingSuffix, summary };
@@ -183,6 +183,10 @@ function onQuickPrompt(prompt) {
 
 function onSuggestionTap(suggestion, messageIndex: number) {
   emit("suggestion-tap", suggestion, messageIndex);
+}
+
+function onAskSlotOpen(payload, messageIndex: number) {
+  emit("ask-slot-open", payload, messageIndex);
 }
 
 function onTtsClick(index) {
@@ -361,6 +365,7 @@ const listPadStyle = computed(() =>
               :no-answer-group="!!msg.noAnswerGroup"
               :asr-pending="!!msg.asrPending"
               @suggestion-tap="onSuggestionTap($event, index)"
+              @ask-slot-open="onAskSlotOpen($event, index)"
               @tts-click="onTtsClick(index)"
               @share-click="onShareClick(index, msg)"
               @select-toggle="onSelectToggle(index)"
