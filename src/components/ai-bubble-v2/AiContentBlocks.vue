@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AiBlock } from "@/utils/ai-stream/chatStreamParser";
 import { computed } from "vue";
 import { expandChartFences, expandMarkdownTables } from "@/utils/ai-stream";
 import AiBlockRenderer from "./AiBlockRenderer.vue";
@@ -10,7 +11,7 @@ defineOptions({
 
 const props = defineProps({
   blocks: {
-    type: Array,
+    type: Array as () => AiBlock[],
     default: () => [],
   },
   forceThinkingExpanded: {
@@ -22,12 +23,16 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  loading: {
+    type: Boolean,
+    default: false,
+  },
 });
 
-const emit = defineEmits(["suggestion-tap"]);
+const emit = defineEmits(["suggestion-tap", "ask-slot-open"]);
 
 // 回答正文里的 Markdown 表格与 ECharts 围栏都在此转换为独立 block，统一走专用组件。
-const normalizedBlocks = computed(() => expandChartFences(expandMarkdownTables(props.blocks || [])));
+const normalizedBlocks = computed(() => expandChartFences(expandMarkdownTables((props.blocks || []) as AiBlock[])));
 
 const renderItems = computed(() => {
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
@@ -63,6 +68,10 @@ const renderItems = computed(() => {
 function onSuggestionTap(suggestion) {
   emit("suggestion-tap", suggestion);
 }
+
+function onAskSlotOpen(payload) {
+  emit("ask-slot-open", payload);
+}
 </script>
 
 <template>
@@ -78,7 +87,9 @@ function onSuggestionTap(suggestion) {
         :block="item"
         :force-thinking-expanded="forceThinkingExpanded"
         :embedded="noAnswerGroup"
+        :loading="loading"
         @suggestion-tap="onSuggestionTap"
+        @ask-slot-open="onAskSlotOpen"
       />
     </template>
   </view>

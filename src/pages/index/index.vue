@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AskSlotPayload, AskSlotSubmitPayload } from "@/api/chat/types";
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
@@ -12,6 +13,7 @@ import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
+import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import { AI_ASK_WELCOME_DONE_KEY, LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
@@ -65,7 +67,7 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
+const { sendMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
 const {
   iconCopyImage,
   iconSaveImage,
@@ -99,6 +101,26 @@ const messageBottomInset = computed(() => {
   return composerBottomInset.value;
 });
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
+const askSlotQueue = ref<AskSlotPayload[]>([]);
+const askSlotDrawerVisible = ref(false);
+
+function onAskSlotOpen(slot: AskSlotPayload) {
+  const existingIndex = askSlotQueue.value.findIndex(item => item.slot_name === slot.slot_name);
+  askSlotQueue.value = existingIndex < 0
+    ? [...askSlotQueue.value, slot]
+    : askSlotQueue.value.map((item, index) => index === existingIndex ? slot : item);
+  askSlotDrawerVisible.value = true;
+}
+
+function closeAskSlotDrawer() {
+  askSlotDrawerVisible.value = false;
+}
+
+function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
+  closeAskSlotDrawer();
+  askSlotQueue.value = [];
+  sendAskSlotSelection(payload);
+}
 
 /** 消息播音统一走实时 TTS。 */
 function onTtsClick(index: number) {
@@ -441,6 +463,7 @@ onBeforeUnmount(() => {
         :realtime-tts-playing="realtimeTts.playing.value"
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="sendQuickPrompt"
+        @ask-slot-open="onAskSlotOpen"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
@@ -449,6 +472,12 @@ onBeforeUnmount(() => {
         @listen-report="onGoListenReport"
         @scroll-top="onScrollTop"
         @pinned-change="chatStore.setPinnedToBottom"
+      />
+      <AiSlotDrawer
+        :slots="askSlotQueue"
+        :visible="askSlotDrawerVisible"
+        @close="closeAskSlotDrawer"
+        @submit="onAskSlotSubmit"
       />
       <AiChatNav
         :visible="showQuickPrompts"

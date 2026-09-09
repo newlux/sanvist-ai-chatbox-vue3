@@ -4,7 +4,7 @@ import type {
   MessageEndEvent,
 } from "@/api/chat/types";
 
-export type AiBlockType = "answer" | "think" | "suggestion" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error";
+export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error";
 
 /** 深度思考步骤：由 status 事件按 node 聚合而来 */
 export interface ThinkStep {
@@ -123,6 +123,15 @@ export function applyEventToBlocks(
         ...base,
         blocks: upsertBlock(blocks, "suggestion-0", "suggestion", event.data),
       };
+    case "ask_slot": {
+      const slotName = String(event.data.slot_name || "").trim();
+      const slotIndex = blocks.filter(block => block.type === "ask-slot").length;
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, stablePayloadId("ask-slot", [slotName], slotIndex), "ask-slot", event.data, true),
+        receivedContent: true,
+      };
+    }
     case "chart": {
       const chartData = event.data || {};
       const option = chartData.option;

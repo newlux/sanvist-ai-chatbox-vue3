@@ -11,6 +11,7 @@ import capsuleGlowOn from "@/assets/img/voice-assistant/voice-capsule-glow-on.pn
 import checkOffIcon from "@/assets/img/voice-assistant/voice-check-off.svg";
 import checkOnIcon from "@/assets/img/voice-assistant/voice-check-on.svg";
 import chevronDownIcon from "@/assets/img/voice-assistant/voice-chevron-down.svg";
+import { REPORT_STYLE_OPTIONS } from "@/config/report-styles";
 import { useReportStyle } from "@/hooks/useReportStyle";
 import { createLogger } from "@/utils/logger";
 
@@ -37,6 +38,11 @@ const selectionHint = ref("");
 const styles = computed(() => config.value?.styles || []);
 const modules = computed(() => config.value?.modules || []);
 const currentStyle = computed(() => styles.value[styleIndex.value]);
+const currentStyleDescription = computed(() => {
+  const style = currentStyle.value;
+  if (!style) return "";
+  return style.description || REPORT_STYLE_OPTIONS.find(item => item.name === style.name)?.description || "";
+});
 const canConfirm = computed(() => Boolean(currentStyle.value && modules.value.length && !submitting.value));
 
 function resetChecked() {
@@ -197,7 +203,7 @@ onMounted(() => {
         <template v-if="loading">
           <view class="report-style-selector__skeleton report-style-selector__skeleton--style-label" />
           <view class="report-style-selector__skeleton report-style-selector__skeleton--style-name" />
-          <view class="report-style-selector__skeleton report-style-selector__skeleton--dots" />
+          <view class="report-style-selector__skeleton report-style-selector__skeleton--style-desc" />
         </template>
         <template v-else>
           <text class="report-style-selector__style-label">
@@ -205,6 +211,9 @@ onMounted(() => {
           </text>
           <text class="report-style-selector__style-name">
             {{ currentStyle?.name || "" }}
+          </text>
+          <text v-if="currentStyleDescription" class="report-style-selector__style-desc">
+            {{ currentStyleDescription }}
           </text>
           <!-- 分页圆点(940:182 8×6 当前 / 940:183 6×6) -->
           <!-- <view class="report-style-selector__dots">
@@ -482,11 +491,10 @@ onMounted(() => {
   margin-top: 30rpx;
 }
 
-.report-style-selector__skeleton--dots {
-  position: absolute;
-  bottom: 46rpx;
-  width: 72rpx;
-  height: 12rpx;
+.report-style-selector__skeleton--style-desc {
+  width: 144rpx;
+  height: 28rpx;
+  margin-top: 12rpx;
 }
 
 /* 汇报风格标签(940:191)：14px=28rpx，Inter Regular，#594342 */

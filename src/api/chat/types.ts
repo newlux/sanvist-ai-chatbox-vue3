@@ -110,8 +110,38 @@ export interface SubtitleEvent {
   message: string;
 }
 
+export interface AskSlotOption extends Record<string, unknown> {
+  label: string;
+  value: string;
+  device_id: string;
+  device_alias?: string;
+  device_name?: string;
+  device_type?: string;
+  device_type_label?: string;
+  project_id?: string;
+  project_name?: string;
+}
+
+export interface AskSlotPayload extends Record<string, unknown> {
+  slot_name: string;
+  selection: "single" | "multiple";
+  required?: boolean;
+  min_select?: number;
+  max_select?: number;
+  title?: string;
+  description?: string;
+  original_query: string;
+  options: AskSlotOption[];
+}
+
+export interface AskSlotSubmitPayload {
+  slot: AskSlotPayload;
+  selectedOptions: AskSlotOption[];
+  remark?: string;
+}
+
 export interface RichContentEvent {
-  event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source";
+  event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source" | "ask_slot";
   conversationId: Identifier;
   messageId: Identifier;
   taskId?: Identifier;

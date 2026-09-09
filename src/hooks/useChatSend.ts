@@ -1,4 +1,4 @@
-import type { ChatFile, Identifier } from "@/api/chat/types";
+import type { AskSlotSubmitPayload, ChatFile, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { ReportAdjustmentAction, ReportNavigationAction } from "@/utils/ai-stream";
 import { useI18n } from "vue-i18n";
@@ -359,9 +359,23 @@ export function useChatSend(scope?: string, handlers?: {
     void sendMessage();
   }
 
+  function buildAskSlotQuery(payload: AskSlotSubmitPayload) {
+    const originalQuery = payload.slot.original_query.trim();
+    const selectedValues = payload.selectedOptions
+      .map(option => option.value.trim())
+      .filter(Boolean);
+    return [originalQuery, selectedValues.join("、")].filter(Boolean).join("：");
+  }
+
+  function sendAskSlotSelection(payload: AskSlotSubmitPayload) {
+    const query = buildAskSlotQuery(payload);
+    if (query) void sendMessage({ text: query });
+  }
+
   return {
     sendMessage,
     sendQuickPrompt,
+    sendAskSlotSelection,
     beginAsrPlaceholder,
     discardAsrPlaceholder,
     stopGenerating,

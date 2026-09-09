@@ -141,20 +141,25 @@ export const useSessionStore = defineStore("session", () => {
       hasMore.value = true;
     }
 
-    const page = await getConversations({
-      lastId: pageNo > 1 ? lastId.value || undefined : undefined,
-      limit: pageSize,
-      sortBy: "-updated_at",
-    });
-    const rows = Array.isArray(page?.data) ? page.data : [];
-    // 低端安卓 WebView 不支持 ES2022 的 Array.prototype.at
-    lastId.value = rows[rows.length - 1]?.id || null;
-    hasMore.value = Boolean(page?.hasMore);
-    const visible = rows.filter(session => !isPodcastSession(session));
+    const visible: Conversation[] = [];
+    while (hasMore.value && visible.length < pageSize) {
+      const page = await getConversations({
+        lastId: lastId.value || undefined,
+        limit: pageSize - visible.length,
+        sortBy: "-updated_at",
+      });
+      const rows = Array.isArray(page?.data) ? page.data : [];
+      // 低端安卓 WebView 不支持 ES2022 的 Array.prototype.at
+      lastId.value = rows[rows.length - 1]?.id || null;
+      hasMore.value = Boolean(page?.hasMore) && rows.length > 0;
+      visible.push(...rows.filter(session => !isPodcastSession(session)));
+    }
+
+    const pageVisible = visible.slice(0, pageSize);
     sessions.value = pageNo === 1
-      ? visible
-      : [...sessions.value, ...visible.filter(session => !sessions.value.some(item => item.id === session.id))];
-    return { data: visible, hasMore: hasMore.value };
+      ? pageVisible
+      : [...sessions.value, ...pageVisible.filter(session => !sessions.value.some(item => item.id === session.id))];
+    return { data: pageVisible, hasMore: hasMore.value };
   }
 
   /**
