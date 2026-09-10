@@ -71,7 +71,7 @@ function onAskSlotOpen(payload: AskSlotPayload) {
     :layout="block.payload.layout"
     :embedded="embedded"
   />
-  <AskSlotBlock v-else-if="block.type === 'ask-slot'" :payload="block.payload" :loading="loading" @open="onAskSlotOpen" />
+  <AskSlotBlock v-else-if="block.type === 'ask-slot'" :payload="block.payload" @open="onAskSlotOpen" />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
   <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />

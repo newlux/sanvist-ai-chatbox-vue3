@@ -141,17 +141,50 @@ function close() {
 
 <template>
   <view v-if="visible && currentSlot" class="slot-drawer-modal">
-    <!-- 弹框主体：仅右上角关闭按钮可关闭 -->
     <view class="slot-drawer">
-      <!-- 顶部操作行：progress | nav + action | spacer | close -->
       <view class="slot-drawer__toolbar">
-        <!-- 左侧：答题 1/4 -->
         <view class="slot-drawer__progress">
           <text>答题</text>
           <text>{{ currentIndex + 1 }}/{{ slots.length }}</text>
         </view>
+        <view class="slot-drawer__close" @tap="close">
+          <image class="slot-drawer__close-icon" :src="CloseIcon" mode="aspectFit" />
+        </view>
+      </view>
 
-        <!-- 中部：翻页按钮，多题时展示；单题时用等宽占位保持提交位置 -->
+      <!-- 题目标题：Status Label -->
+      <text class="slot-drawer__title">
+        {{ currentSlot.title || "请选择要查询的设备" }}
+      </text>
+
+      <scroll-view scroll-y class="slot-drawer__options">
+        <view class="slot-drawer__options-list">
+          <view
+            v-for="(option, index) in currentSlot.options"
+            :key="optionKey(option)"
+            class="slot-drawer__option"
+            :class="{ 'slot-drawer__option--selected': isSelected(option) }"
+            @tap="selectOption(option)"
+          >
+            <text class="slot-drawer__option-text">
+              {{ index + 1 }}  {{ option.label }}
+            </text>
+            <view v-if="index === 0" class="slot-drawer__recommend">
+              <text class="slot-drawer__recommend-text">
+                推荐
+              </text>
+            </view>
+          </view>
+          <textarea
+            v-model="otherRemark"
+            class="slot-drawer__remark"
+            placeholder="其他输入"
+            :maxlength="200"
+            :auto-height="false"
+          />
+        </view>
+      </scroll-view>
+      <view class="slot-drawer__footer">
         <view v-if="showPagination" class="slot-drawer__nav">
           <view
             class="slot-drawer__round"
@@ -169,60 +202,11 @@ function close() {
           </view>
         </view>
         <view v-else class="slot-drawer__nav slot-drawer__nav--placeholder" aria-hidden="true" />
-
-        <!-- 操作文字：下一题 / 提交，始终展示 -->
-        <view v-if="!isLastSlot" class="slot-drawer__action-text" @tap="nextSlot">
-          下一题
-        </view>
-        <view v-else class="slot-drawer__action-text" @tap="submit">
-          提交
-        </view>
-
-        <!-- 占位，把关闭按钮推到最右侧 -->
-        <view class="slot-drawer__toolbar-spacer" />
-
-        <!-- 右侧：关闭 -->
-        <view class="slot-drawer__close" @tap="close">
-          <image class="slot-drawer__close-icon" :src="CloseIcon" mode="aspectFit" />
+        <view class="slot-drawer__footer-spacer" />
+        <view class="slot-drawer__submit" @tap="submit">
+          确认提交
         </view>
       </view>
-
-      <!-- 题目标题：Status Label -->
-      <text class="slot-drawer__title">
-        {{ currentSlot.title || "请选择要查询的设备" }}
-      </text>
-
-      <!-- 选项列表 -->
-      <scroll-view scroll-y class="slot-drawer__options">
-        <view class="slot-drawer__options-list">
-          <view
-            v-for="(option, index) in currentSlot.options"
-            :key="optionKey(option)"
-            class="slot-drawer__option"
-            :class="{ 'slot-drawer__option--selected': isSelected(option) }"
-            @tap="selectOption(option)"
-          >
-            <text class="slot-drawer__option-text">
-              {{ index + 1 }}  {{ option.label }}
-            </text>
-            <!-- 仅第一项显示"推荐"标签 -->
-            <view v-if="index === 0" class="slot-drawer__recommend">
-              <text class="slot-drawer__recommend-text">
-                推荐
-              </text>
-            </view>
-          </view>
-
-          <!-- 其他关注指标输入区：Frame 7 -->
-          <textarea
-            v-model="otherRemark"
-            class="slot-drawer__remark"
-            placeholder="其他关注指标"
-            :maxlength="200"
-            :auto-height="false"
-          />
-        </view>
-      </scroll-view>
     </view>
   </view>
 </template>
@@ -245,74 +229,49 @@ function close() {
   animation: slot-drawer-fade-in 0.2s ease-out;
 }
 
-/* =========================================================
-   弹框主体：Rectangle 25
-   设计稿尺寸 375×383(px) => 750×766(rpx)
-   背景 #FFFFFF，阴影 0 -2 21 rgba(0,0,0,0.0601)
-   ========================================================= */
+/* 设计稿 Rectangle 25：375×436 px，顶部左/右圆角 22px => 44rpx，底部直角。 */
 .slot-drawer {
   position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
-  padding: 40rpx 80rpx calc(28rpx + env(safe-area-inset-bottom));
+  height: 750rpx;
+  padding: 40rpx 80rpx calc(40rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
-  border-radius: 40rpx 40rpx 0 0;
+  border-radius: 44rpx 44rpx 0 0;
+  overflow: hidden;
   background: #FFFFFF;
   box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.0601);
   animation: slot-drawer-slide-up 0.25s ease-out;
 }
 
-/* =========================================================
-   顶部操作行：包含答题进度、翻页按钮、下一题/提交、关闭
-   ========================================================= */
 .slot-drawer__toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   height: 52rpx;
+  /* 关闭按钮距弹窗右边缘 25px（设计稿），内容列右边距为 40px，向左抵消 15px => 30rpx */
+  margin-right: -30rpx;
 }
 
-/* 答题 1/4：14px => 28rpx，颜色 #999999，间距 4px => 8rpx */
 .slot-drawer__progress {
   display: flex;
   align-items: center;
-  flex-shrink: 0;
   gap: 8rpx;
   color: #999999;
   font-size: 28rpx;
   line-height: 34rpx;
 }
 
-/* 翻页按钮组：上一题、下一题两个 26×26 圆形按钮，按钮间距 4px => 8rpx
-   设计稿中 progress 右边缘到 nav 左边缘约 42px => 84rpx */
+/* 翻页按钮间距：设计稿 Group 12 / Group 13 间距 28px => 56rpx */
 .slot-drawer__nav {
   display: flex;
   align-items: center;
-  flex-shrink: 0;
-  gap: 8rpx;
-  width: 112rpx;
-  margin-left: 84rpx;
+  gap: 56rpx;
 }
 
-/* 单题占位：隐藏按钮但保留 112rpx 宽度，让提交位置不变 */
 .slot-drawer__nav--placeholder {
   visibility: hidden;
-}
-
-/* 下一题 / 提交 操作文字
-   设计稿中 nav 到 action text 约 10px => 20rpx */
-.slot-drawer__action-text {
-  flex-shrink: 0;
-  margin-left: 20rpx;
-  color: #666666;
-  font-size: 32rpx;
-  line-height: 38rpx;
-}
-
-/* 占位元素：将关闭按钮推到最右侧 */
-.slot-drawer__toolbar-spacer {
-  flex: 1;
-  min-width: 0;
 }
 
 .slot-drawer__round {
@@ -347,11 +306,6 @@ function close() {
   height: 100%;
 }
 
-/* =========================================================
-   题目标题：Status Label
-   设计稿 y:493，字号 14px => 28rpx，颜色 #1A1A1A
-   与操作行间距 16px => 32rpx
-   ========================================================= */
 .slot-drawer__title {
   margin-top: 32rpx;
   color: #1A1A1A;
@@ -359,20 +313,17 @@ function close() {
   line-height: 34rpx;
 }
 
-/* =========================================================
-   选项列表区域
-   与标题间距 16px => 32rpx
-   多选状态裁剪高度 237px => 474rpx
-   ========================================================= */
 .slot-drawer__options {
+  flex: 1;
+  min-height: 0;
   margin-top: 32rpx;
-  max-height: 474rpx;
 }
 
 .slot-drawer__options-list {
   display: flex;
   flex-direction: column;
   gap: 16rpx;
+  padding-bottom: 32rpx;
 }
 
 /* 选项项：295×36 => 590×72，背景 #F6F6F6，圆角 8px => 16rpx，左内边距 12px => 24rpx */
@@ -432,14 +383,14 @@ function close() {
 }
 
 /* =========================================================
-   其他关注指标输入区：Frame 7
-   设计稿 295×105 => 590×210，背景 #F6F6F6，圆角 12px => 24rpx
-   内边距 16px => 32rpx，占位文字 12px/20px => 24rpx/40rpx，颜色 #999999
+   其他关注指标输入区：Frame 7（单行）
+   设计稿 295×36 => 590×72，背景 #F6F6F6，圆角 12px => 24rpx
+   上下内边距 8px => 16rpx，左右 16px => 32rpx，占位文字 12px/20px => 24rpx/40rpx，颜色 #999999
    ========================================================= */
 .slot-drawer__remark {
   width: 590rpx;
-  height: 210rpx;
-  padding: 32rpx;
+  height: 72rpx;
+  padding: 16rpx 32rpx;
   border: 0;
   box-sizing: border-box;
   border-radius: 24rpx;
@@ -451,6 +402,31 @@ function close() {
 
 .slot-drawer__remark::placeholder {
   color: #999999;
+}
+
+.slot-drawer__footer {
+  display: flex;
+  align-items: center;
+  min-height: 60rpx;
+  padding-top: 16rpx;
+}
+
+.slot-drawer__footer-spacer {
+  flex: 1;
+}
+
+/* 提交按钮：设计稿 Rectangle 101，80×30，圆角 10px => 160×60(rpx)、20rpx */
+.slot-drawer__submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 160rpx;
+  height: 60rpx;
+  border-radius: 20rpx;
+  background: #1A1A1A;
+  color: #FFFFFF;
+  font-size: 28rpx;
+  line-height: 34rpx;
 }
 
 @keyframes slot-drawer-fade-in {

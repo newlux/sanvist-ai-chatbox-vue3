@@ -6,7 +6,6 @@ defineOptions({ name: "AskSlotBlock" });
 
 const props = defineProps({
   payload: { type: Object as () => AskSlotPayload, required: true },
-  loading: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{
@@ -16,10 +15,9 @@ const emit = defineEmits<{
 const hasOpened = ref(false);
 
 onMounted(() => {
-  if (props.loading && !hasOpened.value) {
-    hasOpened.value = true;
-    emit("open", props.payload);
-  }
+  if (hasOpened.value || props.payload.auto_open !== true) return;
+  hasOpened.value = true;
+  emit("open", props.payload);
 });
 </script>
 
