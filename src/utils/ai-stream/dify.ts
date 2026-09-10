@@ -387,7 +387,7 @@ export function createDifyEventNormalizer() {
             events.push({ event: "chart", ...references, data: { option: askData } });
           } else if (type === "slot") {
             const slot = parseAskSlotPayload(askData);
-            if (slot) events.push({ event: "ask_slot", ...references, data: slot });
+            if (slot) events.push({ event: "ask_slot", ...references, data: { ...slot, auto_open: true } });
           }
           receivedSanvistEvent = true;
           continue;

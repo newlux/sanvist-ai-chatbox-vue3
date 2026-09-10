@@ -42,6 +42,14 @@ function appendQuery(url: string, data?: unknown) {
   return `${url}${url.includes("?") ? "&" : "?"}${query}`;
 }
 
+function withChannelHeader(headers?: Record<string, string>) {
+  let channel = "pc";
+  // #ifdef APP-PLUS
+  channel = "app";
+  // #endif
+  return { ...headers, "X-Channel": channel };
+}
+
 /** 请求体大小，用于排查「体积过大被容器拒掉」这类问题（base64 音频动辄几百 KB） */
 function measurePayloadSize(data: unknown) {
   if (data == null) return 0;
@@ -95,7 +103,7 @@ export function platformRequest<T>(
       url,
       method: normalizedMethod as UniApp.RequestOptions["method"],
       data: (normalizedMethod === "GET" ? undefined : options.data) as UniApp.RequestOptions["data"],
-      header: options.headers,
+      header: withChannelHeader(options.headers),
       timeout: options.timeout ?? 60_000,
       ...(options.responseType ? { responseType: options.responseType } : {}),
       success(response) {
@@ -213,7 +221,7 @@ export async function platformUploadFile(
       };
       // 优先传原生 File 对象（H5 形态）：uni.uploadFile 会直接用它的文件名与 MIME 构造 multipart
       if (options.file) payload.file = options.file;
-      const header = pickPlainHeaders(options.headers);
+      const header = pickPlainHeaders(withChannelHeader(options.headers));
       if (header) payload.header = header;
       if (options.formData && Object.keys(options.formData).length > 0) {
         payload.formData = options.formData;
