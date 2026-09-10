@@ -1,5 +1,3 @@
-import { getRequestBaseURL, getRequestHeaders } from "@/utils/request";
-import { platformRequest } from "@/utils/platform/http-request";
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("image-preview");
@@ -59,54 +57,4 @@ export async function toInlineImageUrl(url: string): Promise<string> {
   }
 }
 
-/** 已按 fileId 拉取过的文件预览 blob URL 缓存 */
-const filePreviewCache = new Map<string, string>();
 
-/**
- * 通过鉴权预览接口拉取 Dify 文件内容用于页面展示。
- * 路径：GET /files/:file_id/preview（项目内经 /proxy/v1 前缀，请求层自动携带
- * Authorization）。`<img>`/uni-image 无法携带自定义头，所以在这里把字节取回
- * 转成 blob URL 再交给图片渲染；成功结果按 fileId 缓存。
- * 失败返回空串（调用方回退到直链展示），不抛错。
- */
-export async function fetchFilePreviewBlobUrl(fileId: string, mimeType = ""): Promise<string> {
-  if (!fileId) return "";
-  const cached = filePreviewCache.get(fileId);
-  if (cached) return cached;
-  try {
-    const response = await platformRequest<ArrayBuffer>(
-      getRequestBaseURL(),
-      "GET",
-      `/proxy/v1/files/${encodeURIComponent(fileId)}/preview`,
-      {
-        headers: getRequestHeaders(),
-        // 纯页面预览场景：as_attachment 默认 false（内联返回）即可
-        responseType: "arraybuffer",
-        timeout: 30_000,
-      },
-    );
-    const payload = response.data;
-    const empty = !payload
-      || (typeof payload === "object" && "byteLength" in payload && (payload as { byteLength?: number }).byteLength === 0);
-    if (empty) throw new Error("empty preview payload");
-    const headerType = String(response.headers?.["content-type"] || response.headers?.["Content-Type"] || "")
-      .split(";")[0]
-      .trim();
-    const blob = new Blob([payload as ArrayBuffer], { type: headerType || mimeType || "application/octet-stream" });
-    if (!blob.size) throw new Error("empty preview blob");
-    const objectUrl = URL.createObjectURL(blob);
-    filePreviewCache.set(fileId, objectUrl);
-    logger.info("[image-preview] file preview via /files/{id}/preview", {
-      fileId: fileId.slice(0, 12),
-      size: blob.size,
-      type: blob.type,
-    });
-    return objectUrl;
-  } catch (error) {
-    logger.warn("[image-preview] file preview failed, fallback to direct url", {
-      fileId: fileId.slice(0, 12),
-      error,
-    });
-    return "";
-  }
-}

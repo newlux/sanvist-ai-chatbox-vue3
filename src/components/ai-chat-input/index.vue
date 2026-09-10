@@ -4,7 +4,6 @@ import { useI18n } from "vue-i18n";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
-import { createLogger } from "@/utils/logger";
 
 const props = defineProps({
   modelValue: { type: String, default: "" },
@@ -34,8 +33,6 @@ const emit = defineEmits([
   "recognize-begin",
   "recognize-fail",
 ]);
-
-const logger = createLogger("chat-input");
 
 const { t } = useI18n();
 
@@ -261,14 +258,8 @@ function onTrySend() {
 const isAttachmentPickerOpen = ref(false);
 
 async function onOpenAttachmentPicker() {
-  logger.info("[picker] tap plus", {
-    isLoading: props.isLoading,
-    isRecognizing: voice.isRecognizing,
-    currentCount: attachments.value.length,
-  });
   if (props.attachmentDisabled || props.isLoading || voice.isRecognizing) return;
   if (attachments.value.length >= 3) {
-    logger.info("[picker] limit reached", { count: attachments.value.length });
     openAttachmentPicker(); // 触顶提示
     return;
   }
@@ -276,15 +267,12 @@ async function onOpenAttachmentPicker() {
   // FORCE_H5_UPLOAD 期间 isNativePickerAvailable 恒为 false，走前端三选项弹窗：
   // 拍照/相册 → uni.chooseImage，文件 → uni.chooseFile（均走 /files/upload）
   const nativeReady = await isNativePickerAvailable();
-  logger.info("[picker] native picker available", { nativeReady });
   if (nativeReady) {
-    logger.info("[picker] -> native imageChoose (showFile=true)");
     void chooseFilesFromNative();
     return;
   }
 
   // 原生不可用（Web/H5 等）时用前端三选项弹窗
-  logger.info("[picker] -> show fallback sheet");
   isAttachmentPickerOpen.value = true;
 }
 
@@ -293,10 +281,6 @@ function onCloseAttachmentPicker() {
 }
 
 function onPickAttachmentSource(source: "camera" | "album" | "file") {
-  logger.info("[picker] pick source", {
-    source,
-    currentCount: attachments.value.length,
-  });
   isAttachmentPickerOpen.value = false;
   if (source === "file") {
     void chooseFilesFromNative();

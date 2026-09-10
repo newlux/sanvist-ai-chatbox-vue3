@@ -93,14 +93,16 @@ export class MpaasUnavailableError extends Error {
 export async function callNative<T extends BridgeResult = BridgeResult>(
   apiName: string,
   params: Record<string, unknown> = {},
-  options: { timeoutMs?: number; waitReadyMs?: number; silentTimeout?: boolean } = {},
+  // silent：抑制 call/result 两条 debug。给「自己已经打过入参出参」的调用方用，
+  // 避免同一份报文在控制台出现两遍；默认关闭，其他调用方行为不变。
+  options: { timeoutMs?: number; waitReadyMs?: number; silentTimeout?: boolean; silent?: boolean } = {},
 ): Promise<T> {
   const bridge = await waitForMpaas(options.waitReadyMs ?? 3000);
   if (!bridge) throw new MpaasUnavailableError(apiName);
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
   const startedAt = Date.now();
-  logger.debug(`call ${apiName}`, params);
+  if (!options.silent) logger.debug(`call ${apiName}`, params);
 
   return new Promise<T>((resolve, reject) => {
     let settled = false;
@@ -119,7 +121,7 @@ export async function callNative<T extends BridgeResult = BridgeResult>(
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        logger.debug(`${apiName} result`, summarizeResult(result), { costMs: Date.now() - startedAt });
+        if (!options.silent) logger.debug(`${apiName} result`, summarizeResult(result), { costMs: Date.now() - startedAt });
         // mPaaS 的失败约定不统一，error/errorCode 非 0 都按失败处理
         const errorCode = Number(result?.error ?? result?.errorCode ?? 0);
         if (errorCode) {
@@ -253,12 +255,10 @@ export interface ChooseNativeFilesOptions {
 /** 宿主可能返回远程 URL（apFilePaths 场景），先下载成本地临时文件再上传 */
 function downloadRemoteFile(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    logger.info("[mpaas] downloadRemoteFile start", { url });
     uni.downloadFile({
       url,
       success: (res) => {
         if (res.statusCode === 200 && res.tempFilePath) {
-          logger.info("[mpaas] downloadRemoteFile success", { url, tempFilePath: res.tempFilePath });
           resolve(res.tempFilePath);
         } else {
           logger.error("[mpaas] downloadRemoteFile bad status", { url, statusCode: res.statusCode });
@@ -300,29 +300,16 @@ async function collectPickFiles(result: BridgeResult, skipDownload = false): Pro
     apPaths = apPathsRaw;
   }
 
-  logger.info("[mpaas] collectPickFiles start", {
-    tempPaths: tempPaths.length,
-    apPaths: apPaths.length,
-    skipDownload,
-  });
-
   const collected: NativeSelectedFile[] = [];
   for (const item of tempPaths) {
     if (typeof item === "string") {
       const url = await resolvePickPath(item, skipDownload);
-      logger.info("[mpaas] pick item(string)", { raw: item, resolved: url });
       if (url) collected.push({ url });
       continue;
     }
     if (item && typeof item === "object") {
       const file = item as Record<string, unknown>;
       const url = await resolvePickPath(file.url || file.path || file.filePath, skipDownload);
-      logger.info("[mpaas] pick item(object)", {
-        raw: file,
-        resolved: url,
-        name: file.name,
-        size: file.size,
-      });
       if (!url) continue;
       collected.push({
         url,
@@ -359,38 +346,114 @@ export async function chooseNativeFiles(
     showFile,
     ...(fileTypes ? { fileTypes } : {}),
   };
-  logger.info("[mpaas] imageChoose call start", {
-    params,
-    nativeUploaded,
-    bridgeReady: isMpaasReady(),
-  });
-
   const result = await callNative("imageChoose", params);
-
-  // 打印原始回参的字段构成（不展开大数组，只给类型与长度，便于核对宿主返回形态）
-  const tempRaw = (result as Record<string, unknown>)?.tempFilePaths;
-  const apRaw = (result as Record<string, unknown>)?.apFilePaths;
-  logger.info("[mpaas] imageChoose raw result", {
-    keys: Object.keys(result || {}),
-    success: result?.success,
-    error: result?.error ?? result?.errorCode,
-    errorMessage: result?.errorMessage ?? result?.message,
-    tempFilePathsType: Array.isArray(tempRaw) ? "array" : typeof tempRaw,
-    tempFilePathsLength: Array.isArray(tempRaw) ? tempRaw.length : 0,
-    apFilePathsType: Array.isArray(apRaw) ? "array" : typeof apRaw,
-  });
 
   if (result?.success === false || String(result?.success) === "false") {
     logger.error("[mpaas] imageChoose failed", { code: result?.code ?? "unknown" });
     throw new Error(`imageChoose 失败（code=${result?.code ?? "unknown"}）`);
   }
 
-  const files = await collectPickFiles(result, nativeUploaded);
-  logger.info("[mpaas] imageChoose files resolved", {
-    count: files.length,
-    files: files.map(f => ({ url: f.url, name: f.name, size: f.size, mimeType: f.mimeType })),
-  });
+  return collectPickFiles(result, nativeUploaded);
+}
+
+/**
+ * 调起 mPaaS 原生选图/选文件（imageChoose, returnLocal=true）。
+ * returnLocal=true 时只返回本地地址，图片额外返回 base64 用于预览。
+ * 入参：{ count, returnLocal, showFile, fileTypes }（fileTypes 为数组，如 ["png","jpg","pdf"]）
+ * 出参：{ success, tempFilePaths: [{ path, uri, name, size, type, base64 }] }
+ */
+export interface NativePickedFile {
+  path: string;
+  uri?: string;
+  name?: string;
+  size?: number;
+  type?: string;
+  base64?: string;
+}
+
+export async function imageChooseLocal(options: {
+  count: number;
+  showFile: boolean;
+  fileTypes?: string[];
+}): Promise<NativePickedFile[]> {
+  const params = {
+    count: Math.max(1, options.count),
+    returnLocal: true,
+    showFile: options.showFile,
+    ...(options.fileTypes ? { fileTypes: options.fileTypes } : {}),
+  };
+  // 只留入参 / 出参两条：本链路关心的字段（path/uri/name/size/type/base64）都在里面
+  logger.info("[mpaas] imageChoose 入参", params);
+  const result = await callNative("imageChoose", params, { silent: true });
+  logger.info("[mpaas] imageChoose 出参", result);
+
+  if (result?.success === false || String(result?.success) === "false") {
+    throw new Error(`imageChoose 失败（code=${result?.code ?? "unknown"}）`);
+  }
+
+  // 兼容 tempFilePaths / apFilePaths，且兼容字符串(JSON) 形态
+  const parseList = (raw: unknown): unknown[] => {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === "string") {
+      try { return JSON.parse(raw) || []; } catch { return []; }
+    }
+    return [];
+  };
+  const rawList = [...parseList(result?.tempFilePaths), ...parseList(result?.apFilePaths)];
+
+  const files: NativePickedFile[] = rawList
+    .map((item) => {
+      const f = item as Record<string, unknown>;
+      return {
+        path: String(f.path || ""),
+        uri: String(f.uri || ""),
+        name: String(f.name || ""),
+        size: Number(f.size) || 0,
+        type: String(f.type || ""),
+        base64: String(f.base64 || ""),
+      };
+    })
+    .filter(f => f.path || f.base64);
+
   return files;
+}
+
+/**
+ * mPaaS 原生文件上传：宿主按 files 里的本地 path/uri 完成上传，返回文件元数据。
+ * 入参：{ uploadUrl, headers, files: [{ path, uri, name, type }] }
+ * 出参：{ success, files: [{ id, name, size, extension, mime_type, ... }] }
+ */
+export interface NativeUploadedFile {
+  id: string;
+  name: string;
+  size: number;
+  extension: string;
+  mime_type: string;
+  /** 对话发送时取这个地址；预览仍走 imageChoose 返回的 base64 */
+  source_url?: string;
+  created_by?: string;
+  created_at?: number;
+}
+
+export async function aiFileUploadNative(options: {
+  uploadUrl: string;
+  headers?: Record<string, string>;
+  files: Array<{ path: string; uri?: string; name?: string; type?: string }>;
+}): Promise<NativeUploadedFile[]> {
+  // 只留入参 / 出参两条：files[].source_url 与 id 是发送与落库的取数来源
+  logger.info("[mpaas] aiFileUpload 入参", {
+    uploadUrl: options.uploadUrl,
+    headers: options.headers,
+    files: options.files,
+  });
+  const result = await callNative("aiFileUpload", options, { silent: true });
+  logger.info("[mpaas] aiFileUpload 出参", result);
+
+  if (result?.success === false || String(result?.success) === "false") {
+    throw new Error(`aiFileUpload 失败（code=${result?.code ?? "unknown"}）`);
+  }
+
+  return (Array.isArray(result?.files) ? result.files : []) as NativeUploadedFile[];
 }
 
 /** 宿主支持动态申请的系统权限 */

@@ -1,15 +1,16 @@
 import type { ChatFile } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
-import type { NativeSelectedFile } from "@/utils/platform/mpaas";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { uploadChatFile } from "@/api/chat";
 import { useUserStore } from "@/stores";
 
 import { createLogger } from "@/utils/logger";
+import { getRequestBaseURL, getRequestHeaders } from "@/utils/request";
 import {
-  chooseNativeFiles,
+  aiFileUploadNative,
   ensureNativePermission,
+  imageChooseLocal,
   permissionDeniedMessage,
   waitForMpaas,
 } from "@/utils/platform/mpaas";
@@ -19,16 +20,6 @@ const logger = createLogger("attachments");
 export const MAX_ATTACHMENT_COUNT = 3;
 /** 低版本降级路径（uni.chooseImage / chooseFile）的本地文件大小上限 */
 const MAX_LOCAL_FILE_SIZE = 50 * 1024 * 1024;
-
-/**
- * 是否强制走 H5 低版本自定义上传（uni.chooseImage / uni.chooseFile + /files/upload）。
- *
- * 当前需求：附件上传一律走 H5 上传，不再走原生 imageChoose（原生选择 + 原生上传 + COS 预签名）；
- * 回显始终使用选择器返回的本地路径，不再调 preview 或 COS 预签名下载接口。
- * 原生相关代码（chooseNativeFiles / appendNativeUploadedFiles 等）全部保留备用，
- * 后续要恢复「原生优先」时改回 false 即可。
- */
-const FORCE_H5_UPLOAD = true;
 
 /**
  * 允许上传的文件后缀白名单。
@@ -85,9 +76,19 @@ export interface ComposerAttachment {
   localId: string;
   /** Dify 文件 id：上传接口回填，仅用于发送与后续历史预览。 */
   fileId: string;
-  /** 原生上传完成后是可访问地址；低版本降级上传是本地临时路径，用于缩略图预览与失败重传 */
+  /**
+   * 缩略图/预览地址（本地优先，不依赖网络）：
+   * - 原生 mPaaS 链路：imageChoose(returnLocal) 返回的 base64 → data URL，无网即显
+   * - H5 降级链路：uni.chooseImage/chooseFile 给的本地路径（blob: / tempFilePath），
+   *   再经 FileReader 转本地 data URL
+   * 发送时用 url，不读这里。
+   */
   localPath: string;
-  /** 发送时作为 files[].url */
+  /**
+   * 对话发送地址：
+   * - 原生 mPaaS 链路：取 aiFileUpload 返回的 files[].source_url
+   * - H5 降级链路：取 /files/upload 返回的 source_url
+   */
   url: string;
   /** 兼容旧数据的预览地址；本次选择的图片始终使用 localPath 展示。 */
   previewPath?: string;
@@ -104,6 +105,11 @@ export interface ComposerAttachment {
    * 保证 multipart 里的文件名与 MIME 完整（避免 blob URL 二次转换退化）。
    */
   nativeFile?: File;
+  /**
+   * 上传用的原始本地路径：H5 下 localPath 会被 FileReader 换成 data URL 做缩略图，
+   * 这里保留选择器给的原始地址（blob: / tempFilePath），供 uploadFile 使用。
+   */
+  uploadPath?: string;
 }
 
 interface LocalSelectedFile {
@@ -148,6 +154,23 @@ const DOCUMENT_EXTENSIONS = new Set([
 
 function createAttachmentLocalId() {
   return `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/**
+ * H5 下 uni.chooseImage / uni.chooseFile 给的本地地址是 `blob:` 临时 URL，
+ * 部分 webview 的 uni-image 渲染不出来（空白/破图）。
+ * 用 FileReader 把选中的 File 转成 data URL 作为缩略图地址，本地秒显、不依赖网络。
+ * 非图片不转：base64 体积大，而文件类型本来走图标分支，不需要缩略图。
+ */
+function readLocalPreviewSrc(file: LocalSelectedFile, type: AttachmentKind): Promise<string> {
+  const native = file.file;
+  if (type !== "image" || !native || typeof FileReader === "undefined") return Promise.resolve("");
+  return new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(native);
+  });
 }
 
 function getFileExtension(name: string, path = "") {
@@ -259,7 +282,7 @@ export function useComposerAttachments() {
 
     try {
       const uploaded = await uploadChatFile({
-        filePath: attachment.localPath,
+        filePath: attachment.uploadPath || attachment.localPath,
         // H5 下优先透传原生 File，保证文件名/MIME 完整，避免网关「file不能为空」
         file: attachment.nativeFile,
         // 网关校验非空：游客态没有用户 ID 时用固定占位
@@ -333,6 +356,7 @@ export function useComposerAttachments() {
         localId,
         fileId: "",
         localPath: file.path,
+        uploadPath: file.path,
         url: "",
         name: file.name || fallbackName,
         size: Number(file.size) || 0,
@@ -342,81 +366,85 @@ export function useComposerAttachments() {
         status: "uploading",
         nativeFile: file.file,
       });
+      // H5 的 blob: 临时地址渲染不可靠，转成 data URL 后回填缩略图地址
+      void readLocalPreviewSrc(file, type).then((previewSrc) => {
+        if (!previewSrc) return;
+        const current = findAttachment(localId);
+        if (current) current.localPath = previewSrc;
+      });
       void uploadAttachment(localId);
     });
   }
 
   /**
-   * 原生 imageChoose 回参整理：原生弹窗已完成选择与上传，回参即最终 URL。
-   * 直接生成 uploaded 附件，前端不再做任何文件传输。
+   * WebView 原生附件：imageChoose(returnLocal) 选图 + aiFileUpload 上传。
+   *
+   * 预览与发送分两条线，避免互相干扰：
+   * - 预览（localPath）：imageChoose 返回的 base64 → data URL，本地秒显、不依赖网络；
+   *   没有 base64（如非图片文件）时回退到 picked.path（宿主端临时路径，缩略图组件走文件图标）。
+   * - 发送（url）：aiFileUpload 返回的 files[].source_url，作为 Dify `remote_url` 的 url；
+   *   files[].id 仅在没有 source_url 时兜底走 `local_file`。
+   *
+   * imageChoose 与 aiFileUpload 一一对应、按选中顺序回传，因此 files[i] ↔ uploaded[i] 直接配对。
    */
-  function appendNativeUploadedFiles(files: NativeSelectedFile[]) {
+  async function chooseViaNative(options: { showFile: boolean; count: number }) {
+    const files = await imageChooseLocal({
+      count: options.count,
+      showFile: options.showFile,
+      fileTypes: options.showFile ? [...DEFAULT_ALLOWED_EXTENSIONS] : undefined,
+    });
+
+    if (!files.length) return;
+
+    const uploadUrl = `${getRequestBaseURL().replace(/\/$/, "")}/proxy/v1/files/upload`;
+    const headers = getRequestHeaders();
+    const uploaded = await aiFileUploadNative({
+      uploadUrl,
+      headers,
+      files: files.map(f => ({ path: f.path, uri: f.uri, name: f.name, type: f.type })),
+    });
+
+    if (!uploaded.length) {
+      uni.showToast({ title: t("upload-failed"), icon: "none" });
+      return;
+    }
+
     const remaining = MAX_ATTACHMENT_COUNT - attachments.value.length;
     if (remaining <= 0) {
       toastLimit();
       return;
     }
-    const accepted = files.slice(0, remaining);
-    if (files.length > remaining) toastLimit();
 
-    accepted.forEach((file, index) => {
-      if (!file.url) {
-        logger.warn("[attachment] skip native file: empty url", { index, file });
-        return;
-      }
+    const pairs = uploaded.slice(0, remaining)
+      .map((item, index) => ({ picked: files[index], uploaded: item }))
+      .filter(pair => pair.uploaded && pair.picked);
+    if (uploaded.length > pairs.length) toastLimit();
 
-      // 类型白名单校验：与低版本降级路径共用同一份口径
-      const extension = getFileExtension(file.name || "", file.url);
-      const isAllowed = isAllowedExtension(extension, file.mimeType);
+    pairs.forEach(({ picked, uploaded: up }) => {
+      const extension = getFileExtension(up.name, picked.path || up.name);
+      const mimeType = String(up.mime_type || picked.type || "");
+      const type = inferAttachmentKind(extension, mimeType);
 
-      logger.info("[attachment] native file received", {
-        index,
-        url: file.url,
-        name: file.name,
-        size: file.size,
-        mimeType: file.mimeType,
-        extension,
-        isAllowed,
-      });
-
-      if (!isAllowed) {
-        logger.warn("[attachment] reject by whitelist", {
-          url: file.url,
-          name: file.name,
-          extension,
-          mimeType: file.mimeType,
-        });
-        uni.showToast({ title: t("attachment-type-unsupported"), icon: "none" });
-        return;
-      }
-
-      const type = inferAttachmentKind(extension, file.mimeType);
-      const fallbackName = type === "image"
-        ? `图片-${index + 1}.${extension || "jpg"}`
-        : `附件-${index + 1}${extension ? `.${extension}` : ""}`;
+      // 预览源：imageChoose 给的 base64 直接拼 data URL；缺前缀时按 mime 补齐。
+      // 没有 base64（如非图片）时退到 picked.path，让缩略图组件走文件图标分支。
+      const base64 = String(picked.base64 || "");
+      const previewSrc = base64
+        ? (base64.startsWith("data:") ? base64 : `data:${mimeType || "image/jpeg"};base64,${base64}`)
+        : String(picked.path || "");
 
       const localId = createAttachmentLocalId();
       attachments.value.push({
         localId,
-        // 原生已上传，localPath 与 url 都指向最终地址，预览与发送直接可用
-        fileId: "",
-        localPath: file.url,
-        url: file.url,
-        name: file.name || fallbackName,
-        size: Number(file.size) || 0,
+        fileId: String(up.id || ""),
+        localPath: previewSrc,
+        // 对话发送地址：mPaaS 原生 aiFileUpload 唯一对外可见的地址就是 source_url
+        url: String(up.source_url || ""),
+        name: String(up.name || picked.name || ""),
+        size: Number(up.size) || 0,
         extension,
-        mimeType: file.mimeType || "",
+        mimeType,
         type,
         status: "uploaded",
-      });
-      logger.info("[attachment] appended native-uploaded file", {
-        localId,
-        url: file.url,
-        name: attachments.value[attachments.value.length - 1].name,
-        extension,
-        type,
-        size: file.size,
-        total: attachments.value.length,
       });
     });
   }
@@ -492,119 +520,59 @@ export function useComposerAttachments() {
   // #endif
 
   /**
-   * 选择照片/拍照：默认优先走原生 imageChoose（showFile=false，仅图片，原生完成上传）；
-   * 原生不可用（低版本容器 / 普通 H5）时降级到 uni.chooseImage + /files/upload。
-   * FORCE_H5_UPLOAD=true 时强制走 uni.chooseImage（原生分支保留备用）。
+   * 选择照片/拍照：按环境分流。
+   * - mPaaS 容器（WebView）：imageChoose(returnLocal) 选图 + aiFileUpload 上传
+   * - 普通浏览器：uni.chooseImage + /files/upload
    */
   async function chooseImages(sourceType: Array<"album" | "camera">) {
     const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
-    logger.info("[attachment] chooseImages start", {
-      sourceType,
-      currentCount: attachments.value.length,
-      limit: MAX_ATTACHMENT_COUNT,
-      requestCount: count,
-    });
 
-    // 强制 H5 上传：直接走 uni.chooseImage（拍照/相册）+ /files/upload
-    if (FORCE_H5_UPLOAD) {
-      logger.warn("[attachment] FORCE_H5_UPLOAD, skip native imageChoose", { sourceType });
-      await chooseImagesViaUni(sourceType);
-      return;
-    }
-
-    // 等待 bridge 注入窗口，避免用户点击时 bridge 尚未就绪而白白错过原生弹窗
+    // 等待 bridge 注入窗口，判断是否在 mPaaS 容器（WebView）里
     const bridge = await waitForMpaas(2000);
-    logger.info("[attachment] chooseImages bridge ready", { ready: Boolean(bridge) });
-    if (!bridge) {
-      // 原生不可用：降级到 uni 标准选择 + /files/upload 上传（低版本兼容）
-      logger.warn("[attachment] native picker unavailable, fallback to uni.chooseImage", { sourceType });
-      await chooseImagesViaUni(sourceType);
+    if (bridge) {
+      try {
+        await chooseViaNative({ showFile: false, count });
+      } catch (error) {
+        logger.warn("[attachment] native choose/upload failed", error);
+      }
       return;
     }
 
-    try {
-      const params = {
-        showFile: false,
-        fileTypes: DEFAULT_ALLOWED_IMAGE_TYPES,
-        nativeUploaded: true,
-      };
-      logger.info("[attachment] chooseImages -> imageChoose", { count, params });
-      const files = await chooseNativeFiles(count, params);
-      logger.info("[attachment] native imageChoose result", {
-        mode: "image",
-        count: files.length,
-        files: files.map(f => ({ url: f.url, name: f.name, size: f.size, mimeType: f.mimeType })),
-      });
-      appendNativeUploadedFiles(files);
-      logger.info("[attachment] chooseImages done", { total: attachments.value.length });
-    } catch (error) {
-      logger.error("[attachment] native imageChoose failed", error);
-    }
+    // 浏览器：uni.chooseImage
+    await chooseImagesViaUni(sourceType);
   }
 
   /**
-   * 文件/图片混合选择：默认优先走原生 imageChoose（showFile=true + fileTypes 白名单，原生完成上传）；
-   * 原生不可用（低版本容器 / 普通 H5）时降级到 H5 文件选择 + /files/upload。
-   * FORCE_H5_UPLOAD=true 时强制走 H5 文件选择（原生分支保留备用）。
+   * 文件/图片混合选择：按环境分流。
+   * - mPaaS 容器（WebView）：imageChoose(returnLocal, showFile) 选文件 + aiFileUpload 上传
+   * - 普通浏览器：uni.chooseFile + /files/upload
    */
   async function chooseFilesFromNative() {
     const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
-    logger.info("[attachment] chooseFilesFromNative start", {
-      currentCount: attachments.value.length,
-      limit: MAX_ATTACHMENT_COUNT,
-      requestCount: count,
-    });
 
-    // 强制 H5 上传：直接走 H5 通用文件选择 + /files/upload（原生 imageChoose 分支保留备用）
-    // #ifdef H5
-    if (FORCE_H5_UPLOAD) {
-      logger.warn("[attachment] FORCE_H5_UPLOAD, skip native imageChoose");
-      await chooseFilesViaUni();
-      return;
-    }
-    // #endif
-
-    // 等待 bridge 注入窗口
+    // 等待 bridge 注入窗口，判断是否在 mPaaS 容器（WebView）里
     const bridge = await waitForMpaas(2000);
-    logger.info("[attachment] chooseFilesFromNative bridge ready", { ready: Boolean(bridge) });
-    if (!bridge) {
-      // 原生不可用：降级到 H5 通用文件选择 + /files/upload 上传（低版本兼容）
-      logger.warn("[attachment] native picker unavailable, fallback to uni file picker");
-      // #ifdef H5
-      await chooseFilesViaUni();
-      // #endif
+    if (bridge) {
+      try {
+        await chooseViaNative({ showFile: true, count });
+      } catch (error) {
+        logger.warn("[attachment] native choose/upload failed", error);
+      }
       return;
     }
 
-    try {
-      const params = {
-        showFile: true,
-        fileTypes: DEFAULT_ALLOWED_FILE_TYPES,
-        nativeUploaded: true,
-      };
-      logger.info("[attachment] chooseFilesFromNative -> imageChoose", { count, params });
-      const files = await chooseNativeFiles(count, params);
-      logger.info("[attachment] native imageChoose result", {
-        mode: "file+image",
-        count: files.length,
-        files: files.map(f => ({ url: f.url, name: f.name, size: f.size, mimeType: f.mimeType })),
-      });
-      appendNativeUploadedFiles(files);
-      logger.info("[attachment] chooseFilesFromNative done", { total: attachments.value.length });
-    } catch (error) {
-      logger.error("[attachment] native imageChoose failed", error);
-    }
+    // 浏览器：uni.chooseFile
+    // #ifdef H5
+    await chooseFilesViaUni();
+    // #endif
   }
 
   /**
    * 原生 imageChoose 是否可用（等待 bridge 注入窗口）。
-   * 用于组件决定：优先触发原生弹窗（imageChoose 自带拍照/相册/文件），还是回退到前端三选项弹窗。
-   * FORCE_H5_UPLOAD=true 时恒为 false：一律走前端三选项弹窗（拍照/相册/文件，
-   * 分别落到 uni.chooseImage 的 camera/album 与 uni.chooseFile）。
+   * WebView 下返回 true：点击 + 直接触发原生弹窗（imageChoose showFile=true 自带拍照/相册/文件），
+   * 不再弹前端三选项弹窗；浏览器下返回 false：弹前端三选项弹窗。
    */
   function isNativePickerAvailable() {
-    // 强制 H5 上传期间，不让 UI 直接触发原生弹窗，改由前端三选项弹窗分发到 H5 选择器
-    if (FORCE_H5_UPLOAD) return Promise.resolve(false);
     return waitForMpaas(2000).then(Boolean);
   }
 
@@ -632,24 +600,25 @@ export function useComposerAttachments() {
 
   /**
    * 取出可提交的附件并清空输入栏。
-   * 上传接口返回 fileId 时按 Dify local_file 契约发送；旧原生路径没有 fileId 时
-   * 才以 remote_url 兼容。meta 多带本地路径与名称体积，用于当前消息气泡展示。
+   * 对话 files 一律以 `remote_url` 提交，url 取上传接口返回的 source_url
+   * （mPaaS 原生 aiFileUpload / H5 /files/upload 两个来源同一口径）；
+   * 仅当 source_url 缺失时才退回 `local_file` + upload_file_id。
+   * meta 多带本地路径与名称体积，用于当前消息气泡展示。
    */
   function takeUploadedFiles(): { files: ChatFile[]; meta: ChatMessageAttachment[] } {
-    logger.info("[attachment] takeUploadedFiles start", { total: attachments.value.length });
     const uploaded = attachments.value.filter(item =>
-      item.status === "uploaded" && Boolean(item.fileId || item.url),
+      item.status === "uploaded" && Boolean(item.url || item.fileId),
     );
-    const files: ChatFile[] = uploaded.map(item => item.fileId
+    const files: ChatFile[] = uploaded.map(item => item.url
       ? {
-          type: item.type,
-          transferMethod: "local_file",
-          uploadFileId: item.fileId,
-        }
-      : {
           type: item.type,
           transferMethod: "remote_url",
           url: item.url,
+        }
+      : {
+          type: item.type,
+          transferMethod: "local_file",
+          uploadFileId: item.fileId,
         });
     const meta = uploaded.map(item => ({
       fileId: item.fileId,
@@ -660,7 +629,6 @@ export function useComposerAttachments() {
       size: item.size,
       mimeType: item.mimeType,
     }));
-    logger.info("[attachment] takeUploadedFiles result", { files, meta });
     clearAttachments();
     return { files, meta };
   }
