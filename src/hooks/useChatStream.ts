@@ -1,7 +1,10 @@
 import type { ChatStreamEvent, SendChatMessageParams } from "@/api/chat/types";
 import { createDifyEventNormalizer, toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
 import { createSseSession } from "@/utils/ai-stream/sseSession";
+import { createLogger } from "@/utils/logger";
 import { getRequestBaseURL, getRequestHeaders } from "@/utils/request";
+
+const logger = createLogger("chat-stream");
 
 export interface StreamChunk<T> {
   result: T | null;
@@ -58,6 +61,7 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
     const queue = createAsyncQueue<StreamChunk<ChatStreamEvent>>();
     const url = `${getRequestBaseURL().replace(/\/$/, "")}/proxy/v1/chat-messages`;
     const body = toDifyChatMessagesRequest(params);
+    logger.info("[chat] 对话接口入参", body);
     const idleTimeoutMs = streamOptions.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     const requestTimeoutMs = streamOptions.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
@@ -103,6 +107,7 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
 
     function pushEvent(payload: unknown) {
       if (finished) return;
+      logger.info("[chat] 对话接口出参", payload);
       const event = normalizeEvent(payload);
       if (!event) return;
       if (event instanceof Error) {

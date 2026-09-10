@@ -21,7 +21,10 @@ import type {
   UploadChatFileParams,
 } from "./types";
 import { toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
+import { createLogger } from "@/utils/logger";
 import { request } from "@/utils/request";
+
+const logger = createLogger("chat-api");
 
 export { consumeTextToSpeechStream } from "./tts-stream";
 export type { TtsStreamHandle } from "./tts-stream";
@@ -141,14 +144,15 @@ export function interruptChat(params: InterruptChatParams) {
 
 /** Dify blocking 模式一次性返回完整回答。 */
 export function sendBlockingChatMessage(params: SendChatMessageParams) {
+  const body = toDifyChatMessagesRequest({ ...params, responseMode: "blocking" });
+  logger.info("[chat] 对话接口入参(blocking)", body);
   return request
-    .post<DifyBlockingChatMessageResponse>(
-      "/proxy/v1/chat-messages",
-      toDifyChatMessagesRequest({ ...params, responseMode: "blocking" }),
-      jsonOptions,
-    )
+    .post<DifyBlockingChatMessageResponse>("/proxy/v1/chat-messages", body, jsonOptions)
     .json()
-    .then(toBlockingChatMessageResponse);
+    .then((response) => {
+      logger.info("[chat] 对话接口出参(blocking)", response);
+      return toBlockingChatMessageResponse(response);
+    });
 }
 
 export function getConversations(params: ListConversationsParams) {

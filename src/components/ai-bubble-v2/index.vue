@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref } from "vue";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOff from "@/assets/img/icon-action-radio-off.svg";
@@ -13,7 +13,7 @@ import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
-import { fetchFilePreviewBlobUrl, toInlineImageUrl } from "@/utils/image-preview";
+import { toInlineImageUrl } from "@/utils/image-preview";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
@@ -96,37 +96,18 @@ async function copyText(text) {
   return false;
 }
 
-/** 图片加载失败时的 blob 兜底地址（按附件下标记录，避免重复请求） */
+/** 图片加载失败时的兜底地址（按附件下标记录，避免重复请求） */
 const fileImageFallback = ref<Record<number, string>>({});
 
 /**
- * 新发送的图片带 localPath，直接展示本地文件；只有历史图片没有 localPath，
- * 才按 fileId 请求 GET /files/{file_id}/preview。
- */
-watch(
-  () => props.attachments
-    .map(file => `${file.type}:${file.localPath || ""}:${file.fileId || ""}:${file.url || ""}`)
-    .join("|"),
-  () => {
-    props.attachments.forEach((file, fileIndex) => {
-      if (file.type === "image" && !file.localPath && file.fileId && !fileImageFallback.value[fileIndex]) {
-        void fetchFilePreviewBlobUrl(file.fileId, file.mimeType).then((inline) => {
-          if (inline) fileImageFallback.value = { ...fileImageFallback.value, [fileIndex]: inline };
-        });
-      }
-    });
-  },
-  { immediate: true },
-);
-
-/**
- * 图片附件 src：鉴权预览 blob 解析后优先；
- * 有 fileId 但预览尚未解析完成时返回空占位，避免 img 无凭证打 source_url 失败闪断。
+ * 图片附件 src：
+ * - 新发送的图片带 localPath（H5/mPaaS 都是本地可渲染地址），直接展示本地文件；
+ * - 历史图片用 message_files[].url 直链渲染（Dify 的 file-preview 自带签名），
+ *   img 无凭证也能拿到内容，不再走 /files/{id}/preview 鉴权预览。
  */
 function fileImageSrc(file: ChatMessageAttachment, fileIndex: number) {
   if (file.localPath) return file.localPath;
   if (fileImageFallback.value[fileIndex]) return fileImageFallback.value[fileIndex];
-  if (file.fileId) return "";
   return file.previewPath || file.url || "";
 }
 

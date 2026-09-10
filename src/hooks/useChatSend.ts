@@ -135,7 +135,9 @@ export function useChatSend(scope?: string, handlers?: {
     const checkedModules = handlers?.getReportCheckedModules?.() || [];
     return {
       query: content,
-      user: userStore.userId,
+      // Dify 要求 user 非空；游客态（未选角色 / 已清空）统一用占位标识，
+      // 口径与 /files/upload、反馈接口一致。
+      user: String(userStore.userId || "guest"),
       conversationId: chatStore.aiSessionId,
       // Dify 开始节点通过 inputs 接收场景。
       inputs: {

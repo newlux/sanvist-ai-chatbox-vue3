@@ -261,8 +261,8 @@ export default {
               .then((paths) => {
                 this.uploadImages(paths);
               })
-              .catch((err) => {
-                console.log("downloadFile error", err);
+              .catch(() => {
+                // 下载失败静默处理：宿主临时文件不可用时不做任何展示，避免干扰用户
               });
           }
         }

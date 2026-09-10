@@ -16,7 +16,7 @@ import { useUserStore } from "./user";
 
 type ChatStore = ReturnType<typeof useChatStore>;
 
-/** Dify 历史文件的 url 是 preview 地址；其中的路径 ID 比 message_file 记录 ID 更可靠。 */
+/** 从 file-preview 直链路径取文件标识；仅作附件标识，不再用于拼预览接口地址。 */
 function getPreviewFileId(value: unknown) {
   const matched = /\/files\/([^/?#]+)\/(?:preview|file-preview)(?:[/?#]|$)/i.exec(String(value || ""));
   if (!matched?.[1]) return "";
@@ -55,8 +55,11 @@ function mapHistoryAttachments(value: unknown) {
     const belongsTo = String(file.belongs_to || file.belongsTo || "user").toLowerCase();
     if (belongsTo === "assistant") return null;
     const type = readHistoryFileType(file.type);
+    // message_files[].url 本身就是完整的可渲染地址（Dify 带 timestamp/nonce/sign 的
+    // file-preview 直链），<img> 直接 GET 即可，不再抠 file id 去拼鉴权预览接口。
     const url = String(file.url || file.source_url || file.sourceUrl || file.preview_url || file.previewUrl || "");
     return {
+      // fileId 仅作附件标识：remote_url 投递的文件 upload_file_id 恒为 null，只能从 url 路径派生。
       fileId: String(
         file.upload_file_id
         || file.uploadFileId

@@ -22,7 +22,11 @@ interface LocalChatFile {
   uploadFileId: string;
 }
 
-/** Dify files 参数：上传文件传 upload_file_id，外部资源才传 url。 */
+/**
+ * Dify files 参数：
+ * - `remote_url` 为默认路径，url 取上传接口（aiFileUpload / /files/upload）返回的 source_url；
+ * - `local_file` 仅在拿不到 source_url 时兜底，传 upload_file_id。
+ */
 export type ChatFile = LocalChatFile | RemoteChatFile;
 
 export type ChatResponseMode = "streaming" | "blocking";
