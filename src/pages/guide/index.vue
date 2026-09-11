@@ -3,12 +3,13 @@ import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { getTodayAwakeningPrompt } from "@/api/user-role";
+import { getDeviceModels, getTodayAwakeningPrompt } from "@/api/user-role";
 import iconHelp from "@/assets/img/icon-help.svg";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
+import AiDeviceModelPicker from "@/components/ai-device-model-picker/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import AiSceneWelcome from "@/components/ai-scene-welcome/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
@@ -44,6 +45,10 @@ const sessionStore = useSessionStore();
 const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
 const sharePosterWrap = ref<unknown>(null);
 const shareSheetBottomInset = ref("");
+/** 机型选中值（modelKey）：未选择时不下发，选中后每次对话都作为 inputs.device_model 透传 */
+const selectedDeviceModel = ref("");
+/** 机型选择卡片：进入页面拉到机型后自动弹起，选完/关闭即收起 */
+const deviceModelSheetVisible = ref(false);
 
 const {
   messages,
@@ -71,6 +76,8 @@ const {
 } = useChatViewport();
 const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
+  // 机型由用户在页面上选，每次发送时现取，避免切会话后带上旧值
+  getExtraInputs: () => (selectedDeviceModel.value ? { device_model: selectedDeviceModel.value } : {}),
 });
 const {
   iconCopyImage,
@@ -297,6 +304,21 @@ async function loadAwakeningPrompt() {
   }
 }
 
+/**
+ * 机型选项：进入本页时初始化拉取，拿到数据后直接把选择卡片弹起来。
+ * 失败或没有机型时只记日志，不打断页面。
+ */
+async function loadDeviceModels() {
+  try {
+    const data = await getDeviceModels();
+    const models = Array.isArray(data?.models) ? data.models : [];
+    userStore.setDeviceModels(models);
+    deviceModelSheetVisible.value = models.length > 0;
+  } catch (error) {
+    logger.warn("failed to load device models", error);
+  }
+}
+
 async function onScrollTop() {
   if (!chatStore.aiSessionId) return;
   try {
@@ -323,6 +345,7 @@ onLoad((options) => {
 onMounted(() => {
   syncWindowHeight();
   loadAwakeningPrompt();
+  void loadDeviceModels();
 });
 
 onShow(() => {
@@ -516,6 +539,13 @@ onUnload(() => {
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
         @dock-height-change="setInputDockHeight"
+      />
+
+      <!-- 进入页面自动弹起的机型选择卡片，选完即收起；页面上不保留入口 -->
+      <AiDeviceModelPicker
+        v-model="selectedDeviceModel"
+        v-model:visible="deviceModelSheetVisible"
+        :models="userStore.deviceModels"
       />
 
       <AiBadFeedbackSheet

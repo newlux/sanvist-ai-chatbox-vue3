@@ -8,6 +8,8 @@ export interface DeviceInfo {
 export interface ChatInput extends Record<string, unknown> {
   channel?: string;
   deviceList?: DeviceInfo[];
+  /** 机型标识：取 /user/device-models 的 modelKey，作业指导页用户选择后随对话透传 */
+  device_model?: string;
 }
 
 interface RemoteChatFile {
