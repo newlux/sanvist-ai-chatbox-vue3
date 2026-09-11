@@ -1,3 +1,4 @@
+import type { DeviceModelOption } from "@/api/user-role/device-models";
 import type { AwakeningPrompt } from "@/api/user-role/role-options";
 import { defineStore } from "pinia";
 import { ref } from "vue";
@@ -20,6 +21,8 @@ export const useUserStore = defineStore("user", () => {
   const username = ref("");
   const userInfo = ref<Record<string, unknown>>({});
   const awakeningPrompt = ref<AwakeningPrompt | null>(null);
+  /** 机型选项卡数据源：进入作业指导页时拉取 */
+  const deviceModels = ref<DeviceModelOption[]>([]);
 
   function setIsVisitor(value: boolean | null) {
     isVisitor.value = value;
@@ -58,6 +61,10 @@ export const useUserStore = defineStore("user", () => {
     awakeningPrompt.value = value;
   }
 
+  function setDeviceModels(value: DeviceModelOption[]) {
+    deviceModels.value = Array.isArray(value) ? value : [];
+  }
+
   return {
     isVisitor,
     visitorRole,
@@ -65,6 +72,7 @@ export const useUserStore = defineStore("user", () => {
     username,
     userInfo,
     awakeningPrompt,
+    deviceModels,
     setIsVisitor,
     setVisitorRole,
     restoreVisitorRole,
@@ -72,5 +80,6 @@ export const useUserStore = defineStore("user", () => {
     setUsername,
     setUserInfo,
     setAwakeningPrompt,
+    setDeviceModels,
   };
 });

@@ -30,6 +30,8 @@ export function useChatSend(scope?: string, handlers?: {
   onReportNavigation?: (action: ReportNavigationAction) => void;
   onReportBlockingComplete?: () => void;
   getReportCheckedModules?: () => string[];
+  /** 页面注入的额外 Dify inputs（如作业指导页的机型选择），每次发送时现取 */
+  getExtraInputs?: () => Record<string, unknown>;
 }) {
   const { t } = useI18n();
   const chatStore = useChatStore(scope);
@@ -143,6 +145,7 @@ export function useChatSend(scope?: string, handlers?: {
       inputs: {
         scene,
         ...(scene === "PODCAST" ? { checkedModules: JSON.stringify(checkedModules) } : {}),
+        ...(handlers?.getExtraInputs?.() ?? {}),
       },
       files,
     };

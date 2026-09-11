@@ -453,6 +453,9 @@ onBeforeUnmount(() => {
       ref="dockRef"
       class="chat-input__dock"
     >
+      <!-- 页面自定义的贴底区域，会一起计入输入栏高度 -->
+      <slot name="dock-top" />
+
       <!-- 附件预览栏：选中的文件在输入栏上方排开 -->
       <AiChatAttachments
         v-if="attachments.length"
