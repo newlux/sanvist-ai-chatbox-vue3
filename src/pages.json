@@ -49,6 +49,18 @@
       }
     },
     {
+      "path": "pages/repair/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "",
+        "transparentTitle": "always",
+        "allowsBounceVertical": "NO",
+        "enablePullDownRefresh": false,
+        "disableScroll": true
+      }
+    },
+    {
       "path": "pages/task/index",
       "style": {
         "navigationStyle": "custom",

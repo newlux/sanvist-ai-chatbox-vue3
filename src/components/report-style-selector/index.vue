@@ -44,6 +44,7 @@ const currentStyleDescription = computed(() => {
   return style.description || REPORT_STYLE_OPTIONS.find(item => item.name === style.name)?.description || "";
 });
 const canConfirm = computed(() => Boolean(currentStyle.value && modules.value.length && !submitting.value));
+const showStyleSwitch = computed(() => !loading.value && styles.value.length > 1);
 
 function resetChecked() {
   const defaultModules = currentStyle.value?.defaultModules || [];
@@ -190,8 +191,8 @@ onMounted(() => {
     <view class="report-style-selector__stage">
       <!-- 左切换箭头(940:192 24×24px 图) -->
       <image
+        v-if="showStyleSwitch"
         class="report-style-selector__switch"
-        :class="{ 'report-style-selector__switch--disabled': loading || styles.length < 2 }"
         :src="arrowLeftIcon"
         mode="aspectFit"
         @tap="prevStyle"
@@ -207,7 +208,7 @@ onMounted(() => {
         </template>
         <template v-else>
           <text class="report-style-selector__style-label">
-            汇报风格
+            讲话风格
           </text>
           <text class="report-style-selector__style-name">
             {{ currentStyle?.name || "" }}
@@ -228,8 +229,8 @@ onMounted(() => {
       </view>
       <!-- 右切换箭头(940:134 24×24px 图) -->
       <image
+        v-if="showStyleSwitch"
         class="report-style-selector__switch report-style-selector__switch--right"
-        :class="{ 'report-style-selector__switch--disabled': loading || styles.length < 2 }"
         :src="arrowRightIcon"
         mode="aspectFit"
         @tap="nextStyle"
