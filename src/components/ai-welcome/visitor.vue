@@ -49,8 +49,8 @@ function goToRoleSelect() {
           <text>你可以在游客模式下体验以下能力。</text>
         </view>
         <view class="welcome-visitor__features">
-          <text>体验车型：混凝土泵车、履带吊</text>
-          <text>体验功能：AI问问</text>
+          <text>体验车型：混凝土泵车、履带吊、自卸车、</text>
+          <text>混凝土搅拌车</text>
         </view>
       </view>
     </view>

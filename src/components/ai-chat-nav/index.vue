@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
+import iconRepair from "@/assets/img/icon-repair.svg";
 import iconVox from "@/assets/img/icon-vox.svg";
 
 /** 快捷入口。mode=page 另开专属页面（url 指向对应场景页） */
@@ -42,8 +43,8 @@ const navItems = computed(() => {
     return props.items;
   }
 
-  // 三个入口都另开专属页面：听汇报 / 作业指导 / 任务协同
-  return [
+  // 四个入口都另开专属页面：听汇报 / 作业指导 / 故障维修 / 任务协同
+  const defaultItems: NavItem[] = [
     {
       key: "vox-core",
       title: "听汇报",
@@ -61,6 +62,14 @@ const navItems = computed(() => {
       url: "/pages/guide/index",
     },
     {
+      key: "repair-master-ai",
+      title: "故障维修",
+      icon: iconRepair,
+      subagent: "repair",
+      mode: "page",
+      url: "/pages/repair/index",
+    },
+    {
       key: "ai-form",
       title: "任务协同",
       icon: iconForm,
@@ -69,14 +78,7 @@ const navItems = computed(() => {
       url: "/pages/task/index",
     },
   ];
-});
-
-const navPages = computed(() => {
-  const pages = [];
-  for (let index = 0; index < navItems.value.length; index += 3) {
-    pages.push(navItems.value.slice(index, index + 3));
-  }
-  return pages;
+  return defaultItems;
 });
 
 function onItemTap(item: NavItem) {
@@ -91,12 +93,13 @@ function onItemTap(item: NavItem) {
       :indicator-dots="false"
       :autoplay="false"
       :circular="false"
+      :display-multiple-items="3"
+      previous-margin="40rpx"
+      next-margin="80rpx"
     >
-      <swiper-item v-for="(page, pageIndex) in navPages" :key="pageIndex">
-        <view class="ai-chat-nav__row">
+      <swiper-item v-for="item in navItems" :key="item.key">
+        <view class="ai-chat-nav__item">
           <view
-            v-for="item in page"
-            :key="item.key"
             class="ai-chat-nav__chip"
             :class="{ 'ai-chat-nav__chip--active': item.key === activeKey }"
             @tap="onItemTap(item)"
@@ -122,23 +125,15 @@ function onItemTap(item: NavItem) {
   box-sizing: border-box;
 }
 
-.ai-chat-nav__row {
-  display: flex;
-  min-width: 0;
-  height: 72rpx;
-  align-items: center;
-  gap: 16rpx;
-  padding: 0 40rpx;
-}
-
-.ai-chat-nav__row .ai-chat-nav__chip {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
 .ai-chat-nav__swiper {
   width: 100%;
   height: 72rpx;
+}
+
+.ai-chat-nav__item {
+  height: 72rpx;
+  padding-right: 16rpx;
+  box-sizing: border-box;
 }
 
 .ai-chat-nav__chip {

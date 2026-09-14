@@ -41,10 +41,13 @@ const { t } = useI18n();
  * 这里保留一份本地值，发送时立即置空，保证输入框肉眼可见地被清干净。
  */
 const draft = ref(String(props.modelValue || ""));
-watch(() => props.modelValue, (value) => {
-  const next = String(value || "");
-  if (next !== draft.value) draft.value = next;
-});
+watch(
+  () => props.modelValue,
+  (value) => {
+    const next = String(value || "");
+    if (next !== draft.value) draft.value = next;
+  },
+);
 
 const textTextareaHeight = computed(() => {
   const maxCharsPerLine = 15;
@@ -118,7 +121,9 @@ function observeComposer() {
  */
 const maskLingering = ref(false);
 let maskLingerTimer = null;
-const showKeyboardMask = computed(() => keyboardOpen.value || voiceKeyboardOpen.value || maskLingering.value);
+const showKeyboardMask = computed(
+  () => keyboardOpen.value || voiceKeyboardOpen.value || maskLingering.value,
+);
 
 /** 点击面板以外的区域收起键盘：识别结果编辑态下这是唯一的退出口 */
 function onDismissKeyboard() {
@@ -148,7 +153,9 @@ function submitMessage(rawText?: string) {
 
   if (hasIncompleteAttachments.value) {
     uni.showToast({
-      title: hasFailedAttachments.value ? t("attachment-retry-or-remove") : t("attachment-uploading-wait"),
+      title: hasFailedAttachments.value
+        ? t("attachment-retry-or-remove")
+        : t("attachment-uploading-wait"),
       icon: "none",
     });
     return;
@@ -338,10 +345,10 @@ onBeforeUnmount(() => {
             :class="{ 'voice-listening__header--cancelling': voice.cancelling }"
           >
             <text class="voice-listening__title">
-              {{ voice.cancelling ? '松开取消语音' : 'Sanii正在听，请说话' }}
+              {{ voice.cancelling ? "松开取消语音" : "Sanii正在听，请说话" }}
             </text>
             <text class="voice-listening__hint">
-              {{ voice.cancelling ? '松开手指取消识别' : '说完松手' }}
+              {{ voice.cancelling ? "松开手指取消识别" : "说完松手" }}
             </text>
           </view>
 
@@ -364,7 +371,11 @@ onBeforeUnmount(() => {
             @touchend.prevent="onVoiceTouchEnd"
             @touchcancel.prevent="onVoiceTouchCancel"
           >
-            <image src="@/assets/img/icon-mic-red.svg" mode="aspectFit" class="voice-listening__mic-img" />
+            <image
+              src="@/assets/img/icon-mic-red.svg"
+              mode="aspectFit"
+              class="voice-listening__mic-img"
+            />
           </view>
         </view>
       </view>
@@ -399,15 +410,21 @@ onBeforeUnmount(() => {
             @blur="onVoiceTextareaBlur"
             @touchstart.stop="prepareVoiceTextareaFocus"
           />
-          <view v-if="voice.isRecognizing" class="voice-confirm__recognizing" aria-label="语音识别中">
+          <view
+            v-if="voice.isRecognizing"
+            class="voice-confirm__recognizing"
+            aria-label="语音识别中"
+          >
             <view class="voice-confirm__spinner" />
-            <text class="voice-confirm__recognizing-text">
-              语音识别中...
-            </text>
+            <text class="voice-confirm__recognizing-text"> 语音识别中... </text>
           </view>
-          <view v-else-if="voice.restartRecording" class="voice-confirm__recognizing" aria-label="正在录音">
+          <view
+            v-else-if="voice.restartRecording"
+            class="voice-confirm__recognizing"
+            aria-label="正在录音"
+          >
             <text class="voice-confirm__recognizing-text">
-              {{ voice.cancelling ? '松开取消' : '正在录音，松开识别' }}
+              {{ voice.cancelling ? "松开取消" : "正在录音，松开识别" }}
             </text>
           </view>
         </view>
@@ -423,7 +440,11 @@ onBeforeUnmount(() => {
             @touchstart.stop.prevent="onVoiceCloseUi"
             @tap="onVoiceCloseUi"
           >
-            <image src="@/assets/img/icon-close-lg.svg" mode="aspectFit" class="voice-action__icon" />
+            <image
+              src="@/assets/img/icon-close-lg.svg"
+              mode="aspectFit"
+              class="voice-action__icon"
+            />
           </view>
           <!-- 发送 -->
           <view
@@ -431,7 +452,11 @@ onBeforeUnmount(() => {
             @touchstart.stop.prevent="onVoiceSendUi"
             @tap="onVoiceSendUi"
           >
-            <image src="@/assets/img/icon-send-2.svg" mode="aspectFit" class="voice-action__icon voice-action__icon--send" />
+            <image
+              src="@/assets/img/icon-send-2.svg"
+              mode="aspectFit"
+              class="voice-action__icon voice-action__icon--send"
+            />
           </view>
           <!-- 重新识别 -->
           <view
@@ -442,17 +467,17 @@ onBeforeUnmount(() => {
             @touchend.prevent="onVoiceRestartEnd"
             @touchcancel.prevent="onVoiceRestartCancel"
           >
-            <image src="@/assets/img/icon-voice-sm.svg" mode="aspectFit" class="voice-action__icon" />
+            <image
+              src="@/assets/img/icon-voice-sm.svg"
+              mode="aspectFit"
+              class="voice-action__icon"
+            />
           </view>
         </view>
       </view>
     </view>
     <!-- 始终 fixed 贴底；键盘弹起时用 bottom 抬到键盘上方 -->
-    <view
-      v-if="!voiceKeyboardOpen"
-      ref="dockRef"
-      class="chat-input__dock"
-    >
+    <view v-if="!voiceKeyboardOpen" ref="dockRef" class="chat-input__dock">
       <!-- 页面自定义的贴底区域，会一起计入输入栏高度 -->
       <slot name="dock-top" />
 
@@ -465,14 +490,11 @@ onBeforeUnmount(() => {
       />
 
       <!-- 底部输入栏：默认语音、键盘文本、发送和生成中状态 -->
-      <view
-        class="input-bar"
-        :class="{ 'input-bar--text': inputMode === 'text' }"
-      >
+      <view class="input-bar" :class="{ 'input-bar--text': inputMode === 'text' }">
         <!-- 左侧：附件入口 -->
         <view
+          v-if="!(attachmentDisabled || isLoading || voice.isRecognizing)"
           class="input-bar__plus"
-          :class="{ 'input-bar__plus--disabled': attachmentDisabled || isLoading || voice.isRecognizing }"
           @tap="onOpenAttachmentPicker"
         >
           <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
@@ -481,17 +503,27 @@ onBeforeUnmount(() => {
         <view
           v-if="inputMode === 'voice'"
           class="input-bar__voice-pill"
-          :class="{ 'input-bar__voice-pill--disabled': isLoading || voice.isRecognizing }"
+          :class="{
+            'input-bar__voice-pill--disabled': isLoading || voice.isRecognizing,
+            'input-bar__voice-pill--no-plus': attachmentDisabled || isLoading || voice.isRecognizing,
+          }"
           @touchstart.prevent="onVoicePillTouchStart"
           @touchmove.prevent="updateVoiceGesture"
           @touchend.prevent="onVoicePillTouchEnd"
           @touchcancel.prevent="onVoicePillTouchCancel"
         >
           <text class="input-bar__voice-hint">
-            {{ isLoading ? '回答生成中...' : voice.isRecognizing ? '识别中...' : '按住 说话' }}
+            {{ isLoading ? "回答生成中..." : voice.isRecognizing ? "识别中..." : "按住 说话" }}
           </text>
         </view>
-        <view v-else class="input-bar__text-field">
+        <view
+          v-else
+          class="input-bar__text-field"
+          :class="{
+            'input-bar__text-field--padding':
+              attachmentDisabled || isLoading || voice.isRecognizing,
+          }"
+        >
           <textarea
             class="input-bar__textarea"
             :value="draft"
@@ -543,9 +575,7 @@ onBeforeUnmount(() => {
 
       <!-- 输入单元下提示（Figma: 41116:6071）。跟着输入栏一起上移，键盘弹起时同样要看得见 -->
       <view class="chat-input__footer">
-        <text class="chat-input__footer-text">
-          内容由AI生成，请核实重要信息
-        </text>
+        <text class="chat-input__footer-text"> 内容由AI生成，请核实重要信息 </text>
       </view>
     </view>
 
@@ -556,21 +586,13 @@ onBeforeUnmount(() => {
       @tap.stop="onCloseAttachmentPicker"
     >
       <view class="attachment-picker" @tap.stop>
-        <view class="attachment-picker__title">
-          添加附件
-        </view>
-        <view class="attachment-picker__btn" @tap="onPickAttachmentSource('camera')">
-          拍照
-        </view>
+        <view class="attachment-picker__title"> 添加附件 </view>
+        <view class="attachment-picker__btn" @tap="onPickAttachmentSource('camera')"> 拍照 </view>
         <view class="attachment-picker__btn" @tap="onPickAttachmentSource('album')">
           从相册选择
         </view>
-        <view class="attachment-picker__btn" @tap="onPickAttachmentSource('file')">
-          选择文件
-        </view>
-        <view class="attachment-picker__cancel" @tap="onCloseAttachmentPicker">
-          取消
-        </view>
+        <view class="attachment-picker__btn" @tap="onPickAttachmentSource('file')"> 选择文件 </view>
+        <view class="attachment-picker__cancel" @tap="onCloseAttachmentPicker"> 取消 </view>
       </view>
     </view>
   </view>
@@ -640,8 +662,14 @@ onBeforeUnmount(() => {
 }
 
 .voice-listening__title {
-  font-family: 'Sarasa Gothic SC', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei',
-    -apple-system, 'Helvetica Neue', sans-serif;
+  font-family:
+    "Sarasa Gothic SC",
+    "PingFang SC",
+    "Noto Sans SC",
+    "Microsoft YaHei",
+    -apple-system,
+    "Helvetica Neue",
+    sans-serif;
   font-size: 28rpx; // 14px
   font-weight: 600;
   color: #333333;
@@ -650,8 +678,14 @@ onBeforeUnmount(() => {
 }
 
 .voice-listening__hint {
-  font-family: 'Sarasa Gothic SC', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei',
-    -apple-system, 'Helvetica Neue', sans-serif;
+  font-family:
+    "Sarasa Gothic SC",
+    "PingFang SC",
+    "Noto Sans SC",
+    "Microsoft YaHei",
+    -apple-system,
+    "Helvetica Neue",
+    sans-serif;
   font-size: 24rpx; // 12px
   font-weight: 400;
   color: #999999;
@@ -704,24 +738,61 @@ onBeforeUnmount(() => {
   animation: voice-wave-breathe 0.72s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 
-.voice-wave__dot:nth-child(1) { opacity: 1; animation-delay: 0s; }
-.voice-wave__dot:nth-child(2) { opacity: 0.86; animation-delay: 0.05s; }
-.voice-wave__dot:nth-child(3) { opacity: 0.7; animation-delay: 0.1s; }
-.voice-wave__dot:nth-child(4) { opacity: 0.52; animation-delay: 0.15s; }
-.voice-wave__dot:nth-child(5) { opacity: 0.36; animation-delay: 0.2s; }
-.voice-wave__dot:nth-child(6) { opacity: 0.24; animation-delay: 0.25s; }
-.voice-wave__dot:nth-child(7) { opacity: 0.15; animation-delay: 0.3s; }
-.voice-wave__dot:nth-child(8) { opacity: 0.08; animation-delay: 0.35s; }
-.voice-wave__dot:nth-child(9) { opacity: 0.04; animation-delay: 0.4s; }
+.voice-wave__dot:nth-child(1) {
+  opacity: 1;
+  animation-delay: 0s;
+}
+.voice-wave__dot:nth-child(2) {
+  opacity: 0.86;
+  animation-delay: 0.05s;
+}
+.voice-wave__dot:nth-child(3) {
+  opacity: 0.7;
+  animation-delay: 0.1s;
+}
+.voice-wave__dot:nth-child(4) {
+  opacity: 0.52;
+  animation-delay: 0.15s;
+}
+.voice-wave__dot:nth-child(5) {
+  opacity: 0.36;
+  animation-delay: 0.2s;
+}
+.voice-wave__dot:nth-child(6) {
+  opacity: 0.24;
+  animation-delay: 0.25s;
+}
+.voice-wave__dot:nth-child(7) {
+  opacity: 0.15;
+  animation-delay: 0.3s;
+}
+.voice-wave__dot:nth-child(8) {
+  opacity: 0.08;
+  animation-delay: 0.35s;
+}
+.voice-wave__dot:nth-child(9) {
+  opacity: 0.04;
+  animation-delay: 0.4s;
+}
 
 @keyframes voice-wave-breathe {
-  0%, 100% { transform: scaleY(0.75) scaleX(0.85); }
-  50% { transform: scaleY(3) scaleX(1.15); }
+  0%,
+  100% {
+    transform: scaleY(0.75) scaleX(0.85);
+  }
+  50% {
+    transform: scaleY(3) scaleX(1.15);
+  }
 }
 
 @keyframes voice-wave-center-pulse {
-  0%, 100% { transform: scale(0.9); }
-  50% { transform: scale(1.45); }
+  0%,
+  100% {
+    transform: scale(0.9);
+  }
+  50% {
+    transform: scale(1.45);
+  }
 }
 
 /* 麦克风（按住说话） */
@@ -779,8 +850,15 @@ onBeforeUnmount(() => {
   height: 192rpx;
   padding: 0;
   margin: 0;
-  font-family: 'Inter', 'Sarasa Gothic SC', 'PingFang SC', 'Noto Sans SC', -apple-system,
-    'Helvetica Neue', 'Microsoft YaHei', sans-serif;
+  font-family:
+    "Inter",
+    "Sarasa Gothic SC",
+    "PingFang SC",
+    "Noto Sans SC",
+    -apple-system,
+    "Helvetica Neue",
+    "Microsoft YaHei",
+    sans-serif;
   font-size: 28rpx; // 14px
   font-weight: 600;
   color: #333333;
@@ -809,7 +887,9 @@ onBeforeUnmount(() => {
 }
 
 @keyframes voice-confirm-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .voice-confirm__recognizing-text {
@@ -866,7 +946,7 @@ onBeforeUnmount(() => {
   transform: translateY(-32rpx);
 }
 
- // 整条输入栏就是那颗胶囊：加号、语音、发送都收在里面
+// 整条输入栏就是那颗胶囊：加号、语音、发送都收在里面
 .input-bar {
   display: flex;
   align-items: center;
@@ -912,6 +992,10 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+.input-bar__voice-pill--no-plus {
+  padding-left: 92rpx; // 76rpx 右侧按钮 + 16rpx gap，文案相对整条输入栏居中
+}
+
 .input-bar__voice-hint {
   font-size: 24rpx; // 12px
   font-weight: 400;
@@ -923,8 +1007,12 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   min-width: 0;
-  padding: 12rpx 8rpx;
+  padding: 12rpx 10rpx;
   overflow: hidden;
+}
+
+.input-bar__text-field--padding {
+  padding-left: 20rpx;
 }
 
 .input-bar__textarea {
@@ -944,7 +1032,7 @@ onBeforeUnmount(() => {
   color: #bababa;
 }
 
- // 胶囊内的两颗圆按钮
+// 胶囊内的两颗圆按钮
 .input-bar__plus,
 .input-bar__mode {
   width: 76rpx;
@@ -986,11 +1074,6 @@ onBeforeUnmount(() => {
   width: 58rpx;
   height: 58rpx;
   margin-right: 8rpx;
-}
-
-.input-bar__plus--disabled {
-  opacity: 0.35;
-  pointer-events: none;
 }
 
 .input-bar__mode:active,
