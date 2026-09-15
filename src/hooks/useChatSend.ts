@@ -1,6 +1,10 @@
 import type { AskSlotSubmitPayload, ChatFile, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
-import type { ReportAdjustmentAction, ReportNavigationAction } from "@/utils/ai-stream";
+import type {
+  ReportAdjustmentAction,
+  ReportNavigationAction,
+  ReportWorkflowAction,
+} from "@/utils/ai-stream";
 import { useI18n } from "vue-i18n";
 import { interruptChat, sendBlockingChatMessage } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
@@ -28,8 +32,8 @@ export function useChatSend(scope?: string, handlers?: {
   onReportQa?: (answer: string) => void;
   onReportAdjustment?: (action: ReportAdjustmentAction) => void;
   onReportNavigation?: (action: ReportNavigationAction) => void;
+  onReportWorkflowAction?: (action: ReportWorkflowAction) => void;
   onReportBlockingComplete?: () => void;
-  getReportCheckedModules?: () => string[];
   /** 页面注入的额外 Dify inputs（如作业指导页的机型选择），每次发送时现取 */
   getExtraInputs?: () => Record<string, unknown>;
 }) {
@@ -134,19 +138,18 @@ export function useChatSend(scope?: string, handlers?: {
 
   function createChatRequest(content: string, files: ChatFile[]) {
     const scene = handlers?.scene ?? "ASK";
-    const checkedModules = handlers?.getReportCheckedModules?.() || [];
     return {
       query: content,
       // Dify 要求 user 非空；游客态（未选角色 / 已清空）统一用占位标识，
       // 口径与 /files/upload、反馈接口一致。
       user: String(userStore.userId || "guest"),
       conversationId: chatStore.aiSessionId,
-      // Dify 开始节点通过 inputs 接收场景。
-      inputs: {
-        scene,
-        ...(scene === "PODCAST" ? { checkedModules: JSON.stringify(checkedModules) } : {}),
-        ...(handlers?.getExtraInputs?.() ?? {}),
-      },
+      inputs: scene === "PODCAST"
+        ? { scene: "PODCAST" }
+        : {
+            scene,
+            ...(handlers?.getExtraInputs?.() ?? {}),
+          },
       files,
     };
   }
@@ -224,6 +227,9 @@ export function useChatSend(scope?: string, handlers?: {
       }
       if (reportInteraction?.interactionType === "navigation") {
         handlers?.onReportNavigation?.(reportInteraction.action);
+      }
+      if (reportInteraction?.interactionType === "workflow") {
+        handlers?.onReportWorkflowAction?.(reportInteraction.action);
       }
 
       applySnapshot(aiMsgId, userMsgId, {

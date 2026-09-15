@@ -1,5 +1,9 @@
 import type { PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
-import type { ReportAdjustmentAction, ReportNavigationAction } from "@/utils/ai-stream/report-interaction";
+import type {
+  ReportAdjustmentAction,
+  ReportNavigationAction,
+  ReportWorkflowAction,
+} from "@/utils/ai-stream/report-interaction";
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("report-adjustment-actions");
@@ -16,6 +20,10 @@ export interface UseReportAdjustmentActionsOptions {
   saveReportStyle: (styleCode: string, moduleCodes: string[]) => void;
   getPlayer: () => ReportPlaybackController | null;
   openInsight: () => void;
+  filterInsightList: (action: Extract<ReportWorkflowAction, { type: "filter_list" }>) => void;
+  requestUrgentConfirmation: (action: Extract<ReportWorkflowAction, { type: "request_confirmation" }>) => void;
+  executeUrgent: (action: Extract<ReportWorkflowAction, { type: "execute_urgent" }>) => void;
+  updateUrgentConfirmation: (action: Extract<ReportWorkflowAction, { type: "update_confirmation" }>) => void;
 }
 
 export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOptions) {
@@ -36,7 +44,41 @@ export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOp
   }
 
   function executeNavigation(action: ReportNavigationAction) {
-    if (action.type === "open_insight") options.openInsight();
+    if (action.type === "open_insight" || action.type === "enter_insight") options.openInsight();
+  }
+
+  function executeWorkflow(action: ReportWorkflowAction) {
+    if (action.type === "none") return;
+    if (action.type === "open_insight" || action.type === "enter_insight") {
+      executeNavigation(action);
+      return;
+    }
+    if (action.type === "filter_list") {
+      options.openInsight();
+      options.filterInsightList(action);
+      return;
+    }
+    if (action.type === "request_confirmation") {
+      options.openInsight();
+      options.requestUrgentConfirmation(action);
+      return;
+    }
+    if (action.type === "execute_urgent") {
+      options.openInsight();
+      options.executeUrgent(action);
+      return;
+    }
+    if (action.type === "update_confirmation") {
+      options.updateUrgentConfirmation(action);
+      return;
+    }
+    if (
+      action.type === "update_modules"
+      || action.type === "switch_script_version"
+      || action.type === "playback_control"
+    ) {
+      execute(action);
+    }
   }
 
   function execute(action: ReportAdjustmentAction) {
@@ -85,6 +127,7 @@ export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOp
   return {
     execute,
     executeNavigation,
+    executeWorkflow,
     dispose: clearDelayedPause,
   };
 }

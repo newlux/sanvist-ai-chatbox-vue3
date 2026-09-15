@@ -15,6 +15,7 @@ const props = withDefaults(defineProps<{
   loading: boolean;
   canToggleUrgent: boolean;
   urgentToastVisible: boolean;
+  urgentToastMessage: string;
   loadingMore: boolean;
   hasMore: boolean;
   /** 内嵌到听汇报页时，宿主已提供顶部状态栏占位，这里不再重复渲染。 */
@@ -164,7 +165,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
     </view>
 
     <view v-if="props.canToggleUrgent && props.urgentToastVisible" class="report-insight__urgent-toast" :style="urgentToastStyle">
-      已加急
+      {{ props.urgentToastMessage }}
     </view>
   </view>
 </template>

@@ -25,23 +25,29 @@ function asIdentifier(value: unknown): Identifier | undefined {
   return typeof value === "string" || typeof value === "number" ? value : undefined;
 }
 
+/**
+ * slot 槽位组件：除 slot_name / selection / options 外都可缺省。
+ * options 只要求 label + value：device_* 只是设备类槽位的附加字段，
+ * 时间（date_start/date_end）、项目等槽位并没有它，不能拿 device_id 当准入条件。
+ */
 function parseAskSlotPayload(value: Record<string, unknown>): AskSlotPayload | null {
   const slotName = String(value.slot_name || "").trim();
+  // original_query 允许缺省，但始终归一成字符串，避免下游 trim 时崩。
   const originalQuery = String(value.original_query || "").trim();
   const selection = value.selection === "multiple" ? "multiple" : value.selection === "single" ? "single" : "";
   const options = Array.isArray(value.options)
     ? value.options
       .map(asRecord)
       .filter((item): item is Record<string, unknown> => Boolean(item))
+      // 其余字段（device_*、date_start/date_end 等）原样透传给提交侧。
       .map(item => ({
         ...item,
         label: String(item.label || "").trim(),
         value: String(item.value || "").trim(),
-        device_id: String(item.device_id || "").trim(),
       }))
-      .filter(item => item.label && item.value && item.device_id) as AskSlotOption[]
+      .filter(item => item.label && item.value) as AskSlotOption[]
     : [];
-  if (!slotName || !originalQuery || !selection || !options.length) return null;
+  if (!slotName || !selection || !options.length) return null;
   return { ...value, slot_name: slotName, original_query: originalQuery, selection, options };
 }
 
