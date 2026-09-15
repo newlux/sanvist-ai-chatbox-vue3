@@ -37,6 +37,9 @@ function extractAnswerText(message: UiChatMessage): string {
 function cleanAnswerText(raw: string): string {
   let text = String(raw || "");
 
+  // 正文里残留的协议块（如 <COMPONENT>{...}</COMPONENT>）只用于渲染，不参与口播
+  text = text.replace(/<(SANVIST|ASK|GUIDE|COMPONENT)>[\s\S]*?<\/\1>/g, "");
+
   // 代码块与行内代码
   text = text.replace(/```[\s\S]*?```/g, "");
   text = text.replace(/`([^`]+)`/g, "$1");
