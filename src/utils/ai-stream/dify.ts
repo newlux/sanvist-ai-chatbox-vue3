@@ -162,12 +162,63 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
   return null;
 }
 
-/** 将完整历史 answer 中的 SANVIST/ASK 协议按原顺序还原为 UI blocks。 */
+/** 正文协议标签；历史解析与 SSE 流式解析共用同一份标记表。 */
+const PROTOCOL_MARKERS = ["<SANVIST>", "<ASK>", "<GUIDE>", "<COMPONENT>"];
+
+/** ASK 交互组件：表格 / 图表 / 追问槽位；历史与流式解析共用同一份判定。 */
+function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockData | null {
+  const type = String(value?.type || "").toLowerCase();
+  const data = asRecord(value?.data) || {};
+  if (type === "table") {
+    const table = String(data.format || "").toLowerCase() === "markdown"
+      ? parseMarkdownTable(data.content)
+      : { columns: data.columns, rows: data.rows };
+    return table ? { type: "table", payload: table } : null;
+  }
+  if (type === "echarts") return { type: "chart", payload: { option: data } };
+  if (type === "slot") {
+    const slot = parseAskSlotPayload(data);
+    return slot ? { type: "ask-slot", payload: slot } : null;
+  }
+  return null;
+}
+
+/** 流式事件只差事件名（ask-slot → ask_slot）与 auto_open 标记。 */
+function parseAskStreamEvent(value: Record<string, unknown> | null) {
+  const block = parseAskBlock(value);
+  if (block?.type === "table") return { event: "table" as const, data: block.payload };
+  if (block?.type === "chart") return { event: "chart" as const, data: block.payload };
+  if (block?.type === "ask-slot") return { event: "ask_slot" as const, data: { ...block.payload, auto_open: true } };
+  return null;
+}
+
+/**
+ * 新版协议在组件外又包了一层：<COMPONENT>{"scene":"ask","type":"table","data":{...}}</COMPONENT>。
+ * 解包后按 scene 路由：
+ * - ask（或缺省 scene，兼容老协议）→ 走交互组件渲染；
+ * - guide → 走 GUIDE 卡片；
+ * - 带 dify_event/event 的 → 仍按节点状态事件处理；
+ * - voice 等只服务语音播报的场景 → 返回 null，正文直接丢弃，避免 JSON 泄漏到气泡与 TTS。
+ */
+function unwrapComponent(value: Record<string, unknown>) {
+  const scene = String(value.scene || "").toLowerCase();
+  if (scene === "guide") return { kind: "guide" as const, payload: value };
+  if (scene === "ask") return { kind: "ask" as const, payload: value };
+  if (!scene) {
+    return value.event || value.dify_event
+      ? { kind: "sanvist" as const, payload: value }
+      : { kind: "ask" as const, payload: value };
+  }
+  return null;
+}
+
+/** 将完整历史 answer 中的 SANVIST/ASK/GUIDE/COMPONENT 协议按原顺序还原为 UI blocks。 */
 export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[] {
   const source = String(value || "");
-  const pattern = /<(SANVIST|ASK|GUIDE)>([\s\S]*?)<\/\1>/g;
+  const pattern = /<(SANVIST|ASK|GUIDE|COMPONENT)>([\s\S]*?)<\/\1>/g;
   const blocks: DifyHistoryBlockData[] = [];
   let cursor = 0;
+  let foundProtocol = false;
 
   const appendAnswer = (content: unknown) => {
     const text = String(content || "");
@@ -184,39 +235,45 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
   while (true) {
     const match = pattern.exec(source);
     if (!match) break;
+    foundProtocol = true;
     appendAnswer(source.slice(cursor, match.index));
     cursor = match.index + match[0].length;
     try {
       const payload = asRecord(JSON.parse(match[2]));
       if (!payload) continue;
-      if (match[1] === "GUIDE") {
+      const tag = match[1];
+      let eventPayload = payload;
+      if (tag === "COMPONENT") {
+        // 新版包装层：先按 scene 解包；voice 等播报专用场景不落正文。
+        const component = unwrapComponent(payload);
+        if (!component) continue;
+        if (component.kind === "guide") {
+          const guideBlock = parseGuideBlock(component.payload);
+          if (guideBlock) blocks.push(guideBlock);
+          continue;
+        }
+        if (component.kind === "ask") {
+          const askBlock = parseAskBlock(component.payload);
+          if (askBlock) blocks.push(askBlock);
+          continue;
+        }
+        eventPayload = component.payload;
+      } else if (tag === "GUIDE") {
         const guideBlock = parseGuideBlock(payload);
         if (guideBlock) blocks.push(guideBlock);
         continue;
-      }
-      if (match[1] === "ASK") {
-        const type = String(payload.type || "").toLowerCase();
-        const data = asRecord(payload.data) || {};
-        if (type === "table") {
-          const table = String(data.format || "").toLowerCase() === "markdown"
-            ? parseMarkdownTable(data.content)
-            : { columns: data.columns, rows: data.rows };
-          if (table) blocks.push({ type: "table", payload: table });
-        } else if (type === "echarts") {
-          blocks.push({ type: "chart", payload: { option: data } });
-        } else if (type === "slot") {
-          const slot = parseAskSlotPayload(data);
-          if (slot) blocks.push({ type: "ask-slot", payload: slot });
-        }
+      } else if (tag === "ASK") {
+        const askBlock = parseAskBlock(payload);
+        if (askBlock) blocks.push(askBlock);
         continue;
       }
 
-      const difyEvent = String(payload.dify_event || "");
-      const event = String(payload.event || "");
+      const difyEvent = String(eventPayload.dify_event || "");
+      const event = String(eventPayload.event || "");
       const known = ["status", "answer", "done"].includes(event)
         || ["node_started", "node_retry", "node_finished", "workflow_finished"].includes(difyEvent);
       if (!known) continue;
-      if (event === "answer") appendAnswer(asRecord(payload.data)?.content);
+      if (event === "answer") appendAnswer(asRecord(eventPayload.data)?.content);
     } catch {
       // 历史中的非法协议块不参与渲染。
     }
@@ -230,7 +287,9 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
       result.push(block);
     }
   }
-  return result.length ? result : [{ type: "answer", payload: { content: source } }];
+  if (result.length) return result;
+  // 命中过协议但没产出 block（例如整条 answer 只有播报层）时不能回落成原文，否则会把 JSON 泄漏到气泡。
+  return foundProtocol ? [] : [{ type: "answer", payload: { content: source } }];
 }
 
 /**
@@ -335,14 +394,13 @@ export function createDifyEventNormalizer() {
 
     protocolBuffer += value;
     while (protocolBuffer) {
-      const sanvistStart = protocolBuffer.indexOf("<SANVIST>");
-      const askStart = protocolBuffer.indexOf("<ASK>");
-      const guideStart = protocolBuffer.indexOf("<GUIDE>");
-      const starts = [sanvistStart, askStart, guideStart].filter(index => index >= 0);
+      const starts = PROTOCOL_MARKERS
+        .map(marker => protocolBuffer.indexOf(marker))
+        .filter(index => index >= 0);
       const start = starts.length ? Math.min(...starts) : -1;
       if (start < 0) {
         // 标签可能刚好被 SSE 分片切开，保留与任一起始标签相符的末尾。
-        const suffixLength = ["<SANVIST>", "<ASK>", "<GUIDE>"]
+        const suffixLength = PROTOCOL_MARKERS
           .flatMap(marker => Array.from({ length: marker.length - 1 }, (_, index) => index + 1)
             .map(length => protocolBuffer.endsWith(marker.slice(0, length)) ? length : 0))
           .reduce((max, length) => Math.max(max, length), 0);
@@ -356,18 +414,42 @@ export function createDifyEventNormalizer() {
         protocolBuffer = protocolBuffer.slice(start);
       }
 
-      const isAsk = protocolBuffer.startsWith("<ASK>");
-      const isGuide = protocolBuffer.startsWith("<GUIDE>");
-      const openMarker = isGuide ? "<GUIDE>" : isAsk ? "<ASK>" : "<SANVIST>";
-      const closeMarker = isGuide ? "</GUIDE>" : isAsk ? "</ASK>" : "</SANVIST>";
+      const openMarker = PROTOCOL_MARKERS.find(marker => protocolBuffer.startsWith(marker));
+      if (!openMarker) break;
+      const tag = openMarker.slice(1, -1);
+      const closeMarker = `</${tag}>`;
       const end = protocolBuffer.indexOf(closeMarker);
       if (end < 0) break;
 
       const raw = protocolBuffer.slice(openMarker.length, end);
       protocolBuffer = protocolBuffer.slice(end + closeMarker.length);
       try {
-        const customEvent = asRecord(JSON.parse(raw));
-        if (isGuide) {
+        const parsed = asRecord(JSON.parse(raw));
+        let customEvent = parsed;
+        if (tag === "COMPONENT") {
+          // 新版包装层：按 scene 解包；voice 等播报专用场景不进正文，避免 JSON 泄漏到气泡与 TTS。
+          const component = parsed ? unwrapComponent(parsed) : null;
+          if (!component) {
+            receivedSanvistEvent = true;
+            continue;
+          }
+          customEvent = component.payload;
+          if (component.kind === "guide") {
+            const guideBlock = parseGuideBlock(customEvent);
+            if (guideBlock) {
+              events.push({ event: guideBlock.type, ...references, data: guideBlock.payload });
+            }
+            receivedSanvistEvent = true;
+            continue;
+          }
+          if (component.kind === "ask") {
+            const askEvent = parseAskStreamEvent(customEvent);
+            if (askEvent) events.push({ event: askEvent.event, ...references, data: askEvent.data });
+            receivedSanvistEvent = true;
+            continue;
+          }
+        }
+        if (tag === "GUIDE") {
           const guideBlock = parseGuideBlock(customEvent);
           if (guideBlock) {
             events.push({ event: guideBlock.type, ...references, data: guideBlock.payload });
@@ -375,20 +457,9 @@ export function createDifyEventNormalizer() {
           receivedSanvistEvent = true;
           continue;
         }
-        if (isAsk) {
-          const type = String(customEvent?.type || "").toLowerCase();
-          const askData = asRecord(customEvent?.data) || {};
-          if (type === "table") {
-            const table = String(askData.format || "").toLowerCase() === "markdown"
-              ? parseMarkdownTable(askData.content)
-              : { columns: askData.columns, rows: askData.rows };
-            if (table) events.push({ event: "table", ...references, data: table });
-          } else if (type === "echarts") {
-            events.push({ event: "chart", ...references, data: { option: askData } });
-          } else if (type === "slot") {
-            const slot = parseAskSlotPayload(askData);
-            if (slot) events.push({ event: "ask_slot", ...references, data: { ...slot, auto_open: true } });
-          }
+        if (tag === "ASK") {
+          const askEvent = parseAskStreamEvent(customEvent);
+          if (askEvent) events.push({ event: askEvent.event, ...references, data: askEvent.data });
           receivedSanvistEvent = true;
           continue;
         }
