@@ -1,11 +1,12 @@
 import type { ListenBroadcastStreamHandle } from "@/api/listen-broadcast/play-stream";
 import type { ListenBroadcastAudioChunk, PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
+import { Howl } from "howler";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { consumeListenBroadcastStream } from "@/api/listen-broadcast/play-stream";
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("listen-broadcast-player");
-const PLAYBACK_RATE = 2;
+const PLAYBACK_RATE = 1.2;
 
 /** 解析音频源并输出诊断摘要，用于定位「格式不匹配」还是「数据不完整」。 */
 function inspectAudioSource(source: string, chunk: ListenBroadcastAudioChunk) {
@@ -46,6 +47,14 @@ function resolveAudioSource(chunk: ListenBroadcastAudioChunk) {
   return `data:${mime};base64,${base64}`;
 }
 
+function resolveAudioFormat(source: string, chunk: ListenBroadcastAudioChunk) {
+  const format = String(chunk.format || "").toLowerCase();
+  if (format.includes("wav") || source.includes("audio/wav") || String(chunk.audioBase64 || "").startsWith("UklGR")) {
+    return ["wav"];
+  }
+  return ["mp3"];
+}
+
 export function useListenBroadcastPlayer() {
   const loading = ref(false);
   const playing = ref(false);
@@ -63,7 +72,7 @@ export function useListenBroadcastPlayer() {
   let nextSeq = 1;
   let streamFinished = false;
   let activeStream: ListenBroadcastStreamHandle | null = null;
-  let activeAudio: ReturnType<typeof uni.createInnerAudioContext> | null = null;
+  let activeAudio: Howl | null = null;
   let readyQueue: ListenBroadcastAudioChunk[] = [];
   const pendingChunks = new Map<number, ListenBroadcastAudioChunk>();
 
@@ -71,7 +80,7 @@ export function useListenBroadcastPlayer() {
     if (!activeAudio) return;
     try {
       activeAudio.stop();
-      activeAudio.destroy?.();
+      activeAudio.unload();
     } catch {
       // Ignore container-specific cleanup failures.
     }
@@ -114,28 +123,35 @@ export function useListenBroadcastPlayer() {
       transcriptSegments.value.push({ seq: chunk.seq, text });
     }
 
-    const audio = uni.createInnerAudioContext();
-    activeAudio = audio;
-    audio.onEnded(() => {
-      if (id !== sessionId || activeAudio !== audio) return;
-      activeAudio = null;
-      audio.destroy?.();
-      playNext(id);
-    });
-    audio.onError((audioError) => {
-      if (id !== sessionId || activeAudio !== audio) return;
+    let audio: Howl | null = null;
+    function skipBrokenChunk(audioError: unknown) {
+      if (id !== sessionId || !audio || activeAudio !== audio) return;
       logger.warn("跳过无法播放的听播分片", {
         audioError,
         seq: chunk.seq,
         ...inspectAudioSource(source, chunk),
       });
       activeAudio = null;
-      audio.destroy?.();
+      audio.unload();
       playNext(id);
+    }
+
+    audio = new Howl({
+      src: [source],
+      html5: true,
+      autoplay: true,
+      rate: PLAYBACK_RATE,
+      format: resolveAudioFormat(source, chunk),
+      onend() {
+        if (id !== sessionId || !audio || activeAudio !== audio) return;
+        activeAudio = null;
+        audio.unload();
+        playNext(id);
+      },
+      onloaderror: (_soundId, audioError) => skipBrokenChunk(audioError),
+      onplayerror: (_soundId, audioError) => skipBrokenChunk(audioError),
     });
-    audio.src = source;
-    audio.playbackRate = PLAYBACK_RATE;
-    audio.autoplay = true;
+    activeAudio = audio;
   }
 
   function drainContiguousChunks(id: number) {
