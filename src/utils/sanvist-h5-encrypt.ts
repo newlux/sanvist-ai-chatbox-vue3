@@ -1,5 +1,5 @@
 /**
- * SANVIST H5 加密接入 — 测试环境 URL 生成。
+ * SANVIST H5 加密接入 — 按环境生成三方页面 URL。
  *
  * 算法：RSA-OAEP / SHA-256，2048-bit；明文 UTF-8 ≤ 190 字节；密文 base64。
  * payload 仅 4 字段：externalUserId / name / timestamp / nonce。
@@ -9,14 +9,17 @@ import forge from "node-forge";
 /** 明文 UTF-8 字节上限（RSA-OAEP 2048 上限约 190 字节）。 */
 const PAYLOAD_MAX_BYTES = 190;
 
-const DEFAULT_FRONTEND = "https://sprouts-dev-app-frontend.sany.com.cn";
+const TEST_FRONTEND = "https://sprouts-dev-app-frontend.sany.com.cn";
+const PROD_FRONTEND = "https://fixmasterai.sany.com.cn";
+/** 仅 `pnpm build:h5` 注入 production，其余命令都走测试地址。 */
+const DEFAULT_FRONTEND = import.meta.env.VITE_SANVIST_H5_FRONTEND === "production" ? PROD_FRONTEND : TEST_FRONTEND;
 const DEFAULT_SOURCE = "sanvist";
 const DEFAULT_SYS_CODE = "sanvist";
 const DEFAULT_EXTERNAL_USER_ID = "shengmz2";
 const DEFAULT_NAME = "smz2";
 
 /**
- * sanvist H5 测试环境公钥（PEM）。
+ * sanvist H5 公钥（PEM）。
  * 密钥轮换后请同步更新此处。
  */
 const SANVIST_H5_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
@@ -94,7 +97,7 @@ function encryptPayload(payload: SanvistH5Payload) {
 }
 
 /**
- * 使用 node-forge 加密用户信息，并拼出可直接访问的测试环境 URL。
+ * 使用 node-forge 加密用户信息，并按当前环境拼出可直接访问的 URL。
  */
 export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): SanvistH5EncryptResult {
   const externalUserId = options.externalUserId || DEFAULT_EXTERNAL_USER_ID;

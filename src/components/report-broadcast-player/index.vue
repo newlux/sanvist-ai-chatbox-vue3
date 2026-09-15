@@ -3,7 +3,7 @@ import type {
   ListenBroadcastHistoryItem,
   PlayListenBroadcastParams,
 } from "@/api/listen-broadcast/types";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { getListenBroadcastHistory, getListenBroadcastLikeStatus, toggleListenBroadcastLike } from "@/api/listen-broadcast";
 import { createLogger } from "@/utils/logger";
 import ReportQaAnswer from "@/components/report-qa-answer/index.vue";
@@ -23,6 +23,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   "dismiss-qa": [];
   "exit-report": [];
+  "broadcast-finished": [];
+  "playback-change": [payload: { playing: boolean; loading: boolean }];
 }>();
 
 const {
@@ -33,6 +35,7 @@ const {
   loading,
   playing,
   paused,
+  finished,
   currentSeq,
   nextText,
   transcriptSegments,
@@ -46,6 +49,7 @@ const activeHistoryBizDate = ref("");
 const currentBizDate = ref("");
 const liked = ref(false);
 const likeLoading = ref(false);
+let finishedNotified = false;
 
 const isQaVisible = computed(() => props.qaLoading || Boolean(props.qaAnswer));
 const statusText = computed(() => {
@@ -56,6 +60,22 @@ const statusText = computed(() => {
   if (playing.value) return "播报中";
   if (error.value) return "播报失败";
   return "播报完成";
+});
+
+// 播放态同步给宿主页：洞察收起态的重播按钮沿用这里同一套播放/暂停图标映射。
+watch([playing, loading], ([isPlaying, isLoading]) => {
+  emit("playback-change", { playing: isPlaying, loading: isLoading });
+}, { immediate: true });
+
+// 播放自然结束后只上抛一次，交给页面切换到洞察视图。
+watch(finished, (value) => {
+  if (!value) {
+    finishedNotified = false;
+    return;
+  }
+  if (finishedNotified) return;
+  finishedNotified = true;
+  emit("broadcast-finished");
 });
 
 async function openHistory() {
@@ -108,15 +128,21 @@ function playHistory(item: ListenBroadcastHistoryItem) {
   play({ ...props.params, bizDate: item.bizDate });
 }
 
-function onPlayPause() {
+/**
+ * 播放 / 暂停 / 重播三态合一：播报页头像下方的控件与洞察收起态那颗按钮
+ * 共用同一套语义——播完再点即为从头重播。
+ */
+function togglePlayback() {
   if (loading.value) return;
   if (playing.value) {
     pause();
-  } else if (paused.value) {
-    resume();
-  } else {
-    play({ ...props.params, bizDate: currentBizDate.value || props.params.bizDate });
+    return;
   }
+  if (paused.value) {
+    resume();
+    return;
+  }
+  play({ ...props.params, bizDate: currentBizDate.value || props.params.bizDate });
 }
 
 function exitReport() {
@@ -129,7 +155,7 @@ onMounted(() => {
   void loadLikeStatus(currentBizDate.value);
   play(props.params);
 });
-defineExpose({ pause, resume, restart: play, stop });
+defineExpose({ pause, resume, restart: play, togglePlayback, stop });
 </script>
 
 <template>
@@ -153,7 +179,7 @@ defineExpose({ pause, resume, restart: play, stop });
       :transcript-segments="transcriptSegments"
       :liked="liked"
       :like-loading="likeLoading"
-      @play-pause="onPlayPause"
+      @play-pause="togglePlayback"
       @like="onToggleLike"
     />
     <ReportBroadcastHistory
