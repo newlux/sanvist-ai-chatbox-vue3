@@ -3,14 +3,16 @@ import type {
   ListenBroadcastHistoryItem,
   PlayListenBroadcastParams,
 } from "@/api/listen-broadcast/types";
+import type { ReportPlaybackRate } from "@/config/report-playback-rate";
 import { computed, onMounted, ref, watch } from "vue";
 import { getListenBroadcastHistory, getListenBroadcastLikeStatus, toggleListenBroadcastLike } from "@/api/listen-broadcast";
-import { createLogger } from "@/utils/logger";
 import ReportQaAnswer from "@/components/report-qa-answer/index.vue";
 import { useListenBroadcastPlayer } from "@/hooks/useListenBroadcastPlayer";
+import { createLogger } from "@/utils/logger";
 import ReportBroadcastContent from "./report-broadcast-content.vue";
 import ReportBroadcastHeader from "./report-broadcast-header.vue";
 import ReportBroadcastHistory from "./report-broadcast-history.vue";
+import ReportBroadcastRate from "./report-broadcast-rate.vue";
 
 const props = defineProps<{
   params: PlayListenBroadcastParams;
@@ -25,6 +27,7 @@ const emit = defineEmits<{
   "exit-report": [];
   "broadcast-finished": [];
   "playback-change": [payload: { playing: boolean; loading: boolean }];
+  "open-preference": [];
 }>();
 
 const {
@@ -32,6 +35,8 @@ const {
   pause,
   resume,
   stop,
+  setPlaybackRate,
+  playbackRate,
   loading,
   playing,
   paused,
@@ -43,6 +48,7 @@ const {
 } = useListenBroadcastPlayer();
 const logger = createLogger("report-broadcast-player");
 const showHistory = ref(false);
+const showRatePanel = ref(false);
 const historyLoading = ref(false);
 const historyItems = ref<ListenBroadcastHistoryItem[]>([]);
 const activeHistoryBizDate = ref("");
@@ -79,6 +85,7 @@ watch(finished, (value) => {
 });
 
 async function openHistory() {
+  showRatePanel.value = false;
   showHistory.value = true;
   if (historyItems.value.length || historyLoading.value) return;
   historyLoading.value = true;
@@ -118,6 +125,16 @@ async function onToggleLike() {
   } finally {
     likeLoading.value = false;
   }
+}
+
+function openRatePanel() {
+  showHistory.value = false;
+  showRatePanel.value = true;
+}
+
+function onSelectRate(rate: ReportPlaybackRate) {
+  setPlaybackRate(rate);
+  showRatePanel.value = false;
 }
 
 function playHistory(item: ListenBroadcastHistoryItem) {
@@ -167,6 +184,8 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       @dismiss-qa="emit('dismiss-qa')"
       @exit-report="exitReport"
       @open-history="openHistory"
+      @open-preference="emit('open-preference')"
+      @open-rate="openRatePanel"
     />
     <ReportQaAnswer v-if="isQaVisible" :loading="qaLoading" :answer="qaAnswer" />
     <ReportBroadcastContent
@@ -190,16 +209,24 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       @close="showHistory = false"
       @select="playHistory"
     />
+    <ReportBroadcastRate
+      v-if="showRatePanel"
+      :current-rate="playbackRate"
+      @close="showRatePanel = false"
+      @select="onSelectRate"
+    />
   </view>
 </template>
 
 <style scoped lang="scss">
 .report-broadcast-player {
+  position: relative;
+  z-index: 2;
   display: flex;
   width: 100%;
   height: 100%;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   box-sizing: border-box;
   background: #fff;
 }

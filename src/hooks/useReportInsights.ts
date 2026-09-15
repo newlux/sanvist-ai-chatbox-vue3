@@ -1,4 +1,5 @@
 import type { ReportInsightEvent, ToggleReportInsightUrgentResult } from "@/api/report-insight";
+import type { ReportListFilter, ReportUrgentTarget } from "@/utils/ai-stream";
 import { computed, ref } from "vue";
 import { getReportInsightEvents, toggleReportInsightUrgent } from "@/api/report-insight";
 
@@ -6,9 +7,11 @@ const DEFAULT_PAGE_SIZE = 10;
 
 export interface ReportInsightItem {
   id: string;
+  deviceId: string;
   title: string;
   description: string;
   ownerTag: string;
+  status: string;
   urgentText?: string;
   isUrgent: boolean;
   urgentLoading: boolean;
@@ -22,9 +25,11 @@ function formatUrgentText(urgent: boolean, ownerTag: string) {
 function toInsightItem(event: ReportInsightEvent): ReportInsightItem {
   return {
     id: event.eventId,
+    deviceId: event.deviceNo,
     title: `${event.eventCategory}-${event.eventType}`,
     description: event.description,
     ownerTag: event.ownerTag,
+    status: event.processStatus,
     urgentText: formatUrgentText(event.urgent, event.ownerTag),
     isUrgent: event.urgent,
     urgentLoading: false,
@@ -38,12 +43,16 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
   const loadError = ref(false);
   const currentPage = ref(0);
   const hasMore = ref(true);
+  const currentFilter = ref<ReportListFilter | null>(null);
+  const pendingUrgentTarget = ref<ReportUrgentTarget | null>(null);
   const urgentToastVisible = ref(false);
+  const urgentToastMessage = ref("已加急");
   let urgentToastTimer: ReturnType<typeof setTimeout> | undefined;
 
   const isLoading = computed(() => loading.value || loadingMore.value);
 
-  function showUrgentToast() {
+  function showUrgentToast(message: "已加急" | "已取消加急") {
+    urgentToastMessage.value = message;
     urgentToastVisible.value = true;
     if (urgentToastTimer) clearTimeout(urgentToastTimer);
     urgentToastTimer = setTimeout(() => {
@@ -83,23 +92,68 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
     await fetchPage(currentPage.value + 1, true);
   }
 
+  const visibleItems = computed(() => {
+    const filter = currentFilter.value;
+    if (!filter) return items.value;
+    return items.value.filter((item) => {
+      if (filter.deviceIds?.length && !filter.deviceIds.includes(item.deviceId)) return false;
+      if (filter.eventIds?.length && !filter.eventIds.includes(item.id)) return false;
+      if (filter.statuses?.length && !filter.statuses.includes(item.status)) return false;
+      if (filter.urgency === "urgent" && !item.isUrgent) return false;
+      if (filter.urgency === "normal" && item.isUrgent) return false;
+      return true;
+    });
+  });
+
   function applyUrgentResult(item: ReportInsightItem, result: ToggleReportInsightUrgentResult) {
     item.isUrgent = result.urgent;
     item.urgentText = formatUrgentText(result.urgent, item.ownerTag);
   }
 
-  async function onLightningTap(item: ReportInsightItem) {
-    if (item.urgentLoading) return;
+  function findItem(target: ReportUrgentTarget) {
+    return items.value.find(item => item.id === target.eventId) ?? null;
+  }
+
+  function setCurrentFilter(filter: ReportListFilter | null) {
+    currentFilter.value = filter;
+  }
+
+  function requestUrgentConfirmation(target: ReportUrgentTarget) {
+    pendingUrgentTarget.value = target;
+  }
+
+  function clearUrgentConfirmation() {
+    pendingUrgentTarget.value = null;
+  }
+
+  async function toggleUrgent(item: ReportInsightItem) {
+    if (item.urgentLoading) return false;
     item.urgentLoading = true;
     try {
       const result = await toggleReportInsightUrgent({ eventId: item.id });
       applyUrgentResult(item, result);
-      if (result.urgent) showUrgentToast();
+      showUrgentToast(result.urgent ? "已加急" : "已取消加急");
+      return result.urgent;
     } catch {
-      // 请求失败时保留服务端已确认的旧状态。
+      return false;
     } finally {
       item.urgentLoading = false;
     }
+  }
+
+  async function executeUrgent(target: ReportUrgentTarget) {
+    const item = findItem(target);
+    return !item || item.isUrgent ? false : toggleUrgent(item);
+  }
+
+  async function confirmUrgent(confirmed: boolean, target?: ReportUrgentTarget) {
+    const resolvedTarget = target ?? pendingUrgentTarget.value;
+    clearUrgentConfirmation();
+    return confirmed && resolvedTarget ? executeUrgent(resolvedTarget) : false;
+  }
+
+  async function onLightningTap(item: ReportInsightItem) {
+    await toggleUrgent(item);
   }
 
   function dispose() {
@@ -108,13 +162,22 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
 
   return {
     items,
+    visibleItems,
     loading,
     loadingMore,
     loadError,
     hasMore,
+    currentFilter,
+    pendingUrgentTarget,
     urgentToastVisible,
+    urgentToastMessage,
     loadInitial,
     loadMore,
+    setCurrentFilter,
+    requestUrgentConfirmation,
+    clearUrgentConfirmation,
+    executeUrgent,
+    confirmUrgent,
     onLightningTap,
     dispose,
   };

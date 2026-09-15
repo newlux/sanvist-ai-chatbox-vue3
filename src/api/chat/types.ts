@@ -119,7 +119,10 @@ export interface SubtitleEvent {
 export interface AskSlotOption extends Record<string, unknown> {
   label: string;
   value: string;
-  device_id: string;
+  /** 服务端标记的推荐项，抽屉据此展示「推荐」标签。 */
+  recommended?: boolean;
+  /** 只有设备类槽位带这些字段；时间、项目等槽位没有 device_id。 */
+  device_id?: string;
   device_alias?: string;
   device_name?: string;
   device_type?: string;
@@ -136,7 +139,10 @@ export interface AskSlotPayload extends Record<string, unknown> {
   max_select?: number;
   title?: string;
   description?: string;
+  /** 允许缺省（解析层归一成空串）；为空时提交侧只发选中的值，不会拼出多余前缀。 */
   original_query: string;
+  /** 服务端指定的默认选中项，单个值或数组；抽屉按 options 过滤后预选中。 */
+  default_value?: string | number | Array<string | number>;
   options: AskSlotOption[];
 }
 

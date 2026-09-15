@@ -1,7 +1,9 @@
 import type { Identifier } from "@/api/chat/types";
 import type { UiChatMessage } from "@/stores/chat-types";
 import { defineStore } from "pinia";
-import { getCurrentInstance, inject, nextTick, provide, ref } from "vue";
+import { getCurrentInstance, inject, nextTick, provide, ref, watch } from "vue";
+import { pickRoleQuickPrompts } from "@/config/quick-prompts";
+import { useUserStore } from "@/stores/modules/user";
 
 /** 默认会话域：首页那条主对话 */
 export const DEFAULT_CHAT_SCOPE = "main";
@@ -42,10 +44,14 @@ function defineChatStore(scope: string) {
     /** 当前正在生成的那条 AI 消息 id。按 id 而不是下标记录，切会话后不会指错 */
     const activeMessageId = ref("");
 
-    const quickPrompts = [
-      "设备的在线或离线情况",
-      "最近 7 天设备作业情况",
-    ];
+    const userStore = useUserStore();
+    const quickPrompts = ref(pickRoleQuickPrompts(userStore.visitorRole));
+
+    function refreshQuickPrompts() {
+      quickPrompts.value = pickRoleQuickPrompts(userStore.visitorRole, undefined, quickPrompts.value);
+    }
+
+    watch(() => userStore.visitorRole, refreshQuickPrompts);
 
     let scrollPending = false;
     let bottomAnchorToggle = false;
@@ -91,6 +97,7 @@ function defineChatStore(scope: string) {
       inputText.value = "";
       showQuickPrompts.value = true;
       showQuickList.value = true;
+      refreshQuickPrompts();
       isLoading.value = false;
       aiSessionId.value = null;
       activeMessageId.value = "";
@@ -149,6 +156,7 @@ function defineChatStore(scope: string) {
       activeRequestSeq,
       activeMessageId,
       quickPrompts,
+      refreshQuickPrompts,
       replaceMessage,
       findMessageIndex,
       patchMessageById,

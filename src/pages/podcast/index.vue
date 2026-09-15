@@ -52,6 +52,8 @@ const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
 const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> | null>(null);
 const showReportVoiceSelector = ref(false);
+/** 是否由播报页「偏好设置」进入配置流程：决定关闭配置页时回播报页还是退出页面。 */
+const preferenceEntry = ref(false);
 const reportBroadcastParams = ref<PlayListenBroadcastParams | null>(null);
 const reportBroadcastPortrait = ref("");
 const reportBizDate = ref("");
@@ -69,13 +71,19 @@ let insightLoaded = false;
 const INSIGHT_LEAVE_DURATION = 440;
 const canToggleInsightUrgent = computed(() => userStore.visitorRole === "OWNER");
 const {
-  items: insightItems,
+  visibleItems: visibleInsightItems,
   loading: insightLoading,
   loadingMore: insightLoadingMore,
   hasMore: insightHasMore,
+  pendingUrgentTarget: pendingInsightUrgentTarget,
   urgentToastVisible: insightUrgentToastVisible,
+  urgentToastMessage: insightUrgentToastMessage,
   loadInitial: loadInsights,
   loadMore: loadMoreInsights,
+  setCurrentFilter: setInsightFilter,
+  requestUrgentConfirmation: requestInsightUrgentConfirmation,
+  executeUrgent: executeInsightUrgent,
+  confirmUrgent: confirmInsightUrgent,
   onLightningTap: onInsightUrgentToggle,
   dispose: disposeInsights,
 } = useReportInsights();
@@ -85,6 +93,19 @@ const reportAdjustmentActions = useReportAdjustmentActions({
   saveReportStyle,
   getPlayer: () => reportBroadcastPlayerRef.value,
   openInsight: () => { showInsight(); },
+  filterInsightList(action) {
+    setInsightFilter(action.filter);
+  },
+  requestUrgentConfirmation(action) {
+    requestInsightUrgentConfirmation(action.target);
+    promptUrgentConfirmation(action.message);
+  },
+  executeUrgent(action) {
+    void executeInsightUrgent(action.target);
+  },
+  updateUrgentConfirmation(action) {
+    void confirmInsightUrgent(action.confirmed, action.target);
+  },
 });
 const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "PODCAST",
@@ -102,15 +123,18 @@ const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating,
     reportQaAnswer.value = "";
     reportAdjustmentActions.executeNavigation(action);
   },
+  onReportWorkflowAction(action) {
+    reportQaLoading.value = false;
+    reportQaAnswer.value = "";
+    reportAdjustmentActions.executeWorkflow(action);
+  },
   onReportBlockingComplete() {
     reportQaLoading.value = false;
-  },
-  getReportCheckedModules() {
-    return reportBroadcastParams.value?.checkedModules || [];
   },
 });
 
 function startReportVoiceSelection() {
+  preferenceEntry.value = false;
   reportBroadcastParams.value = null;
   reportBroadcastPortrait.value = "";
   showReportVoiceSelector.value = true;
@@ -139,12 +163,29 @@ function restoreReportBroadcast() {
   showReportVoiceSelector.value = false;
 }
 
+/**
+ * 播报页「偏好设置」入口：复用同一套「选助手 → 选汇报内容」两步流程。
+ * 这里刻意不调用 startReportVoiceSelection()——那条路会清空 params，
+ * 而本入口需要在用户中途退出时原样退回原来那一轮播报。
+ */
+function openReportPreference() {
+  reportBroadcastPlayerRef.value?.pause();
+  preferenceEntry.value = true;
+  showReportVoiceSelector.value = true;
+}
+
 function closeReportVoiceSelector() {
   showReportVoiceSelector.value = false;
+  // 从偏好设置进来的：params 一直保留着，直接退回播报页，不退出整个页面。
+  if (preferenceEntry.value) {
+    preferenceEntry.value = false;
+    return;
+  }
   uni.navigateBack({ delta: 1 });
 }
 
 function confirmReportVoice(voice: ReportVoiceOption, style: ListenBroadcastStyle, moduleCodes: string[]) {
+  preferenceEntry.value = false;
   reportBroadcastParams.value = {
     voice: voice.id,
     styleCode: style.code,
@@ -188,6 +229,23 @@ function showInsight() {
   if (insightLoaded) return;
   insightLoaded = true;
   void loadInsights();
+}
+
+function promptUrgentConfirmation(message?: string) {
+  const target = pendingInsightUrgentTarget.value;
+  if (!target) return;
+  uni.showModal({
+    title: "确认加急",
+    content: message || `确认加急处理${target.title || "该异常"}？`,
+    confirmText: "确认",
+    cancelText: "取消",
+    success(result) {
+      void confirmInsightUrgent(Boolean(result.confirm));
+    },
+    fail() {
+      void confirmInsightUrgent(false);
+    },
+  });
 }
 
 /**
@@ -306,6 +364,7 @@ onBeforeUnmount(() => {
         :qa-answer="reportQaAnswer"
         @dismiss-qa="dismissReportQa"
         @exit-report="closeReportBroadcast"
+        @open-preference="openReportPreference"
         @broadcast-finished="showInsight"
         @playback-change="onBroadcastPlaybackChange"
       />
@@ -313,10 +372,11 @@ onBeforeUnmount(() => {
       <view v-if="insightVisible" class="podcast-page__insight">
         <ReportInsight
           embedded
-          :items="insightItems"
+          :items="visibleInsightItems"
           :loading="insightLoading"
           :can-toggle-urgent="canToggleInsightUrgent"
           :urgent-toast-visible="insightUrgentToastVisible"
+          :urgent-toast-message="insightUrgentToastMessage"
           :loading-more="insightLoadingMore"
           :has-more="insightHasMore"
           :playing="broadcastPlaying"

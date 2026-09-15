@@ -15,6 +15,7 @@ declare module "howler" {
     play(spriteOrId?: string | number): number;
     pause(id?: number): this;
     stop(id?: number): this;
+    rate(rate?: number, id?: number): this | number;
     unload(): this;
   }
 }

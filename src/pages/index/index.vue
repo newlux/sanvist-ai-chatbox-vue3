@@ -406,6 +406,7 @@ onShow(() => {
     void openLocalHistory(sessionId, true);
   }
   syncPageStage();
+  chatStore.refreshQuickPrompts();
   refreshListenReportState();
 });
 onBeforeUnmount(() => {

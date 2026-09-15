@@ -1,12 +1,22 @@
 import type { ListenBroadcastStreamHandle } from "@/api/listen-broadcast/play-stream";
-import type { ListenBroadcastAudioChunk, PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
+import type {
+  ListenBroadcastAudioChunk,
+  PlayListenBroadcastParams,
+} from "@/api/listen-broadcast/types";
+import type { ReportPlaybackRate } from "@/config/report-playback-rate";
 import { Howl } from "howler";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { consumeListenBroadcastStream } from "@/api/listen-broadcast/play-stream";
+import { loadReportPlaybackRate, saveReportPlaybackRate } from "@/hooks/useReportPlaybackRate";
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("listen-broadcast-player");
-const PLAYBACK_RATE = 1.2;
+
+/** 相邻播报分句之间留一点气口，避免上句刚落音就立刻接下一句。 */
+const CHUNK_GAP_MS = 500;
+
+/** 项目内 howler 类型声明偏窄，运行时 Howl 本身支持动态改倍速。 */
+type HowlWithRate = Howl & { rate: (value: number) => Howl | number };
 
 /** 解析音频源并输出诊断摘要，用于定位「格式不匹配」还是「数据不完整」。 */
 function inspectAudioSource(source: string, chunk: ListenBroadcastAudioChunk) {
@@ -49,7 +59,11 @@ function resolveAudioSource(chunk: ListenBroadcastAudioChunk) {
 
 function resolveAudioFormat(source: string, chunk: ListenBroadcastAudioChunk) {
   const format = String(chunk.format || "").toLowerCase();
-  if (format.includes("wav") || source.includes("audio/wav") || String(chunk.audioBase64 || "").startsWith("UklGR")) {
+  if (
+    format.includes("wav") ||
+    source.includes("audio/wav") ||
+    String(chunk.audioBase64 || "").startsWith("UklGR")
+  ) {
     return ["wav"];
   }
   return ["mp3"];
@@ -66,6 +80,7 @@ export function useListenBroadcastPlayer() {
   const nextText = ref("");
   const transcriptSegments = ref<Array<{ seq: number; text: string }>>([]);
   const error = ref<Error | null>(null);
+  const playbackRate = ref(loadReportPlaybackRate());
   const active = computed(() => loading.value || playing.value);
 
   let sessionId = 0;
@@ -73,10 +88,18 @@ export function useListenBroadcastPlayer() {
   let streamFinished = false;
   let activeStream: ListenBroadcastStreamHandle | null = null;
   let activeAudio: Howl | null = null;
+  let gapTimer: ReturnType<typeof setTimeout> | null = null;
   let readyQueue: ListenBroadcastAudioChunk[] = [];
   const pendingChunks = new Map<number, ListenBroadcastAudioChunk>();
 
+  function clearGapTimer() {
+    if (!gapTimer) return;
+    clearTimeout(gapTimer);
+    gapTimer = null;
+  }
+
   function releaseAudio() {
+    clearGapTimer();
     if (!activeAudio) return;
     try {
       activeAudio.stop();
@@ -88,11 +111,34 @@ export function useListenBroadcastPlayer() {
   }
 
   function completeIfDrained(id: number) {
-    if (id !== sessionId || paused.value || !streamFinished || activeAudio || readyQueue.length || pendingChunks.size) return;
+    if (
+      id !== sessionId ||
+      paused.value ||
+      !streamFinished ||
+      activeAudio ||
+      gapTimer ||
+      readyQueue.length ||
+      pendingChunks.size
+    ) {
+      return;
+    }
     loading.value = false;
     playing.value = false;
     finished.value = !error.value;
     currentSeq.value = null;
+  }
+
+  function schedulePlayNext(id: number) {
+    clearGapTimer();
+    if (id !== sessionId || paused.value) return;
+    if (!readyQueue.length) {
+      playNext(id);
+      return;
+    }
+    gapTimer = setTimeout(() => {
+      gapTimer = null;
+      playNext(id);
+    }, CHUNK_GAP_MS);
   }
 
   function playNext(id: number) {
@@ -119,7 +165,11 @@ export function useListenBroadcastPlayer() {
     currentSeq.value = chunk.seq ?? null;
     currentText.value = String(chunk.text || "");
     const text = String(chunk.text || "");
-    if (typeof chunk.seq === "number" && text && !transcriptSegments.value.some(segment => segment.seq === chunk.seq)) {
+    if (
+      typeof chunk.seq === "number" &&
+      text &&
+      !transcriptSegments.value.some(segment => segment.seq === chunk.seq)
+    ) {
       transcriptSegments.value.push({ seq: chunk.seq, text });
     }
 
@@ -140,13 +190,13 @@ export function useListenBroadcastPlayer() {
       src: [source],
       html5: true,
       autoplay: true,
-      rate: PLAYBACK_RATE,
+      rate: playbackRate.value,
       format: resolveAudioFormat(source, chunk),
       onend() {
         if (id !== sessionId || !audio || activeAudio !== audio) return;
         activeAudio = null;
         audio.unload();
-        playNext(id);
+        schedulePlayNext(id);
       },
       onloaderror: (_soundId, audioError) => skipBrokenChunk(audioError),
       onplayerror: (_soundId, audioError) => skipBrokenChunk(audioError),
@@ -162,7 +212,11 @@ export function useListenBroadcastPlayer() {
       if (chunk) {
         readyQueue.push(chunk);
         const text = String(chunk.text || "");
-        if (typeof chunk.seq === "number" && text && !transcriptSegments.value.some(segment => segment.seq === chunk.seq)) {
+        if (
+          typeof chunk.seq === "number" &&
+          text &&
+          !transcriptSegments.value.some(segment => segment.seq === chunk.seq)
+        ) {
           transcriptSegments.value.push({ seq: chunk.seq, text });
         }
       }
@@ -202,11 +256,22 @@ export function useListenBroadcastPlayer() {
     flushRemainingChunks(id);
   }
 
+  function setPlaybackRate(rate: ReportPlaybackRate) {
+    playbackRate.value = rate;
+    saveReportPlaybackRate(rate);
+    try {
+      (activeAudio as HowlWithRate | null)?.rate(rate);
+    } catch {
+      logger.warn("切换听播倍速失败");
+    }
+  }
+
   function pause() {
     if (paused.value || finished.value) return;
     paused.value = true;
     loading.value = false;
     playing.value = false;
+    clearGapTimer();
     try {
       activeAudio?.pause();
     } catch {
@@ -277,6 +342,8 @@ export function useListenBroadcastPlayer() {
     pause,
     resume: () => resume(),
     stop,
+    setPlaybackRate,
+    playbackRate,
     active,
     loading,
     playing,

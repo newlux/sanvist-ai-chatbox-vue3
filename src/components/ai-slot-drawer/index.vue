@@ -28,31 +28,81 @@ const isLastSlot = computed(() => currentIndex.value === props.slots.length - 1)
 const showPagination = computed(() => props.slots.length > 1);
 const selectedIds = computed(() => currentSlot.value ? selections.value[currentSlot.value.slot_name] || [] : []);
 const isMultiple = computed(() => currentSlot.value?.selection === "multiple");
-const minSelect = computed(() => {
-  const slot = currentSlot.value;
-  if (!slot) return 0;
+
+/** 必填判定：required 缺省也按必填处理，避免没选任何一项时点「确认提交」被静默拦掉。 */
+function isRequired(slot: AskSlotPayload) {
+  return slot.required !== false;
+}
+
+/** 某道题的最少可选数：抽屉校验与整体提交共用同一份口径，避免两处策略漂移。 */
+function minSelectOf(slot: AskSlotPayload) {
   const configured = Math.max(0, Number(slot.min_select) || 0);
-  return slot.required ? Math.max(1, configured) : configured;
-});
-const maxSelect = computed(() => {
-  const slot = currentSlot.value;
-  if (!slot) return 0;
-  if (!isMultiple.value) return 1;
+  return isRequired(slot) ? Math.max(1, configured) : configured;
+}
+
+/** 某道题的最多可选数：单选恒为 1，多选受 max_select 与选项总数双重约束。 */
+function maxSelectOf(slot: AskSlotPayload) {
+  const total = slot.options.length;
+  if (slot.selection !== "multiple") return 1;
   const configured = Number(slot.max_select);
-  const maximum = Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : slot.options.length;
-  return Math.min(maximum, slot.options.length);
+  const maximum = Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : total;
+  return Math.min(maximum, total);
+}
+
+/**
+ * 默认选中项：把 default_value 归一成 options 里真实存在的 value。
+ * 兼容单个值、数组与带 value 的对象，并按题目允许的上限截断，
+ * 否则预选中超出 max_select 会让这道题直接变成无法提交。
+ */
+function resolveDefaultKeys(slot: AskSlotPayload) {
+  const raw: unknown = slot.default_value;
+  const list: unknown[] = Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw];
+  const keys = list
+    .map(item => String(
+      item && typeof item === "object" && "value" in item
+        ? (item as Record<string, unknown>).value ?? ""
+        : item ?? "",
+    ).trim())
+    .filter(Boolean);
+  if (!keys.length) return [];
+  return slot.options
+    .filter(option => keys.includes(optionKey(option)))
+    .map(option => optionKey(option))
+    .slice(0, maxSelectOf(slot));
+}
+
+/** 打开抽屉时的初始选中态：一次性落到 selections，不引入深监听。 */
+function buildInitialSelections(slots: AskSlotPayload[]) {
+  return slots.reduce<Record<string, string[]>>((acc, slot) => {
+    const keys = resolveDefaultKeys(slot);
+    if (keys.length) acc[slot.slot_name] = keys;
+    return acc;
+  }, {});
+}
+
+/** 「推荐」标签落位：recommended → default_value → 第 0 项，保证协议不带标记时观感不退化。 */
+const recommendedKey = computed(() => {
+  const slot = currentSlot.value;
+  if (!slot?.options.length) return "";
+  const flagged = slot.options.find(option => option.recommended === true);
+  if (flagged) return optionKey(flagged);
+  return resolveDefaultKeys(slot)[0] || optionKey(slot.options[0]);
 });
+
+const minSelect = computed(() => currentSlot.value ? minSelectOf(currentSlot.value) : 0);
+const maxSelect = computed(() => currentSlot.value ? maxSelectOf(currentSlot.value) : 0);
 const hasInvalidRange = computed(() => minSelect.value > maxSelect.value);
 const isCurrentSelectionValid = computed(() => !hasInvalidRange.value
   && selectedIds.value.length >= minSelect.value
   && selectedIds.value.length <= maxSelect.value);
 
+// visible 与 slots 常在同一 tick 更新，flush: "post" 保证读到的是本轮最新的 slots。
 watch(() => props.visible, (visible) => {
   if (!visible || !props.slots.length) return;
   currentIndex.value = 0;
-  selections.value = {};
+  selections.value = buildInitialSelections(props.slots);
   otherRemark.value = "";
-});
+}, { flush: "post" });
 
 function optionKey(option: AskSlotOption) {
   return option.value;
@@ -112,8 +162,8 @@ function submit() {
   if (!validateCurrentSlot()) return;
   const invalidSlot = props.slots.find((slot) => {
     const selected = selections.value[slot.slot_name] || [];
-    const min = slot.required ? Math.max(1, Number(slot.min_select) || 0) : Math.max(0, Number(slot.min_select) || 0);
-    const max = slot.selection === "single" ? 1 : Math.min(Number(slot.max_select) > 0 ? Number(slot.max_select) : slot.options.length, slot.options.length);
+    const min = minSelectOf(slot);
+    const max = maxSelectOf(slot);
     return min > max || selected.length < min || selected.length > max;
   });
   if (invalidSlot) {
@@ -154,7 +204,7 @@ function close() {
 
       <!-- 题目标题：Status Label -->
       <text class="slot-drawer__title">
-        {{ currentSlot.title || "请选择要查询的设备" }}
+        {{ currentSlot.title || "请选择" }}
       </text>
 
       <scroll-view scroll-y class="slot-drawer__options">
@@ -169,7 +219,7 @@ function close() {
             <text class="slot-drawer__option-text">
               {{ index + 1 }}  {{ option.label }}
             </text>
-            <view v-if="index === 0" class="slot-drawer__recommend">
+            <view v-if="optionKey(option) === recommendedKey" class="slot-drawer__recommend">
               <text class="slot-drawer__recommend-text">
                 推荐
               </text>
