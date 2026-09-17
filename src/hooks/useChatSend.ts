@@ -36,6 +36,8 @@ export function useChatSend(scope?: string, handlers?: {
   onReportBlockingComplete?: () => void;
   /** 页面注入的额外 Dify inputs（如作业指导页的机型选择），每次发送时现取 */
   getExtraInputs?: () => Record<string, unknown>;
+  /** 听播问答的异常列表输入。 */
+  getPodcastExceptions?: () => unknown[] | null;
 }) {
   const { t } = useI18n();
   const chatStore = useChatStore(scope);
@@ -145,7 +147,15 @@ export function useChatSend(scope?: string, handlers?: {
       user: String(userStore.userId || "guest"),
       conversationId: chatStore.aiSessionId,
       inputs: scene === "PODCAST"
-        ? { scene: "PODCAST" }
+        ? {
+            scene: "PODCAST",
+            role_id: userStore.visitorRole || "guest",
+            conversation_id: chatStore.aiSessionId,
+            ...(() => {
+              const exceptions = handlers?.getPodcastExceptions?.();
+              return exceptions ? { exceptions: JSON.stringify(exceptions) } : {};
+            })(),
+          }
         : {
             scene,
             ...(handlers?.getExtraInputs?.() ?? {}),

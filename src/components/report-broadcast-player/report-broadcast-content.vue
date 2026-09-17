@@ -55,15 +55,25 @@ function updateTranscriptScroll() {
       const viewport = rects?.[0] as UniApp.NodeInfo | undefined;
       const current = rects?.[1] as UniApp.NodeInfo | undefined;
       if (
-        !viewport ||
-        !current ||
-        typeof viewport.bottom !== "number" ||
-        typeof current.bottom !== "number"
+        !viewport
+        || !current
+        || typeof viewport.top !== "number"
+        || typeof viewport.bottom !== "number"
+        || typeof current.top !== "number"
+        || typeof current.bottom !== "number"
       ) {
         return;
       }
-      const overflow = current.bottom - viewport.bottom;
-      if (overflow > 0) transcriptScrollTop.value += Math.ceil(overflow);
+
+      // 预留上下渐隐和底部反馈区，当前播报段落只在中间阅读带内定位。
+      const safeTop = viewport.top + Math.min(80, (viewport.bottom - viewport.top) * 0.25);
+      const safeBottom = viewport.bottom - Math.min(112, (viewport.bottom - viewport.top) * 0.35);
+      const currentHeight = current.bottom - current.top;
+      const targetTop = currentHeight >= safeBottom - safeTop
+        ? safeTop
+        : safeTop + (safeBottom - safeTop - currentHeight) / 2;
+      const offset = current.top - targetTop;
+      if (Math.abs(offset) > 1) transcriptScrollTop.value = Math.max(0, transcriptScrollTop.value + Math.round(offset));
     });
   });
 }

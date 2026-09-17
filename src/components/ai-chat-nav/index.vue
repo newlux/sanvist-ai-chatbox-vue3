@@ -63,7 +63,7 @@ const navItems = computed(() => {
     },
     {
       key: "repair-master-ai",
-      title: "故障维修",
+      title: "维修助手",
       icon: iconRepair,
       subagent: "repair",
       mode: "page",
