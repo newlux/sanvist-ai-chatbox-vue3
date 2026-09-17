@@ -47,11 +47,14 @@ const transcriptItems = computed(() => {
 
 function updateTranscriptScroll() {
   if (!props.playing || props.currentSeq === null) return;
+  const targetSeq = props.currentSeq;
   void nextTick(() => {
+    if (!props.playing || props.currentSeq !== targetSeq) return;
     const query = uni.createSelectorQuery().in(instance?.proxy);
     query.select(".report-broadcast-content__transcript-content").boundingClientRect();
-    query.select(`#segment-${props.currentSeq}`).boundingClientRect();
+    query.select(`#segment-${targetSeq}`).boundingClientRect();
     query.exec((rects) => {
+      if (!props.playing || props.currentSeq !== targetSeq) return;
       const viewport = rects?.[0] as UniApp.NodeInfo | undefined;
       const current = rects?.[1] as UniApp.NodeInfo | undefined;
       if (
