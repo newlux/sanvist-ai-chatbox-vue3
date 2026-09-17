@@ -18,6 +18,7 @@ import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useUserStore } from "@/stores";
 import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
+import { backFromScene, isSceneWindowRoot } from '@/utils/scene-navigation';
 
 /**
  * 听汇报页（播报播放器 + 底部输入栏）。
@@ -187,7 +188,7 @@ function closeReportVoiceSelector() {
     preferenceEntry.value = false;
     return;
   }
-  uni.navigateBack({ delta: 1 });
+  backFromScene();
 }
 
 function confirmReportVoice(voice: ReportVoiceOption, style: ListenBroadcastStyle, moduleCodes: string[]) {
@@ -212,6 +213,10 @@ function closeReportBroadcast() {
   reportAdjustmentActions.dispose();
   if (markCurrentReportListened()) uni.$emit("listen-report-marked");
   reportBroadcastParams.value = null;
+  if (isSceneWindowRoot()) {
+    backFromScene();
+    return;
+  }
   const homeUrl = userStore.isVisitor ? "/pages/index/index?mode=demo" : "/pages/index/index";
   uni.redirectTo({ url: homeUrl });
 }

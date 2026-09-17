@@ -8,6 +8,8 @@ import { createLogger } from "@/utils/logger";
 import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
 import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
+import { setSceneStartupQuery } from '@/utils/scene-navigation';
+
 const logger = createLogger("app");
 // 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
 // 否则一旦这串固定 token 泄漏或过期，线上会静默变成无鉴权请求
@@ -32,6 +34,7 @@ function getLaunchQuery(options?: LaunchOptions): StartupQuery {
 function initializeSystem(query: StartupQuery) {
   // 调试面板尽早开：后面初始化里的日志也要能收进去
   setupDebugConsole(query);
+  setSceneStartupQuery(query);
 
   const authorization = query?.Authorization || authorizationFallback;
   const lang = String(query.Lang || "zh_CN");
