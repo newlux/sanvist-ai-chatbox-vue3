@@ -209,6 +209,31 @@ export function notifyTokenExpiration() {
   callNativeSilently("tokenExpiration");
 }
 
+/**
+ * pushWindow 成功时不保证回调；仅在明确失败时降级，避免超时后二次跳转。
+ * 不记录 URL（其中可能含宿主下发的鉴权参数）。
+ */
+export async function openWebview(url: string, onFailure: () => void) {
+  const bridge = await waitForMpaas();
+  if (!bridge) {
+    onFailure();
+    return;
+  }
+  let failed = false;
+  const fallback = () => {
+    if (failed) return;
+    failed = true;
+    onFailure();
+  };
+  try {
+    bridge.call('pushWindow', { url }, (result) => {
+      if (Number(result?.error ?? result?.errorCode ?? 0) || result?.success === false) fallback();
+    });
+  } catch {
+    fallback();
+  }
+}
+
 /** 关闭当前 webview，把返回交回宿主 */
 export async function closeWebview() {
   await callNative("popWindow");

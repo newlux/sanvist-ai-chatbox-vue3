@@ -24,7 +24,8 @@ import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
-import { closeWebview, isMpaasReady } from "@/utils/platform/mpaas";
+import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
+import { navigateToScene } from '@/utils/scene-navigation';
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
 defineOptions({ name: "AiChatPage" });
@@ -175,7 +176,7 @@ function startNewConversation() {
  */
 function enterListenReport() {
   saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
-  uni.navigateTo({ url: "/pages/podcast/index" });
+  void navigateToScene('/pages/podcast/index');
 }
 
 function onNavItemClick(item: { key?: string; title?: string; subagent?: string; mode?: string; url?: string }) {
@@ -194,7 +195,7 @@ function onNavItemClick(item: { key?: string; title?: string; subagent?: string;
     return;
   }
   if (targetUrl) {
-    uni.navigateTo({ url: targetUrl });
+    void navigateToScene(targetUrl);
   }
 }
 
@@ -398,6 +399,8 @@ function refreshListenReportState() {
   listenReportRefreshKey.value += 1;
 }
 
+const stopNativeResume = onNativeEvent('resume', refreshListenReportState);
+
 onShow(() => {
   syncWindowHeight();
   const sessionId = consumePendingHistorySession("ASK", "PODCAST");
@@ -410,6 +413,7 @@ onShow(() => {
   refreshListenReportState();
 });
 onBeforeUnmount(() => {
+  stopNativeResume();
   uni.$off("listen-report-marked", refreshListenReportState);
   cancelActiveStream();
 });

@@ -20,6 +20,7 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
+import { backFromScene, navigateToScene } from '@/utils/scene-navigation';
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
 /**
@@ -182,11 +183,11 @@ function onNavItemClick(item: { key?: string; title?: string; subagent?: string;
   if (subagent === "task") return;
 
   const targetUrl = String(item?.url || "");
-  if (targetUrl) uni.navigateTo({ url: targetUrl });
+  if (targetUrl) void navigateToScene(targetUrl);
 }
 
 function onBack() {
-  uni.navigateBack({ delta: 1 });
+  backFromScene();
 }
 
 /**
