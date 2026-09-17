@@ -10,6 +10,8 @@ export interface ChatInput extends Record<string, unknown> {
   deviceList?: DeviceInfo[];
   /** 机型标识：取 /user/device-models 的 modelKey，作业指导页用户选择后随对话透传 */
   device_model?: string;
+  /** 讲解模式：取 /user/operator-roles 新老手对应的值，选择页选完后随对话透传 */
+  operator_role?: string;
 }
 
 interface RemoteChatFile {
@@ -146,6 +148,56 @@ export interface AskSlotPayload extends Record<string, unknown> {
   options: AskSlotOption[];
 }
 
+/** 步骤配图 */
+export interface GuideStepImage {
+  url: string;
+  caption?: string;
+}
+
+/** 指导步骤卡片：COMPONENT scene=guide / type=step 的单个步骤 */
+export interface GuideStepItem extends Record<string, unknown> {
+  id?: string;
+  title: string;
+  action?: string;
+  verification?: string;
+  /** 这一步的确认问题，显示在步骤卡的问题行 */
+  confirmation_question?: string;
+  /** 主选项文案，如「已经确认，进入下一步」 */
+  confirm_text?: string;
+  /** 次选项文案，如「不确定，我还有其他问题」 */
+  question_text?: string;
+  /** 拍照入口文案，如「我不确定，我拍照让你识别」；为空则不展示该行 */
+  photo_text?: string;
+  /** 这一步的配图：对话里的详情卡展示 */
+  images?: GuideStepImage[];
+}
+
+/** 指导步骤卡片内容：steps 只有 1 个是多轮追问，多个则按顺序一张一张推进后回发 */
+export interface GuideStepPayload extends Record<string, unknown> {
+  device_model?: string;
+  /** 整体标题，如「原地回转操作步骤」 */
+  title?: string;
+  /** 步骤卡左上角灰色小标签，如「开始拆装步骤」 */
+  note?: string;
+  overview?: string;
+  steps: GuideStepItem[];
+}
+
+/** 「核对任务与资料」卡片：与某个步骤绑定，步骤卡片翻页时对话滚动到它 */
+export interface GuideCheckPayload extends Record<string, unknown> {
+  title?: string;
+  /** 关联的步骤 id（对应 GuideStepItem.id），用于步骤卡片翻页时定位 */
+  step_id?: string;
+  step_index?: number;
+  step_total?: number;
+  /** 核对清单正文，换行保留 */
+  content?: string;
+  /** 配图：步骤详情卡会带这一步的操作图 */
+  images?: GuideStepImage[];
+  /** 底部状态行，如「✓ 询问用户」 */
+  status?: string;
+}
+
 export interface AskSlotSubmitPayload {
   slot: AskSlotPayload;
   selectedOptions: AskSlotOption[];
@@ -153,7 +205,7 @@ export interface AskSlotSubmitPayload {
 }
 
 export interface RichContentEvent {
-  event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source" | "ask_slot";
+  event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source" | "ask_slot" | "guide_step" | "guide_check";
   conversationId: Identifier;
   messageId: Identifier;
   taskId?: Identifier;

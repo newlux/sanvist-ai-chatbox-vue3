@@ -1,12 +1,23 @@
 <script setup lang="ts">
 import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload } from "@/api/chat/types";
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import ArrowNextDisabledIcon from "/src/assets/icons/slot-drawer/slot-drawer-arrow-next-disabled.svg";
 import ArrowNextIcon from "/src/assets/icons/slot-drawer/slot-drawer-arrow-next.svg";
 import ArrowPrevDisabledIcon from "/src/assets/icons/slot-drawer/slot-drawer-arrow-prev-disabled.svg";
 import ArrowPrevIcon from "/src/assets/icons/slot-drawer/slot-drawer-arrow-prev.svg";
 import CloseIcon from "/src/assets/icons/slot-drawer/slot-drawer-close.svg";
 
+/**
+ * 多选项追问卡片（设计稿 2667:3284「进入拆装」底部 375×430 白板）。
+ *
+ * 结构：灰色小标签 + 紧跟其后的进度 i/n + 右上 ×
+ *      → 问题行 → 选项列表（末尾固定一行「其他输入」自由填写）
+ *      → 底部居中「内容由AI生成，请核实重要信息」。
+ * 直角白板贴底、向上阴影，无全屏遮罩。
+ *
+ * 交互：单题单选时点选项即作答（选中态先亮一下再提交，设计稿没有确认按钮）；
+ * 多选或一屏有多道题时才出现底部「上一题/下一题 + 确认提交」。
+ */
 defineOptions({ name: "AiSlotDrawer" });
 
 const props = defineProps({
@@ -19,9 +30,12 @@ const emit = defineEmits<{
   submit: [payload: AskSlotSubmitPayload];
 }>();
 
+const OTHER_INPUT_PLACEHOLDER = "其他输入";
+
 const currentIndex = ref(0);
 const selections = ref<Record<string, string[]>>({});
 const otherRemark = ref("");
+const remarkEditing = ref(false);
 
 const currentSlot = computed(() => props.slots[currentIndex.value] || null);
 const isLastSlot = computed(() => currentIndex.value === props.slots.length - 1);
@@ -92,17 +106,36 @@ const recommendedKey = computed(() => {
 const minSelect = computed(() => currentSlot.value ? minSelectOf(currentSlot.value) : 0);
 const maxSelect = computed(() => currentSlot.value ? maxSelectOf(currentSlot.value) : 0);
 const hasInvalidRange = computed(() => minSelect.value > maxSelect.value);
+const hasRemark = computed(() => Boolean(otherRemark.value.trim()));
+/** 单题单选：点一下就是答案，直接提交 */
+const tapToSubmit = computed(() => !showPagination.value && !isMultiple.value);
+/** 自定义输入也算作答，所以要留着提交入口（多选/多题时本来就有底部操作栏） */
+const showActions = computed(() => !tapToSubmit.value || remarkEditing.value || hasRemark.value);
 const isCurrentSelectionValid = computed(() => !hasInvalidRange.value
-  && selectedIds.value.length >= minSelect.value
+  && (selectedIds.value.length >= minSelect.value || hasRemark.value)
   && selectedIds.value.length <= maxSelect.value);
 
-// visible 与 slots 常在同一 tick 更新，flush: "post" 保证读到的是本轮最新的 slots。
+const labelText = computed(() => String(currentSlot.value?.description || "").trim() || "请选择");
+const questionText = computed(() => String(currentSlot.value?.title || "").trim() || "请选择要查询的设备");
+
+let submitTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearSubmitTimer() {
+  if (!submitTimer) return;
+  clearTimeout(submitTimer);
+  submitTimer = null;
+}
+
 watch(() => props.visible, (visible) => {
+  clearSubmitTimer();
+  remarkEditing.value = false;
   if (!visible || !props.slots.length) return;
   currentIndex.value = 0;
   selections.value = buildInitialSelections(props.slots);
   otherRemark.value = "";
-}, { flush: "post" });
+});
+
+onBeforeUnmount(clearSubmitTimer);
 
 function optionKey(option: AskSlotOption) {
   return option.value;
@@ -122,6 +155,14 @@ function selectOption(option: AskSlotOption) {
   }
   if (!isMultiple.value) {
     selections.value = { ...selections.value, [slot.slot_name]: [key] };
+    // 让选中态先亮一下再收起，跟设计稿的深色选中态一致
+    if (tapToSubmit.value) {
+      clearSubmitTimer();
+      submitTimer = setTimeout(() => {
+        submitTimer = null;
+        if (props.visible) submit();
+      }, 180);
+    }
     return;
   }
   if (selectedIds.value.length >= maxSelect.value) {
@@ -129,6 +170,14 @@ function selectOption(option: AskSlotOption) {
     return;
   }
   selections.value = { ...selections.value, [slot.slot_name]: [...selectedIds.value, key] };
+}
+
+function openRemarkInput() {
+  remarkEditing.value = true;
+}
+
+function closeRemarkInput() {
+  remarkEditing.value = false;
 }
 
 function validateCurrentSlot() {
@@ -159,12 +208,16 @@ function nextSlot() {
 }
 
 function submit() {
+  clearSubmitTimer();
   if (!validateCurrentSlot()) return;
   const invalidSlot = props.slots.find((slot) => {
     const selected = selections.value[slot.slot_name] || [];
-    const min = minSelectOf(slot);
-    const max = maxSelectOf(slot);
-    return min > max || selected.length < min || selected.length > max;
+    const min = slot.required ? Math.max(1, Number(slot.min_select) || 0) : Math.max(0, Number(slot.min_select) || 0);
+    const max = slot.selection === "single" ? 1 : Math.min(Number(slot.max_select) > 0 ? Number(slot.max_select) : slot.options.length, slot.options.length);
+    if (min > max || selected.length > max) return true;
+    // 只填了「其他输入」也当作答，不再要求必须勾选项
+    if (hasRemark.value && !selected.length) return false;
+    return selected.length < min;
   });
   if (invalidSlot) {
     currentIndex.value = props.slots.indexOf(invalidSlot);
@@ -185,132 +238,245 @@ function submit() {
 }
 
 function close() {
+  clearSubmitTimer();
   emit("close");
 }
 </script>
 
 <template>
-  <view v-if="visible && currentSlot" class="slot-drawer-modal">
-    <view class="slot-drawer">
-      <view class="slot-drawer__toolbar">
-        <view class="slot-drawer__progress">
-          <text>答题</text>
-          <text>{{ currentIndex + 1 }}/{{ slots.length }}</text>
-        </view>
-        <view class="slot-drawer__close" @tap="close">
-          <image class="slot-drawer__close-icon" :src="CloseIcon" mode="aspectFit" />
-        </view>
-      </view>
-
-      <!-- 题目标题：Status Label -->
-      <text class="slot-drawer__title">
-        {{ currentSlot.title || "请选择" }}
+  <view v-if="visible && currentSlot" class="slot-drawer">
+    <view class="slot-drawer__header">
+      <text class="slot-drawer__label">
+        {{ labelText }}
       </text>
-
-      <scroll-view scroll-y class="slot-drawer__options">
-        <view class="slot-drawer__options-list">
-          <view
-            v-for="(option, index) in currentSlot.options"
-            :key="optionKey(option)"
-            class="slot-drawer__option"
-            :class="{ 'slot-drawer__option--selected': isSelected(option) }"
-            @tap="selectOption(option)"
-          >
-            <text class="slot-drawer__option-text">
-              {{ index + 1 }}  {{ option.label }}
-            </text>
-            <view v-if="optionKey(option) === recommendedKey" class="slot-drawer__recommend">
-              <text class="slot-drawer__recommend-text">
-                推荐
-              </text>
-            </view>
-          </view>
-          <textarea
-            v-model="otherRemark"
-            class="slot-drawer__remark"
-            placeholder="其他输入"
-            :maxlength="200"
-            :auto-height="false"
-          />
-        </view>
-      </scroll-view>
-      <view class="slot-drawer__footer">
-        <view v-if="showPagination" class="slot-drawer__nav">
-          <view
-            class="slot-drawer__round"
-            :class="{ 'slot-drawer__round--disabled': currentIndex === 0 }"
-            @tap="previousSlot"
-          >
-            <image class="slot-drawer__arrow-icon" :src="currentIndex === 0 ? ArrowPrevDisabledIcon : ArrowPrevIcon" mode="aspectFit" />
-          </view>
-          <view
-            class="slot-drawer__round"
-            :class="{ 'slot-drawer__round--disabled': isLastSlot }"
-            @tap="nextSlot"
-          >
-            <image class="slot-drawer__arrow-icon" :src="isLastSlot ? ArrowNextDisabledIcon : ArrowNextIcon" mode="aspectFit" />
-          </view>
-        </view>
-        <view v-else class="slot-drawer__nav slot-drawer__nav--placeholder" aria-hidden="true" />
-        <view class="slot-drawer__footer-spacer" />
-        <view class="slot-drawer__submit" @tap="submit">
-          确认提交
-        </view>
+      <text v-if="showPagination" class="slot-drawer__progress">
+        {{ currentIndex + 1 }}/{{ slots.length }}
+      </text>
+      <view class="slot-drawer__close" @tap="close">
+        <image class="slot-drawer__close-icon" :src="CloseIcon" mode="aspectFit" />
       </view>
     </view>
+
+    <text class="slot-drawer__question">
+      {{ questionText }}
+    </text>
+
+    <scroll-view scroll-y class="slot-drawer__options">
+      <view class="slot-drawer__options-list">
+        <view
+          v-for="option in currentSlot.options"
+          :key="optionKey(option)"
+          class="slot-drawer__option"
+          :class="{ 'slot-drawer__option--selected': isSelected(option) }"
+          @tap="selectOption(option)"
+        >
+          <text class="slot-drawer__option-text">
+            {{ option.label }}
+          </text>
+        </view>
+
+        <!-- 其他输入：与选项同行样式，点开变输入框，填了就算作答 -->
+        <view class="slot-drawer__option slot-drawer__option--remark" @tap="openRemarkInput">
+          <textarea
+            v-if="remarkEditing"
+            v-model="otherRemark"
+            class="slot-drawer__remark-input"
+            :focus="remarkEditing"
+            :placeholder="OTHER_INPUT_PLACEHOLDER"
+            placeholder-class="slot-drawer__remark-placeholder"
+            :maxlength="200"
+            :auto-height="true"
+            @blur="closeRemarkInput"
+          />
+          <text
+            v-else
+            class="slot-drawer__remark-text"
+            :class="{ 'slot-drawer__remark-text--filled': hasRemark }"
+          >
+            {{ hasRemark ? otherRemark : OTHER_INPUT_PLACEHOLDER }}
+          </text>
+        </view>
+      </view>
+    </scroll-view>
+
+    <view v-if="showActions" class="slot-drawer__actions">
+      <view v-if="showPagination" class="slot-drawer__nav">
+        <view
+          class="slot-drawer__round"
+          :class="{ 'slot-drawer__round--disabled': currentIndex === 0 }"
+          @tap="previousSlot"
+        >
+          <image class="slot-drawer__arrow-icon" :src="currentIndex === 0 ? ArrowPrevDisabledIcon : ArrowPrevIcon" mode="aspectFit" />
+        </view>
+        <view
+          class="slot-drawer__round"
+          :class="{ 'slot-drawer__round--disabled': isLastSlot }"
+          @tap="nextSlot"
+        >
+          <image class="slot-drawer__arrow-icon" :src="isLastSlot ? ArrowNextDisabledIcon : ArrowNextIcon" mode="aspectFit" />
+        </view>
+      </view>
+      <view v-else class="slot-drawer__nav slot-drawer__nav--placeholder" aria-hidden="true" />
+      <view class="slot-drawer__submit" @tap="submit">
+        确认提交
+      </view>
+    </view>
+
+    <text class="slot-drawer__hint">
+      内容由AI生成，请核实重要信息
+    </text>
   </view>
 </template>
 
 <style lang="scss" scoped>
-/* =========================================================
-   遮罩层：全屏固定，不响应点击关闭
-   ========================================================= */
-.slot-drawer-modal {
+/* 直角白板贴底，只留向上阴影；safe-area 留给底部 home indicator */
+.slot-drawer {
   position: fixed;
-  top: 0;
+  z-index: 1002;
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  background: rgba(0, 0, 0, 0.38);
-  animation: slot-drawer-fade-in 0.2s ease-out;
-}
-
-/* 设计稿 Rectangle 25：375×436 px，顶部左/右圆角 22px => 44rpx，底部直角。 */
-.slot-drawer {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 750rpx;
-  padding: 40rpx 80rpx calc(40rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
-  border-radius: 44rpx 44rpx 0 0;
-  overflow: hidden;
-  background: #FFFFFF;
+  max-height: 86vh;
+  padding: 52rpx 80rpx 24rpx;
+  padding-bottom: calc(24rpx + constant(safe-area-inset-bottom));
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
+  background: #ffffff;
   box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.0601);
   animation: slot-drawer-slide-up 0.25s ease-out;
 }
 
-.slot-drawer__toolbar {
+/* 标签 + 进度同一行，进度紧跟标签（设计稿间距 9px => 18rpx）；× 固定右侧 */
+.slot-drawer__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   height: 52rpx;
-  /* 关闭按钮距弹窗右边缘 25px（设计稿），内容列右边距为 40px，向左抵消 15px => 30rpx */
-  margin-right: -30rpx;
+}
+
+.slot-drawer__label {
+  flex-shrink: 0;
+  color: #999999;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  font-size: 28rpx;
+  line-height: 34rpx;
 }
 
 .slot-drawer__progress {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
+  flex-shrink: 0;
+  margin-left: 18rpx;
   color: #999999;
+  font-family: "PingFang SC", "Inter", sans-serif;
   font-size: 28rpx;
   line-height: 34rpx;
+}
+
+.slot-drawer__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 52rpx;
+  height: 52rpx;
+  /* 关闭按钮距弹窗右边缘 25px、内容列右边距 40px，向左抵消 15px => 30rpx */
+  margin-left: auto;
+  margin-right: -30rpx;
+}
+
+.slot-drawer__close-icon {
+  width: 100%;
+  height: 100%;
+}
+
+.slot-drawer__question {
+  display: block;
+  margin-top: 36rpx;
+  color: #1a1a1a;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  font-size: 28rpx;
+  line-height: 34rpx;
+}
+
+/* 选项多时在卡片内滚动，避免整屏占满 */
+.slot-drawer__options {
+  max-height: 560rpx;
+  margin-top: 32rpx;
+}
+
+.slot-drawer__options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+/* 选项行：295×36 => 590×72，背景 #F6F6F6，圆角 8px => 16rpx，左内边距 12px => 24rpx */
+.slot-drawer__option {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 72rpx;
+  padding: 0 24rpx;
+  border-radius: 16rpx;
+  background: #f6f6f6;
+}
+
+.slot-drawer__option--selected {
+  background: #2c2626;
+}
+
+.slot-drawer__option-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #000000;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  font-size: 28rpx;
+  line-height: 34rpx;
+}
+
+.slot-drawer__option--selected .slot-drawer__option-text {
+  color: #ffffff;
+}
+
+/* 其他输入：未填写为灰色占位，填了用正文色 */
+.slot-drawer__option--remark {
+  padding-top: 16rpx;
+  padding-bottom: 16rpx;
+}
+
+.slot-drawer__remark-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #666666;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  font-size: 28rpx;
+  line-height: 34rpx;
+}
+
+.slot-drawer__remark-text--filled {
+  color: #000000;
+}
+
+.slot-drawer__remark-input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 40rpx;
+  color: #000000;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  font-size: 28rpx;
+  line-height: 40rpx;
+}
+
+.slot-drawer__remark-placeholder {
+  color: #666666;
+  font-size: 28rpx;
+}
+
+.slot-drawer__actions {
+  display: flex;
+  align-items: center;
+  min-height: 60rpx;
+  margin-top: 32rpx;
 }
 
 /* 翻页按钮间距：设计稿 Group 12 / Group 13 间距 28px => 56rpx */
@@ -331,138 +497,12 @@ function close() {
   width: 52rpx;
   height: 52rpx;
   border-radius: 50%;
-  background: #F6F6F6;
+  background: #f6f6f6;
 }
 
-/* 上一题禁用态：使用灰色箭头图标，无需再叠加透明度 */
-
-/* 翻页箭头图标：设计稿 8×8 => 16×16(rpx) */
 .slot-drawer__arrow-icon {
   width: 100%;
   height: 100%;
-}
-
-/* 关闭按钮：26×26 容器 */
-.slot-drawer__close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 52rpx;
-  height: 52rpx;
-}
-
-.slot-drawer__close-icon {
-  width: 100%;
-  height: 100%;
-}
-
-.slot-drawer__title {
-  margin-top: 32rpx;
-  color: #1A1A1A;
-  font-size: 28rpx;
-  line-height: 34rpx;
-}
-
-.slot-drawer__options {
-  flex: 1;
-  min-height: 0;
-  margin-top: 32rpx;
-}
-
-.slot-drawer__options-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16rpx;
-  padding-bottom: 32rpx;
-}
-
-/* 选项项：295×36 => 590×72，背景 #F6F6F6，圆角 8px => 16rpx，左内边距 12px => 24rpx */
-.slot-drawer__option {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  width: 590rpx;
-  height: 72rpx;
-  margin: 0;
-  padding: 0 24rpx;
-  border: 0;
-  border-radius: 16rpx;
-  box-sizing: border-box;
-  background: #F6F6F6;
-  text-align: left;
-}
-
-.slot-drawer__option--selected {
-  background: #2F2B2B;
-}
-
-/* 选项文字：14px => 28rpx，颜色 #000000（选中态 #FFFFFF），单行截断
-   不设置 flex:1，让文字自然宽度，推荐标签紧跟文字 */
-.slot-drawer__option-text {
-  flex: 0 1 auto;
-  min-width: 0;
-  color: #000000;
-  font-size: 28rpx;
-  line-height: 34rpx;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.slot-drawer__option--selected .slot-drawer__option-text {
-  color: #FFFFFF;
-}
-
-/* 推荐标签：背景 #FFE6E4，圆角 5px => 10rpx，内边距 7/2px => 14/4rpx
-   紧贴文字右侧，间距 6px => 12rpx */
-.slot-drawer__recommend {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  margin-left: 12rpx;
-  padding: 4rpx 14rpx;
-  border-radius: 10rpx;
-  background: #FFE6E4;
-}
-
-.slot-drawer__recommend-text {
-  color: #FE0000;
-  font-size: 22rpx;
-  line-height: 26rpx;
-}
-
-/* =========================================================
-   其他关注指标输入区：Frame 7（单行）
-   设计稿 295×36 => 590×72，背景 #F6F6F6，圆角 12px => 24rpx
-   上下内边距 8px => 16rpx，左右 16px => 32rpx，占位文字 12px/20px => 24rpx/40rpx，颜色 #999999
-   ========================================================= */
-.slot-drawer__remark {
-  width: 590rpx;
-  height: 72rpx;
-  padding: 16rpx 32rpx;
-  border: 0;
-  box-sizing: border-box;
-  border-radius: 24rpx;
-  background: #F6F6F6;
-  color: #000000;
-  font-size: 24rpx;
-  line-height: 40rpx;
-}
-
-.slot-drawer__remark::placeholder {
-  color: #999999;
-}
-
-.slot-drawer__footer {
-  display: flex;
-  align-items: center;
-  min-height: 60rpx;
-  padding-top: 16rpx;
-}
-
-.slot-drawer__footer-spacer {
-  flex: 1;
 }
 
 /* 提交按钮：设计稿 Rectangle 101，80×30，圆角 10px => 160×60(rpx)、20rpx */
@@ -472,16 +512,23 @@ function close() {
   justify-content: center;
   width: 160rpx;
   height: 60rpx;
+  margin-left: auto;
   border-radius: 20rpx;
-  background: #1A1A1A;
-  color: #FFFFFF;
+  background: #1a1a1a;
+  color: #ffffff;
+  font-family: "PingFang SC", sans-serif;
   font-size: 28rpx;
   line-height: 34rpx;
 }
 
-@keyframes slot-drawer-fade-in {
-  from { background: rgba(0, 0, 0, 0); }
-  to { background: rgba(0, 0, 0, 0.38); }
+.slot-drawer__hint {
+  display: block;
+  margin-top: 32rpx;
+  text-align: center;
+  color: #bababa;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  font-size: 24rpx;
+  line-height: 30rpx;
 }
 
 @keyframes slot-drawer-slide-up {

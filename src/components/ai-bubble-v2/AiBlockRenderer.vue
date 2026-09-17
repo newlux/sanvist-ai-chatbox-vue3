@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import type { AskSlotPayload } from "@/api/chat/types";
+import type { AskSlotPayload, GuideStepPayload } from "@/api/chat/types";
 import AnswerBlock from "./blocks/AnswerBlock.vue";
 import AskSlotBlock from "./blocks/AskSlotBlock.vue";
 import ChartBlock from "./blocks/ChartBlock.vue";
 import ErrorBlock from "./blocks/ErrorBlock.vue";
+import GuideCheckBlock from "./blocks/GuideCheckBlock.vue";
 import GuideImageBlock from "./blocks/GuideImageBlock.vue";
 import GuideSourceBlock from "./blocks/GuideSourceBlock.vue";
+import GuideStepBlock from "./blocks/GuideStepBlock.vue";
 import GuideVideoBlock from "./blocks/GuideVideoBlock.vue";
 import MetricBlock from "./blocks/MetricBlock.vue";
 import StatusBlock from "./blocks/StatusBlock.vue";
@@ -37,7 +39,7 @@ defineProps({
   },
 });
 
-const emit = defineEmits(["suggestion-tap", "ask-slot-open"]);
+const emit = defineEmits(["suggestion-tap", "ask-slot-open", "guide-step-open"]);
 
 function onSuggestionTap(suggestion: unknown) {
   emit("suggestion-tap", suggestion);
@@ -45,6 +47,10 @@ function onSuggestionTap(suggestion: unknown) {
 
 function onAskSlotOpen(payload: AskSlotPayload) {
   emit("ask-slot-open", payload);
+}
+
+function onGuideStepOpen(payload: GuideStepPayload) {
+  emit("guide-step-open", payload);
 }
 </script>
 
@@ -72,6 +78,9 @@ function onAskSlotOpen(payload: AskSlotPayload) {
     :embedded="embedded"
   />
   <AskSlotBlock v-else-if="block.type === 'ask-slot'" :payload="block.payload" @open="onAskSlotOpen" />
+  <GuideStepBlock v-else-if="block.type === 'guide-step'" :payload="block.payload" @open="onGuideStepOpen" />
+  <!-- id 落在根节点上：步骤卡片翻页时按 block.id 做 scroll-into-view 定位 -->
+  <GuideCheckBlock v-else-if="block.type === 'guide-check'" :id="block.id" :payload="block.payload" />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
   <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />

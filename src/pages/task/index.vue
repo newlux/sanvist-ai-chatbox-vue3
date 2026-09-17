@@ -3,11 +3,14 @@ import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import type { GuideStepItem, GuideStepPayload } from "@/api/chat/types";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import iconForm from "@/assets/img/icon-form.svg";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
+import AiChatNav from "@/components/ai-chat-nav/index.vue";
+import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import AiSceneWelcome from "@/components/ai-scene-welcome/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
@@ -16,6 +19,7 @@ import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
+import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
@@ -95,11 +99,60 @@ const {
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback(chatScope);
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
 const realtimeTts = useRealtimeTts(chatScope);
+/** 步骤卡「拍照」入口专用：独立实例，选完一张图直接把文件交给 sendMessage */
+const photoPicker = useComposerAttachments();
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
+  // 步骤卡片贴底展开：列表底部让出卡片高度，回答与卡片之间不重叠
+  if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) return `${guideStepSheetHeight.value}px`;
+  // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
+  if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
   return composerBottomInset.value;
 });
+const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
+/** 指导步骤卡片（COMPONENT scene=guide / type=step）：随回答自动弹起，选完即回发下一轮 */
+const guideStepPayload = ref<GuideStepPayload | null>(null);
+const guideStepSheetVisible = ref(false);
+/** 步骤卡片实时高度（px）：卡片展开时把列表底部 padding 顶起来，最后一条回答不会被盖住 */
+const guideStepSheetHeight = ref(0);
+/** 步骤卡按顺序露出：初始只给第一张，推进到第 N 步才显示前 N 张 */
+const guideStepCardCount = ref(1);
+
+function onGuideStepOpen(payload: GuideStepPayload) {
+  guideStepPayload.value = payload;
+  guideStepSheetVisible.value = true;
+  guideStepCardCount.value = 1;
+}
+
+function onGuideStepSubmit(query: string) {
+  guideStepSheetVisible.value = false;
+  sendQuickPrompt(query);
+}
+
+function onGuideStepHeightChange(height: number) {
+  guideStepSheetHeight.value = height;
+  // 底部间距刚生效，再贴一次底：核对卡才会停在步骤卡上方，而不是被压在下面
+  if (guideStepSheetVisible.value) nextTick(() => chatStore.scrollToBottom(true));
+}
+
+/** 步骤卡的附件按钮：按弹窗里选的来源取一个附件，上传完成后按现有附件流程发送 */
+async function onGuideStepPhoto(source: AttachmentSource) {
+  const picked = await photoPicker.pickAttachmentForSend(source);
+  if (!picked) return;
+  guideStepSheetVisible.value = false;
+  sendMessage({ text: "", files: picked.files, attachments: picked.meta });
+}
+
+/** 步骤卡片展开 / 翻页时，只显示这一步对应的核对卡，并把它定位到步骤卡上方 */
+function onGuideStepChange(step: GuideStepItem | null) {
+  const stepId = String(step?.id || "").trim();
+  if (!stepId) return;
+  const steps = guideStepPayload.value?.steps || [];
+  const index = steps.findIndex(item => String(item?.id || "") === stepId);
+  if (index >= 0) guideStepCardCount.value = index + 1;
+  nextTick(() => chatStore.focusStepBlock(stepId));
+}
 
 /** 点击追问后先移除它所属回答的追问列表，再按普通问题走完整发送链路。 */
 function onTaskSuggestionTap(suggestion: string, messageIndex: number) {
@@ -362,6 +415,7 @@ onUnload(() => {
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
         :bottom-inset="messageBottomInset"
+        :step-card-count="guideStepCardCount"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"
@@ -369,6 +423,7 @@ onUnload(() => {
         :realtime-tts-playing="realtimeTts.playing.value"
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="onTaskSuggestionTap"
+        @guide-step-open="onGuideStepOpen"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
@@ -492,6 +547,16 @@ onUnload(() => {
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
         @dock-height-change="setInputDockHeight"
+      />
+
+      <AiGuideStepSheet
+        v-model:visible="guideStepSheetVisible"
+        :payload="guideStepPayload"
+        :keyboard-height="keyboardHeight"
+        @submit="onGuideStepSubmit"
+        @height-change="onGuideStepHeightChange"
+        @step-change="onGuideStepChange"
+        @photo="onGuideStepPhoto"
       />
 
       <AiBadFeedbackSheet

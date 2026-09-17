@@ -33,7 +33,8 @@ const selectedMessages = computed(() => {
         ? block.payload.blocks
         : [block],
     ).filter(
-      block => !["think", "tool_call", "status", "suggestion"].includes(block.type),
+      // guide-step 是「选步骤继续问」的交互入口、guide-check 是独立于气泡的核对卡，海报里都不还原
+      block => !["think", "tool_call", "status", "suggestion", "guide-step", "guide-check"].includes(block.type),
     );
     return { ...message, blocks };
   });

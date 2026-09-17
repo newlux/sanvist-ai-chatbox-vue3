@@ -1,4 +1,5 @@
 import type { DeviceModelOption } from "@/api/user-role/device-models";
+import type { OperatorRoleOption } from "@/api/user-role/operator-roles";
 import type { AwakeningPrompt } from "@/api/user-role/role-options";
 import { defineStore } from "pinia";
 import { ref } from "vue";
@@ -23,6 +24,8 @@ export const useUserStore = defineStore("user", () => {
   const awakeningPrompt = ref<AwakeningPrompt | null>(null);
   /** 机型选项卡数据源：进入作业指导页时拉取 */
   const deviceModels = ref<DeviceModelOption[]>([]);
+  /** 讲解模式（新老手）：进作业指导前在选择页选定，之后每次对话作为 inputs.operator_role 透传 */
+  const operatorRole = ref<OperatorRoleOption | null>(null);
 
   function setIsVisitor(value: boolean | null) {
     isVisitor.value = value;
@@ -65,6 +68,10 @@ export const useUserStore = defineStore("user", () => {
     deviceModels.value = Array.isArray(value) ? value : [];
   }
 
+  function setOperatorRole(value: OperatorRoleOption | null) {
+    operatorRole.value = value;
+  }
+
   return {
     isVisitor,
     visitorRole,
@@ -73,6 +80,7 @@ export const useUserStore = defineStore("user", () => {
     userInfo,
     awakeningPrompt,
     deviceModels,
+    operatorRole,
     setIsVisitor,
     setVisitorRole,
     restoreVisitorRole,
@@ -81,5 +89,6 @@ export const useUserStore = defineStore("user", () => {
     setUserInfo,
     setAwakeningPrompt,
     setDeviceModels,
+    setOperatorRole,
   };
 });
