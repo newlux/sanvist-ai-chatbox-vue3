@@ -1,4 +1,7 @@
 import type { AskSlotOption, AskSlotPayload, ChatResponseMode, ChatStreamEvent, Identifier, SendChatMessageParams } from "@/api/chat/types";
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("ai-stream-protocol");
 
 /** Dify `/chat-messages` 的请求体；只在网络边界使用 snake_case。 */
 export interface DifyChatMessagesRequest {
@@ -137,11 +140,27 @@ export function splitMarkdownTables(source: string): DifyHistoryBlockData[] {
 }
 
 export interface DifyHistoryBlockData {
-  type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion" | "ask-slot";
+  type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion" | "ask-slot" | "guide-step" | "guide-check";
   payload: Record<string, unknown>;
 }
 
-type GuideBlockType = "image" | "video" | "source" | "suggestion";
+type GuideBlockType = "image" | "video" | "source" | "suggestion" | "guide-step" | "guide-check";
+
+/** 步骤配图：兼容 [{url,caption}] 与 ["url"] 两种写法 */
+function parseGuideImages(value: unknown) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => {
+      const record = asRecord(item);
+      const url = String(
+        record?.url || record?.src || record?.source_url || (typeof item === "string" ? item : "") || "",
+      ).trim();
+      return {
+        url,
+        caption: String(record?.caption || record?.title || record?.description || "").trim(),
+      };
+    })
+    .filter(item => item.url);
+}
 
 function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBlockType; payload: Record<string, unknown> } | null {
   const type = String(value?.type || "").toLowerCase();
@@ -165,7 +184,84 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
       ? { type: "suggestion", payload: { title: "你还可以继续问", ...data, items } }
       : null;
   }
+  // 核对任务与资料：一张卡对应一个步骤，step_id 用于步骤卡片翻页时定位
+  if (type === "check") {
+    const content = String(data.content || "").trim();
+    if (!content) return null;
+    const stepIndex = Math.max(0, Number(data.step_index) || 0);
+    const stepTotal = Math.max(0, Number(data.step_total) || 0);
+    return {
+      type: "guide-check",
+      payload: {
+        title: String(data.title || "").trim() || "核对任务与资料",
+        step_id: String(data.step_id || "").trim(),
+        step_index: stepIndex,
+        step_total: stepTotal,
+        content,
+        status: String(data.status || "").trim(),
+      },
+    };
+  }
+  // 指导步骤卡片：每步自带确认问题与三个选项文案（确认 / 提问 / 拍照）。
+  if (type === "step") {
+    const steps = Array.isArray(data.steps)
+      ? data.steps
+        .map(asRecord)
+        .filter((item): item is Record<string, unknown> => Boolean(item))
+        .map(item => ({
+          id: String(item.id || "").trim(),
+          title: String(item.title || "").trim(),
+          action: String(item.action || "").trim(),
+          verification: String(item.verification || "").trim(),
+          confirmation_question: String(item.confirmation_question || "").trim(),
+          confirm_text: String(item.confirm_text || "").trim(),
+          question_text: String(item.question_text || "").trim(),
+          photo_text: String(item.photo_text || "").trim(),
+          images: parseGuideImages(item.images),
+        }))
+        .filter(item => item.title)
+      : [];
+    if (!steps.length) return null;
+    return {
+      type: "guide-step",
+      payload: {
+        device_model: String(data.device_model || "").trim(),
+        title: String(data.title || "").trim(),
+        // 步骤卡左上角灰色小标签；老数据没有 note 时由页面退回 title
+        note: String(data.note || "").trim(),
+        overview: String(data.overview || "").trim(),
+        steps,
+      },
+    };
+  }
   return null;
+}
+
+/**
+ * step 组件展开成「一张步骤卡 + 每步一张详情卡」：
+ * - 步骤卡（guide-step）负责提问：note 标签 + confirmation_question + 三个选项；
+ * - 详情卡（guide-check）负责讲这一步做什么：steps.title / steps.action / steps.images；
+ * 两者靠 step_id 关联，步骤卡翻页时对话滚动到对应详情卡，并且一次只显示当前那一步。
+ * 每步恒定一张，保证详情卡下标与步骤顺序一一对应。其余 GUIDE 卡片原样返回。
+ */
+function expandStepBlocks(block: { type: GuideBlockType; payload: Record<string, unknown> }) {
+  if (block.type !== "guide-step") return [block];
+  const steps = Array.isArray(block.payload.steps)
+    ? block.payload.steps as Record<string, unknown>[]
+    : [];
+  const detailBlocks = steps.map((step, index) => ({
+    type: "guide-check" as const,
+    payload: {
+      title: String(step.title || "").trim(),
+      step_id: String(step.id || "").trim(),
+      step_index: index + 1,
+      step_total: steps.length,
+      content: String(step.action || "").trim(),
+      images: Array.isArray(step.images) ? step.images : [],
+      status: "✓ 询问用户",
+    },
+  }));
+  return [block, ...detailBlocks];
 }
 
 /** 正文协议标签；历史解析与 SSE 流式解析共用同一份标记表。 */
@@ -255,7 +351,7 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
         if (!component) continue;
         if (component.kind === "guide") {
           const guideBlock = parseGuideBlock(component.payload);
-          if (guideBlock) blocks.push(guideBlock);
+          if (guideBlock) blocks.push(...expandStepBlocks(guideBlock));
           continue;
         }
         if (component.kind === "ask") {
@@ -266,7 +362,7 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
         eventPayload = component.payload;
       } else if (tag === "GUIDE") {
         const guideBlock = parseGuideBlock(payload);
-        if (guideBlock) blocks.push(guideBlock);
+        if (guideBlock) blocks.push(...expandStepBlocks(guideBlock));
         continue;
       } else if (tag === "ASK") {
         const askBlock = parseAskBlock(payload);
@@ -280,8 +376,9 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
         || ["node_started", "node_retry", "node_finished", "workflow_finished"].includes(difyEvent);
       if (!known) continue;
       if (event === "answer") appendAnswer(asRecord(eventPayload.data)?.content);
-    } catch {
-      // 历史中的非法协议块不参与渲染。
+    } catch (error) {
+      // 历史中的非法协议块不参与渲染，但要留下线索，避免整块内容静默消失。
+      logger.warn("忽略历史中无法解析的协议块", { tag: match[1], error });
     }
   }
   appendAnswer(source.slice(cursor));
@@ -398,6 +495,19 @@ export function createDifyEventNormalizer() {
       shouldReplace = false;
     };
 
+    /** GUIDE 卡片入队；步骤卡片要自动弹起等用户选，其余卡片交给对应 block 渲染。 */
+    const appendGuideEvent = (guideBlock: { type: GuideBlockType; payload: Record<string, unknown> }) => {
+      if (guideBlock.type === "guide-step") {
+        events.push({ event: "guide_step", ...references, data: { ...guideBlock.payload, auto_open: true } });
+        return;
+      }
+      if (guideBlock.type === "guide-check") {
+        events.push({ event: "guide_check", ...references, data: guideBlock.payload });
+        return;
+      }
+      events.push({ event: guideBlock.type, ...references, data: guideBlock.payload });
+    };
+
     protocolBuffer += value;
     while (protocolBuffer) {
       const starts = PROTOCOL_MARKERS
@@ -406,10 +516,15 @@ export function createDifyEventNormalizer() {
       const start = starts.length ? Math.min(...starts) : -1;
       if (start < 0) {
         // 标签可能刚好被 SSE 分片切开，保留与任一起始标签相符的末尾。
-        const suffixLength = PROTOCOL_MARKERS
-          .flatMap(marker => Array.from({ length: marker.length - 1 }, (_, index) => index + 1)
-            .map(length => protocolBuffer.endsWith(marker.slice(0, length)) ? length : 0))
-          .reduce((max, length) => Math.max(max, length), 0);
+        // lib 锁在 es2018，这里不能用 flatMap（ES2019）。
+        let suffixLength = 0;
+        for (const marker of PROTOCOL_MARKERS) {
+          for (let length = 1; length < marker.length; length += 1) {
+            if (protocolBuffer.endsWith(marker.slice(0, length))) {
+              suffixLength = Math.max(suffixLength, length);
+            }
+          }
+        }
         appendAnswer(protocolBuffer.slice(0, -suffixLength || undefined));
         protocolBuffer = suffixLength ? protocolBuffer.slice(-suffixLength) : "";
         break;
@@ -442,9 +557,7 @@ export function createDifyEventNormalizer() {
           customEvent = component.payload;
           if (component.kind === "guide") {
             const guideBlock = parseGuideBlock(customEvent);
-            if (guideBlock) {
-              events.push({ event: guideBlock.type, ...references, data: guideBlock.payload });
-            }
+            if (guideBlock) expandStepBlocks(guideBlock).forEach(item => appendGuideEvent(item));
             receivedSanvistEvent = true;
             continue;
           }
@@ -457,9 +570,7 @@ export function createDifyEventNormalizer() {
         }
         if (tag === "GUIDE") {
           const guideBlock = parseGuideBlock(customEvent);
-          if (guideBlock) {
-            events.push({ event: guideBlock.type, ...references, data: guideBlock.payload });
-          }
+          if (guideBlock) expandStepBlocks(guideBlock).forEach(item => appendGuideEvent(item));
           receivedSanvistEvent = true;
           continue;
         }
@@ -497,8 +608,9 @@ export function createDifyEventNormalizer() {
           receivedSanvistEvent = true;
           events.push({ event: "subtitle", ...references, message: "" });
         }
-      } catch {
-        // 自定义标记内容不完整或不合法时直接忽略，避免协议文本泄漏到用户回答。
+      } catch (error) {
+        // 自定义标记内容不完整或不合法时直接忽略，避免协议文本泄漏到用户回答；日志留作排查线索。
+        logger.warn("忽略无法解析的协议块", { tag, raw: raw.slice(0, 120), error });
       }
     }
     return events;

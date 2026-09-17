@@ -59,7 +59,8 @@ const navItems = computed(() => {
       icon: iconHelp,
       subagent: "guide",
       mode: "page",
-      url: "/pages/guide/index",
+      // 先进讲解模式选择页（新老手），选完由该页 redirect 到作业指导
+      url: "/pages/users/index",
     },
     {
       key: "repair-master-ai",

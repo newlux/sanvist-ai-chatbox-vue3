@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import AiAttachmentPicker from "@/components/ai-attachment-picker/index.vue";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
@@ -281,10 +282,6 @@ async function onOpenAttachmentPicker() {
 
   // 原生不可用（Web/H5 等）时用前端三选项弹窗
   isAttachmentPickerOpen.value = true;
-}
-
-function onCloseAttachmentPicker() {
-  isAttachmentPickerOpen.value = false;
 }
 
 function onPickAttachmentSource(source: "camera" | "album" | "file") {
@@ -579,22 +576,11 @@ onBeforeUnmount(() => {
       </view>
     </view>
 
-    <!-- 附件来源弹窗：拍照 / 从相册选择 / 选择文件（参考 media-picker 的 pickerPopup） -->
-    <view
-      v-if="isAttachmentPickerOpen"
-      class="attachment-picker-mask"
-      @tap.stop="onCloseAttachmentPicker"
-    >
-      <view class="attachment-picker" @tap.stop>
-        <view class="attachment-picker__title"> 添加附件 </view>
-        <view class="attachment-picker__btn" @tap="onPickAttachmentSource('camera')"> 拍照 </view>
-        <view class="attachment-picker__btn" @tap="onPickAttachmentSource('album')">
-          从相册选择
-        </view>
-        <view class="attachment-picker__btn" @tap="onPickAttachmentSource('file')"> 选择文件 </view>
-        <view class="attachment-picker__cancel" @tap="onCloseAttachmentPicker"> 取消 </view>
-      </view>
-    </view>
+    <!-- 附件来源弹窗：拍照 / 从相册选择 / 选择文件；步骤卡复用同一个组件 -->
+    <AiAttachmentPicker
+      v-model:visible="isAttachmentPickerOpen"
+      @pick="onPickAttachmentSource"
+    />
   </view>
 </template>
 
@@ -1153,57 +1139,5 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
-/* ---------- 附件来源弹窗 ---------- */
-.attachment-picker-mask {
-  position: fixed;
-  z-index: 1000;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-}
-
-.attachment-picker {
-  width: 560rpx;
-  border-radius: 24rpx;
-  background: #ffffff;
-  overflow: hidden;
-}
-
-.attachment-picker__title {
-  padding: 32rpx 0 20rpx;
-  font-size: 28rpx; // 14px
-  font-weight: 600;
-  color: #333333;
-  line-height: 36rpx;
-  text-align: center;
-}
-
-.attachment-picker__btn,
-.attachment-picker__cancel {
-  height: 96rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 30rpx; // 15px
-  line-height: 40rpx;
-  border-top: 1rpx solid #f0f0f0;
-  box-sizing: border-box;
-
-  &:active {
-    background: #f5f5f5;
-  }
-}
-
-.attachment-picker__btn {
-  color: #1a1a1a;
-}
-
-.attachment-picker__cancel {
-  color: #999999;
-}
+/* 附件来源弹窗样式随组件走：src/components/ai-attachment-picker/index.vue */
 </style>

@@ -50,6 +50,7 @@ const props = defineProps({
 const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
+  "guide-step-open",
   "tts-click",
   "share-click",
   "feedback-change",
@@ -104,10 +105,11 @@ const fileImageFallback = ref<Record<number, string>>({});
  * - 新发送的图片带 localPath（H5/mPaaS 都是本地可渲染地址），直接展示本地文件；
  * - 历史图片用 message_files[].url 直链渲染（Dify 的 file-preview 自带签名），
  *   img 无凭证也能拿到内容，不再走 /files/{id}/preview 鉴权预览。
+ * 本地地址加载失败过（兜底地址已生成）时优先用兜底，避免一直卡在灰块上。
  */
 function fileImageSrc(file: ChatMessageAttachment, fileIndex: number) {
-  if (file.localPath) return file.localPath;
   if (fileImageFallback.value[fileIndex]) return fileImageFallback.value[fileIndex];
+  if (file.localPath) return file.localPath;
   return file.previewPath || file.url || "";
 }
 
@@ -130,12 +132,12 @@ function onPreviewImage(url) {
 /**
  * 图片加载失败兜底：把带 attachment 头/Content-Type 异常的原始地址
  * 用 fetch + blob 换成一定能被 img 渲染的本地地址。
+ * 本地缩略图（data / blob）本身挂了也要能退回远端地址，不能一直卡在灰块上。
  */
 async function onFileImageError(file, fileIndex) {
-  if (file.localPath) return;
   if (fileImageFallback.value[fileIndex]) return;
   const source = file.previewPath || file.url;
-  if (!source) return;
+  if (!source || source === file.localPath) return;
   const inline = await toInlineImageUrl(source);
   if (inline !== source) {
     fileImageFallback.value = { ...fileImageFallback.value, [fileIndex]: inline };
@@ -191,15 +193,24 @@ const visibleBlocks = computed(() =>
     ? props.blocks.filter(block => block && block.type !== "suggestion")
     : props.blocks,
 );
+/**
+ * 核对/步骤卡（guide-check）是独立白卡，不套在回答气泡里：
+ * 气泡只渲染正文/图片等，这些 block 由消息列表在气泡外单独成卡。
+ */
+const STANDALONE_BLOCK_TYPES = ["guide-check"];
 const contentBlocks = computed(() => {
-  const blocks = visibleBlocks.value.filter(block => block && block.type !== "suggestion");
+  const blocks = visibleBlocks.value
+    .filter(block => block && block.type !== "suggestion" && !STANDALONE_BLOCK_TYPES.includes(block.type));
   return blocks.length || !props.content
     ? blocks
-    : [{ id: "content-fallback", type: "answer", payload: { content: props.content }, complete: true }];
+    : [{ id: "content-fallback", type: "answer" as const, payload: { content: props.content }, complete: true }];
 });
 const suggestionBlocks = computed(() =>
   visibleBlocks.value.filter(block => block && block.type === "suggestion"),
 );
+
+/** 只有独立卡片、没有正文时，气泡不再画白卡外壳（操作栏仍保留），避免留一个空框 */
+const isBareBody = computed(() => !isUser.value && !contentBlocks.value.length && !props.content);
 
 /**
  * 等待条：模型还没吐出内容时的占位。
@@ -233,6 +244,10 @@ function onSuggestionTap(event) {
 
 function onAskSlotOpen(payload) {
   emit("ask-slot-open", payload);
+}
+
+function onGuideStepOpen(payload) {
+  emit("guide-step-open", payload);
 }
 
 function onShareTap() {
@@ -343,7 +358,11 @@ function onNegativeFeedback() {
       </template>
     </view>
 
-    <view v-if="!isUser || props.content" class="ai-bubble-v2__body">
+    <view
+      v-if="!isUser || props.content"
+      class="ai-bubble-v2__body"
+      :class="{ 'ai-bubble-v2__body--bare': isBareBody }"
+    >
       <template v-if="isUser">
         <view v-if="props.asrPending" class="ai-bubble-v2__asr" aria-label="识别中">
           <text class="ai-bubble-v2__asr-label">
@@ -426,6 +445,7 @@ function onNegativeFeedback() {
           :loading="props.loading"
           @suggestion-tap="onSuggestionTap"
           @ask-slot-open="onAskSlotOpen"
+          @guide-step-open="onGuideStepOpen"
         />
         <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
           <view
@@ -549,6 +569,14 @@ function onNegativeFeedback() {
   border-radius: 32rpx;
   background: #ffffff;
   box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
+}
+/* 没有正文只有独立卡片：不画白卡外壳，只留操作栏 */
+.ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--bare {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .ai-bubble-v2--no-answer-group:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
   padding: 0;

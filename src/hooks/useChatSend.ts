@@ -385,7 +385,10 @@ export function useChatSend(scope?: string, handlers?: {
     const selectedValues = payload.selectedOptions
       .map(option => option.value.trim())
       .filter(Boolean);
-    return [originalQuery, selectedValues.join("、")].filter(Boolean).join("：");
+    // 「其他输入」填的自定义内容也算作答，跟选项一起按「、」拼进提问
+    const remark = String(payload.remark || "").trim();
+    const answer = [selectedValues.join("、"), remark].filter(Boolean).join("、");
+    return [originalQuery, answer].filter(Boolean).join("：");
   }
 
   function sendAskSlotSelection(payload: AskSlotSubmitPayload) {

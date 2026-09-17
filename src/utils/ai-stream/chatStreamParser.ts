@@ -4,7 +4,7 @@ import type {
   MessageEndEvent,
 } from "@/api/chat/types";
 
-export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error";
+export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-check" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error";
 
 /** 深度思考步骤：由 status 事件按 node 聚合而来 */
 export interface ThinkStep {
@@ -129,6 +129,26 @@ export function applyEventToBlocks(
       return {
         ...base,
         blocks: upsertBlock(blocks, stablePayloadId("ask-slot", [slotName], slotIndex), "ask-slot", event.data, true),
+        receivedContent: true,
+      };
+    }
+    case "guide_step": {
+      const steps = Array.isArray(event.data?.steps) ? event.data.steps : [];
+      if (!steps.length) return base;
+      const stepIndex = blocks.filter(block => block.type === "guide-step").length;
+      const title = String(event.data?.title || "").trim();
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, stablePayloadId("guide-step", [title], stepIndex), "guide-step", event.data, true),
+        receivedContent: true,
+      };
+    }
+    case "guide_check": {
+      const stepId = String(event.data?.step_id || "").trim();
+      const checkIndex = blocks.filter(block => block.type === "guide-check").length;
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, stablePayloadId("guide-check", [stepId], checkIndex), "guide-check", event.data, true),
         receivedContent: true,
       };
     }

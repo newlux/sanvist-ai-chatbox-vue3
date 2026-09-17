@@ -5,6 +5,7 @@ import moment from "moment";
 import { computed, ref, watch } from "vue";
 import iconWaveForm from "@/assets/img/icon-waveform.svg";
 import { isListenReportListened } from "@/utils/listen-report";
+import AiBlockRenderer from "../ai-bubble-v2/AiBlockRenderer.vue";
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
 
 defineOptions({
@@ -53,6 +54,11 @@ const props = defineProps({
     type: String,
     default: "",
   },
+  /** 独立步骤卡最多显示几张（初始 1 张，步骤卡推进后递增） */
+  stepCardCount: {
+    type: Number,
+    default: 1,
+  },
   awakening: {
     type: Object,
     default: null,
@@ -94,6 +100,7 @@ const emit = defineEmits([
   "quick-prompt",
   "suggestion-tap",
   "ask-slot-open",
+  "guide-step-open",
   "tts-click",
   "share-click",
   "feedback-change",
@@ -189,6 +196,10 @@ function onAskSlotOpen(payload, messageIndex: number) {
   emit("ask-slot-open", payload, messageIndex);
 }
 
+function onGuideStepOpen(payload) {
+  emit("guide-step-open", payload);
+}
+
 function onTtsClick(index) {
   emit("tts-click", index);
 }
@@ -236,6 +247,19 @@ watch([
 function onListenReport() {
   emit("listen-report", listenedReport.value);
 }
+/** 独立卡片（如核对/步骤卡）：不放进回答气泡，跟在气泡下方单独成卡 */
+const STANDALONE_BLOCK_TYPES = ["guide-check"];
+/**
+ * 步骤卡按顺序逐个露出：初始只显示第一张，步骤卡推进到第 N 步时只显示第 N 张，其余隐藏。
+ * 当前步骤由页面传入，历史消息复用同一个下标。
+ */
+function standaloneBlocks(message: UiChatMessage) {
+  const current = Math.max(1, Number(props.stepCardCount) || 1);
+  return (message?.blocks || [])
+    .filter(block => block && STANDALONE_BLOCK_TYPES.includes(block.type))
+    .slice(current - 1, current);
+}
+
 const listPadStyle = computed(() =>
   (props.bottomInset ? { paddingBottom: props.bottomInset } : {}),
 );
@@ -366,12 +390,21 @@ const listPadStyle = computed(() =>
               :asr-pending="!!msg.asrPending"
               @suggestion-tap="onSuggestionTap($event, index)"
               @ask-slot-open="onAskSlotOpen($event, index)"
+              @guide-step-open="onGuideStepOpen"
               @tts-click="onTtsClick(index)"
               @share-click="onShareClick(index, msg)"
               @select-toggle="onSelectToggle(index)"
               @feedback-change="onFeedbackChange(index, msg, $event)"
               @copy-click="onCopyClick(index, msg)"
             />
+            <!-- 核对/步骤卡独立成卡，不放进回答气泡 -->
+            <view
+              v-for="block in standaloneBlocks(msg)"
+              :key="block.id"
+              class="chat-box__card"
+            >
+              <AiBlockRenderer :block="block" />
+            </view>
           </view>
         </view>
       </view>
@@ -402,6 +435,10 @@ const listPadStyle = computed(() =>
 }
 .chat-box {
   padding: 40rpx 40rpx 0;
+}
+/* 独立于回答气泡的卡片（核对/步骤卡） */
+.chat-box__card {
+  margin: 24rpx 0;
 }
 .business-overview {
   padding: 148rpx 40rpx 0;

@@ -18,6 +18,9 @@ import {
 const logger = createLogger("attachments");
 
 export const MAX_ATTACHMENT_COUNT = 3;
+
+/** 附件来源：前端三选项弹窗的三项，外加容器原生的合并入口 */
+export type AttachmentSource = "camera" | "album" | "file" | "native";
 /** 低版本降级路径（uni.chooseImage / chooseFile）的本地文件大小上限 */
 const MAX_LOCAL_FILE_SIZE = 50 * 1024 * 1024;
 
@@ -156,21 +159,47 @@ function createAttachmentLocalId() {
   return `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-/**
- * H5 下 uni.chooseImage / uni.chooseFile 给的本地地址是 `blob:` 临时 URL，
- * 部分 webview 的 uni-image 渲染不出来（空白/破图）。
- * 用 FileReader 把选中的 File 转成 data URL 作为缩略图地址，本地秒显、不依赖网络。
- * 非图片不转：base64 体积大，而文件类型本来走图标分支，不需要缩略图。
- */
-function readLocalPreviewSrc(file: LocalSelectedFile, type: AttachmentKind): Promise<string> {
-  const native = file.file;
-  if (type !== "image" || !native || typeof FileReader === "undefined") return Promise.resolve("");
+/** H5 选择器给的是 blob: 临时地址：部分 WebView 的 uni-image 渲染不出来（消息里就是灰块） */
+function isBlobUrl(path: string) {
+  return /^blob:/.test(String(path || ""));
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  if (typeof FileReader === "undefined") return Promise.resolve("");
   return new Promise<string>((resolve) => {
     const reader = new FileReader();
     reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
     reader.onerror = () => resolve("");
-    reader.readAsDataURL(native);
+    reader.readAsDataURL(blob);
   });
+}
+
+/**
+ * 附件缩略图地址：统一换成可直接渲染的 data URL。
+ *
+ * H5 下 uni.chooseImage / uni.chooseFile 给的本地地址是 `blob:` 临时 URL，
+ * 部分 webview 的 uni-image 渲染不出来（空白/破图，消息里就是灰块）。
+ * - 选择器给了原生 File → 直接 FileReader 转；
+ * - 只给了 blob: 地址（个别版本 tempFiles 只是 {path}）→ fetch 回来再转，避免最终落到 blob: 上。
+ * 非图片不转：base64 体积大，而文件类型本来走图标分支，不需要缩略图。
+ */
+async function readLocalPreviewSrc(file: LocalSelectedFile, type: AttachmentKind): Promise<string> {
+  if (type !== "image") return "";
+  const native = file.file;
+  if (typeof Blob !== "undefined" && native instanceof Blob) {
+    const converted = await blobToDataUrl(native);
+    if (converted) return converted;
+  }
+  if (typeof fetch === "function" && isBlobUrl(file.path)) {
+    try {
+      const response = await fetch(file.path);
+      return await blobToDataUrl(await response.blob());
+    } catch (error) {
+      logger.warn("[attachment] local preview fallback failed", error);
+      return "";
+    }
+  }
+  return "";
 }
 
 function getFileExtension(name: string, path = "") {
@@ -223,6 +252,15 @@ function isAllowedExtension(extension: string, mimeType = "") {
   return !extension && mimeIsImage;
 }
 
+/**
+ * 容器内原生附件选择器是否可用（等待 bridge 注入窗口）。
+ * 单独导出是因为步骤卡要先判断「弹前端三选项弹窗」还是「直接走原生弹窗」，
+ * 而它并不需要整个 hook 实例。
+ */
+export function isNativeAttachmentPickerAvailable() {
+  return waitForMpaas(2000).then(Boolean);
+}
+
 /** 低版本降级上传时 uni.uploadFile 需要的 fileType */
 function toUploadFileType(kind: AttachmentKind) {
   if (kind === "video") return "video" as const;
@@ -257,6 +295,8 @@ export function useComposerAttachments() {
     uni.showToast({ title: t("attachment-limit", { count: MAX_ATTACHMENT_COUNT }), icon: "none" });
   }
   const attachments = ref<ComposerAttachment[]>([]);
+  /** 缩略图转换是独立异步线：发送前要等它落地，否则消息里回显的还是 blob: 灰块 */
+  const previewTasks = new Map<string, Promise<void>>();
 
   const hasAttachments = computed(() => attachments.value.length > 0);
   // 原生路径恒为 uploaded；低版本降级路径存在「上传中 / 上传失败」状态，发送前需校验
@@ -367,11 +407,12 @@ export function useComposerAttachments() {
         nativeFile: file.file,
       });
       // H5 的 blob: 临时地址渲染不可靠，转成 data URL 后回填缩略图地址
-      void readLocalPreviewSrc(file, type).then((previewSrc) => {
+      const previewTask = readLocalPreviewSrc(file, type).then((previewSrc) => {
         if (!previewSrc) return;
         const current = findAttachment(localId);
         if (current) current.localPath = previewSrc;
       });
+      previewTasks.set(localId, previewTask);
       void uploadAttachment(localId);
     });
   }
@@ -450,7 +491,7 @@ export function useComposerAttachments() {
   }
 
   /** 低版本降级：uni.chooseImage 选择照片/拍照，再走 /files/upload 上传 */
-  async function chooseImagesViaUni(sourceType: Array<"album" | "camera">) {
+  async function chooseImagesViaUni(sourceType: Array<"album" | "camera">, limit?: number) {
     // 容器里先向原生要权限：安卓 WebView 不先授权的话，选图/拍照会被静默拒绝
     const permission = sourceType.includes("camera") ? "camera" : "photo";
     if (!await ensureNativePermission(permission)) {
@@ -458,31 +499,39 @@ export function useComposerAttachments() {
       return;
     }
 
-    const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
-    uni.chooseImage({
-      count,
-      sourceType,
-      sizeType: ["compressed", "original"],
-      success: (result) => {
-        // H5 下 tempFiles 元素就是原生 File 对象：保留引用，上传时透传避免文件名退化
-        const tempFiles = (result.tempFiles || []) as Array<{
-          path?: string;
-          size?: number;
-          name?: string;
-          type?: string;
-        }>;
-        const paths = Array.isArray(result.tempFilePaths)
-          ? result.tempFilePaths
-          : [result.tempFilePaths].filter(Boolean) as string[];
-        appendSelectedFiles(paths.map((path, index) => ({
-          path: String(path),
-          name: String(tempFiles[index]?.name || ""),
-          size: Number(tempFiles[index]?.size) || 0,
-          mimeType: String(tempFiles[index]?.type || "image/*"),
-          file: tempFiles[index] as unknown as File | undefined,
-        })));
-      },
-      fail: error => logger.warn("chooseImage failed", error),
+    const count = Math.max(1, Math.min(limit ?? MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_COUNT - attachments.value.length));
+    // 选择器是异步弹窗，必须等它回调后再返回：调用方（步骤卡附件入口）选完要立刻判断有没有选中
+    await new Promise<void>((resolve) => {
+      uni.chooseImage({
+        count,
+        sourceType,
+        sizeType: ["compressed", "original"],
+        success: (result) => {
+          // H5 下 tempFiles 元素就是原生 File 对象：保留引用，上传时透传避免文件名退化
+          const tempFiles = (result.tempFiles || []) as Array<{
+            path?: string;
+            size?: number;
+            name?: string;
+            type?: string;
+          }>;
+          const paths = Array.isArray(result.tempFilePaths)
+            ? result.tempFilePaths
+            : [result.tempFilePaths].filter(Boolean) as string[];
+          appendSelectedFiles(paths.map((path, index) => ({
+            path: String(path),
+            name: String(tempFiles[index]?.name || ""),
+            size: Number(tempFiles[index]?.size) || 0,
+            mimeType: String(tempFiles[index]?.type || "image/*"),
+            file: tempFiles[index] as unknown as File | undefined,
+          })));
+          resolve();
+        },
+        // 用户取消也 resolve：调用方靠「有没有选中附件」区分取消与选中
+        fail: (error) => {
+          logger.warn("chooseImage failed", error);
+          resolve();
+        },
+      });
     });
   }
 
@@ -499,22 +548,29 @@ export function useComposerAttachments() {
       uni.showToast({ title: t("file-select-unsupported"), icon: "none" });
       return;
     }
-    chooseFile({
-      count: Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length),
-      type: "all",
-      // 选择器层面先过滤一轮（个别环境不认这个参数，appendSelectedFiles 还有一次白名单兜底）
-      extension: DEFAULT_ALLOWED_EXTENSIONS.map(ext => `.${ext}`),
-      success: (result: { tempFiles?: Array<Record<string, unknown>> }) => {
-        appendSelectedFiles((result.tempFiles || []).map(file => ({
-          path: String(file.path || ""),
-          name: String(file.name || ""),
-          size: Number(file.size) || 0,
-          mimeType: String(file.type || ""),
-          // H5 下 tempFiles 元素就是原生 File 对象本身，直接透传
-          file: file as unknown as File | undefined,
-        })));
-      },
-      fail: (error: unknown) => logger.warn("chooseFile failed", error),
+    // 同 chooseImagesViaUni：等文件选择器回调后再返回
+    await new Promise<void>((resolve) => {
+      chooseFile({
+        count: Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length),
+        type: "all",
+        // 选择器层面先过滤一轮（个别环境不认这个参数，appendSelectedFiles 还有一次白名单兜底）
+        extension: DEFAULT_ALLOWED_EXTENSIONS.map(ext => `.${ext}`),
+        success: (result: { tempFiles?: Array<Record<string, unknown>> }) => {
+          appendSelectedFiles((result.tempFiles || []).map(file => ({
+            path: String(file.path || ""),
+            name: String(file.name || ""),
+            size: Number(file.size) || 0,
+            mimeType: String(file.type || ""),
+            // H5 下 tempFiles 元素就是原生 File 对象本身，直接透传
+            file: file as unknown as File | undefined,
+          })));
+          resolve();
+        },
+        fail: (error: unknown) => {
+          logger.warn("chooseFile failed", error);
+          resolve();
+        },
+      });
     });
   }
   // #endif
@@ -524,8 +580,8 @@ export function useComposerAttachments() {
    * - mPaaS 容器（WebView）：imageChoose(returnLocal) 选图 + aiFileUpload 上传
    * - 普通浏览器：uni.chooseImage + /files/upload
    */
-  async function chooseImages(sourceType: Array<"album" | "camera">) {
-    const count = Math.max(1, MAX_ATTACHMENT_COUNT - attachments.value.length);
+  async function chooseImages(sourceType: Array<"album" | "camera">, limit?: number) {
+    const count = Math.max(1, Math.min(limit ?? MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_COUNT - attachments.value.length));
 
     // 等待 bridge 注入窗口，判断是否在 mPaaS 容器（WebView）里
     const bridge = await waitForMpaas(2000);
@@ -539,7 +595,45 @@ export function useComposerAttachments() {
     }
 
     // 浏览器：uni.chooseImage
-    await chooseImagesViaUni(sourceType);
+    await chooseImagesViaUni(sourceType, limit);
+  }
+
+  /** 等某个附件的上传流程结束（uploaded / failed），最长等 timeoutMs */
+  function waitForAttachmentSettled(localId: string, timeoutMs = 60_000) {
+    return new Promise<void>((resolve) => {
+      const startedAt = Date.now();
+      const timer = setInterval(() => {
+        const attachment = findAttachment(localId);
+        if (!attachment || attachment.status !== "uploading" || Date.now() - startedAt > timeoutMs) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 120);
+    });
+  }
+
+  /**
+   * 步骤卡的附件入口：选一个附件并等它上传完，直接返回可发送的 files/meta。
+   * - "camera" / "album"：前端弹窗里的拍照 / 相册（uni.chooseImage，限 1 张）
+   * - "file"：H5 文件选择；"native"：容器内原生弹窗（自带拍照 / 相册 / 文件）
+   * 用户取消选择、上传失败都返回 null（失败提示由上传流程内部给出）。
+   * 这条链路用独立的 hook 实例，选文件前先清空，避免和输入栏的附件互相干扰。
+   */
+  async function pickAttachmentForSend(source: AttachmentSource = "native") {
+    clearAttachments();
+    if (source === "camera" || source === "album") {
+      await chooseImages([source], 1);
+    } else {
+      await chooseFilesFromNative();
+    }
+    const localId = attachments.value[attachments.value.length - 1]?.localId;
+    if (!localId) return null;
+    await waitForAttachmentSettled(localId);
+    // 等缩略图转成 data URL：否则消息里回显的是 blob:，部分 WebView 上就是灰块
+    await previewTasks.get(localId);
+    const attachment = findAttachment(localId);
+    if (!attachment || attachment.status !== "uploaded") return null;
+    return takeUploadedFiles();
   }
 
   /**
@@ -573,7 +667,7 @@ export function useComposerAttachments() {
    * 不再弹前端三选项弹窗；浏览器下返回 false：弹前端三选项弹窗。
    */
   function isNativePickerAvailable() {
-    return waitForMpaas(2000).then(Boolean);
+    return isNativeAttachmentPickerAvailable();
   }
 
   /** 触发附件选择（含原生降级）；已达上限时只提示 */
@@ -588,6 +682,7 @@ export function useComposerAttachments() {
 
   function removeAttachment(localId: string) {
     attachments.value = attachments.value.filter(item => item.localId !== localId);
+    previewTasks.delete(localId);
   }
 
   function retryAttachment(localId: string) {
@@ -596,6 +691,7 @@ export function useComposerAttachments() {
 
   function clearAttachments() {
     attachments.value = [];
+    previewTasks.clear();
   }
 
   /**
@@ -623,7 +719,8 @@ export function useComposerAttachments() {
     const meta = uploaded.map(item => ({
       fileId: item.fileId,
       url: item.url,
-      localPath: item.localPath,
+      // 消息只管回显：blob: 在部分 WebView 的 uni-image 上是灰块，交给远端 url 兜底
+      localPath: isBlobUrl(item.localPath) ? "" : item.localPath,
       name: item.name,
       type: item.type,
       size: item.size,
@@ -641,6 +738,7 @@ export function useComposerAttachments() {
     openAttachmentPicker,
     isNativePickerAvailable,
     chooseImages,
+    pickAttachmentForSend,
     chooseFilesFromNative,
     removeAttachment,
     retryAttachment,
