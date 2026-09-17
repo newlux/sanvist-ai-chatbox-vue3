@@ -97,9 +97,8 @@ const realtimeTts = useRealtimeTts();
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
-  // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
-  if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
-  return composerBottomInset.value;
+  // ASK 场景的导航和输入栏都是 fixed，列表要为两者预留空间。
+  return `calc(${composerBottomInset.value} + 72rpx)`;
 });
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 const askSlotQueue = ref<AskSlotPayload[]>([]);
@@ -485,7 +484,6 @@ onBeforeUnmount(() => {
         @submit="onAskSlotSubmit"
       />
       <AiChatNav
-        :visible="showQuickPrompts"
         :active-key="navActiveKey"
         :style="navOffsetStyle"
         @item-click="onNavItemClick"

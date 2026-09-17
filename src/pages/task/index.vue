@@ -8,7 +8,6 @@ import iconForm from "@/assets/img/icon-form.svg";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
-import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import AiSceneWelcome from "@/components/ai-scene-welcome/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
@@ -20,7 +19,7 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
-import { backFromScene, navigateToScene } from '@/utils/scene-navigation';
+import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
 /**
@@ -33,8 +32,6 @@ import { consumePendingHistorySession, getSessionId, navigateToSessionScene, pee
  */
 defineOptions({ name: "AiTaskPage" });
 
-/** 任务协同对应的导航项 key（与 ai-chat-nav 默认数据一致），本页内导航高亮该项 */
-const TASK_NAV_KEY = "ai-form";
 const logger = createLogger("task-page");
 const { t } = useI18n();
 
@@ -64,7 +61,6 @@ const {
   keyboardHeight,
   voiceKeyboardHeight,
   composerBottomInset,
-  composerDockOffset,
   syncWindowHeight,
   setInputDockHeight,
   setTextInputFocused,
@@ -102,11 +98,8 @@ const realtimeTts = useRealtimeTts(chatScope);
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
-  // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
-  if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
   return composerBottomInset.value;
 });
-const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 
 /** 点击追问后先移除它所属回答的追问列表，再按普通问题走完整发送链路。 */
 function onTaskSuggestionTap(suggestion: string, messageIndex: number) {
@@ -172,18 +165,6 @@ function startNewConversation() {
   cancelActiveStream();
   chatStore.resetConversation();
   nextTick(() => chatStore.scrollToBottom(true));
-}
-
-/**
- * 快捷入口：听汇报 / 作业指导各自另开专属页；
- * 任务协同已在当前页（高亮），点了不重复入栈。
- */
-function onNavItemClick(item: { key?: string; title?: string; subagent?: string; url?: string }) {
-  const subagent = String(item?.subagent || "");
-  if (subagent === "task") return;
-
-  const targetUrl = String(item?.url || "");
-  if (targetUrl) void navigateToScene(targetUrl);
 }
 
 function onBack() {
@@ -395,12 +376,6 @@ onUnload(() => {
         @select-toggle="onShareSelectToggle"
         @scroll-top="onScrollTop"
         @pinned-change="chatStore.setPinnedToBottom"
-      />
-      <AiChatNav
-        :visible="showQuickPrompts"
-        :active-key="TASK_NAV_KEY"
-        :style="navOffsetStyle"
-        @item-click="onNavItemClick"
       />
       <view v-if="isSessionSwitching" class="session-loading">
         <view class="session-loading__spinner" />
