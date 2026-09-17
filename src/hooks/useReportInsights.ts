@@ -38,6 +38,7 @@ function toInsightItem(event: ReportInsightEvent): ReportInsightItem {
 
 export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
   const items = ref<ReportInsightItem[]>([]);
+  const rawItems = ref<ReportInsightEvent[]>([]);
   const loading = ref(false);
   const loadingMore = ref(false);
   const loadError = ref(false);
@@ -70,6 +71,7 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
     try {
       const result = await getReportInsightEvents({ page, pageSize });
       const nextItems = result.items.map(toInsightItem);
+      rawItems.value = append ? [...rawItems.value, ...result.items] : result.items;
       items.value = append ? [...items.value, ...nextItems] : nextItems;
       currentPage.value = result.page;
       hasMore.value = result.hasMore;
@@ -162,6 +164,7 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
 
   return {
     items,
+    rawItems,
     visibleItems,
     loading,
     loadingMore,

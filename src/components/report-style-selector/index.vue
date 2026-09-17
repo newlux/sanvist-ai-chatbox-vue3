@@ -297,17 +297,48 @@ onMounted(() => {
    普通文档流（非 fixed 覆盖层），由外层 podcast-page flex 撑满；
    relative 仅为内部 absolute 子元素提供定位参照。顶部安全区由外层 statusbar 占位统一负责 */
 .report-style-selector {
+  --rs-avail: calc(100vh - var(--safe-top-px, 0px));
+  --rs-bottom: max(var(--safe-bottom-px, 0px), 48px);
+  --rs-gap-floor: 0.3;
+  --rs-region-floor: 0.45;
+  --rs-gaps: clamp(
+    calc(258rpx * var(--rs-gap-floor)),
+    calc(var(--rs-avail) - 336rpx - 856rpx - var(--rs-bottom)),
+    258rpx
+  );
+  --rs-gap-u: calc(var(--rs-gaps) / 258);
+  --rs-region-budget: calc(
+    var(--rs-avail) - 336rpx - calc(258rpx * var(--rs-gap-floor)) - var(--rs-bottom)
+  );
+  --rs-stage-size: clamp(
+    calc(400rpx * var(--rs-region-floor)),
+    calc(var(--rs-region-budget) * 0.46729),
+    400rpx
+  );
+  --rs-permission-size: clamp(
+    calc(456rpx * var(--rs-region-floor)),
+    calc(var(--rs-region-budget) * 0.53271),
+    456rpx
+  );
+  --rs-stage-u: calc(var(--rs-stage-size) / 400);
+  --rs-permission-u: calc(var(--rs-permission-size) / 456);
   position: relative;
   box-sizing: border-box;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
   width: 100%;
-  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
   color: #1a1a1a;
   background: #fff;
+}
+
+@supports (height: 100dvh) {
+  .report-style-selector {
+    --rs-avail: calc(100dvh - var(--safe-top-px, 0px));
+  }
 }
 
 /* —— ② 顶部导航 Top Nav(940:136 375×50px)：关闭居左 + 工作胶囊居中，右侧等宽占位保持胶囊居中 —— */
@@ -384,7 +415,7 @@ onMounted(() => {
 .report-style-selector__title {
   display: block;
   width: 100%;
-  margin-top: 32rpx;
+  margin-top: calc(32 * var(--rs-gap-u));
   color: #1a1a1a;
   font-size: 34rpx;
   font-weight: 500;
@@ -396,7 +427,7 @@ onMounted(() => {
 /* —— ④ 汇报时间行(940:76)：13px=26rpx，Inter Regular，#999999 ——
    与标题底(143)间距 gap=157-143=14px=28rpx */
 .report-style-selector__time-picker {
-  margin-top: 28rpx;
+  margin-top: calc(28 * var(--rs-gap-u));
   flex-shrink: 0;
 }
 
@@ -434,8 +465,8 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 400rpx;
-  margin-top: 26rpx;
+  height: var(--rs-stage-size);
+  margin-top: calc(26 * var(--rs-gap-u));
   flex-shrink: 0;
 }
 
@@ -450,8 +481,8 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: 392rpx;
-  height: 392rpx;
+  width: calc(392 * var(--rs-stage-u));
+  height: calc(392 * var(--rs-stage-u));
   border-radius: 50%;
   overflow: hidden;
   background: linear-gradient(180deg, #f9fdff 0%, #ffffff 49%, #ffebeb 100%);
@@ -482,49 +513,49 @@ onMounted(() => {
 }
 
 .report-style-selector__skeleton--style-label {
-  width: 112rpx;
-  height: 28rpx;
+  width: calc(112 * var(--rs-stage-u));
+  height: calc(28 * var(--rs-stage-u));
 }
 
 .report-style-selector__skeleton--style-name {
-  width: 210rpx;
-  height: 60rpx;
-  margin-top: 30rpx;
+  width: calc(210 * var(--rs-stage-u));
+  height: calc(60 * var(--rs-stage-u));
+  margin-top: calc(30 * var(--rs-stage-u));
 }
 
 .report-style-selector__skeleton--style-desc {
-  width: 144rpx;
-  height: 28rpx;
-  margin-top: 12rpx;
+  width: calc(144 * var(--rs-stage-u));
+  height: calc(28 * var(--rs-stage-u));
+  margin-top: calc(12 * var(--rs-stage-u));
 }
 
 /* 汇报风格标签(940:191)：14px=28rpx，Inter Regular，#594342 */
 .report-style-selector__style-label {
   position: relative;
   color: #594342;
-  font-size: 28rpx;
+  font-size: calc(28 * var(--rs-stage-u));
   font-weight: 400;
-  line-height: 34rpx;
+  line-height: calc(34 * var(--rs-stage-u));
 }
 
 /* 风格名称(940:181)：33px=66rpx，Inter Bold，#1A1A1A；与标签底(252)间距=267-252=15px=30rpx */
 .report-style-selector__style-name {
   position: relative;
-  margin-top: 30rpx;
+  margin-top: calc(30 * var(--rs-stage-u));
   color: #1a1a1a;
-  font-size: 66rpx;
+  font-size: calc(66 * var(--rs-stage-u));
   font-weight: 700;
-  line-height: 76rpx;
+  line-height: calc(76 * var(--rs-stage-u));
 }
 
 /* 风格说明(940:159)：14px=28rpx，Inter Regular，#999999；与名称底(307)间距=313-307=6px=12rpx */
 .report-style-selector__style-desc {
   position: relative;
-  margin-top: 12rpx;
+  margin-top: calc(12 * var(--rs-stage-u));
   color: #999999;
-  font-size: 28rpx;
+  font-size: calc(28 * var(--rs-stage-u));
   font-weight: 400;
-  line-height: 36rpx;
+  line-height: calc(36 * var(--rs-stage-u));
 }
 
 /* 分页圆点(940:182 8×6px 当前 / 940:183 6×6px 其余)，白底 */
@@ -558,13 +589,13 @@ onMounted(() => {
   top: 50%;
   z-index: 3;
   display: block;
-  width: 48rpx;
-  height: 48rpx;
+  width: calc(48 * var(--rs-stage-u));
+  height: calc(48 * var(--rs-stage-u));
   transform: translateY(-50%);
 }
 
-.report-style-selector__switch--right { right: 54rpx; }
-.report-style-selector__switch:not(.report-style-selector__switch--right) { left: 54rpx; }
+.report-style-selector__switch--right { right: calc(54 * var(--rs-stage-u)); }
+.report-style-selector__switch:not(.report-style-selector__switch--right) { left: calc(54 * var(--rs-stage-u)); }
 .report-style-selector__switch--disabled {
   pointer-events: none;
   opacity: 0.35;
@@ -574,7 +605,7 @@ onMounted(() => {
 .report-style-selector__permission-hint {
   display: block;
   width: 100%;
-  margin-top: 56rpx;
+  margin-top: calc(56 * var(--rs-gap-u));
   color: #999999;
   font-size: 28rpx;
   font-weight: 400;
@@ -586,9 +617,9 @@ onMounted(() => {
 /* —— ⑦ 权限数据胶囊区(120×120px=240×240rpx)：与说明底(427)间距=449-427=22px=44rpx —— */
 .report-style-selector__permission-stage {
   position: relative;
-  width: 100%;
-  height: 456rpx;
-  margin-top: 44rpx;
+  width: calc(750 * var(--rs-permission-u));
+  height: var(--rs-permission-size);
+  margin-top: calc(44 * var(--rs-gap-u));
   flex-shrink: 0;
 }
 
@@ -602,8 +633,8 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: 240rpx;
-  height: 240rpx;
+  width: calc(240 * var(--rs-permission-u));
+  height: calc(240 * var(--rs-permission-u));
   background: #ffffff;
   border-radius: 50%;
   overflow: hidden;
@@ -627,19 +658,30 @@ onMounted(() => {
 }
 
 /* 设计稿坐标（相对权限区顶, 1px=2rpx）：经营成本(32,449)、风险预警(213.5,447)、成本能耗(128.5,557) */
-.report-style-selector__capsule--1 { left: 64rpx; top: 4rpx; }
-.report-style-selector__capsule--2 { left: 427rpx; top: 0; }
-.report-style-selector__capsule--3 { left: 257rpx; top: 216rpx; }
+.report-style-selector__capsule--1 {
+  top: calc(4 * var(--rs-permission-u));
+  left: calc(64 * var(--rs-permission-u));
+}
+
+.report-style-selector__capsule--2 {
+  top: 0;
+  left: calc(427 * var(--rs-permission-u));
+}
+
+.report-style-selector__capsule--3 {
+  top: calc(216 * var(--rs-permission-u));
+  left: calc(257 * var(--rs-permission-u));
+}
 
 /* 勾选(940:161 20×20px=40×40rpx)：相对胶囊右上，top 15px=30rpx、right ~20px=40rpx（置于底图之上） */
 .report-style-selector__capsule-check {
   position: absolute;
-  top: 30rpx;
-  right: 40rpx;
+  top: calc(30 * var(--rs-permission-u));
+  right: calc(40 * var(--rs-permission-u));
   z-index: 2;
   display: block;
-  width: 40rpx;
-  height: 40rpx;
+  width: calc(40 * var(--rs-permission-u));
+  height: calc(40 * var(--rs-permission-u));
 }
 
 /* 胶囊文字(940:160)：13px=26rpx，Inter Medium，#0B0B0B（置于底图之上） */
@@ -647,16 +689,16 @@ onMounted(() => {
   position: relative;
   z-index: 1;
   color: #0b0b0b;
-  font-size: 26rpx;
+  font-size: calc(26 * var(--rs-permission-u));
   font-weight: 500;
-  line-height: 32rpx;
+  line-height: calc(32 * var(--rs-permission-u));
 }
 
 /* —— ⑧ CTA 按钮(940:132 319×56px=638×112rpx)：白底、radius 28px、红字 #C8201E；与胶囊底(677)间距=713-677=36px=72rpx；
    box-shadow(px)：0 -2px 21px rgba(0,0,0,0.06) —— */
 .report-style-selector__selection-hint {
   height: 36rpx;
-  margin-top: 36rpx;
+  margin-top: calc(36 * var(--rs-gap-u));
   color: #c8201e;
   font-size: 26rpx;
   line-height: 36rpx;
@@ -669,7 +711,7 @@ onMounted(() => {
   box-sizing: border-box;
   width: 638rpx;
   height: 112rpx;
-  margin-top: 72rpx;
+  margin-top: calc(72 * var(--rs-gap-u));
   color: #c8201e;
   font-size: 34rpx;
   font-weight: 400;
@@ -678,8 +720,8 @@ onMounted(() => {
   border-radius: 56rpx;
   box-shadow: 0 -2px 21px rgb(0 0 0 / 6.1%);
   flex-shrink: 0;
-  /* 底部安全区：改由按钮自身承担，避免贴底按钮被系统导航栏/手势条遮挡。 */
-  margin-bottom: var(--safe-bottom-px, 0px);
+  /* 底部安全区：优先使用真实 inset，缺失时至少保留 48px，避免按钮贴近系统导航栏。 */
+  margin-bottom: max(var(--safe-bottom-px, 0px), 48px);
 }
 
 .report-style-selector__button--disabled {

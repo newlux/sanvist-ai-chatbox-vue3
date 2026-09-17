@@ -88,6 +88,7 @@ const { safeBottomPx } = useSafeArea();
   left: 0;
   display: flex;
   height: 910rpx;
+  max-height: var(--app-viewport-height);
   flex-direction: column;
   overflow: hidden;
   border-radius: 48rpx 48rpx 0 0;
@@ -133,6 +134,8 @@ const { safeBottomPx } = useSafeArea();
 .report-broadcast-history__list {
   width: 694rpx;
   height: 656rpx;
+  min-height: 0;
+  flex: 1 1 auto;
   align-self: center;
   padding-top: 44rpx;
 }

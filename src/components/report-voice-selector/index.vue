@@ -228,12 +228,7 @@ function closeSelector() {
           :key="item.voice.id"
           class="report-voice-selector__item"
           :class="{ 'report-voice-selector__item--selected': item.index === selectedIndex }"
-          :style="{
-            left: `${item.x * 2}rpx`,
-            top: `${(item.y - 481) * 2}rpx`,
-            opacity: item.opacity,
-            transform: `translateX(${dragDeltaX * 0.12}rpx)`,
-          }"
+          :style="`--slot-x: ${item.x * 2}; --slot-y: ${(item.y - 481) * 2}; --drag-x: ${dragDeltaX * 0.12}; opacity: ${item.opacity}`"
           @tap.stop="selectVoice(item.index)"
         >
           <!-- 选中项外层椭圆(940:27)：粉渐变 + 红描边；非选中为空 -->
@@ -268,17 +263,48 @@ function closeSelector() {
 /* 根容器：普通文档流（非 fixed 覆盖层），由外层 podcast-page flex 撑满；
    relative 仅为内部 absolute 子元素提供定位参照。顶部安全区由外层 statusbar 占位统一负责 */
 .report-voice-selector {
+  --vs-avail: calc(100vh - var(--safe-top-px, 0px));
+  --vs-bottom: max(var(--safe-bottom-px, 0px), 48px);
+  --vs-gap-floor: 0.3;
+  --vs-region-floor: 0.45;
+  --vs-gaps: clamp(
+    calc(281rpx * var(--vs-gap-floor)),
+    calc(var(--vs-avail) - 424rpx - 16rpx - 720rpx - var(--vs-bottom)),
+    281rpx
+  );
+  --vs-gap-u: calc(var(--vs-gaps) / 281);
+  --vs-region-budget: calc(
+    var(--vs-avail) - 424rpx - 16rpx - calc(281rpx * var(--vs-gap-floor)) - var(--vs-bottom)
+  );
+  --vs-hero-size: clamp(
+    calc(420rpx * var(--vs-region-floor)),
+    calc(var(--vs-region-budget) * 0.583333),
+    420rpx
+  );
+  --vs-car-size: clamp(
+    calc(300rpx * var(--vs-region-floor)),
+    calc(var(--vs-region-budget) * 0.416667),
+    300rpx
+  );
+  --vs-hero-u: calc(var(--vs-hero-size) / 420);
+  --vs-car-u: calc(var(--vs-car-size) / 300);
   position: relative;
   box-sizing: border-box;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
   width: 100%;
-  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
   color: #1a1a1a;
   background: #fff;
+}
+
+@supports (height: 100dvh) {
+  .report-voice-selector {
+    --vs-avail: calc(100dvh - var(--safe-top-px, 0px));
+  }
 }
 
 /* —— ② 顶部导航 Top Nav(1024:1) 高 54px=108rpx，flex 两端对齐 —— */
@@ -354,7 +380,7 @@ function closeSelector() {
 .report-voice-selector__title {
   display: block;
   width: 100%;
-  margin-top: 38rpx;
+  margin-top: calc(38 * var(--vs-gap-u));
   color: #1a1a1a;
   font-size: 34rpx;
   font-weight: 600;
@@ -366,9 +392,9 @@ function closeSelector() {
 /* —— ④ 主视觉区(940:56 群组)：人物半身大图，与标题底间距 31px=62rpx —— */
 .report-voice-selector__hero {
   position: relative;
-  width: 420rpx;
-  height: 420rpx;
-  margin-top: 62rpx;
+  width: var(--vs-hero-size);
+  height: var(--vs-hero-size);
+  margin-top: calc(62 * var(--vs-gap-u));
   flex-shrink: 0;
 }
 
@@ -383,17 +409,17 @@ function closeSelector() {
 /* 左右声波(940:3 / 940:110)：70×70px=140×140rpx，垂直居中于人物中部 */
 .report-voice-selector__wave {
   position: absolute;
-  top: 156rpx;
-  width: 140rpx;
-  height: 140rpx;
+  top: calc(156 * var(--vs-hero-u));
+  width: calc(140 * var(--vs-hero-u));
+  height: calc(140 * var(--vs-hero-u));
 }
 
-.report-voice-selector__wave--left { left: -88rpx; }
-.report-voice-selector__wave--right { right: -110rpx; }
+.report-voice-selector__wave--left { left: calc(-88 * var(--vs-hero-u)); }
+.report-voice-selector__wave--right { right: calc(-110 * var(--vs-hero-u)); }
 
 .report-voice-selector__wave .report-waveform {
-  width: 140rpx;
-  height: 140rpx;
+  width: calc(140 * var(--vs-hero-u)) !important;
+  height: calc(140 * var(--vs-hero-u)) !important;
 }
 
 /* —— ⑤ 性格信息：与主视觉底间距 25px=50rpx —— */
@@ -407,7 +433,7 @@ function closeSelector() {
 
 /* 名称(940:78)：Inter SemiBold 17px=34rpx，色 #9A5F5D */
 .report-voice-selector__name {
-  margin-top: 50rpx;
+  margin-top: calc(50 * var(--vs-gap-u));
   color: #9a5f5d;
   font-size: 34rpx;
   font-weight: 600;
@@ -452,21 +478,20 @@ function closeSelector() {
 /* —— ⑦ 轮播区：轨道弧线(940:48) 高 72px=144rpx，与胶囊底间距 13px=26rpx —— */
 .report-voice-selector__carousel {
   position: relative;
-  width: 100%;
-  height: 300rpx;
-  margin-top: 34rpx;
+  width: calc(750 * var(--vs-car-u));
+  height: var(--vs-car-size);
+  margin-top: calc(34 * var(--vs-gap-u));
   flex-shrink: 0;
   touch-action: pan-y;
 }
 
-/* 轨道弧线(940:48)：327×72px → 宽 calc(100%-96rpx)，高 144rpx
-   box-shadow(px)：0 4px 4px rgba(183,20,20,0.25) */
+/* 轨道弧线(940:48)：固定描边投影，几何随轮播区域统一缩放 */
 .report-voice-selector__track {
   position: absolute;
   top: 0;
-  left: 48rpx;
-  width: calc(100% - 96rpx);
-  height: 144rpx;
+  left: calc(48 * var(--vs-car-u));
+  width: calc(654 * var(--vs-car-u));
+  height: calc(144 * var(--vs-car-u));
   filter: drop-shadow(0 4px 4px rgb(183 20 20 / 25%));
 }
 
@@ -477,8 +502,11 @@ function closeSelector() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 140rpx;
-  height: 280rpx;
+  width: calc(140 * var(--vs-car-u));
+  height: calc(280 * var(--vs-car-u));
+  left: calc(var(--slot-x) * var(--vs-car-u));
+  top: calc(var(--slot-y) * var(--vs-car-u));
+  transform: translateX(calc(var(--drag-x) * var(--vs-car-u)));
   transform-origin: center bottom;
   transition: left 180ms ease, top 180ms ease, transform 180ms ease, opacity 180ms ease;
 }
@@ -494,8 +522,8 @@ function closeSelector() {
   left: 50%;
   z-index: 0;
   box-sizing: border-box;
-  width: 180rpx;
-  height: 228rpx;
+  width: calc(180 * var(--vs-car-u));
+  height: calc(228 * var(--vs-car-u));
   background: linear-gradient(180deg, #f5eaea 0%, #f2fbff 100%);
   border: 1px solid #c8201e;
   border-radius: 50%;
@@ -507,9 +535,9 @@ function closeSelector() {
   position: relative;
   z-index: 1;
   box-sizing: border-box;
-  width: 140rpx;
-  height: 184rpx;
-  padding: 6rpx;
+  width: calc(140 * var(--vs-car-u));
+  height: calc(184 * var(--vs-car-u));
+  padding: calc(6 * var(--vs-car-u));
   overflow: hidden;
   border: 1px solid #eaeaea;
   border-radius: 50%;
@@ -519,10 +547,10 @@ function closeSelector() {
 /* 选中头像(940:67)：缩到椭圆内且明显小于外层渐变，四周露出粉渐变 */
 .report-voice-selector__item--selected .report-voice-selector__avatar-wrap {
   position: absolute;
-  top: 20rpx;
+  top: calc(20 * var(--vs-car-u));
   left: 50%;
-  width: 140rpx;
-  height: 182rpx;
+  width: calc(140 * var(--vs-car-u));
+  height: calc(182 * var(--vs-car-u));
   padding: 0;
   background: transparent;
   border: none;
@@ -540,29 +568,29 @@ function closeSelector() {
 /* 选中麦克风徽标(940:28)：24×24px=48×48rpx，设计稿 y=581 → 相对槽位顶 192rpx */
 .report-voice-selector__mic {
   position: absolute;
-  top: 192rpx;
+  top: calc(192 * var(--vs-car-u));
   left: 50%;
   z-index: 4;
-  width: 48rpx;
-  height: 48rpx;
+  width: calc(48 * var(--vs-car-u));
+  height: calc(48 * var(--vs-car-u));
   transform: translateX(-50%);
 }
 
 /* 音色标签(940:71 等)：Inter Regular 13px=26rpx，色 #B78E8C */
 .report-voice-selector__tag {
   display: block;
-  margin-top: 16rpx;
+  margin-top: calc(16 * var(--vs-car-u));
   color: #b78e8c;
-  font-size: 26rpx;
+  font-size: calc(26 * var(--vs-car-u));
   font-weight: 400;
-  line-height: 32rpx;
+  line-height: calc(32 * var(--vs-car-u));
   white-space: nowrap;
 }
 
 /* 选中标签(940:83)：Inter SemiBold 13px=26rpx，色 #96605C，设计稿 y=609 → 相对槽位顶 248rpx */
 .report-voice-selector__item--selected .report-voice-selector__tag {
   position: absolute;
-  top: 248rpx;
+  top: calc(248 * var(--vs-car-u));
   left: 50%;
   margin-top: 0;
   color: #96605c;
@@ -574,7 +602,7 @@ function closeSelector() {
 .report-voice-selector__hint {
   display: block;
   width: 100%;
-  margin-top: 33rpx;
+  margin-top: calc(33 * var(--vs-gap-u));
   color: #b5b5b5;
   font-size: 24rpx;
   font-weight: 400;
@@ -592,7 +620,7 @@ function closeSelector() {
   box-sizing: border-box;
   width: 638rpx;
   height: 112rpx;
-  margin-top: 64rpx;
+  margin-top: calc(64 * var(--vs-gap-u));
   color: #c8201e;
   font-size: 34rpx;
   font-weight: 400;

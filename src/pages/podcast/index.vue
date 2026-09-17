@@ -70,7 +70,10 @@ let insightLoaded = false;
 /** 退场时长，略大于最长一段 0.42s 的还原动画。 */
 const INSIGHT_LEAVE_DURATION = 440;
 const canToggleInsightUrgent = computed(() => userStore.visitorRole === "OWNER");
+/** 本次页面访问一旦展示过闪鉴，后续问答均携带当前异常列表。 */
+let hasShownInsight = false;
 const {
+  rawItems: rawInsightItems,
   visibleItems: visibleInsightItems,
   loading: insightLoading,
   loadingMore: insightLoadingMore,
@@ -109,6 +112,9 @@ const reportAdjustmentActions = useReportAdjustmentActions({
 });
 const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "PODCAST",
+  getPodcastExceptions() {
+    return hasShownInsight ? rawInsightItems.value : null;
+  },
   onReportQa(answer) {
     reportQaLoading.value = false;
     reportQaAnswer.value = answer;
@@ -222,6 +228,7 @@ function clearInsightLeaveTimer() {
 
 /** 播报播放结束或收到 open_insight 导航时，页内切换为洞察视图；仅首次加载列表。 */
 function showInsight() {
+  hasShownInsight = true;
   if (insightVisible.value) return;
   clearInsightLeaveTimer();
   insightLeaving.value = false;
@@ -317,6 +324,7 @@ onLoad(() => {
   insightVisible.value = false;
   insightLeaving.value = false;
   insightLoaded = false;
+  hasShownInsight = false;
   broadcastPlaying.value = false;
   restoreReportBroadcast();
   // 每次进来都是全新一轮；发送场景由 useChatSend 固定为 PODCAST。

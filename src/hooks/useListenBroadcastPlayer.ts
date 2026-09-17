@@ -12,8 +12,8 @@ import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("listen-broadcast-player");
 
-/** 相邻播报分句之间留一点气口，避免上句刚落音就立刻接下一句。 */
-const CHUNK_GAP_MS = 500;
+/** 相邻播报分句之间留出自然气口，避免上句刚落音就立刻接下一句。 */
+const CHUNK_GAP_MS = 800;
 
 /** 项目内 howler 类型声明偏窄，运行时 Howl 本身支持动态改倍速。 */
 type HowlWithRate = Howl & { rate: (value: number) => Howl | number };
@@ -131,10 +131,6 @@ export function useListenBroadcastPlayer() {
   function schedulePlayNext(id: number) {
     clearGapTimer();
     if (id !== sessionId || paused.value) return;
-    if (!readyQueue.length) {
-      playNext(id);
-      return;
-    }
     gapTimer = setTimeout(() => {
       gapTimer = null;
       playNext(id);
@@ -142,7 +138,7 @@ export function useListenBroadcastPlayer() {
   }
 
   function playNext(id: number) {
-    if (id !== sessionId || paused.value || activeAudio) return;
+    if (id !== sessionId || paused.value || activeAudio || gapTimer) return;
 
     const chunk = readyQueue.shift();
     if (!chunk) {
