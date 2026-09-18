@@ -1,7 +1,11 @@
 import type { PlatformRequestOptions } from "@/utils/platform/http-request";
 import { createLogger } from "@/utils/logger";
 
-import { platformRequest, PlatformRequestError, platformUploadFile } from "@/utils/platform/http-request";
+import {
+  platformRequest,
+  PlatformRequestError,
+  platformUploadFile,
+} from "@/utils/platform/http-request";
 
 const logger = createLogger("request");
 
@@ -63,7 +67,7 @@ export function getRequestHeaders(headers: Record<string, string> = {}) {
 
 export const GUEST_ROLE_OPTIONS = ["OWNER", "OPERATOR"] as const;
 
-export type GuestRole = typeof GUEST_ROLE_OPTIONS[number];
+export type GuestRole = (typeof GUEST_ROLE_OPTIONS)[number];
 
 export function isGuestRole(value: unknown): value is GuestRole {
   return typeof value === "string" && (GUEST_ROLE_OPTIONS as readonly string[]).includes(value);
@@ -102,7 +106,8 @@ function unwrapResponse<T>(response: BaseResponse<T> | T): T {
   const envelope = response as BaseResponse<T>;
   // 主 API 成功包是 code=200；COS 预签名等 hfle 网关服务是 errorCode=200 + 业务码字符串
   // （code 形如 common.info.vo.success），两种都算成功并返回 data
-  if (envelope.code === 200 || envelope.failed === false||envelope.errorCode===200) return envelope.data;
+  if (envelope.code === 200 || envelope.failed === false || envelope.errorCode === 200)
+    return envelope.data;
   const message = envelope.message || "业务请求失败";
   // 网关把鉴权结果放在业务 code 里返回，HTTP 状态仍是 200
   notifyAuthFailure(envelope.code, message);
@@ -130,15 +135,16 @@ function parseUploadPayload<T>(data: unknown): BaseResponse<T> | T {
 }
 
 function readHttpErrorMessage(data: unknown, fallback: string) {
-  const payload = typeof data === "string"
-    ? (() => {
-        try {
-          return JSON.parse(data) as { message?: string };
-        } catch {
-          return null;
-        }
-      })()
-    : data;
+  const payload =
+    typeof data === "string"
+      ? (() => {
+          try {
+            return JSON.parse(data) as { message?: string };
+          } catch {
+            return null;
+          }
+        })()
+      : data;
   if (payload && typeof payload === "object" && "message" in payload) {
     const message = String((payload as { message?: unknown }).message || "").trim();
     if (message) return message;
@@ -188,11 +194,16 @@ function createJsonRequest<T>(
 ): JsonRequest<T> {
   return {
     async json() {
-      const response = await platformRequest<BaseResponse<T> | T>(options.baseURL || baseURL, method, path, {
-        ...options,
-        data: options.data ?? data,
-        headers: getRequestHeaders(options.headers),
-      }).catch(rethrowWithAuthCheck);
+      const response = await platformRequest<BaseResponse<T> | T>(
+        options.baseURL || baseURL,
+        method,
+        path,
+        {
+          ...options,
+          data: options.data ?? data,
+          headers: getRequestHeaders(options.headers),
+        },
+      ).catch(rethrowWithAuthCheck);
       return unwrapResponse(response.data);
     },
   };

@@ -13,18 +13,17 @@ defineOptions({ name: "AiRepairPage" });
 
 const logger = createLogger("repair-page");
 const userStore = useUserStore();
-const { safeTopPx, safeBottomPx } = useSafeArea();
+const { safeTopPx } = useSafeArea();
 const embedUrl = ref("");
 const loadError = ref("");
 
 const iframeSrc = computed(() => {
-  console.log("🚀 ~ iframeSrc:", embedUrl.value);
   return embedUrl.value;
 });
 
 const embedStyle = computed(() => ({
   paddingTop: `${safeTopPx.value}px`,
-  paddingBottom: `${safeBottomPx.value}px`,
+  // paddingBottom: `${safeBottomPx.value}px`,
 }));
 
 function buildEmbedUrl() {
@@ -52,13 +51,13 @@ onMounted(buildEmbedUrl);
       <text v-if="loadError" class="ai-page__error">
         {{ loadError }}
       </text>
-      <!-- <iframe
+      <iframe
         v-else-if="iframeSrc"
         class="ai-page__iframe"
         :src="iframeSrc"
         frameborder="0"
         allow="microphone; camera; autoplay; clipboard-write"
-      /> -->
+      />
     </view>
   </view>
 </template>
