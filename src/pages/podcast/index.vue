@@ -105,7 +105,7 @@ const reportAdjustmentActions = useReportAdjustmentActions({
     promptUrgentConfirmation(action.message);
   },
   executeUrgent(action) {
-    void executeInsightUrgent(action.target);
+    void executeInsightUrgent(action);
   },
   updateUrgentConfirmation(action) {
     void confirmInsightUrgent(action.confirmed, action.target);

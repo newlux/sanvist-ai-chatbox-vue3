@@ -17,7 +17,11 @@ const { safeTopPx, safeBottomPx } = useSafeArea();
 const embedUrl = ref("");
 const loadError = ref("");
 
-const iframeSrc = computed(() => embedUrl.value);
+const iframeSrc = computed(() => {
+  console.log("🚀 ~ iframeSrc:", embedUrl.value);
+  return embedUrl.value;
+});
+
 const embedStyle = computed(() => ({
   paddingTop: `${safeTopPx.value}px`,
   paddingBottom: `${safeBottomPx.value}px`,
@@ -48,13 +52,13 @@ onMounted(buildEmbedUrl);
       <text v-if="loadError" class="ai-page__error">
         {{ loadError }}
       </text>
-      <iframe
+      <!-- <iframe
         v-else-if="iframeSrc"
         class="ai-page__iframe"
         :src="iframeSrc"
         frameborder="0"
         allow="microphone; camera; autoplay; clipboard-write"
-      />
+      /> -->
     </view>
   </view>
 </template>

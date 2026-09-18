@@ -9,7 +9,7 @@ export type VisitorRole = "OWNER" | "OPERATOR" | "ADMIN" | "MAINTAINER" | "PURCH
 
 export const VISITOR_ROLE_ACCOUNTS: Record<VisitorRole, string> = {
   OWNER: "BOSS-001",
-  ADMIN: "DISPATCHER-001",
+  ADMIN: "PM-DC-001",
   MAINTAINER: "MAINTAINER-001",
   PURCHASER: "PURCHASER-001",
   OPERATOR: "DC-OP-CP-01",
