@@ -52,6 +52,10 @@ export type ReportWorkflowAction =
   }
   | {
     type: "execute_urgent";
+    targets: number[];
+  }
+  | {
+    type: "execute_urgent";
     target: ReportUrgentTarget;
   }
   | {
@@ -101,6 +105,14 @@ function parseStringList(value: unknown) {
   if (!Array.isArray(value)) return null;
   const items = value.map(parseString);
   return items.every(Boolean) ? items as string[] : null;
+}
+
+function parseTargetIndexes(value: unknown): number[] | null {
+  if (!Array.isArray(value) || !value.length) return null;
+  const targets = value.filter((item): item is number =>
+    typeof item === "number" && Number.isInteger(item) && item >= 0,
+  );
+  return targets.length === value.length && new Set(targets).size === targets.length ? targets : null;
 }
 
 function parseSelectedModules(value: unknown): ReportModuleCode[] | null {
@@ -186,6 +198,8 @@ function parseWorkflowAction(value: unknown): ReportWorkflowAction | null {
     return target ? { type: value.type, target, message } : null;
   }
   if (value.type === "execute_urgent") {
+    const targets = parseTargetIndexes(params.targets);
+    if (targets) return { type: value.type, targets };
     const target = parseUrgentTarget(params.target ?? params);
     return target ? { type: value.type, target } : null;
   }

@@ -1,5 +1,5 @@
 import type { ReportInsightEvent, ToggleReportInsightUrgentResult } from "@/api/report-insight";
-import type { ReportListFilter, ReportUrgentTarget } from "@/utils/ai-stream";
+import type { ReportListFilter, ReportUrgentTarget, ReportWorkflowAction } from "@/utils/ai-stream";
 import { computed, ref } from "vue";
 import { getReportInsightEvents, toggleReportInsightUrgent } from "@/api/report-insight";
 
@@ -52,7 +52,7 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
 
   const isLoading = computed(() => loading.value || loadingMore.value);
 
-  function showUrgentToast(message: "已加急" | "已取消加急") {
+  function showUrgentToast(message: "已加急" | "已取消加急" | "已处理") {
     urgentToastMessage.value = message;
     urgentToastVisible.value = true;
     if (urgentToastTimer) clearTimeout(urgentToastTimer);
@@ -143,9 +143,40 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
     }
   }
 
-  async function executeUrgent(target: ReportUrgentTarget) {
-    const item = findItem(target);
-    return !item || item.isUrgent ? false : toggleUrgent(item);
+  async function executeUrgent(action: Extract<ReportWorkflowAction, { type: "execute_urgent" }> | ReportUrgentTarget) {
+    if ("eventId" in action) {
+      const item = findItem(action);
+      return !item || item.isUrgent ? false : toggleUrgent(item);
+    }
+
+    if ("target" in action) {
+      const item = findItem(action.target);
+      return !item || item.isUrgent ? false : toggleUrgent(item);
+    }
+
+    const targetItems = action.targets
+      .map(index => items.value[index])
+      .filter((item): item is ReportInsightItem => Boolean(item));
+    const actionableItems = targetItems.filter(item => !item.isUrgent && !item.urgentLoading);
+    if (!actionableItems.length) {
+      showUrgentToast("已处理");
+      return false;
+    }
+
+    const results = await Promise.all(actionableItems.map(async (item) => {
+      item.urgentLoading = true;
+      try {
+        const result = await toggleReportInsightUrgent({ eventId: item.id });
+        applyUrgentResult(item, result);
+        return result.urgent;
+      } catch {
+        return false;
+      } finally {
+        item.urgentLoading = false;
+      }
+    }));
+    if (results.some(Boolean)) showUrgentToast("已加急");
+    return results.some(Boolean);
   }
 
   async function confirmUrgent(confirmed: boolean, target?: ReportUrgentTarget) {
