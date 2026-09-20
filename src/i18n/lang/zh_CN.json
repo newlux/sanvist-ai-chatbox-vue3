@@ -28,6 +28,7 @@
   "copy-failed": "复制失败",
   "copy-failed-browser-not-supported": "浏览器不支持",
   "ai-unavailable-retry-later": "AI 暂时无法回答，请稍后重试",
+  "ai-busy-retry-later": "系统繁忙，请稍后重试",
   "audio-play-failed": "音频播放失败",
   "batch-delete-failed": "批量删除失败",
   "copy-failed-please-manually-copy": "复制失败，请手动复制",

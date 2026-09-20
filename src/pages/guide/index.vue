@@ -4,9 +4,11 @@ import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { GuideStepItem, GuideStepPayload, GuideSuggestionPayload } from "@/api/chat/types";
+import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { getDeviceModels, getTodayAwakeningPrompt } from "@/api/user-role";
 import iconHelp from "@/assets/img/icon-help.svg";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
+import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiDeviceModelPicker from "@/components/ai-device-model-picker/index.vue";
@@ -45,10 +47,17 @@ const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
 const sessionStore = useSessionStore();
 const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
+/** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送 */
+const chatInputRef = ref<{
+  appendAttachments?: (meta: ChatMessageAttachment[]) => void;
+  focusTextInput?: () => void;
+} | null>(null);
 const sharePosterWrap = ref<unknown>(null);
 const shareSheetBottomInset = ref("");
 /** 机型选中值（modelKey）：未选择时不下发，选中后每次对话都作为 inputs.device_model 透传 */
 const selectedDeviceModel = ref("");
+/** 选中的机型同步到 store：对话框设备背景图按它出图，跨页面共用一份 */
+watch(selectedDeviceModel, value => userStore.setSelectedDeviceModelKey(value), { immediate: true });
 /** 机型选择卡片：进入页面拉到机型后自动弹起，选完/关闭即收起 */
 const deviceModelSheetVisible = ref(false);
 /** 指导步骤卡片（COMPONENT scene=guide / type=step）：随回答自动弹起，选完即回发下一轮 */
@@ -150,12 +159,16 @@ function onGuideStepHeightChange(height: number) {
   if (guideStepSheetVisible.value) nextTick(() => chatStore.scrollToBottom(true));
 }
 
-/** 步骤卡的附件按钮：按弹窗里选的来源取一个附件，上传完成后按现有附件流程发送 */
+/**
+ * 步骤卡的附件按钮：选完不直接发送——收起步骤卡、把附件挂到输入栏并聚焦输入框，
+ * 用户补一句说明或直接点发送，都走原来的对话发送链路。
+ */
 async function onGuideStepPhoto(source: AttachmentSource) {
   const picked = await photoPicker.pickAttachmentForSend(source);
   if (!picked) return;
   guideStepSheetVisible.value = false;
-  sendMessage({ text: "", files: picked.files, attachments: picked.meta });
+  chatInputRef.value?.appendAttachments(picked.meta);
+  chatInputRef.value?.focusTextInput();
 }
 
 /** 步骤卡片展开 / 翻页时，只显示这一步对应的核对卡，并把它定位到步骤卡上方 */
@@ -430,6 +443,8 @@ onUnload(() => {
     <view class="ai-page__chat" :style="chatViewportStyle">
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
+      <!-- 设备线稿背景图：跟着上方机型选择走（履带吊 / 混凝土泵车） -->
+      <AiChatBackdrop />
       <!-- Header -->
       <AiChatHeader
         ref="chatHeader"
@@ -588,6 +603,7 @@ onUnload(() => {
 
       <AiChatInput
         v-else
+        ref="chatInputRef"
         v-model="inputText"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"

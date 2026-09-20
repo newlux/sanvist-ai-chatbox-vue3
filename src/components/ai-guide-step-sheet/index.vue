@@ -20,7 +20,8 @@ import closeIcon from "@/assets/img/icon-close.svg";
  *   按顺序用「、」拼成提问发出去；
  * - 「附件」：photo_text 非空时出现，点它弹附件来源弹窗（拍照 / 相册 / 文件，与输入栏
  *   「+」同一个组件；容器内直接走原生弹窗），选完由页面按附件流程发送；
- * - 末尾输入框：placeholder 取 question_text，用户自己写的问题按原样发出去。
+ * - 末尾输入框：placeholder 取 question_text，输入框右侧带「发送」图标（与原生输入栏 input-bar
+ *   同款 icon-send.svg，与键盘回车等效，输入为空时置灰），用户自己写的问题按原样发出去。
  *
  * 视觉：白板贴底 + 向上阴影 + 灰色小标签 + 右上 ×，选项行默认 #f6f6f6；
  * 卡片高度通过 height-change 上报给页面，用于给消息列表让出底部间距。
@@ -74,6 +75,8 @@ const question = computed(() => String(currentStep.value?.confirmation_question 
 const confirmText = computed(() => String(currentStep.value?.confirm_text || "").trim());
 /** 末尾输入框的 placeholder */
 const questionText = computed(() => String(currentStep.value?.question_text || "").trim());
+/** 输入框有内容，「发送」按钮才是可用态 */
+const canSubmitText = computed(() => Boolean(draftText.value.trim()));
 const photoText = computed(() => String(currentStep.value?.photo_text || "").trim());
 
 watch(() => props.visible, (visible) => {
@@ -204,18 +207,29 @@ watch(() => [props.visible, currentIndex.value], () => {
           {{ photoText }}
         </text>
       </view>
-      <!-- 其他问题：placeholder 取 steps[].question_text，键盘上点「发送」即发出 -->
-      <input
-        v-if="questionText"
-        v-model="draftText"
-        class="guide-step-sheet__input"
-        type="text"
-        :placeholder="questionText"
-        placeholder-style="color:#999999;"
-        confirm-type="send"
-        :confirm-hold="true"
-        @confirm="onSubmitText"
-      />
+      <!-- 其他问题：placeholder 取 steps[].question_text；右侧「发送」图标与键盘回车等效 -->
+      <view v-if="questionText" class="guide-step-sheet__input-row">
+        <input
+          v-model="draftText"
+          class="guide-step-sheet__input"
+          type="text"
+          :placeholder="questionText"
+          placeholder-style="color:#999999;"
+          confirm-type="send"
+          :confirm-hold="true"
+          @confirm="onSubmitText"
+        />
+        <!-- touchstart 先拦一次（输入框聚焦时首点不会被键盘收起吞掉），tap 兜住桌面浏览器鼠标点：
+             第一个事件发出后输入内容已清空，第二个事件会直接 return，不会重复发送 -->
+        <view
+          class="guide-step-sheet__send"
+          :class="{ 'guide-step-sheet__send--disabled': !canSubmitText }"
+          @touchstart.stop.prevent="onSubmitText"
+          @tap="onSubmitText"
+        >
+          <image class="guide-step-sheet__send-icon" src="@/assets/img/icon-send.svg" mode="aspectFit" />
+        </view>
+      </view>
     </view>
 
     <text class="guide-step-sheet__hint">
@@ -335,20 +349,56 @@ watch(() => [props.visible, currentIndex.value], () => {
   color: #000000;
 }
 
-/* 末尾输入框：视觉与选项行一致，placeholder 取 steps[].question_text */
-.guide-step-sheet__input {
-  display: block;
+/* 末尾输入行：整个容器就是输入框（与上方选项行同宽同款：#f6f6f6 / 16rpx 圆角 / 72rpx 高），
+   发送图标包在框内右侧，左内边距与选项行文字对齐 */
+.guide-step-sheet__input-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
   box-sizing: border-box;
-  width: 100%;
   min-height: 72rpx;
-  padding: 16rpx 32rpx;
+  padding: 0 16rpx 0 32rpx;
   border-radius: 16rpx;
   background: #f6f6f6;
+}
+
+/* 末尾输入框：只负责输入，外观由外层容器给，placeholder 取 steps[].question_text */
+.guide-step-sheet__input {
+  display: block;
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
   font-family: "PingFang SC", "Inter", sans-serif;
   font-size: 28rpx;
   font-weight: 400;
   line-height: 40rpx;
   color: #000000;
+}
+
+/* 发送图标：与原生输入栏 input-bar__send 同款（icon-send.svg，图标自带底色，不再加按钮底色） */
+.guide-step-sheet__send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 56rpx;
+  height: 56rpx;
+}
+
+.guide-step-sheet__send:active {
+  opacity: 0.7;
+}
+
+/* 未输入内容：图标置灰（点了也不会发），位置保留避免输入框宽窄跳动 */
+.guide-step-sheet__send--disabled {
+  opacity: 0.4;
+}
+
+.guide-step-sheet__send-icon {
+  width: 56rpx;
+  height: 56rpx;
 }
 
 .guide-step-sheet__hint {
