@@ -101,6 +101,7 @@ const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
   "guide-step-open",
+  "guide-suggestion-open",
   "tts-click",
   "share-click",
   "feedback-change",
@@ -198,6 +199,10 @@ function onAskSlotOpen(payload, messageIndex: number) {
 
 function onGuideStepOpen(payload) {
   emit("guide-step-open", payload);
+}
+
+function onGuideSuggestionOpen(payload) {
+  emit("guide-suggestion-open", payload);
 }
 
 function onTtsClick(index) {
@@ -391,6 +396,7 @@ const listPadStyle = computed(() =>
               @suggestion-tap="onSuggestionTap($event, index)"
               @ask-slot-open="onAskSlotOpen($event, index)"
               @guide-step-open="onGuideStepOpen"
+              @guide-suggestion-open="onGuideSuggestionOpen"
               @tts-click="onTtsClick(index)"
               @share-click="onShareClick(index, msg)"
               @select-toggle="onSelectToggle(index)"

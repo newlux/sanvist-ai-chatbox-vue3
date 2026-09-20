@@ -51,6 +51,7 @@ const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
   "guide-step-open",
+  "guide-suggestion-open",
   "tts-click",
   "share-click",
   "feedback-change",
@@ -250,6 +251,10 @@ function onGuideStepOpen(payload) {
   emit("guide-step-open", payload);
 }
 
+function onGuideSuggestionOpen(payload) {
+  emit("guide-suggestion-open", payload);
+}
+
 function onShareTap() {
   emit("share-click");
 }
@@ -446,6 +451,7 @@ function onNegativeFeedback() {
           @suggestion-tap="onSuggestionTap"
           @ask-slot-open="onAskSlotOpen"
           @guide-step-open="onGuideStepOpen"
+          @guide-suggestion-open="onGuideSuggestionOpen"
         />
         <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
           <view

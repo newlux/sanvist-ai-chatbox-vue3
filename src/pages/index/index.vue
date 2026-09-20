@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import type { AskSlotPayload, AskSlotSubmitPayload, GuideStepItem, GuideStepPayload } from "@/api/chat/types";
+import type {
+  AskSlotPayload,
+  AskSlotSubmitPayload,
+  GuideStepItem,
+  GuideStepPayload,
+  GuideSuggestionPayload,
+} from "@/api/chat/types";
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
@@ -12,6 +18,7 @@ import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
+import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
@@ -101,8 +108,11 @@ const photoPicker = useComposerAttachments();
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
-  // 步骤卡片贴底展开：列表底部让出卡片高度，回答与卡片之间不重叠
+  // 步骤卡 / 追问卡贴底展开：列表底部让出卡片高度，回答与卡片之间不重叠
   if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) return `${guideStepSheetHeight.value}px`;
+  if (guideSuggestionSheetVisible.value && guideSuggestionSheetHeight.value > 0) {
+    return `${guideSuggestionSheetHeight.value}px`;
+  }
   // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
   if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
   return composerBottomInset.value;
@@ -170,6 +180,29 @@ function onGuideStepChange(step: GuideStepItem | null) {
   const index = steps.findIndex(item => String(item?.id || "") === stepId);
   if (index >= 0) guideStepCardCount.value = index + 1;
   nextTick(() => chatStore.focusStepBlock(stepId));
+}
+
+/**
+ * 多轮追问卡（COMPONENT scene=guide / type=suggestion）：options 是并行分支，
+ * 点哪一项就把那一项作为下一轮提问发出去（与按顺序推进的步骤卡区分开）。
+ */
+const guideSuggestionPayload = ref<GuideSuggestionPayload | null>(null);
+const guideSuggestionSheetVisible = ref(false);
+/** 追问卡实时高度（px）：同步骤卡，展开时给列表底部让位 */
+const guideSuggestionSheetHeight = ref(0);
+
+function onGuideSuggestionOpen(payload: GuideSuggestionPayload) {
+  guideSuggestionPayload.value = payload;
+  guideSuggestionSheetVisible.value = true;
+}
+
+function onGuideSuggestionSubmit(query: string) {
+  guideSuggestionSheetVisible.value = false;
+  sendQuickPrompt(query);
+}
+
+function onGuideSuggestionHeightChange(height: number) {
+  guideSuggestionSheetHeight.value = height;
 }
 
 /** 消息播音统一走实时 TTS。 */
@@ -520,6 +553,7 @@ onBeforeUnmount(() => {
         @suggestion-tap="sendQuickPrompt"
         @ask-slot-open="onAskSlotOpen"
         @guide-step-open="onGuideStepOpen"
+        @guide-suggestion-open="onGuideSuggestionOpen"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
@@ -543,6 +577,13 @@ onBeforeUnmount(() => {
         @height-change="onGuideStepHeightChange"
         @step-change="onGuideStepChange"
         @photo="onGuideStepPhoto"
+      />
+      <AiGuideSuggestionSheet
+        v-model:visible="guideSuggestionSheetVisible"
+        :payload="guideSuggestionPayload"
+        :keyboard-height="keyboardHeight"
+        @submit="onGuideSuggestionSubmit"
+        @height-change="onGuideSuggestionHeightChange"
       />
       <AiChatNav
         :active-key="navActiveKey"
