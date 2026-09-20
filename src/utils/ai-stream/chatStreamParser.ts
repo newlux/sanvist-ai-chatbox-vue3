@@ -4,7 +4,8 @@ import type {
   MessageEndEvent,
 } from "@/api/chat/types";
 
-export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-check" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error";
+export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-suggestion"
+  | "guide-check" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error";
 
 /** 深度思考步骤：由 status 事件按 node 聚合而来 */
 export interface ThinkStep {
@@ -149,6 +150,23 @@ export function applyEventToBlocks(
       return {
         ...base,
         blocks: upsertBlock(blocks, stablePayloadId("guide-check", [stepId], checkIndex), "guide-check", event.data, true),
+        receivedContent: true,
+      };
+    }
+    case "guide_suggestion": {
+      const options = Array.isArray(event.data?.options) ? event.data.options : [];
+      if (!options.length) return base;
+      const suggestionIndex = blocks.filter(block => block.type === "guide-suggestion").length;
+      const question = String(event.data?.question || "").trim();
+      return {
+        ...base,
+        blocks: upsertBlock(
+          blocks,
+          stablePayloadId("guide-suggestion", [question], suggestionIndex),
+          "guide-suggestion",
+          event.data,
+          true,
+        ),
         receivedContent: true,
       };
     }
