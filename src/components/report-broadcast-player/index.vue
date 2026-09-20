@@ -20,11 +20,14 @@ const props = defineProps<{
   dockOffset: string;
   qaLoading: boolean;
   qaAnswer: string;
+  /** iframe 内嵌（from=sanvist_pc）时，头部露出「最小化」 */
+  canMinimize?: boolean;
 }>();
 
 const emit = defineEmits<{
   "dismiss-qa": [];
   "exit-report": [];
+  minimize: [];
   "broadcast-finished": [];
   "playback-change": [payload: { playing: boolean; loading: boolean }];
   "open-preference": [];
@@ -181,8 +184,10 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       :status="statusText"
       :qa-visible="isQaVisible"
       :active="playing"
+      :can-minimize="props.canMinimize"
       @dismiss-qa="emit('dismiss-qa')"
       @exit-report="exitReport"
+      @minimize="emit('minimize')"
       @open-history="openHistory"
       @open-preference="emit('open-preference')"
       @open-rate="openRatePanel"

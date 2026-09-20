@@ -2,6 +2,7 @@
 import type { ListenBroadcastConfig, ListenBroadcastStyle } from "@/api/listen-broadcast/types";
 import { computed, onMounted, ref } from "vue";
 import { getListenBroadcastConfig, saveListenBroadcastPreference } from "@/api/listen-broadcast";
+import minimizeIcon from "@/assets/img/min_icon.png";
 import arrowLeftIcon from "@/assets/img/voice-assistant/voice-arrow-left.svg";
 import arrowRightIcon from "@/assets/img/voice-assistant/voice-arrow-right.svg";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
@@ -12,6 +13,7 @@ import checkOffIcon from "@/assets/img/voice-assistant/voice-check-off.svg";
 import checkOnIcon from "@/assets/img/voice-assistant/voice-check-on.svg";
 import chevronDownIcon from "@/assets/img/voice-assistant/voice-chevron-down.svg";
 import { REPORT_STYLE_OPTIONS } from "@/config/report-styles";
+import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useReportStyle } from "@/hooks/useReportStyle";
 import { createLogger } from "@/utils/logger";
 
@@ -26,6 +28,8 @@ const emit = defineEmits<{
 
 const logger = createLogger("report-style-selector");
 const { saveReportStyle, loadReportStyle } = useReportStyle();
+/** PC 端内嵌时顶栏右侧露出「最小化」，替换原来的等宽占位 */
+const { canMinimize, onMinimize } = useIframeMinimize();
 const config = ref<ListenBroadcastConfig | null>(null);
 const loading = ref(true);
 const submitting = ref(false);
@@ -157,7 +161,10 @@ onMounted(() => {
           </text>
         </view>
       </view>
-      <view class="report-style-selector__topbar-space" />
+      <view v-if="canMinimize" class="report-style-selector__minimize" @tap="onMinimize">
+        <image class="report-style-selector__minimize-icon" :src="minimizeIcon" mode="aspectFit" />
+      </view>
+      <view v-else class="report-style-selector__topbar-space" />
     </view>
 
     <!-- ③ 页面标题(940:131) -->
@@ -354,13 +361,21 @@ onMounted(() => {
 }
 
 .report-style-selector__close,
-.report-style-selector__topbar-space {
+.report-style-selector__topbar-space,
+.report-style-selector__minimize {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 48rpx;
   height: 48rpx;
   flex-shrink: 0;
+}
+
+/* 最小化图标：容器与关闭按钮等宽，保证胶囊居中不被挤偏 */
+.report-style-selector__minimize-icon {
+  display: block;
+  width: 40rpx;
+  height: 40rpx;
 }
 
 /* 关闭 × (980:204 24×24px) */

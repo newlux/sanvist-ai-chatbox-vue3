@@ -2,18 +2,23 @@
 import type { ListenBroadcastStyle } from "@/api/listen-broadcast/types";
 import type { ReportVoiceOption } from "@/config/report-voices";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import minimizeIcon from "@/assets/img/min_icon.png";
 import microphoneBadge from "@/assets/img/voice-assistant/report-microphone-badge.png";
 import smallWave from "@/assets/img/voice-assistant/report-small-wave.png";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
 import ReportStyleSelector from "@/components/report-style-selector/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
+import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useReportVoice } from "@/hooks/useReportVoice";
 
 const emit = defineEmits<{
   confirm: [voice: ReportVoiceOption, style: ListenBroadcastStyle, moduleCodes: string[]];
   close: [];
 }>();
+
+/** PC 端内嵌时顶栏右侧露出「最小化」，替换原来的空占位 */
+const { canMinimize, onMinimize } = useIframeMinimize();
 
 // 报告听播音色交互：只在风格确认后一起保存，避免留下半完成配置
 const { saveReportVoice } = useReportVoice();
@@ -181,7 +186,10 @@ function closeSelector() {
             </text>
           </view>
         </view>
-        <view class="report-voice-selector__home-placeholder" />
+        <view v-if="canMinimize" class="report-voice-selector__minimize" @tap="onMinimize">
+          <image class="report-voice-selector__minimize-icon" :src="minimizeIcon" mode="aspectFit" />
+        </view>
+        <view v-else class="report-voice-selector__home-placeholder" />
       </view>
 
       <!-- ③ 页面标题(940:79) -->
@@ -320,12 +328,20 @@ function closeSelector() {
 }
 
 .report-voice-selector__close,
-.report-voice-selector__home-placeholder {
+.report-voice-selector__home-placeholder,
+.report-voice-selector__minimize {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 48rpx;
   height: 48rpx;
+}
+
+/* 最小化图标：与关闭按钮同尺寸容器，图标本体略小以贴合视觉重心 */
+.report-voice-selector__minimize-icon {
+  display: block;
+  width: 40rpx;
+  height: 40rpx;
 }
 
 /* 关闭 × ：设计稿 1024:12 为 24×24px=48×48rpx 矢量叉（灰 #999），用 SVG 图承载 */
