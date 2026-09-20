@@ -2,7 +2,6 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, toRefs } from "vue"
 import { useI18n } from "vue-i18n";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
 import { createLogger } from "@/utils/logger";
-import { isMicPermissionBlockedByPolicy, isMicPermissionDenied, markMicPermissionDenied, markMicPermissionGranted, micPermissionHint, micPolicyBlockedHint } from "@/utils/mic-permission";
 import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
@@ -23,8 +22,6 @@ interface RecorderResult {
   success?: boolean;
   cancelled?: boolean;
   error?: string;
-  /** 录音器明确回传「权限被拒」时置位，用于把拒绝状态固化下来 */
-  notAllowed?: boolean;
   data?: {
     tempFilePath?: string;
     audioUrl?: string;
@@ -198,33 +195,6 @@ export function useVoiceInput(options: VoiceInputOptions) {
     }
   }
 
-  /**
-   * 浏览器侧麦克风权限的兜底拦截。
-   *
-   * Chrome 一旦被用户拒绝，之后不会再弹授权窗，getUserMedia 只会静默报 NotAllowedError。
-   * 所以这里先查上一次的结果：确认被拒就直接给指路提示，不再白跑一次录音流程。
-   *
-   * @returns true 表示被拒且已提示，调用方应直接放弃本次录音
-   */
-  function blockIfMicPermissionDenied(): boolean {
-    // 优先判断权限策略拦截：这种情况用户无法自己解决，文案与「被拒」不同
-    if (isMicPermissionBlockedByPolicy()) {
-      uni.showToast({
-        title: micPolicyBlockedHint(),
-        icon: "none",
-        duration: 4000,
-      });
-      return true;
-    }
-    if (!isMicPermissionDenied()) return false;
-    uni.showToast({
-      title: micPermissionHint(),
-      icon: "none",
-      duration: 4000,
-    });
-    return true;
-  }
-
   function onVoiceClose() {
     cancelRecorder();
     resetVoiceInput();
@@ -328,19 +298,11 @@ export function useVoiceInput(options: VoiceInputOptions) {
       : { success: false, error: permissionDeniedMessage("record_audio") };
 
     if (jobSeq !== state.jobSeq) return { success: false, error: "任务已失效" };
-    if (result?.success) {
-      // 录音真的跑起来了，说明权限可用，清掉可能残留的拒绝标记
-      markMicPermissionGranted();
-      return result;
-    }
-
-    // 录音器确认是权限问题：把状态固化下来，下次按下直接给指路提示，
-    // 因为 Chrome 拒绝后不会再弹窗，重试也不会成功
-    if (result?.notAllowed) markMicPermissionDenied();
+    if (result?.success) return result;
 
     if (!result?.cancelled) {
       uni.showToast({
-        title: result?.notAllowed ? micPermissionHint() : (result?.error || t("record-start-failed")),
+        title: result?.error || t("record-start-failed"),
         icon: "none",
         duration: 4000,
       });
@@ -357,13 +319,6 @@ export function useVoiceInput(options: VoiceInputOptions) {
   function beginVoiceRecording({ restart = false } = {}) {
     // 幂等：已有进行中的录音则忽略
     if (state.gesture.active) return;
-
-    // 浏览器侧已被拒就不再走一遍：Chrome 不会再弹窗，只会静默失败，直接给指路提示
-    if (blockIfMicPermissionDenied()) {
-      resetGestureState();
-      state.gesture.active = false;
-      return;
-    }
 
     const existingText = state.draftText || state.recognizedText;
     state.recognizedText = existingText;
