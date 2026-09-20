@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { AskSlotPayload, AskSlotSubmitPayload, GuideStepItem, GuideStepPayload } from "@/api/chat/types";
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
+import type { AttachmentSource } from "@/hooks/useComposerAttachments";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -21,13 +22,13 @@ import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatViewport } from "@/hooks/useChatViewport";
-import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
+import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
-import { navigateToScene } from '@/utils/scene-navigation';
+import { navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
 defineOptions({ name: "AiChatPage" });
@@ -44,6 +45,9 @@ const pageStage = ref<"welcome" | "chat">("welcome");
 const listenBroadcast = ref<TodayListenBroadcast | null>(null);
 const listenBroadcastLoading = ref(false);
 const listenReportRefreshKey = ref(0);
+const guideStepSheetVisible = ref(false);
+const guideStepSheetHeight = ref(0);
+
 let isDemoPage = false;
 
 const {
@@ -103,9 +107,8 @@ const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
   // 步骤卡片贴底展开：列表底部让出卡片高度，回答与卡片之间不重叠
   if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) return `${guideStepSheetHeight.value}px`;
-  // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
-  if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
-  return composerBottomInset.value;
+  // 导航与输入栏始终固定在底部；无论是否显示首页快捷问题，都预留导航实际高度。
+  return `calc(${composerBottomInset.value} + 88rpx)`;
 });
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 const askSlotQueue = ref<AskSlotPayload[]>([]);
@@ -131,9 +134,6 @@ function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
 
 /** 指导步骤卡片（COMPONENT scene=guide / type=step）：单步点一下进入下一轮，多步选好后确认回发。 */
 const guideStepPayload = ref<GuideStepPayload | null>(null);
-const guideStepSheetVisible = ref(false);
-/** 步骤卡片实时高度（px）：卡片展开时把列表底部 padding 顶起来，最后一条回答不会被盖住 */
-const guideStepSheetHeight = ref(0);
 /** 步骤卡按顺序露出：初始只给第一张，推进到第 N 步才显示前 N 张 */
 const guideStepCardCount = ref(1);
 
@@ -225,7 +225,7 @@ function startNewConversation() {
  */
 function enterListenReport() {
   saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
-  void navigateToScene('/pages/podcast/index');
+  void navigateToScene("/pages/podcast/index");
 }
 
 function onNavItemClick(item: { key?: string; title?: string; subagent?: string; mode?: string; url?: string }) {
@@ -448,7 +448,7 @@ function refreshListenReportState() {
   listenReportRefreshKey.value += 1;
 }
 
-const stopNativeResume = onNativeEvent('resume', refreshListenReportState);
+const stopNativeResume = onNativeEvent("resume", refreshListenReportState);
 
 onShow(() => {
   syncWindowHeight();

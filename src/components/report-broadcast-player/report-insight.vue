@@ -116,7 +116,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
             </view>
           </view>
           <view
-            v-for="item in props.items"
+            v-for="(item, index) in props.items"
             v-else
             :key="item.id"
             class="report-insight__item"
@@ -124,7 +124,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
           >
             <view class="report-insight__item-head">
               <text class="report-insight__item-title">
-                {{ item.title }}
+                {{ index + 1 }}.{{ item.title }}
               </text>
               <view
                 v-if="props.canToggleUrgent"

@@ -124,6 +124,8 @@ function onItemTap(item: NavItem) {
   z-index: 1;
   width: 100%;
   box-sizing: border-box;
+  background: #fafafa;
+  padding-top: 16rpx;
 }
 
 .ai-chat-nav__swiper {

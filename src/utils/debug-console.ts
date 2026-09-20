@@ -8,14 +8,12 @@ const logger = createLogger("debug-console");
  * 嵌在宿主 APP 里跑的 H5 没法直接连 Chrome DevTools，出问题只能靠猜。
  * 这里挂一个页内控制台，把 console 输出、网络请求、报错都收进去。
  *
- * 当前阶段【始终开启】。等排查告一段落要收回去时，把 ALWAYS_ON 改回 false，
- * 就退回按需开启：启动参数/地址栏带 debug=1，或打包时 VITE_LOG_LEVEL=debug。
+ * 生产 H5 构建不展示调试面板；非生产环境可按启动参数、地址栏或日志级别按需开启。
  *
- * vConsole 走动态 import，单独成 chunk，不占主包体积（但始终开启时会多一次请求）。
+ * vConsole 走动态 import，单独成 chunk，不占主包体积。
  */
 
-/** 排查期常开；改成 false 即恢复「按需开启」 */
-const ALWAYS_ON = true;
+const IS_PRODUCTION_H5 = import.meta.env.VITE_WEB_ENV === "production";
 
 let instance: unknown = null;
 let loading: Promise<void> | null = null;
@@ -34,7 +32,7 @@ function isTruthy(value: unknown) {
 
 /** 启动参数里带 debug 也算数：宿主是用启动参数传值的，未必落在 URL 上 */
 export function shouldEnableDebugConsole(launchQuery: Record<string, unknown> = {}) {
-  if (ALWAYS_ON) return true;
+  if (IS_PRODUCTION_H5) return false;
   if (isTruthy(launchQuery.debug) || isTruthy(launchQuery.Debug)) return true;
   if (isTruthy(readQueryFlag("debug"))) return true;
   return String(import.meta.env.VITE_LOG_LEVEL || "").toLowerCase() === "debug";
