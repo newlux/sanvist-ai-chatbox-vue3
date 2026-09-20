@@ -24,6 +24,11 @@ export const useUserStore = defineStore("user", () => {
   const awakeningPrompt = ref<AwakeningPrompt | null>(null);
   /** 机型选项卡数据源：进入作业指导页时拉取 */
   const deviceModels = ref<DeviceModelOption[]>([]);
+  /**
+   * 当前选中的机型（modelKey）：作业指导页的机型卡片选完写这里。
+   * 对话框设备背景图跟着它走，跨页面共用一份，避免各页各自维护。
+   */
+  const selectedDeviceModelKey = ref("");
   /** 讲解模式（新老手）：进作业指导前在选择页选定，之后每次对话作为 inputs.operator_role 透传 */
   const operatorRole = ref<OperatorRoleOption | null>(null);
 
@@ -68,6 +73,10 @@ export const useUserStore = defineStore("user", () => {
     deviceModels.value = Array.isArray(value) ? value : [];
   }
 
+  function setSelectedDeviceModelKey(value: string) {
+    selectedDeviceModelKey.value = String(value || "");
+  }
+
   function setOperatorRole(value: OperatorRoleOption | null) {
     operatorRole.value = value;
   }
@@ -80,6 +89,7 @@ export const useUserStore = defineStore("user", () => {
     userInfo,
     awakeningPrompt,
     deviceModels,
+    selectedDeviceModelKey,
     operatorRole,
     setIsVisitor,
     setVisitorRole,
@@ -89,6 +99,7 @@ export const useUserStore = defineStore("user", () => {
     setUserInfo,
     setAwakeningPrompt,
     setDeviceModels,
+    setSelectedDeviceModelKey,
     setOperatorRole,
   };
 });

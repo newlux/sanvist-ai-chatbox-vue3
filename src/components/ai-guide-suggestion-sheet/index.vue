@@ -10,7 +10,8 @@ import closeIcon from "@/assets/img/icon-close.svg";
  * - 左上灰色小标签 ← data.items[].note
  * - 问题行 ← data.items[].suggestion_question
  * - 选项卡 ← data.items[].options[].label
- * - 末尾输入框的 placeholder ← data.items[].other_text（为空则不展示）
+ * - 末尾输入框的 placeholder ← data.items[].other_text（为空则不展示），右侧带「发送」图标
+ *   （与原生输入栏 input-bar 同款 icon-send.svg，与键盘回车等效，输入为空时置灰）
  *
  * 与步骤卡的区别：options 是**并行分支**，点哪一项就把那一项作为下一轮提问发出去；
  * 没有 i/n 进度，也没有「确认 / 拍照」这类步骤语义。
@@ -46,6 +47,8 @@ const cardLabel = computed(() => String(props.payload?.note || "").trim() || "�
 const question = computed(() => String(props.payload?.question || "").trim());
 /** 末尾输入框的 placeholder */
 const otherText = computed(() => String(props.payload?.other_text || "").trim());
+/** 输入框有内容，「发送」按钮才是可用态 */
+const canSubmitText = computed(() => Boolean(draftText.value.trim()));
 
 function submitQuery(query: string) {
   if (!query) return;
@@ -130,18 +133,29 @@ watch(() => props.visible, () => {
         </text>
       </view>
 
-      <!-- 其他入口：placeholder 取 other_text，键盘上点「发送」即发出 -->
-      <input
-        v-if="otherText"
-        v-model="draftText"
-        class="guide-suggestion-sheet__input"
-        type="text"
-        :placeholder="otherText"
-        placeholder-style="color:#999999;"
-        confirm-type="send"
-        :confirm-hold="true"
-        @confirm="onSubmitText"
-      />
+      <!-- 其他入口：placeholder 取 other_text；右侧「发送」图标与键盘回车等效 -->
+      <view v-if="otherText" class="guide-suggestion-sheet__input-row">
+        <input
+          v-model="draftText"
+          class="guide-suggestion-sheet__input"
+          type="text"
+          :placeholder="otherText"
+          placeholder-style="color:#999999;"
+          confirm-type="send"
+          :confirm-hold="true"
+          @confirm="onSubmitText"
+        />
+        <!-- touchstart 先拦一次（输入框聚焦时首点不会被键盘收起吞掉），tap 兜住桌面浏览器鼠标点：
+             第一个事件发出后输入内容已清空，第二个事件会直接 return，不会重复发送 -->
+        <view
+          class="guide-suggestion-sheet__send"
+          :class="{ 'guide-suggestion-sheet__send--disabled': !canSubmitText }"
+          @touchstart.stop.prevent="onSubmitText"
+          @tap="onSubmitText"
+        >
+          <image class="guide-suggestion-sheet__send-icon" src="@/assets/img/icon-send.svg" mode="aspectFit" />
+        </view>
+      </view>
     </view>
 
     <text class="guide-suggestion-sheet__hint">
@@ -246,20 +260,56 @@ watch(() => props.visible, () => {
   color: #000000;
 }
 
-/* 末尾输入框：视觉与选项卡一致，placeholder 取 other_text */
-.guide-suggestion-sheet__input {
-  display: block;
+/* 末尾输入行：整个容器就是输入框（与上方选项卡同宽同款：#f6f6f6 / 16rpx 圆角 / 72rpx 高），
+   发送图标包在框内右侧，左内边距与选项卡文字对齐 */
+.guide-suggestion-sheet__input-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
   box-sizing: border-box;
-  width: 100%;
   min-height: 72rpx;
-  padding: 16rpx 32rpx;
+  padding: 0 16rpx 0 32rpx;
   border-radius: 16rpx;
   background: #f6f6f6;
+}
+
+/* 末尾输入框：只负责输入，外观由外层容器给，placeholder 取 other_text */
+.guide-suggestion-sheet__input {
+  display: block;
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
   font-family: "PingFang SC", "Inter", sans-serif;
   font-size: 28rpx;
   font-weight: 400;
   line-height: 40rpx;
   color: #000000;
+}
+
+/* 发送图标：与原生输入栏 input-bar__send 同款（icon-send.svg，图标自带底色，不再加按钮底色） */
+.guide-suggestion-sheet__send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 56rpx;
+  height: 56rpx;
+}
+
+.guide-suggestion-sheet__send:active {
+  opacity: 0.7;
+}
+
+/* 未输入内容：图标置灰（点了也不会发），位置保留避免输入框宽窄跳动 */
+.guide-suggestion-sheet__send--disabled {
+  opacity: 0.4;
+}
+
+.guide-suggestion-sheet__send-icon {
+  width: 56rpx;
+  height: 56rpx;
 }
 
 .guide-suggestion-sheet__hint {

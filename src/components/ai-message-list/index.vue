@@ -253,11 +253,10 @@ function onListenReport() {
   emit("listen-report", listenedReport.value);
 }
 /**
- * 步骤卡回答的独立卡片栈：步骤详情卡（一次只显示当前那张）→ 该步骤的参考图。
+ * 步骤卡回答的独立卡片栈：只渲染当前那一张步骤详情卡。
  *
- * 带步骤卡的回答气泡正文不展示（见 ai-bubble-v2 的 hideBody），所以：
- * - 同一条回答的参考来源（source 组件）注入到步骤卡内展示（卡片底部「参考来源」样式）；
- * - 这一步的配图从卡片里搬出来，紧跟在步骤卡下面单独成卡；
+ * 带步骤卡的回答气泡正文不展示（见 ai-bubble-v2 的 hideBody），所以同一条回答的
+ * 参考来源（source 组件）注入到步骤卡内：卡片里的顺序是 正文 → 该步骤参考图 → 参考来源。
  * 其它回答的参考来源仍留在气泡正文里。
  * 步骤卡按顺序逐个露出：初始只显示第一张，推进到第 N 步时只显示第 N 张，当前下标由页面传入。
  */
@@ -281,13 +280,7 @@ function standaloneBlocks(message: UiChatMessage) {
     ? stepCards.map(card => ({ ...card, payload: { ...card.payload, sources: evidence } }))
     : stepCards;
 
-  // 这一步的配图：宽高自适应（widthFix），样式沿用参考图那套
-  const images = Array.isArray(stepCard.payload?.images) ? stepCard.payload.images : [];
-  const imageBlocks = images.length
-    ? [{ id: `${stepCard.id}-images`, type: "image", payload: { items: images }, complete: true }]
-    : [];
-
-  return [...cards, ...imageBlocks];
+  return cards;
 }
 
 const listPadStyle = computed(() =>
