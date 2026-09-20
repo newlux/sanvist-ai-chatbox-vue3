@@ -69,6 +69,7 @@ const {
   removeAttachment,
   retryAttachment,
   takeUploadedFiles,
+  appendUploadedAttachments,
 } = useComposerAttachments();
 
 /**
@@ -178,6 +179,7 @@ const {
   voiceTextareaRef,
   state: voice,
   onToggleInputMode,
+  switchToText,
   onVoiceClose,
   onVoiceSend,
   onVoiceTextareaInput,
@@ -261,6 +263,30 @@ function onToggleInputModeUi() {
 function onTrySend() {
   submitMessage();
 }
+
+const textTextareaRef = ref<unknown>(null);
+
+/**
+ * 供外部调用（步骤卡拍照）：先切到文本模式，再聚焦文本输入框。
+ * 走的是 textarea 自己的 focus 链路，键盘与底部间距沿用原有逻辑。
+ */
+async function focusTextInput() {
+  switchToText();
+  await nextTick();
+  const el = textTextareaRef.value as { focus?: () => void } | null;
+  el?.focus?.();
+}
+
+/**
+ * 对外接口（页面通过 ref 调用）：
+ * - appendAttachments：把「已经上传好」的附件挂进输入栏（步骤卡拍照走这条路，不重复上传）；
+ * - focusTextInput：切到文本模式并聚焦输入框。
+ * 注意 appendAttachments 对应 hook 里的 appendUploadedAttachments，两处名字必须一致。
+ */
+defineExpose({
+  appendAttachments: appendUploadedAttachments,
+  focusTextInput,
+});
 
 /** 附件来源弹窗：拍照 / 相册 / 文件 三选一（强制 H5 上传期间为唯一入口） */
 const isAttachmentPickerOpen = ref(false);
@@ -522,6 +548,7 @@ onBeforeUnmount(() => {
           }"
         >
           <textarea
+            ref="textTextareaRef"
             class="input-bar__textarea"
             :value="draft"
             :style="{ height: textTextareaHeight }"
