@@ -4,7 +4,9 @@ import { useI18n } from "vue-i18n";
 import { setLocale } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
 import { setupDebugConsole } from "@/utils/debug-console";
+import { isEmbeddedInIframe, isSanvistPcEmbedded, notifyParentReady, resolveFromParam } from "@/utils/iframe";
 import { createLogger } from "@/utils/logger";
+import { requestMicPermission } from "@/utils/mic-permission";
 import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
 import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
@@ -64,6 +66,9 @@ function initializeSystem(query: StartupQuery) {
   systemStore.setBaseUrl(baseUrl);
   systemStore.setGridCountry(country);
   systemStore.setAppVersion(version);
+  // 来源标识：PC 端以内嵌 iframe 打开时传 from=sanvist_pc，用于显性化「最小化」
+  // 走 resolveFromParam：hash 路由下 onLaunch 的 query 可能取不到，需要从 location 兜底
+  systemStore.setFrom(resolveFromParam(query));
   // 宿主注入的状态栏高度最准，H5 自己是取不到的
   systemStore.setStatusBarHeight(Number(query.statusBarHeight || query.StatusBarHeight) || 0);
   userStore.setUsername(username);
@@ -101,9 +106,30 @@ function initializeDeviceInfo() {
   });
 }
 
+/**
+ * PC 端内嵌 iframe 场景的初始化。
+ *
+ * 两件事：
+ * 1. 告知主应用页面已就绪 —— 主应用据此撤掉 loading；
+ * 2. 提前申请麦克风权限 —— 用户第一次点录音时不该再被授权弹窗打断。
+ */
+function initializeIframeBridge(query: StartupQuery) {
+  if (!isSanvistPcEmbedded(query)) return;
+  if (!isEmbeddedInIframe()) {
+    logger.debug("from=sanvist_pc 但当前未被嵌套，跳过 iframe 初始化");
+    return;
+  }
+
+  notifyParentReady();
+  // 不 await：权限弹窗可能停留很久，不能拖住启动流程
+  requestMicPermission();
+}
+
 onLaunch(async (options) => {
   setAuthFailureHandler(handleAuthFailure);
-  const baseInfo = initializeSystem(getLaunchQuery(options));
+  const query = getLaunchQuery(options);
+  const baseInfo = initializeSystem(query);
+  initializeIframeBridge(query);
   await setLocale(baseInfo.lang);
   await systemStore.initPhoneSizesInfo();
   initializeDeviceInfo();
