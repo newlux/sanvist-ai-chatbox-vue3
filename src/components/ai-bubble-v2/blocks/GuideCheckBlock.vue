@@ -2,6 +2,7 @@
 import type { GuideCheckPayload } from "@/api/chat/types";
 import { computed } from "vue";
 import GuideSourceBlock from "./GuideSourceBlock.vue";
+import { normalizeGuideUrl, previewGuideImages } from "@/utils/guide-content";
 
 /**
  * 核对任务与资料卡片（设计稿 2667:4520）。
@@ -19,8 +20,19 @@ const props = defineProps({
 
 const title = computed(() => String(props.payload?.title || "").trim() || "核对任务与资料");
 const content = computed(() => String(props.payload?.content || ""));
+/** 这一步的参考图（steps[].images）：渲染在「参考来源」上方，宽高自适应 */
+const images = computed(() => (Array.isArray(props.payload?.images) ? props.payload.images : [])
+  .map(item => ({
+    url: normalizeGuideUrl(String(item?.url || "")),
+    caption: String(item?.caption || ""),
+  }))
+  .filter(item => item.url));
 /** 参考来源：由消息列表从同一条回答的 source 组件注入，卡片内沿用「参考来源」样式展示 */
 const sources = computed(() => (Array.isArray(props.payload?.sources) ? props.payload.sources : []));
+
+function previewImage(current: string) {
+  previewGuideImages(current, images.value.map(item => item.url));
+}
 const status = computed(() => String(props.payload?.status || "").trim());
 const stepIndex = computed(() => Math.max(0, Number(props.payload?.step_index) || 0));
 const stepTotal = computed(() => Math.max(0, Number(props.payload?.step_total) || 0));
@@ -52,6 +64,21 @@ const progressPercent = computed(() => {
       {{ content }}
     </text>
 
+    <!-- 这一步的参考图：渲染在「参考来源」上方 -->
+    <view v-if="images.length" class="guide-check-block__images">
+      <view v-for="item in images" :key="item.url" class="guide-check-block__image-item">
+        <image
+          class="guide-check-block__image"
+          :src="item.url"
+          mode="widthFix"
+          @tap.stop="previewImage(item.url)"
+        />
+        <text v-if="item.caption" class="guide-check-block__image-caption">
+          {{ item.caption }}
+        </text>
+      </view>
+    </view>
+
     <!-- 参考来源：与回答气泡里的参考资料同款（标题 + 条目） -->
     <GuideSourceBlock
       v-if="sources.length"
@@ -66,7 +93,35 @@ const progressPercent = computed(() => {
 </template>
 
 <style lang="scss" scoped>
-/* 步骤配图已移到卡片外单独成卡（消息列表的卡片栈），卡片内只留标题 / 正文 / 参考来源 / 状态行 */
+/* 这一步的参考图：宽高自适应（widthFix），与对话框里的参考图同一套观感 */
+.guide-check-block__images {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  margin-top: 24rpx;
+}
+
+.guide-check-block__image-item {
+  overflow: hidden;
+  border-radius: 16rpx;
+  background: #f6f6f6;
+}
+
+.guide-check-block__image {
+  display: block;
+  width: 100%;
+  min-height: 240rpx;
+  background: #eeeeee;
+}
+
+.guide-check-block__image-caption {
+  display: block;
+  padding: 12rpx 16rpx 16rpx;
+  color: #666666;
+  font-size: 24rpx;
+  line-height: 34rpx;
+}
+
 .guide-check-block__sources {
   margin-top: 24rpx;
 }

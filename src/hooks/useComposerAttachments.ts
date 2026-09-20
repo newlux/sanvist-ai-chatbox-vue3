@@ -730,6 +730,39 @@ export function useComposerAttachments() {
     return { files, meta };
   }
 
+  /**
+   * 外部已经上传好的附件（如步骤卡拍照的结果）直接挂到输入栏：
+   * 不重新上传，也不自动发送，等用户在输入栏里补完说明自己发。
+   * 入参结构与 takeUploadedFiles() 返回的 meta 一致。
+   */
+  function appendUploadedAttachments(list: ChatMessageAttachment[]) {
+    (Array.isArray(list) ? list : []).forEach((item) => {
+      const url = String(item?.url || "");
+      const fileId = String(item?.fileId || "");
+      if (!url && !fileId) return;
+      if (attachments.value.length >= MAX_ATTACHMENT_COUNT) {
+        toastLimit();
+        return;
+      }
+      const name = String(item?.name || "附件");
+      const mimeType = String(item?.mimeType || "");
+      const extension = getFileExtension(name, url);
+      attachments.value.push({
+        localId: createAttachmentLocalId(),
+        fileId,
+        // 预览优先用本地地址（data URL 消息里也能渲染），没有再用远端地址
+        localPath: String(item?.localPath || url || ""),
+        url,
+        name,
+        size: Number(item?.size) || 0,
+        extension,
+        mimeType,
+        type: (item?.type as AttachmentKind) || inferAttachmentKind(extension, mimeType),
+        status: "uploaded",
+      });
+    });
+  }
+
   return {
     attachments,
     hasAttachments,
@@ -739,6 +772,7 @@ export function useComposerAttachments() {
     isNativePickerAvailable,
     chooseImages,
     pickAttachmentForSend,
+    appendUploadedAttachments,
     chooseFilesFromNative,
     removeAttachment,
     retryAttachment,
