@@ -252,17 +252,42 @@ watch([
 function onListenReport() {
   emit("listen-report", listenedReport.value);
 }
-/** 独立卡片（如核对/步骤卡）：不放进回答气泡，跟在气泡下方单独成卡 */
-const STANDALONE_BLOCK_TYPES = ["guide-check"];
 /**
- * 步骤卡按顺序逐个露出：初始只显示第一张，步骤卡推进到第 N 步时只显示第 N 张，其余隐藏。
- * 当前步骤由页面传入，历史消息复用同一个下标。
+ * 步骤卡回答的独立卡片栈：步骤详情卡（一次只显示当前那张）→ 该步骤的参考图。
+ *
+ * 带步骤卡的回答气泡正文不展示（见 ai-bubble-v2 的 hideBody），所以：
+ * - 同一条回答的参考来源（source 组件）注入到步骤卡内展示（卡片底部「参考来源」样式）；
+ * - 这一步的配图从卡片里搬出来，紧跟在步骤卡下面单独成卡；
+ * 其它回答的参考来源仍留在气泡正文里。
+ * 步骤卡按顺序逐个露出：初始只显示第一张，推进到第 N 步时只显示第 N 张，当前下标由页面传入。
  */
 function standaloneBlocks(message: UiChatMessage) {
+  const blocks = (message?.blocks || []).filter(Boolean);
   const current = Math.max(1, Number(props.stepCardCount) || 1);
-  return (message?.blocks || [])
-    .filter(block => block && STANDALONE_BLOCK_TYPES.includes(block.type))
+  const stepCards = blocks
+    .filter(block => block.type === "guide-check")
     .slice(current - 1, current);
+  const stepCard = stepCards[0];
+  if (!stepCard) return [];
+
+  // 参考来源：低端安卓 WebView 不支持 flatMap，这里手写合并
+  const evidence: unknown[] = [];
+  blocks.forEach((block) => {
+    if (block.type !== "source") return;
+    const list = Array.isArray(block.payload?.evidence) ? block.payload.evidence : [];
+    evidence.push(...list);
+  });
+  const cards = evidence.length
+    ? stepCards.map(card => ({ ...card, payload: { ...card.payload, sources: evidence } }))
+    : stepCards;
+
+  // 这一步的配图：宽高自适应（widthFix），样式沿用参考图那套
+  const images = Array.isArray(stepCard.payload?.images) ? stepCard.payload.images : [];
+  const imageBlocks = images.length
+    ? [{ id: `${stepCard.id}-images`, type: "image", payload: { items: images }, complete: true }]
+    : [];
+
+  return [...cards, ...imageBlocks];
 }
 
 const listPadStyle = computed(() =>
