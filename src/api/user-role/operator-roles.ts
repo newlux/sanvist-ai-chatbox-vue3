@@ -37,12 +37,12 @@ export const OPERATOR_ROLE_KEYS = {
 /** 设计稿兜底文案：接口缺字段或加载失败时用它，保证选择页不空屏、流程不断 */
 const FALLBACK_TEXT: Record<string, Pick<OperatorRoleOption, "roleName" | "description" | "tag">> = {
   [OPERATOR_ROLE_KEYS.skilled]: {
-    roleName: "我比较资深",
+    roleName: "我是资深司机",
     description: "我操作过同类设备，\n希望重点了解这台设备的新功能和操作差异。",
     tag: "重点讲差异 · 快速定位新功能",
   },
   [OPERATOR_ROLE_KEYS.novice]: {
-    roleName: "我需要带教",
+    roleName: "我是新手司机",
     description: "我第一次操作这款设备，\n希望从部件和术语开始，按步骤完成操作。",
     tag: "讲清基础 · 一步一操作一确认",
   },
