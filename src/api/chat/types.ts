@@ -172,6 +172,29 @@ export interface GuideStepItem extends Record<string, unknown> {
   images?: GuideStepImage[];
 }
 
+/** 追问卡的单个选项 */
+export interface GuideSuggestionOption {
+  id?: string;
+  label: string;
+}
+
+/**
+ * 多轮追问卡（COMPONENT scene=guide / type=suggestion）。
+ * 与步骤卡的区别：options 是**并行分支**（选一个就作为下一轮提问发出去），
+ * 不按顺序推进、没有 i/n 进度与确认/拍照语义。
+ */
+export interface GuideSuggestionPayload extends Record<string, unknown> {
+  /** 卡片左上角灰色小标签，如「开始匹配系统语言修改入口」 */
+  note?: string;
+  /** 问题行，如「请选择修改系统语言的入口方式」 */
+  question?: string;
+  /** 末尾输入框的 placeholder，如「其他入口」；为空则不展示输入框 */
+  other_text?: string;
+  options: GuideSuggestionOption[];
+  /** 新消息里的追问卡自动弹起 */
+  auto_open?: boolean;
+}
+
 /** 指导步骤卡片内容：steps 只有 1 个是多轮追问，多个则按顺序一张一张推进后回发 */
 export interface GuideStepPayload extends Record<string, unknown> {
   device_model?: string;
@@ -194,6 +217,11 @@ export interface GuideCheckPayload extends Record<string, unknown> {
   content?: string;
   /** 配图：步骤详情卡会带这一步的操作图 */
   images?: GuideStepImage[];
+  /**
+   * 参考来源：由消息列表从同一条回答的 source 组件注入（气泡正文隐藏后，
+   * 参考来源改在步骤卡内展示），结构与 source 组件的 evidence 一致。
+   */
+  sources?: Array<Record<string, unknown>>;
   /** 底部状态行，如「✓ 询问用户」 */
   status?: string;
 }
@@ -205,7 +233,8 @@ export interface AskSlotSubmitPayload {
 }
 
 export interface RichContentEvent {
-  event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source" | "ask_slot" | "guide_step" | "guide_check";
+  event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source" | "ask_slot"
+    | "guide_step" | "guide_check" | "guide_suggestion";
   conversationId: Identifier;
   messageId: Identifier;
   taskId?: Identifier;

@@ -4,11 +4,12 @@ import { useI18n } from "vue-i18n";
 import { setLocale } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
 import { setupDebugConsole } from "@/utils/debug-console";
+import { isEmbeddedInIframe, isSanvistPcEmbedded, notifyParentReady, resolveFromParam } from "@/utils/iframe";
 import { createLogger } from "@/utils/logger";
 import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
 import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
-import { setSceneStartupQuery } from '@/utils/scene-navigation';
+import { setSceneStartupQuery } from "@/utils/scene-navigation";
 
 const logger = createLogger("app");
 // 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
@@ -64,6 +65,9 @@ function initializeSystem(query: StartupQuery) {
   systemStore.setBaseUrl(baseUrl);
   systemStore.setGridCountry(country);
   systemStore.setAppVersion(version);
+  // 来源标识：PC 端以内嵌 iframe 打开时传 from=sanvist_pc，用于显性化「最小化」
+  // 走 resolveFromParam：hash 路由下 onLaunch 的 query 可能取不到，需要从 location 兜底
+  systemStore.setFrom(resolveFromParam(query));
   // 宿主注入的状态栏高度最准，H5 自己是取不到的
   systemStore.setStatusBarHeight(Number(query.statusBarHeight || query.StatusBarHeight) || 0);
   userStore.setUsername(username);
@@ -101,9 +105,32 @@ function initializeDeviceInfo() {
   });
 }
 
+/**
+ * PC 端内嵌 iframe 场景的初始化。
+ *
+ * 只做一件事：告知主应用页面已就绪，主应用据此撤掉 loading。
+ *
+ * 注意：这里【不要】预申请麦克风权限。Chrome 对 getUserMedia 的权限弹窗
+ * 要求「用户手势」（transient user activation），在跨域 iframe 里尤其严格。
+ * onLaunch 阶段没有手势，预申请会被挂起/静默拒绝，反而把权限状态机标成
+ * denied，导致用户之后真正点录音时被误拦截（表现为「点了没反应」）。
+ * 权限申请必须回到「用户点录音」的手势上下文里触发。
+ */
+function initializeIframeBridge(query: StartupQuery) {
+  if (!isSanvistPcEmbedded(query)) return;
+  if (!isEmbeddedInIframe()) {
+    logger.debug("from=sanvist_pc 但当前未被嵌套，跳过 iframe 初始化");
+    return;
+  }
+
+  notifyParentReady();
+}
+
 onLaunch(async (options) => {
   setAuthFailureHandler(handleAuthFailure);
-  const baseInfo = initializeSystem(getLaunchQuery(options));
+  const query = getLaunchQuery(options);
+  const baseInfo = initializeSystem(query);
+  initializeIframeBridge(query);
   await setLocale(baseInfo.lang);
   await systemStore.initPhoneSizesInfo();
   initializeDeviceInfo();

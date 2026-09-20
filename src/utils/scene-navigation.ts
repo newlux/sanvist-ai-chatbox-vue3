@@ -16,6 +16,8 @@ const startupKeys = [
   "CountryCode-User",
   "CountryCode-Position",
   "pageName",
+  // PC 端内嵌标识：跨页（首页 ↔ 听播）跳转时必须带着，否则新页面认不出自己仍在 iframe 里
+  "from",
 ];
 let startupQuery: Record<string, unknown> = {};
 let opening = false;

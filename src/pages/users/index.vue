@@ -227,6 +227,7 @@ $color-avatar-bg: #e4e4e4;
   font-size: 22rpx;
   font-weight: 400;
   line-height: 30rpx;
+  white-space: nowrap;
 }
 
 .mode-card__tag {

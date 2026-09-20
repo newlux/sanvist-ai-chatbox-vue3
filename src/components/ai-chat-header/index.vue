@@ -3,6 +3,8 @@ import { useI18n } from "vue-i18n";
 import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete.svg";
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
+import minimizeIcon from "@/assets/img/min_icon.png";
+import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { createLogger } from "@/utils/logger";
 import { getSessionSceneLabel, isPodcastSession } from "@/utils/session-scene";
@@ -43,6 +45,8 @@ const emit = defineEmits([
 const logger = createLogger("chat-header");
 const { t } = useI18n();
 const { safeTopPx } = useSafeArea();
+/** PC 端内嵌时头部露出「最小化」，替换原来的「回到首页」图标 */
+const { canMinimize, onMinimize } = useIframeMinimize();
 const historyPopup = ref();
 const sessionPaging = ref();
 const historyLoading = ref(false);
@@ -343,7 +347,14 @@ onBeforeUnmount(() => {
             </text>
           </view>
 
-          <view v-if="!props.backOnly" class="chat-header__icon-btn" @tap="onBackTap">
+          <view v-if="canMinimize" class="chat-header__icon-btn" @tap="onMinimize">
+            <image
+              :src="minimizeIcon"
+              mode="aspectFit"
+              class="chat-header__icon-minimize-img"
+            />
+          </view>
+          <view v-else-if="!props.backOnly" class="chat-header__icon-btn" @tap="onBackTap">
             <view class="chat-header__icon-atlas">
               <image
                 src="@/assets/img/icon-home.svg"
@@ -786,6 +797,10 @@ onBeforeUnmount(() => {
 .chat-header__icon-atlas-img {
   width: 46rpx;
   height: 44rpx;
+}
+.chat-header__icon-minimize-img {
+  width: 40rpx;
+  height: 40rpx;
 }
 
 .chat-header__check-all {
