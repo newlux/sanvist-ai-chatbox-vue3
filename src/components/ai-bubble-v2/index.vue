@@ -214,6 +214,13 @@ const suggestionBlocks = computed(() =>
 const isBareBody = computed(() => !isUser.value && !contentBlocks.value.length && !props.content);
 
 /**
+ * 作业指导的步骤卡回答：思考结束、步骤卡出现后气泡正文（含空的答复与操作栏）不再展示。
+ * 内容都在气泡外的独立卡片里（步骤详情卡 / 参考图 / 参考来源），避免留一个空白气泡。
+ */
+const hasGuideStepCard = computed(() => visibleBlocks.value.some(block => block?.type === "guide-step"));
+const hideBody = computed(() => !isUser.value && !props.loading && hasGuideStepCard.value);
+
+/**
  * 等待条：模型还没吐出内容时的占位。
  * 被中断后不撤掉，只把状态字改成「已停止」——否则没来得及出内容的那一轮
  * 会变成一个空气泡，用户看不出这轮发生了什么。
@@ -364,7 +371,7 @@ function onNegativeFeedback() {
     </view>
 
     <view
-      v-if="!isUser || props.content"
+      v-if="(!isUser || props.content) && !hideBody"
       class="ai-bubble-v2__body"
       :class="{ 'ai-bubble-v2__body--bare': isBareBody }"
     >

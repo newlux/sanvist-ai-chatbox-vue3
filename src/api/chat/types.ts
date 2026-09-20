@@ -217,6 +217,11 @@ export interface GuideCheckPayload extends Record<string, unknown> {
   content?: string;
   /** 配图：步骤详情卡会带这一步的操作图 */
   images?: GuideStepImage[];
+  /**
+   * 参考来源：由消息列表从同一条回答的 source 组件注入（气泡正文隐藏后，
+   * 参考来源改在步骤卡内展示），结构与 source 组件的 evidence 一致。
+   */
+  sources?: Array<Record<string, unknown>>;
   /** 底部状态行，如「✓ 询问用户」 */
   status?: string;
 }
