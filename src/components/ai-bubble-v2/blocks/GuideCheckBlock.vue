@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import type { GuideCheckPayload } from "@/api/chat/types";
 import { computed } from "vue";
-import { normalizeGuideUrl, previewGuideImages } from "@/utils/guide-content";
+import GuideSourceBlock from "./GuideSourceBlock.vue";
 
 /**
  * 核对任务与资料卡片（设计稿 2667:4520）。
  *
  * 独立白卡（白底 + #EFEFEF 边框 + 圆角 20 + 阴影 + 内边距 20），不套在回答气泡里，
  * 由消息列表在气泡下方单独渲染。
- * 结构：标题 + 右上角红色「步骤i/n」→ 红色进度条（已完成步骤占比）→ 核对清单正文 → 状态行。
+ * 结构：标题 + 右上角红色「步骤i/n」→ 红色进度条（已完成步骤占比）→ 核对清单正文
+ * → 参考来源（步骤卡回答气泡正文隐藏时，由消息列表注入同一条回答的 source 组件）→ 状态行。
  */
 defineOptions({ name: "GuideCheckBlock" });
 
@@ -17,19 +18,9 @@ const props = defineProps({
 });
 
 const title = computed(() => String(props.payload?.title || "").trim() || "核对任务与资料");
-/** 这一步的操作图（steps.images）：卡片内直接预览 */
-const images = computed(() => (Array.isArray(props.payload?.images) ? props.payload.images : [])
-  .map(item => ({
-    url: normalizeGuideUrl(String(item?.url || "")),
-    caption: String(item?.caption || ""),
-  }))
-  .filter(item => item.url)
-  .slice(0, 2));
-
-function previewImage(current: string) {
-  previewGuideImages(current, images.value.map(item => item.url));
-}
 const content = computed(() => String(props.payload?.content || ""));
+/** 参考来源：由消息列表从同一条回答的 source 组件注入，卡片内沿用「参考来源」样式展示 */
+const sources = computed(() => (Array.isArray(props.payload?.sources) ? props.payload.sources : []));
 const status = computed(() => String(props.payload?.status || "").trim());
 const stepIndex = computed(() => Math.max(0, Number(props.payload?.step_index) || 0));
 const stepTotal = computed(() => Math.max(0, Number(props.payload?.step_total) || 0));
@@ -61,19 +52,12 @@ const progressPercent = computed(() => {
       {{ content }}
     </text>
 
-    <view v-if="images.length" class="guide-check-block__images">
-      <view v-for="item in images" :key="item.url" class="guide-check-block__image-item">
-        <image
-          class="guide-check-block__image"
-          :src="item.url"
-          mode="widthFix"
-          @tap.stop="previewImage(item.url)"
-        />
-        <text v-if="item.caption" class="guide-check-block__image-caption">
-          {{ item.caption }}
-        </text>
-      </view>
-    </view>
+    <!-- 参考来源：与回答气泡里的参考资料同款（标题 + 条目） -->
+    <GuideSourceBlock
+      v-if="sources.length"
+      class="guide-check-block__sources"
+      :payload="{ evidence: sources }"
+    />
 
     <text v-if="status" class="guide-check-block__status">
       {{ status }}
@@ -82,6 +66,12 @@ const progressPercent = computed(() => {
 </template>
 
 <style lang="scss" scoped>
+/* 步骤配图已移到卡片外单独成卡（消息列表的卡片栈），卡片内只留标题 / 正文 / 参考来源 / 状态行 */
+.guide-check-block__sources {
+  margin-top: 24rpx;
+}
+
+
 /* 设计稿卡片：白底 + #EFEFEF 边框 + 圆角 20px + 阴影，内边距 20px */
 .guide-check-block {
   display: flex;
@@ -149,34 +139,6 @@ const progressPercent = computed(() => {
   font-weight: 400;
   line-height: 44rpx;
   color: #1a1a1e;
-}
-
-.guide-check-block__images {
-  display: flex;
-  flex-direction: column;
-  gap: 16rpx;
-  margin-top: 24rpx;
-}
-
-.guide-check-block__image-item {
-  overflow: hidden;
-  border-radius: 16rpx;
-  background: #f6f6f6;
-}
-
-.guide-check-block__image {
-  display: block;
-  width: 100%;
-  min-height: 240rpx;
-  background: #eeeeee;
-}
-
-.guide-check-block__image-caption {
-  display: block;
-  padding: 12rpx 16rpx 16rpx;
-  color: #666666;
-  font-size: 24rpx;
-  line-height: 34rpx;
 }
 
 .guide-check-block__status {
