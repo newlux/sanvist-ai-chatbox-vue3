@@ -37,9 +37,11 @@ const emit = defineEmits<{
 
 <style lang="scss" scoped>
 /* ---------- 附件来源弹窗 ---------- */
+/* z-index 必须高于底部卡片（步骤卡 / 追问卡 / 多选项抽屉都是 1002）：
+   从卡片里唤起时要压住卡片，遮罩才能真正挡住卡上的其它按钮 */
 .attachment-picker-mask {
   position: fixed;
-  z-index: 1000;
+  z-index: 1010;
   top: 0;
   right: 0;
   bottom: 0;

@@ -16,10 +16,11 @@ import closeIcon from "@/assets/img/icon-close.svg";
  * 步骤本身的内容（title / action / images）不在这里，由对话里的详情卡展示。
  *
  * 交互：
- * - 「确认」：没到最后一步就翻到下一张（标签右侧 i/n 跟着走），到最后一步把走过的步骤
- *   按顺序用「、」拼成提问发出去；
+ * - 「确认」：没到最后一步就翻到下一张（标签右侧 i/n 跟着走）；到最后一步说明整轮指导做完，
+ *   直接收起卡片结束流程，不发对话（单步卡是多轮追问，仍会把这一步发出去换下一轮）；
  * - 「附件」：photo_text 非空时出现，点它弹附件来源弹窗（拍照 / 相册 / 文件，与输入栏
  *   「+」同一个组件；容器内直接走原生弹窗），选完由页面按附件流程发送；
+ *   等弹窗弹出来的这段时间（bridge 判断最长 2 秒）会先盖一层中间蒙层挡住整页；
  * - 末尾输入框：placeholder 取 question_text，输入框右侧带「发送」图标（与原生输入栏 input-bar
  *   同款 icon-send.svg，与键盘回车等效，输入为空时置灰），用户自己写的问题按原样发出去。
  *
@@ -58,6 +59,8 @@ const currentIndex = ref(0);
 const draftText = ref("");
 /** 附件来源弹窗开关（前端三选项；容器内原生弹窗由原生自己弹） */
 const isSourcePickerOpen = ref(false);
+/** 选附件期间的中间蒙层：等 bridge 判断 / 弹来源弹窗的这段时间挡住整页，防止重复点其它按钮 */
+const isPreparingAttachment = ref(false);
 
 const steps = computed<GuideStepItem[]>(() => (Array.isArray(props.payload?.steps) ? props.payload.steps : []));
 /** 灰色小标签取 data.note，老数据没有 note 时退回 data.title */
@@ -84,7 +87,7 @@ watch(() => props.visible, (visible) => {
   isSourcePickerOpen.value = false;
 });
 
-/** 按顺序把走过的步骤标题用「、」拼成下一轮的提问（会话上下文里已有原问题，不再加前缀）。 */
+/** 把步骤标题按「、」拼成下一轮的提问（会话上下文里已有原问题，不再加前缀）。 */
 function buildQuery(list: GuideStepItem[]) {
   return list.map(step => String(step.title || "").trim()).filter(Boolean).join("、");
 }
@@ -99,7 +102,13 @@ function submitSteps(list: GuideStepItem[]) {
   submitQuery(buildQuery(list));
 }
 
-/** 主选项：确认这一步。单步直接发；多步没到最后一张就翻页，到最后一张把整串步骤发出去。 */
+/**
+ * 主选项：确认这一步。
+ * - 单步（多轮追问）：把这一步发出去换下一轮；
+ * - 多步：没到最后一张就翻页（标签右侧 i/n 跟着走）；
+ * - 多步的最后一步（如「已经确认，完成本次指导」）：整轮指导结束，直接收起卡片，
+ *   不再发对话（早先是把走过的步骤拼成提问回发，现在按产品要求只结束流程）。
+ */
 function onConfirm() {
   const step = currentStep.value;
   if (!step) return;
@@ -111,7 +120,7 @@ function onConfirm() {
     currentIndex.value += 1;
     return;
   }
-  submitSteps(steps.value);
+  close();
 }
 
 /** 末尾输入框的回车发送：用户自己写的问题原样发出去 */
@@ -126,14 +135,23 @@ function onSubmitText() {
  * 附件按钮：容器内原生选择器自带「拍照 / 相册 / 文件」弹窗，直接用原生弹窗；
  * H5 弹同款三选项弹窗（与输入栏「+」共用一个组件）。选完由页面选文件并发送，
  * 这里不关卡片——用户取消时还能改选别的。
+ *
+ * 从点击到这里弹出弹窗要等 bridge 注入判断（最长 2 秒），期间先用中间蒙层挡住整页，
+ * 防止用户以为没反应而重复点其它选项；弹窗一出现就撤掉蒙层，由弹窗自己的遮罩接管。
  */
 async function onPhoto() {
-  if (!currentStep.value) return;
-  if (await isNativeAttachmentPickerAvailable()) {
-    emit("photo", "native");
-    return;
+  if (!currentStep.value || isPreparingAttachment.value) return;
+  isPreparingAttachment.value = true;
+  try {
+    if (await isNativeAttachmentPickerAvailable()) {
+      emit("photo", "native");
+      return;
+    }
+    // 先开弹窗（它的遮罩立即生效），再在 finally 里撤掉中间蒙层，避免出现无遮挡的空档
+    isSourcePickerOpen.value = true;
+  } finally {
+    isPreparingAttachment.value = false;
   }
-  isSourcePickerOpen.value = true;
 }
 
 function onPickAttachmentSource(source: "camera" | "album" | "file") {
@@ -236,7 +254,18 @@ watch(() => [props.visible, currentIndex.value], () => {
       内容由AI生成，请核实重要信息
     </text>
 
-    <!-- 附件来源弹窗：拍照 / 相册 / 文件，与输入栏「+」同一个组件 -->
+    <!-- 选附件期间的中间蒙层：等原生 bridge 判断 / 弹来源弹窗最长要 2 秒，
+         这期间挡住整页，避免用户重复点「确认」等按钮；来源弹窗遮罩出现后立刻撤掉 -->
+    <view
+      v-if="isPreparingAttachment"
+      class="guide-step-sheet__mask"
+      @touchstart.stop.prevent
+      @tap.stop.prevent
+    >
+      <view class="guide-step-sheet__mask-spinner" />
+    </view>
+
+    <!-- 附件来源弹窗：拍照 / 相册 / 文件，与输入栏「+」同一个组件（其遮罩 z-index 更高，接管挡点击） -->
     <AiAttachmentPicker
       v-model:visible="isSourcePickerOpen"
       @pick="onPickAttachmentSource"
@@ -410,5 +439,33 @@ watch(() => [props.visible, currentIndex.value], () => {
   font-weight: 400;
   line-height: 30rpx;
   color: #bababa;
+}
+
+/* 选附件期间的中间蒙层：底色与来源弹窗遮罩一致，弹窗弹出时视觉上无缝衔接 */
+.guide-step-sheet__mask {
+  position: fixed;
+  z-index: 1005;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* 转圈：纯 CSS，不引额外资源 */
+.guide-step-sheet__mask-spinner {
+  width: 56rpx;
+  height: 56rpx;
+  border: 6rpx solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: guide-step-sheet-spin 0.8s linear infinite;
+}
+
+@keyframes guide-step-sheet-spin {
+  to { transform: rotate(360deg); }
 }
 </style>
