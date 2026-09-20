@@ -6,11 +6,10 @@ import { useSystemStore, useUserStore } from "@/stores";
 import { setupDebugConsole } from "@/utils/debug-console";
 import { isEmbeddedInIframe, isSanvistPcEmbedded, notifyParentReady, resolveFromParam } from "@/utils/iframe";
 import { createLogger } from "@/utils/logger";
-import { requestMicPermission } from "@/utils/mic-permission";
 import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
 import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
-import { setSceneStartupQuery } from '@/utils/scene-navigation';
+import { setSceneStartupQuery } from "@/utils/scene-navigation";
 
 const logger = createLogger("app");
 // 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
@@ -109,9 +108,13 @@ function initializeDeviceInfo() {
 /**
  * PC 端内嵌 iframe 场景的初始化。
  *
- * 两件事：
- * 1. 告知主应用页面已就绪 —— 主应用据此撤掉 loading；
- * 2. 提前申请麦克风权限 —— 用户第一次点录音时不该再被授权弹窗打断。
+ * 只做一件事：告知主应用页面已就绪，主应用据此撤掉 loading。
+ *
+ * 注意：这里【不要】预申请麦克风权限。Chrome 对 getUserMedia 的权限弹窗
+ * 要求「用户手势」（transient user activation），在跨域 iframe 里尤其严格。
+ * onLaunch 阶段没有手势，预申请会被挂起/静默拒绝，反而把权限状态机标成
+ * denied，导致用户之后真正点录音时被误拦截（表现为「点了没反应」）。
+ * 权限申请必须回到「用户点录音」的手势上下文里触发。
  */
 function initializeIframeBridge(query: StartupQuery) {
   if (!isSanvistPcEmbedded(query)) return;
@@ -121,8 +124,6 @@ function initializeIframeBridge(query: StartupQuery) {
   }
 
   notifyParentReady();
-  // 不 await：权限弹窗可能停留很久，不能拖住启动流程
-  requestMicPermission();
 }
 
 onLaunch(async (options) => {

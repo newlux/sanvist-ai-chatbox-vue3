@@ -146,7 +146,6 @@ class WebVoiceRecorder {
           resolve({ success: false, error: "未录制到音频内容" });
           return;
         }
-        // blob: 地址交给 uni.uploadFile；下一次录音开始时再回收
         this.lastObjectUrl = URL.createObjectURL(blob);
         logger.info("web recorder stopped", { size: blob.size, mimeType });
         resolve({ success: true, data: { tempFilePath: this.lastObjectUrl } });

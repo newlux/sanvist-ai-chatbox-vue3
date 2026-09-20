@@ -23,13 +23,28 @@ export const AI_ASK_READY_ACTION = "ai-ask-ready";
 
 /**
  * 允许通信的父页面 origin。
- * 主应用测试环境固定域名；本地联调时父页面来自 localhost，端口不固定，单独用正则放行。
+ * 主应用可能来自多个环境/域名（三一、游途），用后缀白名单统一放行；
+ * 本地联调时父页面来自 localhost，端口不固定，单独用正则放行。
  */
 const ALLOWED_PARENT_ORIGINS = ["https://sanvist-test.sany.com.cn"];
+/** 按后缀放行的域名，覆盖 test / prod 等子域 */
+const ALLOWED_PARENT_SUFFIXES = [
+  ".sany.com.cn",
+  ".unifytour.com",
+];
 const LOCALHOST_ORIGIN_RE = /^https?:\/\/localhost(?::\d+)?$/;
 
 function isAllowedParentOrigin(origin: string): boolean {
-  return ALLOWED_PARENT_ORIGINS.includes(origin) || LOCALHOST_ORIGIN_RE.test(origin);
+  if (ALLOWED_PARENT_ORIGINS.includes(origin)) return true;
+  if (LOCALHOST_ORIGIN_RE.test(origin)) return true;
+
+  try {
+    const { hostname } = new URL(origin);
+    return ALLOWED_PARENT_SUFFIXES.some(suffix => hostname === suffix.slice(1) || hostname.endsWith(suffix));
+  }
+  catch {
+    return false;
+  }
 }
 
 /**

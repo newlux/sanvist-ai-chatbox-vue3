@@ -13,8 +13,8 @@ import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("mic-permission");
 
-/** 权限状态：unknown 尚未询问过，granted/denied 为已定论 */
-export type MicPermissionState = "unknown" | "granted" | "denied" | "unsupported";
+/** 权限状态：unknown 尚未询问过，granted/denied 为已定论，policy-blocked 为被权限策略拦截 */
+export type MicPermissionState = "unknown" | "granted" | "denied" | "policy-blocked" | "unsupported";
 
 let state: MicPermissionState = "unknown";
 let pending: Promise<MicPermissionState> | null = null;
@@ -26,6 +26,11 @@ export function getMicPermissionState(): MicPermissionState {
 /** 是否已经明确被拒 —— 录音前据此决定要不要先给提示而不是直接试 */
 export function isMicPermissionDenied(): boolean {
   return state === "denied";
+}
+
+/** 是否被权限策略拦截（父页面 iframe 缺 allow="microphone"） */
+export function isMicPermissionBlockedByPolicy(): boolean {
+  return state === "policy-blocked";
 }
 
 /**
@@ -49,6 +54,32 @@ function readErrorName(error: unknown): string {
 }
 
 /**
+ * 当前文档是否被浏览器的 Permissions Policy 允许使用麦克风。
+ *
+ * 跨域 iframe 默认不继承父页面的麦克风能力，除非父页面的 <iframe> 写了
+ * allow="microphone"。这个检测能在真正调 getUserMedia 之前就发现问题，
+ * 否则被策略拦截和「用户主动拒绝」在错误上都是 NotAllowedError，无法区分。
+ */
+export function isMicAllowedByPolicy(): boolean {
+  if (typeof document === "undefined") return true;
+
+  const policies = document as Document & {
+    featurePolicy?: { allowsFeature?: (feature: string) => boolean };
+    permissionsPolicy?: { allowsFeature?: (feature: string) => boolean };
+  };
+
+  const checker = policies.permissionsPolicy ?? policies.featurePolicy;
+  if (!checker?.allowsFeature) return true;
+
+  try {
+    return checker.allowsFeature("microphone");
+  }
+  catch {
+    return true;
+  }
+}
+
+/**
  * 申请麦克风权限。多次调用共享同一个在途 Promise，避免连点弹出多个系统弹窗。
  *
  * 注意：浏览器侧的「已拒绝」会被缓存到本模块（同一个页面会话内），
@@ -57,6 +88,14 @@ function readErrorName(error: unknown): string {
 export function requestMicPermission(): Promise<MicPermissionState> {
   if (state === "granted" || state === "unsupported") return Promise.resolve(state);
   if (pending) return pending;
+
+  if (!isMicAllowedByPolicy()) {
+    // 跨域 iframe 没加 allow="microphone"，调 getUserMedia 只会静默 NotAllowedError。
+    // 这是父页面的配置问题，不是用户拒绝，单独归一类，提示也要说清楚。
+    state = "policy-blocked";
+    logger.warn("麦克风被 Permissions Policy 拦截：父页面 iframe 缺少 allow=\"microphone\"");
+    return Promise.resolve(state);
+  }
 
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
     // http 打开的页面拿不到 mediaDevices（浏览器安全限制），不是「被拒绝」
@@ -99,6 +138,16 @@ export function requestMicPermission(): Promise<MicPermissionState> {
  * 必须引导用户去地址栏的权限设置里手动改回来，所以文案要指路而不是只说「失败」。
  */
 export function micPermissionHint(): string {
-    // （点击地址栏左侧图标 → 网站设置 → 麦克风 → 允许）
+  // （点击地址栏左侧图标 → 网站设置 → 麦克风 → 允许）
   return "请允许浏览器使用麦克风";
+}
+
+/**
+ * 被 Permissions Policy 拦截时的提示文案。
+ *
+ * 这种情况和「用户拒绝」本质不同：是父页面 iframe 缺 allow="microphone"，
+ * 用户再点多少次都不会弹窗，也无法自己解决，只能提示联系平台/刷新重试。
+ */
+export function micPolicyBlockedHint(): string {
+  return "麦克风权限未开启，请刷新重试或联系客服";
 }

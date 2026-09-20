@@ -2,7 +2,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, toRefs } from "vue"
 import { useI18n } from "vue-i18n";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
 import { createLogger } from "@/utils/logger";
-import { isMicPermissionDenied, markMicPermissionDenied, markMicPermissionGranted, micPermissionHint } from "@/utils/mic-permission";
+import { isMicPermissionBlockedByPolicy, isMicPermissionDenied, markMicPermissionDenied, markMicPermissionGranted, micPermissionHint, micPolicyBlockedHint } from "@/utils/mic-permission";
 import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
@@ -207,6 +207,15 @@ export function useVoiceInput(options: VoiceInputOptions) {
    * @returns true 表示被拒且已提示，调用方应直接放弃本次录音
    */
   function blockIfMicPermissionDenied(): boolean {
+    // 优先判断权限策略拦截：这种情况用户无法自己解决，文案与「被拒」不同
+    if (isMicPermissionBlockedByPolicy()) {
+      uni.showToast({
+        title: micPolicyBlockedHint(),
+        icon: "none",
+        duration: 4000,
+      });
+      return true;
+    }
     if (!isMicPermissionDenied()) return false;
     uni.showToast({
       title: micPermissionHint(),
