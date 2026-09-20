@@ -140,11 +140,12 @@ export function splitMarkdownTables(source: string): DifyHistoryBlockData[] {
 }
 
 export interface DifyHistoryBlockData {
-  type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion" | "ask-slot" | "guide-step" | "guide-check";
+  type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion" | "ask-slot"
+    | "guide-step" | "guide-check" | "guide-suggestion";
   payload: Record<string, unknown>;
 }
 
-type GuideBlockType = "image" | "video" | "source" | "suggestion" | "guide-step" | "guide-check";
+type GuideBlockType = "image" | "video" | "source" | "suggestion" | "guide-step" | "guide-check" | "guide-suggestion";
 
 /** 步骤配图：兼容 [{url,caption}] 与 ["url"] 两种写法 */
 function parseGuideImages(value: unknown) {
@@ -231,6 +232,33 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
         note: String(data.note || "").trim(),
         overview: String(data.overview || "").trim(),
         steps,
+      },
+    };
+  }
+  // 多轮追问卡：options 是并行分支（区别于按顺序推进的 step 卡），选一个就发出去。
+  if (type === "suggestion") {
+    const items = (Array.isArray(data.items) ? data.items : [])
+      .map(asRecord)
+      .filter((item): item is Record<string, unknown> => Boolean(item));
+    // 低端安卓 WebView 不支持 Array.prototype.flatMap，这里手写展开
+    const options: Array<{ id: string; label: string }> = [];
+    items.forEach((item) => {
+      (Array.isArray(item.options) ? item.options : []).forEach((option) => {
+        const record = asRecord(option);
+        const label = String(record?.label || "").trim();
+        if (!label) return;
+        options.push({ id: String(record?.id || "").trim(), label });
+      });
+    });
+    if (!options.length) return null;
+    const first = items[0] || {};
+    return {
+      type: "guide-suggestion",
+      payload: {
+        note: String(first.note || "").trim(),
+        question: String(first.suggestion_question || "").trim(),
+        other_text: String(first.other_text || "").trim(),
+        options,
       },
     };
   }
@@ -495,10 +523,14 @@ export function createDifyEventNormalizer() {
       shouldReplace = false;
     };
 
-    /** GUIDE 卡片入队；步骤卡片要自动弹起等用户选，其余卡片交给对应 block 渲染。 */
+    /** GUIDE 卡片入队；步骤卡 / 追问卡都要自动弹起等用户选，其余卡片交给对应 block 渲染。 */
     const appendGuideEvent = (guideBlock: { type: GuideBlockType; payload: Record<string, unknown> }) => {
       if (guideBlock.type === "guide-step") {
         events.push({ event: "guide_step", ...references, data: { ...guideBlock.payload, auto_open: true } });
+        return;
+      }
+      if (guideBlock.type === "guide-suggestion") {
+        events.push({ event: "guide_suggestion", ...references, data: { ...guideBlock.payload, auto_open: true } });
         return;
       }
       if (guideBlock.type === "guide-check") {
