@@ -1,20 +1,24 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import minimizeIcon from "@/assets/img/min_icon.png";
 import menuHistoryIcon from "@/assets/img/report-broadcast/feedback-history.svg";
 import menuPreferenceIcon from "@/assets/img/report-broadcast/icon-fav-setting.svg";
 import menuRateIcon from "@/assets/img/report-broadcast/icon-podcast-rate.svg";
 import moreIcon from "@/assets/img/report-broadcast/icon-show-more.svg";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
 
-defineProps<{
+const props = defineProps<{
   status: string;
   qaVisible: boolean;
   active: boolean;
+  /** iframe 内嵌（from=sanvist_pc）时，右侧额外露出「最小化」 */
+  canMinimize?: boolean;
 }>();
 
 const emit = defineEmits<{
   "dismiss-qa": [];
   "exit-report": [];
+  minimize: [];
   "open-history": [];
   "open-preference": [];
   "open-rate": [];
@@ -72,8 +76,13 @@ function onItemTouchEnd() {
         <text>.</text><text>.</text><text>.</text>
       </text>
     </view>
-    <view class="report-broadcast-header__more" @tap.stop="toggleMenu">
-      <image class="report-broadcast-header__more-icon" :src="moreIcon" mode="aspectFit" />
+    <view class="report-broadcast-header__actions">
+      <view v-if="props.canMinimize" class="report-broadcast-header__minimize" @tap="emit('minimize')">
+        <image class="report-broadcast-header__minimize-icon" :src="minimizeIcon" mode="aspectFit" />
+      </view>
+      <view class="report-broadcast-header__more" @tap.stop="toggleMenu">
+        <image class="report-broadcast-header__more-icon" :src="moreIcon" mode="aspectFit" />
+      </view>
     </view>
   </view>
   <!-- 播放器 overflow:hidden，菜单必须传送到 body，否则点「偏好设置」会打在头像上。 -->
@@ -118,7 +127,8 @@ function onItemTouchEnd() {
   padding: 0 38rpx;
 }
 .report-broadcast-header__close,
-.report-broadcast-header__more {
+.report-broadcast-header__more,
+.report-broadcast-header__minimize {
   display: flex;
   flex: 0 0 48rpx;
   align-items: center;
@@ -126,10 +136,19 @@ function onItemTouchEnd() {
   width: 48rpx;
   height: 48rpx;
 }
+.report-broadcast-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
 .report-broadcast-header__icon,
 .report-broadcast-header__more-icon {
   width: 48rpx;
   height: 48rpx;
+}
+.report-broadcast-header__minimize-icon {
+  width: 40rpx;
+  height: 40rpx;
 }
 .report-broadcast-header__menu-mask {
   position: fixed;

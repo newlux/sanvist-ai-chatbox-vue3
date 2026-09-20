@@ -15,6 +15,8 @@ export const useSystemStore = defineStore("system", () => {
   const statusBarHeight = ref(0);
   const tabbarHeight = ref(0);
   const keyHeight = ref(0);
+  /** 启动参数 from：来源标识。sanvist_pc 表示本页被 PC 端以内嵌 iframe 方式打开 */
+  const from = ref("");
 
   const mapLang: Record<string, string> = {
     en_US: "en",
@@ -78,6 +80,10 @@ export const useSystemStore = defineStore("system", () => {
     tabbarHeight.value = value;
   }
 
+  function setFrom(value: string) {
+    from.value = String(value || "");
+  }
+
   function setPixelRatio(value: number) {
     pixelRatio.value = value;
   }
@@ -121,6 +127,7 @@ export const useSystemStore = defineStore("system", () => {
     statusBarHeight,
     tabbarHeight,
     keyHeight,
+    from,
     mapLang,
     finalMapLanguage,
     finalMapRegion,
@@ -132,6 +139,7 @@ export const useSystemStore = defineStore("system", () => {
     setGridCountry,
     setStatusBarHeight,
     setTabbarHeight,
+    setFrom,
     setPixelRatio,
     setScreenWidth,
     setIsIOS,

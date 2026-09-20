@@ -11,6 +11,7 @@ import ReportInsight from "@/components/report-broadcast-player/report-insight.v
 import ReportVoiceSelector from "@/components/report-voice-selector/index.vue";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatViewport } from "@/hooks/useChatViewport";
+import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useReportAdjustmentActions } from "@/hooks/useReportAdjustmentActions";
 import { useReportInsights } from "@/hooks/useReportInsights";
 import { loadReportStyle, saveReportStyle } from "@/hooks/useReportStyle";
@@ -18,7 +19,7 @@ import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useUserStore } from "@/stores";
 import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
-import { backFromScene, isSceneWindowRoot } from '@/utils/scene-navigation';
+import { backFromScene, isSceneWindowRoot } from "@/utils/scene-navigation";
 
 /**
  * 听汇报页（播报播放器 + 底部输入栏）。
@@ -33,6 +34,8 @@ const chatStore = useChatStore(chatScope);
 const userStore = useUserStore();
 const { inputText, isLoading } = storeToRefs(chatStore);
 const { safeAreaStyle, safeTopPx } = useSafeArea();
+/** PC 端内嵌时播报头部露出「最小化」 */
+const { canMinimize, onMinimize } = useIframeMinimize();
 
 // 顶部状态栏占位：高度随真实机型状态栏高度，避免内容被顶到状态栏底下
 const statusbarStyle = computed(() => ({
@@ -375,7 +378,9 @@ onBeforeUnmount(() => {
         :dock-offset="composerDockOffset"
         :qa-loading="reportQaLoading"
         :qa-answer="reportQaAnswer"
+        :can-minimize="canMinimize"
         @dismiss-qa="dismissReportQa"
+        @minimize="onMinimize"
         @exit-report="closeReportBroadcast"
         @open-preference="openReportPreference"
         @broadcast-finished="showInsight"
