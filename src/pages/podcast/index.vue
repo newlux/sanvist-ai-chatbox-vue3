@@ -54,6 +54,8 @@ const {
 } = useChatViewport();
 const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
+/** 本轮问答是否从异常列表发起：确认或取消后必须回到异常列表。 */
+const reportQaFromInsight = ref(false);
 const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> | null>(null);
 const showReportVoiceSelector = ref(false);
 /** 是否由播报页「偏好设置」进入配置流程：决定关闭配置页时回播报页还是退出页面。 */
@@ -65,6 +67,8 @@ const reportBizDate = ref("");
 const insightVisible = ref(false);
 /** 洞察层退场中：等还原动画走完再卸载，期间不接受重复重播。 */
 const insightLeaving = ref(false);
+/** 异常列表入场是否播放过渡动画：仅播报结束与语音跳转需要。 */
+const insightAnimated = ref(true);
 /** 播报播放态，由播放器上抛，用于收起态重播按钮的图标切换。 */
 const broadcastPlaying = ref(false);
 /** 退场定时器句柄，卸载或让位给 QA 时必须清掉。 */
@@ -76,6 +80,8 @@ const INSIGHT_LEAVE_DURATION = 440;
 const canToggleInsightUrgent = computed(() => userStore.visitorRole === "OWNER");
 /** 本次页面访问一旦展示过闪鉴，后续问答均携带当前异常列表。 */
 let hasShownInsight = false;
+/** 本轮识别是否已给出 qa answer：有 answer 时视图必须留给 answer。 */
+let qaAnswerShown = false;
 const {
   rawItems: rawInsightItems,
   visibleItems: visibleInsightItems,
@@ -90,6 +96,7 @@ const {
   setCurrentFilter: setInsightFilter,
   requestUrgentConfirmation: requestInsightUrgentConfirmation,
   executeUrgent: executeInsightUrgent,
+  executeCancelUrgent: cancelInsightUrgent,
   confirmUrgent: confirmInsightUrgent,
   onLightningTap: onInsightUrgentToggle,
   dispose: disposeInsights,
@@ -99,7 +106,7 @@ const reportAdjustmentActions = useReportAdjustmentActions({
   setParams: (params) => { reportBroadcastParams.value = params; },
   saveReportStyle,
   getPlayer: () => reportBroadcastPlayerRef.value,
-  openInsight: () => { showInsight(); },
+  openInsight: (animated = false) => { showInsight(animated); },
   filterInsightList(action) {
     setInsightFilter(action.filter);
   },
@@ -109,6 +116,9 @@ const reportAdjustmentActions = useReportAdjustmentActions({
   },
   executeUrgent(action) {
     void executeInsightUrgent(action);
+  },
+  executeCancelUrgent(action) {
+    void cancelInsightUrgent(action);
   },
   updateUrgentConfirmation(action) {
     void confirmInsightUrgent(action.confirmed, action.target);
@@ -120,26 +130,33 @@ const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating,
     return hasShownInsight ? rawInsightItems.value : null;
   },
   onReportQa(answer) {
+    qaAnswerShown = true;
     reportQaLoading.value = false;
     reportQaAnswer.value = answer;
   },
   onReportAdjustment(action) {
     reportQaLoading.value = false;
     reportQaAnswer.value = "";
-    reportAdjustmentActions.execute(action);
+    // 走 workflow 通路做兜底：正常调整动作行为不变，万一加急/取消加急被打上 adjustment，也能落到正确分支。
+    reportAdjustmentActions.executeWorkflow(action);
+    returnToInsightSource();
   },
   onReportNavigation(action) {
     reportQaLoading.value = false;
     reportQaAnswer.value = "";
     reportAdjustmentActions.executeNavigation(action);
+    returnToInsightSource();
   },
   onReportWorkflowAction(action) {
     reportQaLoading.value = false;
     reportQaAnswer.value = "";
     reportAdjustmentActions.executeWorkflow(action);
+    returnToInsightSource();
   },
   onReportBlockingComplete() {
     reportQaLoading.value = false;
+    // 没产出 answer 也没带动作的回合，同样要回到刚才的异常列表。
+    if (!qaAnswerShown) returnToInsightSource();
   },
 });
 
@@ -234,16 +251,31 @@ function clearInsightLeaveTimer() {
   insightLeaveTimer = null;
 }
 
-/** 播报播放结束或收到 open_insight 导航时，页内切换为洞察视图；仅首次加载列表。 */
-function showInsight() {
+/**
+ * 播报播放结束或收到 open_insight 导航时，页内切换为洞察视图；仅首次加载列表。
+ * animated 只在这两个入口传 true，异常处理回到列表时直接呈现，不做过渡。
+ */
+function showInsight(animated = false) {
   hasShownInsight = true;
   if (insightVisible.value) return;
   clearInsightLeaveTimer();
   insightLeaving.value = false;
+  insightAnimated.value = animated;
   insightVisible.value = true;
   if (insightLoaded) return;
   insightLoaded = true;
   void loadInsights();
+}
+
+/**
+ * 回到本轮交互的来源：只要这一轮问答/动作起始于异常列表，收尾都要留在该列表。
+ * 列表已经可见（如语音跳转）时 showInsight() 直接返回，不会覆盖入场过渡。
+ * 标记不在这里清：同一轮里 answer 关闭、blocking 收尾等回调还要用它兜底，
+ * 只有用户主动回听播（replayInsightBroadcast）或重进页面才重置。
+ */
+function returnToInsightSource() {
+  if (!reportQaFromInsight.value) return;
+  showInsight();
 }
 
 function promptUrgentConfirmation(message?: string) {
@@ -270,6 +302,8 @@ function promptUrgentConfirmation(message?: string) {
  */
 function replayInsightBroadcast() {
   if (insightLeaving.value) return;
+  // 用户主动回听播：后续问答不再回退到异常列表。
+  reportQaFromInsight.value = false;
   insightLeaving.value = true;
   reportBroadcastPlayerRef.value?.togglePlayback();
   clearInsightLeaveTimer();
@@ -293,10 +327,15 @@ function openInsightItem(item: ReportInsightItem) {
 function dismissReportQa() {
   reportQaLoading.value = false;
   reportQaAnswer.value = "";
+  // answer 被关闭、识别失败或录音取消：这一轮同样要回到来源列表。
+  returnToInsightSource();
 }
 
 function enterReportQaLoading() {
   // QA 答案只在播报视图内渲染，提问时先让出洞察层。
+  // 本轮从哪发起就从哪回去：answer 里继续说“确认/取消”时来源保持不变。
+  reportQaFromInsight.value = reportQaFromInsight.value || insightVisible.value;
+  qaAnswerShown = false;
   clearInsightLeaveTimer();
   insightLeaving.value = false;
   insightVisible.value = false;
@@ -329,6 +368,8 @@ onLoad(() => {
   reportBizDate.value = getCurrentListenReportDate();
   reportQaAnswer.value = "";
   reportQaLoading.value = false;
+  reportQaFromInsight.value = false;
+  qaAnswerShown = false;
   insightVisible.value = false;
   insightLeaving.value = false;
   insightLoaded = false;
@@ -372,6 +413,7 @@ onBeforeUnmount(() => {
         :class="{
           'podcast-page__broadcast--hidden': insightVisible && !insightLeaving,
           'podcast-page__broadcast--restoring': insightLeaving,
+          'podcast-page__broadcast--instant': insightVisible && !insightLeaving && !insightAnimated,
         }"
         :params="reportBroadcastParams"
         :portrait="reportBroadcastPortrait"
@@ -383,7 +425,7 @@ onBeforeUnmount(() => {
         @minimize="onMinimize"
         @exit-report="closeReportBroadcast"
         @open-preference="openReportPreference"
-        @broadcast-finished="showInsight"
+        @broadcast-finished="showInsight(true)"
         @playback-change="onBroadcastPlaybackChange"
       />
       <!-- 播报结束后页内原地形变出的洞察层：透明容器，不做整层位移 -->
@@ -399,6 +441,7 @@ onBeforeUnmount(() => {
           :has-more="insightHasMore"
           :playing="broadcastPlaying"
           :leaving="insightLeaving"
+          :animated="insightAnimated"
           @close="closeReportBroadcast"
           @operator-item-open="openInsightItem"
           @urgent-toggle="onInsightUrgentToggle"
@@ -417,6 +460,7 @@ onBeforeUnmount(() => {
         @voice-start="onVoiceStart"
         @recognize-begin="onRecognizeBegin"
         @recognize-fail="onRecognizeFail"
+        @voice-cancel="onRecognizeFail"
         @input-focus="setTextInputFocused(true)"
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
@@ -460,6 +504,14 @@ onBeforeUnmount(() => {
 .podcast-page__broadcast--hidden {
   pointer-events: none;
   animation: podcast-broadcast-hide 0.24s ease-out forwards;
+}
+
+/* 非过渡入场：播报层直接让位，不做淡出。
+   注意不能只写 animation: none —— 让位靠的就是 podcast-broadcast-hide 的末帧 opacity: 0，
+   播报层 z-index: 2 高于洞察层的 0，少了这条透明度就会整层盖住异常列表。 */
+.podcast-page__broadcast--hidden.podcast-page__broadcast--instant {
+  animation: none;
+  opacity: 0;
 }
 
 /* 重播时播报内容原地淡回（声纹、字幕、大头像一起回来）。

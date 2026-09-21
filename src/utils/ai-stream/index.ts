@@ -13,6 +13,7 @@ export type {
   ReportModuleCode,
   ReportNavigationAction,
   ReportQaInteraction,
+  ReportUrgentAction,
   ReportUrgentTarget,
   ReportWorkflowAction,
 } from "./report-interaction";

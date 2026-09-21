@@ -59,6 +59,14 @@ export type ReportWorkflowAction =
     target: ReportUrgentTarget;
   }
   | {
+    type: "cancel_urgent";
+    targets: number[];
+  }
+  | {
+    type: "cancel_urgent";
+    target: ReportUrgentTarget;
+  }
+  | {
     type: "update_confirmation";
     confirmed: boolean;
     target?: ReportUrgentTarget;
@@ -66,6 +74,9 @@ export type ReportWorkflowAction =
   | {
     type: "none";
   };
+
+/** 加急与取消加急共用同一套定位参数（列表下标或以 eventId 定位），这里收成一个联合类型。 */
+export type ReportUrgentAction = Extract<ReportWorkflowAction, { type: "execute_urgent" | "cancel_urgent" }>;
 
 export interface ReportAdjustmentInteraction {
   interactionType: "adjustment";
@@ -197,11 +208,13 @@ function parseWorkflowAction(value: unknown): ReportWorkflowAction | null {
     const message = parseString(params.message) ?? undefined;
     return target ? { type: value.type, target, message } : null;
   }
-  if (value.type === "execute_urgent") {
+  if (value.type === "execute_urgent" || value.type === "cancel_urgent") {
+    // 取消既能用独立的 cancel_urgent，也兼容沿用 execute_urgent、只用参数位表达取消。
+    const cancel = value.type === "cancel_urgent" || params.urgent === false || params.cancel === true;
     const targets = parseTargetIndexes(params.targets);
-    if (targets) return { type: value.type, targets };
     const target = parseUrgentTarget(params.target ?? params);
-    return target ? { type: value.type, target } : null;
+    if (targets) return cancel ? { type: "cancel_urgent", targets } : { type: "execute_urgent", targets };
+    return target ? (cancel ? { type: "cancel_urgent", target } : { type: "execute_urgent", target }) : null;
   }
   if (value.type === "update_confirmation") {
     const confirmed = params.confirmed ?? params.confirmation;
