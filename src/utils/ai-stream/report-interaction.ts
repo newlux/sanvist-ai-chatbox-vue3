@@ -59,6 +59,14 @@ export type ReportWorkflowAction =
     target: ReportUrgentTarget;
   }
   | {
+    type: "cancel_execute";
+    targets: number[];
+  }
+  | {
+    type: "cancel_execute";
+    target: ReportUrgentTarget;
+  }
+  | {
     type: "update_confirmation";
     confirmed: boolean;
     target?: ReportUrgentTarget;
@@ -198,6 +206,12 @@ function parseWorkflowAction(value: unknown): ReportWorkflowAction | null {
     return target ? { type: value.type, target, message } : null;
   }
   if (value.type === "execute_urgent") {
+    const targets = parseTargetIndexes(params.targets);
+    if (targets) return { type: value.type, targets };
+    const target = parseUrgentTarget(params.target ?? params);
+    return target ? { type: value.type, target } : null;
+  }
+  if (value.type === "cancel_execute") {
     const targets = parseTargetIndexes(params.targets);
     if (targets) return { type: value.type, targets };
     const target = parseUrgentTarget(params.target ?? params);

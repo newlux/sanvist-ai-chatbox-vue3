@@ -23,6 +23,7 @@ export interface UseReportAdjustmentActionsOptions {
   filterInsightList: (action: Extract<ReportWorkflowAction, { type: "filter_list" }>) => void;
   requestUrgentConfirmation: (action: Extract<ReportWorkflowAction, { type: "request_confirmation" }>) => void;
   executeUrgent: (action: Extract<ReportWorkflowAction, { type: "execute_urgent" }>) => void;
+  cancelUrgent: (action: Extract<ReportWorkflowAction, { type: "cancel_execute" }>) => void;
   updateUrgentConfirmation: (action: Extract<ReportWorkflowAction, { type: "update_confirmation" }>) => void;
 }
 
@@ -66,6 +67,11 @@ export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOp
     if (action.type === "execute_urgent") {
       options.openInsight();
       options.executeUrgent(action);
+      return;
+    }
+    if (action.type === "cancel_execute") {
+      options.openInsight();
+      options.cancelUrgent(action);
       return;
     }
     if (action.type === "update_confirmation") {

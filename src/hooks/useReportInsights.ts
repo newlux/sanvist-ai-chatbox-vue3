@@ -3,6 +3,12 @@ import type { ReportListFilter, ReportUrgentTarget, ReportWorkflowAction } from 
 import { computed, ref } from "vue";
 import { getReportInsightEvents, toggleReportInsightUrgent } from "@/api/report-insight";
 
+/** 加急相关动作的载荷：精确目标字段 / 目标对象 / 索引数组。 */
+type UrgentAction =
+  | Extract<ReportWorkflowAction, { type: "execute_urgent" }>
+  | Extract<ReportWorkflowAction, { type: "cancel_execute" }>
+  | ReportUrgentTarget;
+
 const DEFAULT_PAGE_SIZE = 10;
 
 export interface ReportInsightItem {
@@ -143,21 +149,23 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
     }
   }
 
-  async function executeUrgent(action: Extract<ReportWorkflowAction, { type: "execute_urgent" }> | ReportUrgentTarget) {
-    if ("eventId" in action) {
-      const item = findItem(action);
-      return !item || item.isUrgent ? false : toggleUrgent(item);
-    }
-
-    if ("target" in action) {
-      const item = findItem(action.target);
-      return !item || item.isUrgent ? false : toggleUrgent(item);
-    }
-
-    const targetItems = action.targets
+  /** 索引数组载荷：越界索引直接丢弃，避免 undefined 混进批量请求。 */
+  function pickItemsByIndexes(indexes: number[]) {
+    return indexes
       .map(index => items.value[index])
       .filter((item): item is ReportInsightItem => Boolean(item));
-    const actionableItems = targetItems.filter(item => !item.isUrgent && !item.urgentLoading);
+  }
+
+  /**
+   * 批量分支：加急接口本身是 toggle，所以只对「状态需要翻转」的条目发请求——
+   * 加急时跳过已加急项，取消时跳过未加急项，否则会把状态又翻回去。
+   */
+  async function applyUrgentBatch(
+    targetItems: ReportInsightItem[],
+    desiredUrgent: boolean,
+    successToast: "已加急" | "已取消加急",
+  ) {
+    const actionableItems = targetItems.filter(item => item.isUrgent !== desiredUrgent && !item.urgentLoading);
     if (!actionableItems.length) {
       showUrgentToast("已处理");
       return false;
@@ -168,15 +176,45 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
       try {
         const result = await toggleReportInsightUrgent({ eventId: item.id });
         applyUrgentResult(item, result);
-        return result.urgent;
+        return result.urgent === desiredUrgent;
       } catch {
         return false;
       } finally {
         item.urgentLoading = false;
       }
     }));
-    if (results.some(Boolean)) showUrgentToast("已加急");
+    if (results.some(Boolean)) showUrgentToast(successToast);
     return results.some(Boolean);
+  }
+
+  /** 收到 execute_urgent：把未加急的条目置为加急，已加急的原样跳过。 */
+  async function executeUrgent(action: UrgentAction) {
+    if ("eventId" in action) {
+      const item = findItem(action);
+      return !item || item.isUrgent ? false : toggleUrgent(item);
+    }
+
+    if ("target" in action) {
+      const item = findItem(action.target);
+      return !item || item.isUrgent ? false : toggleUrgent(item);
+    }
+
+    return applyUrgentBatch(pickItemsByIndexes(action.targets), true, "已加急");
+  }
+
+  /** 收到 cancel_execute：把已加急的条目改回未加急，未加急的原样跳过。 */
+  async function cancelUrgent(action: UrgentAction) {
+    if ("eventId" in action) {
+      const item = findItem(action);
+      return !item || !item.isUrgent ? false : toggleUrgent(item);
+    }
+
+    if ("target" in action) {
+      const item = findItem(action.target);
+      return !item || !item.isUrgent ? false : toggleUrgent(item);
+    }
+
+    return applyUrgentBatch(pickItemsByIndexes(action.targets), false, "已取消加急");
   }
 
   async function confirmUrgent(confirmed: boolean, target?: ReportUrgentTarget) {
@@ -211,6 +249,7 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
     requestUrgentConfirmation,
     clearUrgentConfirmation,
     executeUrgent,
+    cancelUrgent,
     confirmUrgent,
     onLightningTap,
     dispose,

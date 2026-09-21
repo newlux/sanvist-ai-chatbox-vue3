@@ -90,6 +90,7 @@ const {
   setCurrentFilter: setInsightFilter,
   requestUrgentConfirmation: requestInsightUrgentConfirmation,
   executeUrgent: executeInsightUrgent,
+  cancelUrgent: cancelInsightUrgent,
   confirmUrgent: confirmInsightUrgent,
   onLightningTap: onInsightUrgentToggle,
   dispose: disposeInsights,
@@ -109,6 +110,9 @@ const reportAdjustmentActions = useReportAdjustmentActions({
   },
   executeUrgent(action) {
     void executeInsightUrgent(action);
+  },
+  cancelUrgent(action) {
+    void cancelInsightUrgent(action);
   },
   updateUrgentConfirmation(action) {
     void confirmInsightUrgent(action.confirmed, action.target);
