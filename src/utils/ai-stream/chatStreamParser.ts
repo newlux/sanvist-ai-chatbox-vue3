@@ -4,7 +4,7 @@ import type {
   MessageEndEvent,
 } from "@/api/chat/types";
 
-export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-suggestion"
+export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "assistant-navigation" | "guide-step" | "guide-suggestion"
   | "guide-check" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error";
 
 /** 深度思考步骤：由 status 事件按 node 聚合而来 */
@@ -130,6 +130,24 @@ export function applyEventToBlocks(
       return {
         ...base,
         blocks: upsertBlock(blocks, stablePayloadId("ask-slot", [slotName], slotIndex), "ask-slot", event.data, true),
+        receivedContent: true,
+      };
+    }
+    case "assistant_navigation": {
+      const navigationIndex = blocks.filter(block => block.type === "assistant-navigation").length;
+      return {
+        ...base,
+        blocks: upsertBlock(
+          blocks,
+          stablePayloadId("assistant-navigation", [event.data.target], navigationIndex),
+          "assistant-navigation",
+          {
+            ...event.data,
+            sessionId: event.conversationId,
+            conversationId: event.messageId,
+          },
+          true,
+        ),
         receivedContent: true,
       };
     }
