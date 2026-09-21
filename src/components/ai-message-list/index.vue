@@ -100,6 +100,7 @@ const emit = defineEmits([
   "quick-prompt",
   "suggestion-tap",
   "ask-slot-open",
+  "assistant-navigation-open",
   "guide-step-open",
   "guide-suggestion-open",
   "tts-click",
@@ -413,6 +414,7 @@ const listPadStyle = computed(() =>
               :asr-pending="!!msg.asrPending"
               @suggestion-tap="onSuggestionTap($event, index)"
               @ask-slot-open="onAskSlotOpen($event, index)"
+              @assistant-navigation-open="emit('assistant-navigation-open', $event)"
               @guide-step-open="onGuideStepOpen"
               @guide-suggestion-open="onGuideSuggestionOpen"
               @tts-click="onTtsClick(index)"

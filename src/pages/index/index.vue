@@ -2,19 +2,21 @@
 import type {
   AskSlotPayload,
   AskSlotSubmitPayload,
+  AssistantNavigationPayload,
   GuideStepItem,
   GuideStepPayload,
   GuideSuggestionPayload,
 } from "@/api/chat/types";
-import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { AttachmentSource } from "@/hooks/useComposerAttachments";
+import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { getTodayListenBroadcast } from "@/api/listen-broadcast";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
+import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
@@ -37,6 +39,7 @@ import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, us
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
+import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
@@ -127,6 +130,25 @@ const messageBottomInset = computed(() => {
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 const askSlotQueue = ref<AskSlotPayload[]>([]);
 const askSlotDrawerVisible = ref(false);
+const assistantNavigationPayload = ref<AssistantNavigationPayload | null>(null);
+const assistantNavigationVisible = ref(false);
+
+function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
+  if (payload.target !== "maintenance_assistant") return;
+  assistantNavigationPayload.value = payload;
+  assistantNavigationVisible.value = true;
+}
+
+function onAssistantNavigationConfirm(payload: AssistantNavigationPayload) {
+  if (payload.target !== "maintenance_assistant") return;
+  stashPendingRepairNavigationContext({
+    ...payload.context,
+    userId: userStore.userId,
+    sessionId: payload.sessionId,
+    conversationId: payload.conversationId,
+  });
+  void navigateToScene("/pages/repair/index");
+}
 
 function onAskSlotOpen(slot: AskSlotPayload) {
   const existingIndex = askSlotQueue.value.findIndex(item => item.slot_name === slot.slot_name);
@@ -563,6 +585,7 @@ onBeforeUnmount(() => {
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="sendQuickPrompt"
         @ask-slot-open="onAskSlotOpen"
+        @assistant-navigation-open="onAssistantNavigationOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @tts-click="onTtsClick"
@@ -579,6 +602,11 @@ onBeforeUnmount(() => {
         :visible="askSlotDrawerVisible"
         @close="closeAskSlotDrawer"
         @submit="onAskSlotSubmit"
+      />
+      <AiAssistantNavigationSheet
+        v-model:visible="assistantNavigationVisible"
+        :payload="assistantNavigationPayload"
+        @confirm="onAssistantNavigationConfirm"
       />
       <AiGuideStepSheet
         v-model:visible="guideStepSheetVisible"

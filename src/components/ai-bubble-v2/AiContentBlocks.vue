@@ -29,7 +29,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["suggestion-tap", "ask-slot-open", "guide-step-open", "guide-suggestion-open"]);
+const emit = defineEmits(["suggestion-tap", "ask-slot-open", "assistant-navigation-open", "guide-step-open", "guide-suggestion-open"]);
 
 // 回答正文里的 Markdown 表格与 ECharts 围栏都在此转换为独立 block，统一走专用组件。
 const normalizedBlocks = computed(() => expandChartFences(expandMarkdownTables((props.blocks || []) as AiBlock[])));
@@ -73,6 +73,10 @@ function onAskSlotOpen(payload) {
   emit("ask-slot-open", payload);
 }
 
+function onAssistantNavigationOpen(payload) {
+  emit("assistant-navigation-open", payload);
+}
+
 function onGuideStepOpen(payload) {
   emit("guide-step-open", payload);
 }
@@ -98,6 +102,7 @@ function onGuideSuggestionOpen(payload) {
         :loading="loading"
         @suggestion-tap="onSuggestionTap"
         @ask-slot-open="onAskSlotOpen"
+        @assistant-navigation-open="onAssistantNavigationOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
       />

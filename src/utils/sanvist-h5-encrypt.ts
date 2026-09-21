@@ -10,9 +10,12 @@ import forge from "node-forge";
 const PAYLOAD_MAX_BYTES = 190;
 
 const TEST_FRONTEND = "https://sprouts-dev-app-frontend.sany.com.cn";
-const PROD_FRONTEND = "https://fixmasterai.sany.com.cn";
+const PROD_FRONTEND = "https://sprouts-dev-app-frontend.sany.com.cn";
+// const PROD_FRONTEND = "https://fixmasterai.sany.com.cn";
+
 /** 仅 `pnpm build:h5` 注入 production，其余命令都走测试地址。 */
-const DEFAULT_FRONTEND = import.meta.env.VITE_SANVIST_H5_FRONTEND === "production" ? PROD_FRONTEND : TEST_FRONTEND;
+const DEFAULT_FRONTEND =
+  import.meta.env.VITE_SANVIST_H5_FRONTEND === "production" ? PROD_FRONTEND : TEST_FRONTEND;
 const DEFAULT_SOURCE = "sanvist";
 const DEFAULT_SYS_CODE = "sanvist";
 const DEFAULT_EXTERNAL_USER_ID = "shengmz2";
@@ -45,6 +48,9 @@ export interface SanvistH5EncryptOptions {
   sysCode?: string;
   source?: string;
   frontend?: string;
+  userId?: string;
+  sessionId?: string;
+  conversationId?: string;
 }
 
 export interface SanvistH5EncryptResult {
@@ -78,7 +84,9 @@ function encryptPayload(payload: SanvistH5Payload) {
   const plaintext = JSON.stringify(payload);
   const bytes = utf8ByteLength(plaintext);
   if (bytes > PAYLOAD_MAX_BYTES) {
-    throw new Error(`payload 过大 (${bytes} bytes)，RSA-OAEP-SHA256 2048 上限约 190 字节。\nplaintext=${plaintext}`);
+    throw new Error(
+      `payload 过大 (${bytes} bytes)，RSA-OAEP-SHA256 2048 上限约 190 字节。\nplaintext=${plaintext}`,
+    );
   }
 
   const publicKey = forge.pki.publicKeyFromPem(SANVIST_H5_PUBLIC_KEY_PEM);
@@ -109,7 +117,23 @@ export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): Sanvis
   const payload = buildPayload(externalUserId, name);
   const { plaintext, bytes, ciphertext } = encryptPayload(payload);
   const encoded = encodeURIComponent(ciphertext);
-  const url = `${frontend}/chat?source=${encodeURIComponent(source)}&sysCode=${encodeURIComponent(sysCode)}&ciphertext=${encoded}`;
+  const params = new URLSearchParams({
+    source,
+    sysCode,
+    ciphertext,
+    language: "zh-CN",
+    companyId: "8",
+    organizationId: "2",
+    isChinaMode: "true",
+    isConsumer: "true",
+  });
+  const userId = String(options.userId || "").trim();
+  const sessionId = String(options.sessionId || "").trim();
+  const conversationId = String(options.conversationId || "").trim();
+  if (userId) params.set("userId", userId);
+  if (sessionId) params.set("sessionId", sessionId);
+  if (conversationId) params.set("conversationId", conversationId);
+  const url = `${frontend}/chat?${params.toString()}`;
 
   return {
     payload,
