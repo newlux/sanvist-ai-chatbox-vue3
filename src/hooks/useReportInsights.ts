@@ -1,5 +1,5 @@
 import type { ReportInsightEvent, ToggleReportInsightUrgentResult } from "@/api/report-insight";
-import type { ReportListFilter, ReportUrgentTarget, ReportWorkflowAction } from "@/utils/ai-stream";
+import type { ReportListFilter, ReportUrgentAction, ReportUrgentTarget, ReportWorkflowAction } from "@/utils/ai-stream";
 import { computed, ref } from "vue";
 import { getReportInsightEvents, toggleReportInsightUrgent } from "@/api/report-insight";
 
@@ -143,40 +143,47 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
     }
   }
 
-  async function executeUrgent(action: Extract<ReportWorkflowAction, { type: "execute_urgent" }> | ReportUrgentTarget) {
+  /**
+   * 加急 / 取消加急共用执行体：direction 决定只命中「未加急」还是「已加急」的条目，
+   * 一条都没命中时不发请求，直接提示已处理。
+   */
+  async function executeUrgentAction(action: ReportUrgentAction | ReportUrgentTarget, direction: "urgent" | "cancel") {
+    const wantsUrgent = direction === "urgent";
+    const isActionable = (item: ReportInsightItem) =>
+      !item.urgentLoading && (wantsUrgent ? !item.isUrgent : item.isUrgent);
+
     if ("eventId" in action) {
       const item = findItem(action);
-      return !item || item.isUrgent ? false : toggleUrgent(item);
+      return item && isActionable(item) ? toggleUrgent(item) : false;
     }
 
     if ("target" in action) {
       const item = findItem(action.target);
-      return !item || item.isUrgent ? false : toggleUrgent(item);
+      return item && isActionable(item) ? toggleUrgent(item) : false;
     }
 
     const targetItems = action.targets
       .map(index => items.value[index])
       .filter((item): item is ReportInsightItem => Boolean(item));
-    const actionableItems = targetItems.filter(item => !item.isUrgent && !item.urgentLoading);
+    const actionableItems = targetItems.filter(isActionable);
     if (!actionableItems.length) {
       showUrgentToast("已处理");
       return false;
     }
 
-    const results = await Promise.all(actionableItems.map(async (item) => {
-      item.urgentLoading = true;
-      try {
-        const result = await toggleReportInsightUrgent({ eventId: item.id });
-        applyUrgentResult(item, result);
-        return result.urgent;
-      } catch {
-        return false;
-      } finally {
-        item.urgentLoading = false;
-      }
-    }));
-    if (results.some(Boolean)) showUrgentToast("已加急");
+    const results = await Promise.all(actionableItems.map(toggleUrgent));
+    if (results.some(Boolean)) showUrgentToast(wantsUrgent ? "已加急" : "已取消加急");
     return results.some(Boolean);
+  }
+
+  /** 加急：只处理尚未加急的条目。 */
+  function executeUrgent(action: Extract<ReportWorkflowAction, { type: "execute_urgent" }> | ReportUrgentTarget) {
+    return executeUrgentAction(action, "urgent");
+  }
+
+  /** 取消加急：定位参数与加急完全一致，只处理已经加急的条目。 */
+  function executeCancelUrgent(action: Extract<ReportWorkflowAction, { type: "cancel_urgent" }> | ReportUrgentTarget) {
+    return executeUrgentAction(action, "cancel");
   }
 
   async function confirmUrgent(confirmed: boolean, target?: ReportUrgentTarget) {
@@ -211,6 +218,7 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
     requestUrgentConfirmation,
     clearUrgentConfirmation,
     executeUrgent,
+    executeCancelUrgent,
     confirmUrgent,
     onLightningTap,
     dispose,

@@ -19,20 +19,40 @@ export interface UseReportAdjustmentActionsOptions {
   setParams: (params: PlayListenBroadcastParams) => void;
   saveReportStyle: (styleCode: string, moduleCodes: string[]) => void;
   getPlayer: () => ReportPlaybackController | null;
-  openInsight: () => void;
+  /** 打开异常列表；animated=true 时播放入场过渡（仅语音跳转需要）。 */
+  openInsight: (animated?: boolean) => void;
   filterInsightList: (action: Extract<ReportWorkflowAction, { type: "filter_list" }>) => void;
   requestUrgentConfirmation: (action: Extract<ReportWorkflowAction, { type: "request_confirmation" }>) => void;
   executeUrgent: (action: Extract<ReportWorkflowAction, { type: "execute_urgent" }>) => void;
+  executeCancelUrgent: (action: Extract<ReportWorkflowAction, { type: "cancel_urgent" }>) => void;
   updateUrgentConfirmation: (action: Extract<ReportWorkflowAction, { type: "update_confirmation" }>) => void;
 }
 
+/** 收到加急 / 取消加急指令后回到异常列表，等待 1 秒再真正发请求。 */
+const URGENT_ACTION_DELAY = 1000;
+
 export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOptions) {
   let pauseTimer: ReturnType<typeof setTimeout> | null = null;
+  let urgentTimer: ReturnType<typeof setTimeout> | null = null;
 
   function clearDelayedPause() {
     if (!pauseTimer) return;
     clearTimeout(pauseTimer);
     pauseTimer = null;
+  }
+
+  function clearDelayedUrgent() {
+    if (!urgentTimer) return;
+    clearTimeout(urgentTimer);
+    urgentTimer = null;
+  }
+
+  function scheduleUrgent(run: () => void) {
+    clearDelayedUrgent();
+    urgentTimer = setTimeout(() => {
+      urgentTimer = null;
+      run();
+    }, URGENT_ACTION_DELAY);
   }
 
   function restartWith(params: PlayListenBroadcastParams) {
@@ -44,7 +64,8 @@ export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOp
   }
 
   function executeNavigation(action: ReportNavigationAction) {
-    if (action.type === "open_insight" || action.type === "enter_insight") options.openInsight();
+    // 语音跳转异常页保留入场过渡；异常处理回到列表则直接呈现。
+    if (action.type === "open_insight" || action.type === "enter_insight") options.openInsight(true);
   }
 
   function executeWorkflow(action: ReportWorkflowAction) {
@@ -65,11 +86,22 @@ export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOp
     }
     if (action.type === "execute_urgent") {
       options.openInsight();
-      options.executeUrgent(action);
+      scheduleUrgent(() => options.executeUrgent(action));
+      return;
+    }
+    if (action.type === "cancel_urgent") {
+      options.openInsight();
+      scheduleUrgent(() => options.executeCancelUrgent(action));
       return;
     }
     if (action.type === "update_confirmation") {
-      options.updateUrgentConfirmation(action);
+      // 取消：不动加急；确认：先回异常列表，1 秒后再执行加急。
+      if (!action.confirmed) {
+        options.updateUrgentConfirmation(action);
+        return;
+      }
+      options.openInsight();
+      scheduleUrgent(() => options.updateUrgentConfirmation(action));
       return;
     }
     if (
@@ -128,6 +160,9 @@ export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOp
     execute,
     executeNavigation,
     executeWorkflow,
-    dispose: clearDelayedPause,
+    dispose() {
+      clearDelayedPause();
+      clearDelayedUrgent();
+    },
   };
 }
