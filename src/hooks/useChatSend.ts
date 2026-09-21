@@ -9,7 +9,7 @@ import { useI18n } from "vue-i18n";
 import { interruptChat, sendBlockingChatMessage } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { buildInitialBlocks, consumeChatStream, extractDifyHistoryBlocks, parseReportInteraction, type AiBlock } from "@/utils/ai-stream";
+import { buildInitialBlocks, consumeChatStream, extractDifyHistoryBlocks, parseReportInteraction } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
 import { createLogger } from "@/utils/logger";
@@ -24,15 +24,6 @@ function isAbortError(error: unknown) {
   const name = err.name || "";
   const message = String(err.message || "").toLowerCase();
   return name === "AbortError" || message.includes("aborted") || message.includes("abort");
-}
-
-/**
- * 这一轮回答是否真的产出了可读内容。
- * think 只是思考过程、status 只是过程状态，单独出现不算答案——
- * 这类情况回答卡是空的，要按「系统繁忙」兜底。
- */
-function hasAnswerOutput(blocks: AiBlock[]) {
-  return blocks.some(block => block && block.type !== "think" && block.type !== "status");
 }
 
 export function useChatSend(scope?: string, handlers?: {
@@ -198,7 +189,7 @@ export function useChatSend(scope?: string, handlers?: {
     let receivedContent = false;
 
     try {
-      const snapshot = await consumeChatStream({
+      await consumeChatStream({
         source: stream(createChatRequest(content, files), { idleTimeoutMs: 60_000 }),
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
@@ -206,16 +197,6 @@ export function useChatSend(scope?: string, handlers?: {
           applySnapshot(aiMsgId, userMsgId, snapshot);
         },
       });
-
-      // 接口正常结束、但整轮没有任何可读内容（作业指导等场景可能只回一个 message_end）：
-      // 回答卡里补一句兜底提示，避免用户看到一张空白卡片。
-      if (requestSeq === chatStore.activeRequestSeq && !hasAnswerOutput(snapshot.blocks)) {
-        chatStore.patchMessageById(aiMsgId, {
-          content: t("ai-busy-retry-later"),
-          blocks: buildInitialBlocks(),
-        });
-        logger.warn("[chat] empty answer, fallback hint applied", snapshot.processStatus?.phase);
-      }
     } catch (error) {
       const index = chatStore.findMessageIndex(aiMsgId);
       const aiMessage = index >= 0 ? chatStore.messages[index] : null;
