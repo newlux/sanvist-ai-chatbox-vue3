@@ -64,6 +64,8 @@ const listenBroadcastLoading = ref(false);
 const listenReportRefreshKey = ref(0);
 const guideStepSheetVisible = ref(false);
 const guideStepSheetHeight = ref(0);
+/** 核对卡要顶到对话区顶部还缺的底部间距（px，由消息列表量出来） */
+const guideStepCardSpace = ref(0);
 
 let isDemoPage = false;
 
@@ -122,8 +124,10 @@ const photoPicker = useComposerAttachments();
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
-  // 步骤卡 / 追问卡贴底展开：列表底部让出卡片高度，回答与卡片之间不重叠
-  if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) return `${guideStepSheetHeight.value}px`;
+  // 步骤卡贴底展开：列表底部既要让开卡片高度，也要留够把核对卡顶到对话区最上方的间距
+  if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) {
+    return `${Math.max(guideStepSheetHeight.value, guideStepCardSpace.value)}px`;
+  }
   // 导航与输入栏始终固定在底部；无论是否显示首页快捷问题，都预留导航实际高度。
   return `calc(${composerBottomInset.value} + 88rpx)`;
 });
@@ -173,11 +177,24 @@ const guideStepPayload = ref<GuideStepPayload | null>(null);
 /** 步骤卡按顺序露出：初始只给第一张，推进到第 N 步才显示前 N 张 */
 const guideStepCardCount = ref(1);
 
+/**
+ * 把当前显示的那张核对卡（对话区的 .chat-box__card）顶到对话区最上方。
+ * 步骤卡出现、翻页、卡片高度变化后都用它：卡片顶在上方才整张可见。
+ */
+function focusGuideStepCardAtTop() {
+  const steps = guideStepPayload.value?.steps || [];
+  const step = steps[Math.max(0, guideStepCardCount.value - 1)];
+  const stepId = String(step?.id || "").trim();
+  if (stepId) chatStore.focusStepBlock(stepId);
+}
+
 /** 步骤卡片：单步是多轮追问（点一下直接发），多步选好后确认，统一按普通问题发送。 */
 function onGuideStepOpen(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
   guideStepSheetVisible.value = true;
   guideStepCardCount.value = 1;
+  // 步骤卡弹出：把这一步的核对卡滚到对话区顶部
+  nextTick(() => focusGuideStepCardAtTop());
 }
 
 function onGuideStepSubmit(query: string) {
@@ -187,8 +204,14 @@ function onGuideStepSubmit(query: string) {
 
 function onGuideStepHeightChange(height: number) {
   guideStepSheetHeight.value = height;
-  // 底部间距刚生效，再贴一次底：核对卡才会停在步骤卡上方，而不是被压在下面
-  if (guideStepSheetVisible.value) nextTick(() => chatStore.scrollToBottom(true));
+  // 卡片高度 / 底部间距刚生效，按当前步骤重新对齐到对话区顶部
+  if (guideStepSheetVisible.value) nextTick(() => focusGuideStepCardAtTop());
+}
+
+/** 核对卡高度量出来了（底部间距跟着变），再对齐一次对话区顶部 */
+function onGuideStepCardSpaceChange(space: number) {
+  guideStepCardSpace.value = space;
+  if (guideStepSheetVisible.value) nextTick(() => focusGuideStepCardAtTop());
 }
 
 /**
@@ -203,14 +226,14 @@ async function onGuideStepPhoto(source: AttachmentSource) {
   chatInputRef.value?.focusTextInput();
 }
 
-/** 步骤卡片展开 / 翻页时，只显示这一步对应的核对卡，并把它定位到步骤卡上方 */
+/** 步骤卡片展开 / 翻页时，只显示这一步对应的核对卡，并把它顶到对话区顶部 */
 function onGuideStepChange(step: GuideStepItem | null) {
   const stepId = String(step?.id || "").trim();
   if (!stepId) return;
   const steps = guideStepPayload.value?.steps || [];
   const index = steps.findIndex(item => String(item?.id || "") === stepId);
   if (index >= 0) guideStepCardCount.value = index + 1;
-  nextTick(() => chatStore.focusStepBlock(stepId));
+  nextTick(() => focusGuideStepCardAtTop());
 }
 
 /**
@@ -574,6 +597,8 @@ onBeforeUnmount(() => {
         :suppress-highlight="shareSuppressHighlight"
         :bottom-inset="messageBottomInset"
         :step-card-count="guideStepCardCount"
+        :pin-step-card="guideStepSheetVisible"
+        @card-space-change="onGuideStepCardSpaceChange"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :listen-broadcast="listenBroadcast"
