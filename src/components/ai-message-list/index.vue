@@ -2,7 +2,7 @@
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { UiChatMessage } from "@/stores/chat-types";
 import moment from "moment";
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import iconWaveForm from "@/assets/img/icon-waveform.svg";
 import { isListenReportListened } from "@/utils/listen-report";
 import AiBlockRenderer from "../ai-bubble-v2/AiBlockRenderer.vue";
@@ -59,6 +59,11 @@ const props = defineProps({
     type: Number,
     default: 1,
   },
+  /** 步骤卡（底部白板）是否展开：展开时要保证核对卡能顶到对话区最上方 */
+  pinStepCard: {
+    type: Boolean,
+    default: false,
+  },
   awakening: {
     type: Object,
     default: null,
@@ -109,6 +114,8 @@ const emit = defineEmits([
   "copy-click",
   "select-toggle",
   "listen-report",
+  /** 把核对卡顶到对话区最上方还需要补多少底部间距（px），由页面并进 bottomInset */
+  "card-space-change",
 ]);
 
 const FALLBACK_OVERVIEW = {
@@ -286,6 +293,61 @@ function standaloneBlocks(message: UiChatMessage) {
 
 const listPadStyle = computed(() =>
   (props.bottomInset ? { paddingBottom: props.bottomInset } : {}),
+);
+
+/**
+ * 当前显示的那张核对卡的 block id：列表里可能有多轮指导留下的卡片，取最后一张
+ * （也就是页面正在推进的那一步）。
+ */
+const stepCardTargetId = computed(() => {
+  for (let index = props.messages.length - 1; index >= 0; index -= 1) {
+    const card = standaloneBlocks(props.messages[index])[0];
+    if (card?.id) return String(card.id);
+  }
+  return "";
+});
+
+/**
+ * 把当前这张核对卡顶到对话区最上方需要补的底部间距：对话区高度 − 卡片高度。
+ *
+ * 为什么必须补：scroll-into-view 就是把元素顶部对到容器顶部（uni 里是直接赋 scrollTop），
+ * 而滚动最多到「内容末尾 + 底部间距」，间距不够时会被浏览器夹在偏下的位置，看着就像没滚。
+ * 卡片比可视区还高时量出来是 0，此时贴底已经是卡片顶部能到的最高位置。
+ */
+function measureCardPinSpace() {
+  return new Promise<number>((resolve) => {
+    const targetId = stepCardTargetId.value;
+    if (!targetId) {
+      resolve(0);
+      return;
+    }
+    uni.createSelectorQuery()
+      .select(".msg-list")
+      .boundingClientRect()
+      .select(`#${targetId}`)
+      .boundingClientRect()
+      .exec((rects) => {
+        const listRect = Array.isArray(rects) ? rects[0] as { height?: number } | null : null;
+        const cardRect = Array.isArray(rects) ? rects[1] as { height?: number } | null : null;
+        const viewport = Number(listRect?.height) || 0;
+        const card = Number(cardRect?.height) || 0;
+        resolve(viewport && card ? Math.max(0, viewport - card) : 0);
+      });
+  });
+}
+
+watch(
+  () => [props.pinStepCard, props.stepCardCount],
+  async () => {
+    if (!props.pinStepCard) {
+      emit("card-space-change", 0);
+      return;
+    }
+    // 等这一轮 DOM 更新完（翻页后的新卡片、新间距）量出来才准
+    await nextTick();
+    emit("card-space-change", await measureCardPinSpace());
+  },
+  { flush: "post" },
 );
 </script>
 

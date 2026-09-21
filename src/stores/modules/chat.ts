@@ -142,21 +142,41 @@ function defineChatStore(scope: string) {
     }
 
     /**
-     * 定位到某个步骤对应的核对卡：
-     * - 卡属于最后一条消息（当前轮次）时直接贴底 —— 列表底部让出了步骤卡高度，卡片正好停在步骤卡上方；
-     * - 卡在更早的历史消息里时用 scroll-into-view 拉进视野，避免整段对话跳到最底。
+     * 把某个块滚到对话区顶部。
+     *
+     * scroll-into-view 只在值变化时生效，同一张卡需要重新对齐时（卡片收起后再点开同一步、
+     * 步骤卡高度/底部间距量出来后触发的二次对齐）必须先清空再设回，否则不会滚动；
+     * 空值是 no-op（uni 的实现里只有非空才滚），不会把列表拉回顶部。
+     */
+    function scrollBlockToTop(blockId: string) {
+      if (scrollIntoView.value !== blockId) {
+        scrollIntoView.value = blockId;
+        return;
+      }
+      scrollIntoView.value = "";
+      nextTick(() => {
+        scrollIntoView.value = blockId;
+      });
+    }
+
+    /**
+     * 定位到某个步骤对应的核对卡（对话区的 .chat-box__card），并把它滚到对话区顶部：
+     * 卡片顶在最上方才整张完整可见，贴底时会被底部步骤卡挡住大半。
+     *
+     * 能不能真的顶到，取决于页面给的底部间距（messageBottomInset 里的
+     * max(步骤卡高, 对话区高 − 卡片高)）：间距不够时滚动会被浏览器夹在偏下的位置，
+     * 这里只负责把滚动目标指向这张卡。
+     * 注意这里不再贴底，也就不会把 pinnedToBottom 置回 true（贴底会让后续追加内容再滚一次、冲掉对齐）。
      * 从最后一条往前找，避免同一份步骤在历史里来回跳。
      */
     function focusStepBlock(stepId: string) {
       const target = String(stepId || "").trim();
       if (!target) return false;
-      const lastIndex = messages.value.length - 1;
-      for (let index = lastIndex; index >= 0; index -= 1) {
+      for (let index = messages.value.length - 1; index >= 0; index -= 1) {
         const block = (messages.value[index]?.blocks || [])
           .find(item => String(item?.payload?.step_id || "") === target);
         if (!block?.id) continue;
-        if (index === lastIndex) scrollToBottom(true);
-        else scrollIntoView.value = String(block.id);
+        scrollBlockToTop(String(block.id));
         return true;
       }
       return false;

@@ -15,8 +15,11 @@ import iconGood from "@/assets/img/icon-good.svg";
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { toInlineImageUrl } from "@/utils/image-preview";
 import AiContentBlocks from "./AiContentBlocks.vue";
+import { useI18n } from "vue-i18n";
 
 defineOptions({ name: "AiBubbleV2" });
+
+const { t } = useI18n();
 
 const props = defineProps({
   role: { type: String, default: "ai" },
@@ -220,6 +223,16 @@ const isBareBody = computed(() => !isUser.value && !contentBlocks.value.length &
  */
 const hasGuideStepCard = computed(() => visibleBlocks.value.some(block => block?.type === "guide-step"));
 const hideBody = computed(() => !isUser.value && !props.loading && hasGuideStepCard.value);
+
+/**
+ * 兜底提示：回答已经结束，但回复区里既没有正文、也没有任何内容块
+ * （例如接口只回了过程进度，或只回了语音播报这类不落正文的场景）时，
+ * 在操作栏上方补一句「系统繁忙，请稍后重试」，避免只留一个空回复区。
+ * 用户主动停止的那一轮不算（那种情况显示的是「已停止」等待条）。
+ */
+const showBusyFallback = computed(
+  () => !props.loading && !props.interrupted && !hideBody.value && isBareBody.value,
+);
 
 /**
  * 等待条：模型还没吐出内容时的占位。
@@ -466,6 +479,12 @@ function onNegativeFeedback() {
           @guide-step-open="onGuideStepOpen"
           @guide-suggestion-open="onGuideSuggestionOpen"
         />
+        <!-- 空回答兜底：回复区没有内容时给一句提示，位置就在操作栏上方 -->
+        <view v-if="showBusyFallback" class="ai-bubble-v2__busy-hint">
+          <text class="ai-bubble-v2__busy-hint-text">
+            {{ t("ai-busy-retry-later") }}
+          </text>
+        </view>
         <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
           <view
             v-if="props.ttsEnabled"
@@ -907,6 +926,20 @@ function onNegativeFeedback() {
   margin-top: 32rpx;
   padding-top: 28rpx;
   border-top: 2rpx solid #f0f0f2;
+}
+/* 空回答兜底提示：外观对齐回答正文卡（灰底圆角 + 正文字号） */
+.ai-bubble-v2__busy-hint {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 24rpx 32rpx;
+  border-radius: 20rpx;
+  background: #f9f9f9;
+}
+.ai-bubble-v2__busy-hint-text {
+  font-size: 28rpx;
+  line-height: 42rpx;
+  color: #2f323c;
+  word-break: break-word;
 }
 .ai-bubble-v2__action-btn {
   width: 32rpx;
