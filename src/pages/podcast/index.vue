@@ -19,6 +19,7 @@ import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useUserStore } from "@/stores";
 import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
+import { createLogger } from "@/utils/logger";
 import { backFromScene, isSceneWindowRoot } from "@/utils/scene-navigation";
 
 /**
@@ -28,6 +29,8 @@ import { backFromScene, isSceneWindowRoot } from "@/utils/scene-navigation";
  * 进页即按听汇报处理，不再依赖 query 参数。
  */
 defineOptions({ name: "AiPodcastPage" });
+
+const logger = createLogger("podcast-page");
 
 const chatScope = provideChatScope("podcast");
 const chatStore = useChatStore(chatScope);
@@ -88,6 +91,7 @@ const {
   loadInitial: loadInsights,
   loadMore: loadMoreInsights,
   setCurrentFilter: setInsightFilter,
+  clearCurrentFilter: clearInsightFilter,
   requestUrgentConfirmation: requestInsightUrgentConfirmation,
   executeUrgent: executeInsightUrgent,
   cancelUrgent: cancelInsightUrgent,
@@ -101,7 +105,12 @@ const reportAdjustmentActions = useReportAdjustmentActions({
   saveReportStyle,
   getPlayer: () => reportBroadcastPlayerRef.value,
   openInsight: () => { showInsight(); },
+  clearInsightFilter() {
+    logger.info("[filter_list] podcast.clearInsightFilter 触发");
+    clearInsightFilter();
+  },
   filterInsightList(action) {
+    logger.info("[filter_list] podcast.filterInsightList 入参", { filter: action.filter });
     setInsightFilter(action.filter);
   },
   requestUrgentConfirmation(action) {

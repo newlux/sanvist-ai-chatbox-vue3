@@ -1,3 +1,9 @@
+import type { ReportEventTypeCode } from "@/config/report-event-types";
+import { REPORT_EVENT_TYPE_LABELS } from "@/config/report-event-types";
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("report-interaction");
+
 export interface ReportQaInteraction {
   interactionType: "qa";
   answer: string;
@@ -9,6 +15,8 @@ export type ReportModuleCode = (typeof REPORT_MODULE_CODES)[number];
 export interface ReportListFilter {
   deviceIds?: string[];
   eventIds?: string[];
+  /** 事件类型码，取值见 REPORT_EVENT_TYPE_CODES，例如 "HIGH_HYDRAULIC_OIL_TEMP"（高液压油温）。 */
+  eventType?: ReportEventTypeCode[];
   statuses?: string[];
   urgency?: "urgent" | "normal";
 }
@@ -140,15 +148,46 @@ function parseUrgentTarget(value: unknown): ReportUrgentTarget | null {
   return { eventId, deviceId, title };
 }
 
+/** 中文名 → 事件类型码 反查表（AI 下发的 anomaly_type 是中文）。 */
+const EVENT_TYPE_CODE_BY_LABEL: Record<string, ReportEventTypeCode> = {};
+(Object.entries(REPORT_EVENT_TYPE_LABELS) as [ReportEventTypeCode, string][]).forEach(([code, label]) => {
+  EVENT_TYPE_CODE_BY_LABEL[label] = code;
+});
+
+/**
+ * 中文异常类型 → 事件类型码：AI 下发的 anomaly_type 是中文（如「高液压油温」），
+ * 这里按中文名反查成接口需要的英文码；匹配不到的丢弃并告警。
+ */
+function parseEventTypeList(value: unknown): ReportEventTypeCode[] | null {
+  const rawList = Array.isArray(value) ? value : [value];
+  const codes: ReportEventTypeCode[] = [];
+  rawList.forEach((item) => {
+    const raw = parseString(item);
+    if (!raw) return;
+    const code = EVENT_TYPE_CODE_BY_LABEL[raw];
+    if (!code) {
+      logger.warn("[filter_list] 中文异常类型匹配不到事件类型码，已丢弃", { raw });
+      return;
+    }
+    logger.info("[filter_list] 中文异常类型 → 事件类型码", { raw, code });
+    if (!codes.includes(code)) codes.push(code);
+  });
+  return codes.length ? codes : null;
+}
+
 function parseListFilter(value: unknown): ReportListFilter | null {
   if (!isRecord(value)) return null;
   const deviceIds = parseStringList(value.device_ids ?? value.deviceIds) ?? undefined;
   const eventIds = parseStringList(value.event_ids ?? value.eventIds) ?? undefined;
+  /** AI 下发的中文异常类型：优先 params.criteria.anomaly_type，兼容直接给 anomaly_type。 */
+  const rawAnomalyType = (isRecord(value.criteria) ? value.criteria.anomaly_type : undefined) ?? value.anomaly_type;
+  logger.info("[filter_list] parseListFilter anomaly_type", { anomalyType: rawAnomalyType });
+  const eventType = parseEventTypeList(rawAnomalyType) ?? undefined;
   const statuses = parseStringList(value.statuses) ?? undefined;
   const rawUrgency = value.urgency;
   if (rawUrgency !== undefined && rawUrgency !== "urgent" && rawUrgency !== "normal") return null;
   const urgency = rawUrgency as ReportListFilter["urgency"];
-  const filter = { deviceIds, eventIds, statuses, urgency };
+  const filter = { deviceIds, eventIds, eventType, statuses, urgency };
   return Object.values(filter).some(Boolean) ? filter : null;
 }
 
@@ -198,7 +237,12 @@ function parseWorkflowAction(value: unknown): ReportWorkflowAction | null {
 
   if (value.type === "filter_list") {
     const filter = parseListFilter(params.filter ?? params);
-    return filter ? { type: value.type, filter } : null;
+    if (!filter) {
+      logger.warn("[filter_list] 解析失败：过滤条件为空或字段不合法，动作被丢弃", { params, raw: value });
+      return null;
+    }
+    logger.info("[filter_list] 解析成功", { filter });
+    return { type: value.type, filter };
   }
   if (value.type === "request_confirmation") {
     const target = parseUrgentTarget(params.target ?? params);

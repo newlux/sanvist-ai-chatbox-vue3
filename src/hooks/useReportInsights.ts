@@ -1,7 +1,12 @@
 import type { ReportInsightEvent, ToggleReportInsightUrgentResult } from "@/api/report-insight";
+import type { ReportEventTypeCode } from "@/config/report-event-types";
 import type { ReportListFilter, ReportUrgentTarget, ReportWorkflowAction } from "@/utils/ai-stream";
 import { computed, ref } from "vue";
 import { getReportInsightEvents, toggleReportInsightUrgent } from "@/api/report-insight";
+import { normalizeEventTypeCode } from "@/config/report-event-types";
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("report-insights");
 
 /** 加急相关动作的载荷：精确目标字段 / 目标对象 / 索引数组。 */
 type UrgentAction =
@@ -18,9 +23,17 @@ export interface ReportInsightItem {
   description: string;
   ownerTag: string;
   status: string;
+  eventTypeCode: string;
   urgentText?: string;
   isUrgent: boolean;
   urgentLoading: boolean;
+}
+
+/** 事件类型码比对：服务端已过滤时不额外拦截，客户端仅做归一化后的兜底。 */
+function matchesEventType(expected: ReportEventTypeCode[] | undefined, actual: string) {
+  if (!expected?.length) return true;
+  const target = normalizeEventTypeCode(actual);
+  return expected.some(code => code === target);
 }
 
 function formatUrgentText(urgent: boolean, ownerTag: string) {
@@ -36,6 +49,7 @@ function toInsightItem(event: ReportInsightEvent): ReportInsightItem {
     description: event.description,
     ownerTag: event.ownerTag,
     status: event.processStatus,
+    eventTypeCode: event.eventTypeCode,
     urgentText: formatUrgentText(event.urgent, event.ownerTag),
     isUrgent: event.urgent,
     urgentLoading: false,
@@ -69,19 +83,37 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
   }
 
   async function fetchPage(page: number, append: boolean) {
-    if (isLoading.value) return;
+    if (isLoading.value) {
+      logger.warn("[filter_list] fetchPage 跳过：已有请求进行中", { page, append });
+      return;
+    }
+    const eventType = currentFilter.value?.eventType;
     if (append) loadingMore.value = true;
     else loading.value = true;
     loadError.value = false;
 
+    logger.info("[filter_list] fetchPage 发起请求", {
+      page,
+      pageSize,
+      eventType,
+      filter: currentFilter.value,
+    });
+
     try {
-      const result = await getReportInsightEvents({ page, pageSize });
+      const result = await getReportInsightEvents({ page, pageSize, eventType });
       const nextItems = result.items.map(toInsightItem);
       rawItems.value = append ? [...rawItems.value, ...result.items] : result.items;
       items.value = append ? [...items.value, ...nextItems] : nextItems;
       currentPage.value = result.page;
       hasMore.value = result.hasMore;
-    } catch {
+      logger.info("[filter_list] fetchPage 请求成功", {
+        page: result.page,
+        total: result.total,
+        itemCount: result.items.length,
+        hasMore: result.hasMore,
+      });
+    } catch (error) {
+      logger.error("[filter_list] fetchPage 请求失败", error);
       loadError.value = true;
     } finally {
       loading.value = false;
@@ -106,6 +138,7 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
     return items.value.filter((item) => {
       if (filter.deviceIds?.length && !filter.deviceIds.includes(item.deviceId)) return false;
       if (filter.eventIds?.length && !filter.eventIds.includes(item.id)) return false;
+      if (!matchesEventType(filter.eventType, item.eventTypeCode)) return false;
       if (filter.statuses?.length && !filter.statuses.includes(item.status)) return false;
       if (filter.urgency === "urgent" && !item.isUrgent) return false;
       if (filter.urgency === "normal" && item.isUrgent) return false;
@@ -122,8 +155,32 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
     return items.value.find(item => item.id === target.eventId) ?? null;
   }
 
+  /**
+   * 收到 filter_list：落条件 + 重新拉取第一页，把「筛选」变成真正的接口动作。
+   * eventType（如高液压油温）随请求发给服务端，visibleItems 再做一次客户端兜底。
+   */
   function setCurrentFilter(filter: ReportListFilter | null) {
+    logger.info("[filter_list] setCurrentFilter 入参", {
+      filter,
+      currentFilter: currentFilter.value,
+    });
     currentFilter.value = filter;
+    void loadInitial();
+  }
+
+  /**
+   * 收到 enter_insight：上一轮的筛选条件（如高液压油温的 eventType）还留在 currentFilter 里，
+   * 先清空再重新拉第一页，保证进入洞察列表时看到的是全部数据。
+   */
+  function clearCurrentFilter() {
+    const previous = currentFilter.value;
+    if (!previous?.eventType?.length) {
+      logger.info("[filter_list] clearCurrentFilter 跳过：无历史 eventType", { currentFilter: previous });
+      return;
+    }
+    logger.info("[filter_list] clearCurrentFilter 清空历史筛选，重新查询全部", { previous });
+    currentFilter.value = null;
+    void loadInitial();
   }
 
   function requestUrgentConfirmation(target: ReportUrgentTarget) {
@@ -246,6 +303,7 @@ export function useReportInsights(pageSize = DEFAULT_PAGE_SIZE) {
     loadInitial,
     loadMore,
     setCurrentFilter,
+    clearCurrentFilter,
     requestUrgentConfirmation,
     clearUrgentConfirmation,
     executeUrgent,

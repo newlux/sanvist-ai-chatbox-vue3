@@ -20,6 +20,8 @@ export interface UseReportAdjustmentActionsOptions {
   saveReportStyle: (styleCode: string, moduleCodes: string[]) => void;
   getPlayer: () => ReportPlaybackController | null;
   openInsight: () => void;
+  /** enter_insight：清空上一轮筛选条件（如 eventType），让列表重新查询全部数据。 */
+  clearInsightFilter: () => void;
   filterInsightList: (action: Extract<ReportWorkflowAction, { type: "filter_list" }>) => void;
   requestUrgentConfirmation: (action: Extract<ReportWorkflowAction, { type: "request_confirmation" }>) => void;
   executeUrgent: (action: Extract<ReportWorkflowAction, { type: "execute_urgent" }>) => void;
@@ -45,16 +47,24 @@ export function useReportAdjustmentActions(options: UseReportAdjustmentActionsOp
   }
 
   function executeNavigation(action: ReportNavigationAction) {
-    if (action.type === "open_insight" || action.type === "enter_insight") options.openInsight();
+    if (action.type !== "open_insight" && action.type !== "enter_insight") return;
+    options.openInsight();
+    /** enter_insight 是「进入洞察列表」：清掉上一轮 eventType，否则看到的还是上次的筛选结果。 */
+    if (action.type === "enter_insight") {
+      logger.info("[filter_list] executeNavigation enter_insight → 清空历史筛选");
+      options.clearInsightFilter();
+    }
   }
 
   function executeWorkflow(action: ReportWorkflowAction) {
+    logger.info("[filter_list] executeWorkflow 入口", { action });
     if (action.type === "none") return;
     if (action.type === "open_insight" || action.type === "enter_insight") {
       executeNavigation(action);
       return;
     }
     if (action.type === "filter_list") {
+      logger.info("[filter_list] executeWorkflow 分发 filter_list", { filter: action.filter });
       options.openInsight();
       options.filterInsightList(action);
       return;
