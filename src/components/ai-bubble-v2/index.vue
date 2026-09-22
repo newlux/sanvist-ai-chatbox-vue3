@@ -2,6 +2,7 @@
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
 import { computed, nextTick, ref } from "vue";
+import { useI18n } from "vue-i18n";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOff from "@/assets/img/icon-action-radio-off.svg";
@@ -15,11 +16,8 @@ import iconGood from "@/assets/img/icon-good.svg";
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { toInlineImageUrl } from "@/utils/image-preview";
 import AiContentBlocks from "./AiContentBlocks.vue";
-import { useI18n } from "vue-i18n";
 
 defineOptions({ name: "AiBubbleV2" });
-
-const { t } = useI18n();
 
 const props = defineProps({
   role: { type: String, default: "ai" },
@@ -48,6 +46,8 @@ const props = defineProps({
   noAnswerGroup: { type: Boolean, default: false },
   /** 语音已松手、ASR 尚未返回：展示「识别中...」占位 */
   asrPending: { type: Boolean, default: false },
+  /** 维修助手回流的本地 QA 卡片标题。 */
+  assistantCallbackTitle: { type: String, default: "" },
 });
 
 const emit = defineEmits([
@@ -63,6 +63,8 @@ const emit = defineEmits([
   "select-toggle",
   "longpress-copy",
 ]);
+
+const { t } = useI18n();
 
 /** 工作流结束事件的 elapsed_time 已在流层换算为毫秒；展示时统一转换为秒。 */
 const durationSeconds = computed(() => {
@@ -420,6 +422,9 @@ function onNegativeFeedback() {
       </template>
 
       <template v-else>
+        <view v-if="props.assistantCallbackTitle" class="ai-bubble-v2__assistant-callback-title">
+          <text>{{ props.assistantCallbackTitle }}</text>
+        </view>
         <view
           v-if="showProcessStatus"
           class="ai-bubble-v2__process-status"
@@ -780,6 +785,15 @@ function onNegativeFeedback() {
   color: #999999;
   font-size: 22rpx;
   line-height: 30rpx;
+}
+
+.ai-bubble-v2__assistant-callback-title {
+  margin-bottom: 24rpx;
+  color: #1a1a1a;
+  font-family: "PingFang SC";
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 42rpx;
 }
 
 .ai-bubble-v2__waiting {

@@ -3,5 +3,14 @@ export interface GetConversationSummaryParams {
   aiAskSessionId: string;
 }
 
-/** 接口响应结构待后端协议确认，调用方按实际字段消费。 */
-export type ConversationSummary = Record<string, unknown>;
+export interface ConversationSummaryData {
+  problem?: string;
+  conclusion?: string;
+  treatment?: string;
+  status?: string;
+  equipmentCategory?: string | null;
+  model?: string | null;
+  deviceId?: string | null;
+}
+
+export type ConversationSummary = ConversationSummaryData;

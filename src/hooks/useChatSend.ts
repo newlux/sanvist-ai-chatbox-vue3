@@ -138,7 +138,7 @@ export function useChatSend(scope?: string, handlers?: {
     chatStore.scrollToBottom();
   }
 
-  function createChatRequest(content: string, files: ChatFile[]) {
+  function createChatRequest(content: string, files: ChatFile[], extraInputs: Record<string, unknown> = {}) {
     const scene = handlers?.scene ?? "ASK";
     return {
       query: content,
@@ -159,6 +159,7 @@ export function useChatSend(scope?: string, handlers?: {
         : {
             scene,
             ...(handlers?.getExtraInputs?.() ?? {}),
+            ...extraInputs,
           },
       files,
     };
@@ -184,13 +185,14 @@ export function useChatSend(scope?: string, handlers?: {
     files: ChatFile[];
     hadSessionId: boolean;
     requestSeq: number;
+    extraInputs?: Record<string, unknown>;
   }) {
-    const { aiMsgId, userMsgId, content, files, hadSessionId, requestSeq } = options;
+    const { aiMsgId, userMsgId, content, files, hadSessionId, requestSeq, extraInputs } = options;
     let receivedContent = false;
 
     try {
       await consumeChatStream({
-        source: stream(createChatRequest(content, files), { idleTimeoutMs: 60_000 }),
+        source: stream(createChatRequest(content, files, extraInputs), { idleTimeoutMs: 60_000 }),
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
@@ -348,6 +350,49 @@ export function useChatSend(scope?: string, handlers?: {
     else await sendAiFlow(options);
   }
 
+  async function sendAssistantCallback(content: string, options: {
+    aiMsgId?: string;
+    waitingText?: string;
+  } = {}) {
+    const query = String(content || "").trim();
+    if (!query) return;
+
+    cancelActiveStream();
+    const requestSeq = chatStore.nextRequestSeq();
+    const hadSessionId = Boolean(chatStore.aiSessionId);
+    const aiMsgId = options.aiMsgId || `assistant-callback-${Date.now()}`;
+    const conversationId = chatStore.aiSessionId;
+
+    chatStore.showQuickPrompts = false;
+    chatStore.isLoading = true;
+    if (chatStore.findMessageIndex(aiMsgId) < 0) {
+      chatStore.messages.push({
+        id: aiMsgId,
+        role: "ai",
+        content: "",
+        blocks: buildInitialBlocks(),
+        loading: true,
+        interrupted: false,
+        sessionId: conversationId,
+        messageId: null,
+        waitingText: options.waitingText || "维修助手-快速问答",
+        processStatus: { phase: "thinking" },
+      });
+    }
+    chatStore.activeMessageId = aiMsgId;
+    chatStore.scrollToBottom(true);
+
+    await sendAiFlow({
+      aiMsgId,
+      userMsgId: "",
+      content: query,
+      files: [],
+      hadSessionId,
+      requestSeq,
+      extraInputs: { entry_type: "assistant_callback" },
+    });
+  }
+
   /** 语音松手后立刻插入「识别中...」占位，等 ASR 回来再改成真正的问题和回答 */
   function beginAsrPlaceholder() {
     const pending = chatStore.messages.find(item => item.role === "user" && item.asrPending);
@@ -400,6 +445,7 @@ export function useChatSend(scope?: string, handlers?: {
     sendMessage,
     sendQuickPrompt,
     sendAskSlotSelection,
+    sendAssistantCallback,
     beginAsrPlaceholder,
     discardAsrPlaceholder,
     stopGenerating,

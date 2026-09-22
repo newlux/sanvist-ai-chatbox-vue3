@@ -14,6 +14,7 @@ import { onLoad, onShow } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { getConversationSummary } from "@/api/conversation-summary";
 import { getTodayListenBroadcast } from "@/api/listen-broadcast";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
@@ -39,6 +40,7 @@ import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, us
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
+import { consumePendingRepairCallback, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -93,7 +95,16 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
+const {
+  sendMessage,
+  sendQuickPrompt,
+  sendAskSlotSelection,
+  sendAssistantCallback,
+  beginAsrPlaceholder,
+  discardAsrPlaceholder,
+  stopGenerating,
+  cancelActiveStream,
+} = useChatSend();
 const {
   iconCopyImage,
   iconSaveImage,
@@ -136,6 +147,10 @@ const askSlotQueue = ref<AskSlotPayload[]>([]);
 const askSlotDrawerVisible = ref(false);
 const assistantNavigationPayload = ref<AssistantNavigationPayload | null>(null);
 const assistantNavigationVisible = ref(false);
+let repairSummaryPollingTimer: ReturnType<typeof setTimeout> | null = null;
+let repairSummaryPollingAttempts = 0;
+const REPAIR_SUMMARY_POLL_INTERVAL_MS = 5_000;
+const REPAIR_SUMMARY_MAX_ATTEMPTS = 30;
 
 function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
   if (payload.target !== "maintenance_assistant") return;
@@ -151,7 +166,74 @@ function onAssistantNavigationConfirm(payload: AssistantNavigationPayload) {
     sessionId: payload.sessionId,
     conversationId: payload.conversationId,
   });
+  const aiAskConversationId = String(payload.conversationId || "").trim();
+  const aiAskSessionId = String(payload.sessionId || "").trim();
+  if (aiAskConversationId && aiAskSessionId) {
+    stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
+  }
   void navigateToScene("/pages/repair/index");
+}
+
+function clearRepairSummaryPolling() {
+  if (!repairSummaryPollingTimer) return;
+  clearTimeout(repairSummaryPollingTimer);
+  repairSummaryPollingTimer = null;
+}
+
+function startRepairSummaryCallback() {
+  const task = consumePendingRepairCallback();
+  if (!task) return;
+
+  clearRepairSummaryPolling();
+  repairSummaryPollingAttempts = 0;
+  const aiMsgId = `repair-summary-${Date.now()}`;
+  chatStore.messages.push({
+    id: aiMsgId,
+    role: "ai",
+    content: "",
+    blocks: [],
+    loading: true,
+    sessionId: chatStore.aiSessionId,
+    messageId: null,
+    waitingText: "维修助手-快速问答",
+    assistantCallbackTitle: "维修助手-快速问答",
+    processStatus: { phase: "thinking", title: "故障诊断中..." },
+  });
+  chatStore.scrollToBottom(true);
+
+  const poll = async () => {
+    repairSummaryPollingAttempts += 1;
+    try {
+      const data = await getConversationSummary(task);
+      // 快速问答没有状态字段，首次获取结果后直接回流，不进入轮询。
+      if (!data.status) {
+        await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
+        return;
+      }
+      // 故障诊断仅在状态为 Completed 时结束轮询并回流。
+      if (data.status === "Completed") {
+        clearRepairSummaryPolling();
+        await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
+        return;
+      }
+    }
+    catch (error) {
+      logger.error("failed to query repair conversation summary", error);
+    }
+
+    if (repairSummaryPollingAttempts >= REPAIR_SUMMARY_MAX_ATTEMPTS) {
+      clearRepairSummaryPolling();
+      chatStore.patchMessageById(aiMsgId, {
+        content: "维修助手结果暂未生成，请稍后再试。",
+        loading: false,
+        processStatus: { phase: "failed", title: "故障诊断未完成" },
+      });
+      return;
+    }
+    repairSummaryPollingTimer = setTimeout(poll, REPAIR_SUMMARY_POLL_INTERVAL_MS);
+  };
+
+  void poll();
 }
 
 function onAskSlotOpen(slot: AskSlotPayload) {
@@ -547,8 +629,10 @@ onShow(() => {
   syncPageStage();
   chatStore.refreshQuickPrompts();
   refreshListenReportState();
+  startRepairSummaryCallback();
 });
 onBeforeUnmount(() => {
+  clearRepairSummaryPolling();
   stopNativeResume();
   uni.$off("listen-report-marked", refreshListenReportState);
   cancelActiveStream();
