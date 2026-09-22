@@ -83,15 +83,16 @@ function postToRepair(payload: Record<string, unknown>) {
 
 function handleQueryQuestion() {
   const question = String(repairNavigationContext.value.query || "").trim();
-  const deviceNo = String(repairNavigationContext.value.deviceid || "").trim();
-  if (!question || !deviceNo) {
+  // const deviceNo = String(repairNavigationContext.value.deviceid || "").trim();
+  if (!question) {
     logger.warn("维修 H5 请求问题时缺少 AI 问答导航上下文", repairNavigationContext.value);
     return;
   }
 
   postToRepair({
     type: "send_question",
-    data: { question, deviceNo },
+    data: { question },
+    // data: { question, deviceNo },
   });
 }
 
@@ -141,7 +142,7 @@ onBeforeUnmount(() => {
 .ai-page {
   display: flex;
   flex-direction: column;
-  width: 100%;
+  width: 100vw;
   height: 100vh;
   min-height: 0;
   overflow: hidden;
@@ -159,9 +160,10 @@ onBeforeUnmount(() => {
 
 .ai-page__iframe {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
   border: 0;
+  overflow: hidden;
 }
 
 .ai-page__error {

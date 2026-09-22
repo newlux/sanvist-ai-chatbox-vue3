@@ -462,6 +462,7 @@ watch(
               :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
               :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted"
               :waiting-text="msg.waitingText"
+              :assistant-callback-title="msg.assistantCallbackTitle"
               :attachments="msg.attachments || []"
               :interrupted="!!msg.interrupted"
               :duration-ms="msg.durationMs"

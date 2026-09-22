@@ -89,6 +89,8 @@ export function mapHistoryMessages(
     const item = raw as Record<string, unknown>;
     const sessionId = (item?.conversationId || fallbackSessionId || null) as Identifier | null;
     const messageId = (item?.id ?? null) as Identifier | null;
+    const inputs = item?.inputs && typeof item.inputs === "object" ? item.inputs as Record<string, unknown> : {};
+    const isAssistantCallback = inputs.entry_type === "assistant_callback";
     const userText = String(item?.query || "").trim();
     const attachments = mapHistoryAttachments(pickHistoryFileList(item));
     // 标准 Dify answer 中可能内嵌 SANVIST/ASK/GUIDE 协议，按原顺序还原文本与富内容卡片。
@@ -100,7 +102,7 @@ export function mapHistoryMessages(
         payload: block.payload,
         complete: true,
       }));
-    if (userText || attachments.length) {
+    if (!isAssistantCallback && (userText || attachments.length)) {
       mapped.push({ role: "user", content: userText, attachments, sessionId, messageId });
     }
     if (blocks.length) {
@@ -119,6 +121,7 @@ export function mapHistoryMessages(
         positive: feedback?.rating === "like" ? true : feedback?.rating === "dislike" ? false : null,
         feedbackValue: feedback?.rating === "like" ? "good" : feedback?.rating === "dislike" ? "bad" : "",
         feedbackRemark: feedback?.content || "",
+        ...(isAssistantCallback ? { assistantCallbackTitle: "维修助手-快速问答" } : {}),
       });
     }
   });
