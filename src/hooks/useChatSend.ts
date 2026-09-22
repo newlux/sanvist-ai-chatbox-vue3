@@ -159,7 +159,7 @@ export function useChatSend(scope?: string, handlers?: {
         ? {
             scene: "PODCAST",
             role_id: userStore.visitorRole || "guest",
-            conversation_id: chatStore.aiSessionId,
+            conversation_id: chatStore.aiSessionId  ?? "",
             ...(() => {
               const exceptions = handlers?.getPodcastExceptions?.();
               return exceptions ? { exceptions: JSON.stringify(exceptions) } : {};
