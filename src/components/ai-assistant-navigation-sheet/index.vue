@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AssistantNavigationPayload } from "@/api/chat/types";
 import { computed } from "vue";
-import CloseIcon from "/src/assets/icons/slot-drawer/slot-drawer-close.svg";
+import CloseIcon from "@/assets/img/slot-drawer-close.svg";
 
 defineOptions({ name: "AiAssistantNavigationSheet" });
 

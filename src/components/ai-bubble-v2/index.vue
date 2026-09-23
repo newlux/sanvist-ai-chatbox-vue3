@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { PropType } from "vue";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
 import { computed, nextTick, ref } from "vue";
@@ -12,6 +13,8 @@ import iconBadFilled from "@/assets/img/icon-bad-fill.svg";
 import iconBad from "@/assets/img/icon-bad.svg";
 import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
+import iconRepair from "@/assets/img/icon-repair.svg";
+import iconArrowNext from "@/assets/img/slot-drawer-arrow-next.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { toInlineImageUrl } from "@/utils/image-preview";
@@ -46,8 +49,12 @@ const props = defineProps({
   noAnswerGroup: { type: Boolean, default: false },
   /** 语音已松手、ASR 尚未返回：展示「识别中...」占位 */
   asrPending: { type: Boolean, default: false },
-  /** 维修助手回流的本地 QA 卡片标题。 */
+  /** 维修助手回流的 QA 卡片标题。 */
   assistantCallbackTitle: { type: String, default: "" },
+  assistantCallbackDetails: {
+    type: Array as PropType<Array<{ label: string; value: string }>>,
+    default: () => [],
+  },
 });
 
 const emit = defineEmits([
@@ -255,6 +262,7 @@ const processStatusText = computed(() => {
 });
 
 const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusText.value));
+const showAssistantCallbackResult = computed(() => Boolean(props.assistantCallbackTitle) && !props.loading && !props.interrupted);
 const hasProcessContent = computed(() => Boolean(contentBlocks.value.length || props.content));
 const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(props.processSubtitle?.trim()));
 
@@ -391,9 +399,12 @@ function onNegativeFeedback() {
     </view>
 
     <view
-      v-if="(!isUser || props.content) && !hideBody"
+      v-if="(!isUser || props.content) && !hideBody && (!props.assistantCallbackTitle || !props.loading)"
       class="ai-bubble-v2__body"
-      :class="{ 'ai-bubble-v2__body--bare': isBareBody }"
+      :class="{
+        'ai-bubble-v2__body--bare': isBareBody,
+        'ai-bubble-v2__body--assistant-callback': Boolean(props.assistantCallbackTitle),
+      }"
     >
       <template v-if="isUser">
         <view v-if="props.asrPending" class="ai-bubble-v2__asr" aria-label="识别中">
@@ -422,11 +433,32 @@ function onNegativeFeedback() {
       </template>
 
       <template v-else>
-        <view v-if="props.assistantCallbackTitle" class="ai-bubble-v2__assistant-callback-title">
-          <text>{{ props.assistantCallbackTitle }}</text>
+        <view v-if="props.assistantCallbackTitle" class="ai-bubble-v2__assistant-callback-card">
+          <view class="ai-bubble-v2__assistant-callback-heading">
+            <image class="ai-bubble-v2__assistant-callback-icon" :src="iconRepair" mode="aspectFit" />
+            <view class="ai-bubble-v2__assistant-callback-copy">
+              <text class="ai-bubble-v2__assistant-callback-title">
+                {{ props.assistantCallbackTitle }}
+              </text>
+              <text class="ai-bubble-v2__assistant-callback-status">
+                {{ showAssistantCallbackResult ? "答案回复生成" : processStatusText }}
+              </text>
+            </view>
+            <image class="ai-bubble-v2__assistant-callback-arrow" :src="iconArrowNext" mode="aspectFit" />
+          </view>
+          <view v-if="showAssistantCallbackResult && props.assistantCallbackDetails.length" class="ai-bubble-v2__assistant-callback-details">
+            <view v-for="(item, index) in props.assistantCallbackDetails" :key="`${item.label}-${index}`" class="ai-bubble-v2__assistant-callback-detail">
+              <text class="ai-bubble-v2__assistant-callback-label">
+                {{ index + 1 }} {{ item.label }}
+              </text>
+              <text class="ai-bubble-v2__assistant-callback-value">
+                {{ item.value }}
+              </text>
+            </view>
+          </view>
         </view>
         <view
-          v-if="showProcessStatus"
+          v-if="showProcessStatus && !props.assistantCallbackTitle"
           class="ai-bubble-v2__process-status"
           :class="[
             `ai-bubble-v2__process-status--${props.processStatus?.phase}`,
@@ -474,6 +506,7 @@ function onNegativeFeedback() {
           </text>
         </view>
         <AiContentBlocks
+          v-if="!props.assistantCallbackTitle"
           :blocks="contentBlocks"
           :force-thinking-expanded="props.forceThinkingExpanded"
           :no-answer-group="props.noAnswerGroup"
@@ -485,7 +518,7 @@ function onNegativeFeedback() {
           @guide-suggestion-open="onGuideSuggestionOpen"
         />
         <!-- 空回答兜底：回复区没有内容时给一句提示，位置就在操作栏上方 -->
-        <view v-if="showBusyFallback" class="ai-bubble-v2__busy-hint">
+        <view v-if="showBusyFallback && !props.assistantCallbackTitle" class="ai-bubble-v2__busy-hint">
           <text class="ai-bubble-v2__busy-hint-text">
             {{ t("ai-busy-retry-later") }}
           </text>
@@ -612,6 +645,14 @@ function onNegativeFeedback() {
   border-radius: 32rpx;
   background: #ffffff;
   box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
+}
+/* 维修助手回流卡片本身承担边框和底色，不使用通用 AI 气泡外壳。 */
+.ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--assistant-callback {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 /* 没有正文只有独立卡片：不画白卡外壳，只留操作栏 */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--bare {
@@ -787,13 +828,96 @@ function onNegativeFeedback() {
   line-height: 30rpx;
 }
 
+.ai-bubble-v2__assistant-callback-card {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 240rpx;
+  padding: 24rpx 36rpx;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid #efefef;
+  border-radius: 32rpx;
+  background: #ffffff;
+}
+
+.ai-bubble-v2__assistant-callback-heading {
+  display: flex;
+  width: 100%;
+  align-items: center;
+}
+
+.ai-bubble-v2__assistant-callback-icon {
+  flex: 0 0 auto;
+  width: 32rpx;
+  height: 32rpx;
+  margin-right: 8rpx;
+}
+
+.ai-bubble-v2__assistant-callback-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
 .ai-bubble-v2__assistant-callback-title {
-  margin-bottom: 24rpx;
+  overflow: hidden;
   color: #1a1a1a;
   font-family: "PingFang SC";
-  font-size: 30rpx;
-  font-weight: 600;
-  line-height: 42rpx;
+  font-size: 28rpx;
+  font-weight: 500;
+  line-height: 34rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-bubble-v2__assistant-callback-status {
+  overflow: hidden;
+  color: #999999;
+  font-size: 22rpx;
+  line-height: 28rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-bubble-v2__assistant-callback-arrow {
+  flex: 0 0 auto;
+  width: 40rpx;
+  height: 40rpx;
+  margin-left: 12rpx;
+}
+
+.ai-bubble-v2__assistant-callback-details {
+  display: flex;
+  width: 100%;
+  margin-top: 18rpx;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.ai-bubble-v2__assistant-callback-detail {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 12rpx;
+}
+
+.ai-bubble-v2__assistant-callback-label {
+  flex: 0 0 auto;
+  color: #999999;
+  font-size: 22rpx;
+  line-height: 32rpx;
+}
+
+.ai-bubble-v2__assistant-callback-value {
+  min-width: 0;
+  overflow: hidden;
+  color: #202027;
+  font-size: 22rpx;
+  line-height: 32rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ai-bubble-v2__waiting {

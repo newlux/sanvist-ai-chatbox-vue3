@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload } from "@/api/chat/types";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import ArrowNextDisabledIcon from "/src/assets/icons/slot-drawer/slot-drawer-arrow-next-disabled.svg";
-import ArrowNextIcon from "/src/assets/icons/slot-drawer/slot-drawer-arrow-next.svg";
-import ArrowPrevDisabledIcon from "/src/assets/icons/slot-drawer/slot-drawer-arrow-prev-disabled.svg";
-import ArrowPrevIcon from "/src/assets/icons/slot-drawer/slot-drawer-arrow-prev.svg";
-import CloseIcon from "/src/assets/icons/slot-drawer/slot-drawer-close.svg";
+import ArrowNextDisabledIcon from "@/assets/img/slot-drawer-arrow-next-disabled.svg";
+import ArrowNextIcon from "@/assets/img/slot-drawer-arrow-next.svg";
+import ArrowPrevDisabledIcon from "@/assets/img/slot-drawer-arrow-prev-disabled.svg";
+import ArrowPrevIcon from "@/assets/img/slot-drawer-arrow-prev.svg";
+import CloseIcon from "@/assets/img/slot-drawer-close.svg";
 
 /**
  * 多选项追问卡片（设计稿 2667:3284「进入拆装」底部 375×430 白板）。
