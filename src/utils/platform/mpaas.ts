@@ -522,6 +522,93 @@ export function permissionDeniedMessage(permission: NativePermission) {
   return `请在系统设置中允许使用${PERMISSION_LABELS[permission]}`;
 }
 
+export interface NativeLocation {
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  altitude?: number;
+  speed?: number;
+  timestamp?: number;
+  provider: "mpaas" | "web";
+}
+
+export interface GetLocationOptions {
+  timeoutMs?: number;
+  enableHighAccuracy?: boolean;
+  maximumAgeMs?: number;
+}
+
+function pickLocationNumber(source: BridgeResult, keys: string[]) {
+  for (const key of keys) {
+    const raw = source[key];
+    if (raw == null || raw === "") continue;
+    const value = Number(raw);
+    if (Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function normalizeNativeLocation(result: BridgeResult): NativeLocation {
+  const nested = result.data;
+  const source = nested && typeof nested === "object" && !Array.isArray(nested)
+    ? nested as BridgeResult
+    : result;
+  const latitude = pickLocationNumber(source, ["latitude", "lat"]);
+  const longitude = pickLocationNumber(source, ["longitude", "lng", "lon"]);
+  if (latitude == null || longitude == null) throw new Error("getLocation 未返回有效经纬度");
+
+  return {
+    latitude,
+    longitude,
+    accuracy: pickLocationNumber(source, ["accuracy"]),
+    altitude: pickLocationNumber(source, ["altitude"]),
+    speed: pickLocationNumber(source, ["speed"]),
+    timestamp: pickLocationNumber(source, ["timestamp", "time"]),
+    provider: "mpaas",
+  };
+}
+
+function getWebLocation(options: GetLocationOptions): Promise<NativeLocation> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return Promise.reject(new Error("当前环境不支持获取位置"));
+  }
+
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      position => resolve({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        altitude: position.coords.altitude ?? undefined,
+        speed: position.coords.speed ?? undefined,
+        timestamp: position.timestamp,
+        provider: "web",
+      }),
+      error => reject(new Error(error.message || "获取位置失败")),
+      {
+        enableHighAccuracy: options.enableHighAccuracy ?? true,
+        maximumAge: options.maximumAgeMs ?? 0,
+        timeout: options.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS,
+      },
+    );
+  });
+}
+
+/**
+ * 获取当前位置：优先调用宿主 mPaaS getLocation；Web 调试或宿主未接入时降级浏览器定位。
+ * 宿主 JSAPI 约定出参至少包含 { latitude, longitude }，也兼容 data 包裹的回参。
+ */
+export async function getCurrentLocation(options: GetLocationOptions = {}): Promise<NativeLocation> {
+  try {
+    const result = await callNative("getLocation", {}, { timeoutMs: options.timeoutMs });
+    return normalizeNativeLocation(result);
+  }
+  catch (error) {
+    logger.warn("[mpaas] getLocation 不可用，降级浏览器定位", error);
+    return getWebLocation(options);
+  }
+}
+
 /**
  * 原生录音。宿主约定：
  * - microphoneStart 开录（存成 temp.m4a），出参 { success }

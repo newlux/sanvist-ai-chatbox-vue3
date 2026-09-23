@@ -463,6 +463,7 @@ watch(
               :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted && !msg.assistantCallbackTitle"
               :waiting-text="msg.waitingText"
               :assistant-callback-title="msg.assistantCallbackTitle"
+              :assistant-callback-status="msg.assistantCallbackStatus || ''"
               :assistant-callback-details="msg.assistantCallbackDetails || []"
               :attachments="msg.attachments || []"
               :interrupted="!!msg.interrupted"

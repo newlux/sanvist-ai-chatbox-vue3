@@ -11,6 +11,7 @@ import {
   renameConversation,
 } from "@/api/chat";
 import { extractDifyHistoryBlocks } from "@/utils/ai-stream/dify";
+import { parseRepairCallbackSummary } from "@/utils/repair-callback";
 import { isPodcastSession } from "@/utils/session-scene";
 import { useUserStore } from "./user";
 
@@ -80,20 +81,6 @@ function mapHistoryAttachments(value: unknown) {
   }).filter((file): file is NonNullable<typeof file> => Boolean(file && (file.fileId || file.url)));
 }
 
-function parseAssistantCallbackDetails(query: string) {
-  if (!query) return [];
-  try {
-    const data = JSON.parse(query) as Record<string, unknown>;
-    const details = [
-      { label: "设备", value: [data.equipmentCategory, data.model, data.deviceId].filter(Boolean).join(" ") },
-      { label: "问题", value: String(data.problem || data.conclusion || data.treatment || "") },
-    ];
-    return details.filter(item => item.value);
-  } catch {
-    return [];
-  }
-}
-
 export function mapHistoryMessages(
   list: unknown[],
   fallbackSessionId: Identifier | null,
@@ -106,6 +93,8 @@ export function mapHistoryMessages(
     const inputs = item?.inputs && typeof item.inputs === "object" ? item.inputs as Record<string, unknown> : {};
     const isAssistantCallback = inputs.entry_type === "assistant_callback";
     const userText = String(item?.query || "").trim();
+    // 历史里的回流数据存在 query 上：带 status 的是故障诊断，没有的是快问快答。
+    const callbackSummary = isAssistantCallback ? parseRepairCallbackSummary(userText) : null;
     const attachments = mapHistoryAttachments(pickHistoryFileList(item));
     // 标准 Dify answer 中可能内嵌 SANVIST/ASK/GUIDE 协议，按原顺序还原文本与富内容卡片。
     const blocks = extractDifyHistoryBlocks(item?.answer)
@@ -135,10 +124,11 @@ export function mapHistoryMessages(
         positive: feedback?.rating === "like" ? true : feedback?.rating === "dislike" ? false : null,
         feedbackValue: feedback?.rating === "like" ? "good" : feedback?.rating === "dislike" ? "bad" : "",
         feedbackRemark: feedback?.content || "",
-        ...(isAssistantCallback
+        ...(callbackSummary
           ? {
-              assistantCallbackTitle: "维修助手-快速问答",
-              assistantCallbackDetails: parseAssistantCallbackDetails(userText),
+              assistantCallbackTitle: callbackSummary.title,
+              assistantCallbackStatus: callbackSummary.statusText,
+              assistantCallbackDetails: callbackSummary.details,
             }
           : {}),
       });
