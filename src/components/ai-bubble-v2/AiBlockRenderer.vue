@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { AskSlotPayload, GuideStepPayload, GuideSuggestionPayload } from "@/api/chat/types";
+import type { AssistantNavigationPayload, AskSlotPayload, GuideStepPayload, GuideSuggestionPayload } from "@/api/chat/types";
 import AnswerBlock from "./blocks/AnswerBlock.vue";
+import AssistantNavigationBlock from "./blocks/AssistantNavigationBlock.vue";
 import AskSlotBlock from "./blocks/AskSlotBlock.vue";
 import ChartBlock from "./blocks/ChartBlock.vue";
 import ErrorBlock from "./blocks/ErrorBlock.vue";
@@ -40,7 +41,7 @@ defineProps({
   },
 });
 
-const emit = defineEmits(["suggestion-tap", "ask-slot-open", "guide-step-open", "guide-suggestion-open"]);
+const emit = defineEmits(["suggestion-tap", "ask-slot-open", "assistant-navigation-open", "guide-step-open", "guide-suggestion-open"]);
 
 function onSuggestionTap(suggestion: unknown) {
   emit("suggestion-tap", suggestion);
@@ -48,6 +49,10 @@ function onSuggestionTap(suggestion: unknown) {
 
 function onAskSlotOpen(payload: AskSlotPayload) {
   emit("ask-slot-open", payload);
+}
+
+function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
+  emit("assistant-navigation-open", payload);
 }
 
 function onGuideStepOpen(payload: GuideStepPayload) {
@@ -83,6 +88,11 @@ function onGuideSuggestionOpen(payload: GuideSuggestionPayload) {
     :embedded="embedded"
   />
   <AskSlotBlock v-else-if="block.type === 'ask-slot'" :payload="block.payload" @open="onAskSlotOpen" />
+  <AssistantNavigationBlock
+    v-else-if="block.type === 'assistant-navigation'"
+    :payload="block.payload"
+    @open="onAssistantNavigationOpen"
+  />
   <GuideStepBlock v-else-if="block.type === 'guide-step'" :payload="block.payload" @open="onGuideStepOpen" />
   <!-- 多轮追问卡：与步骤卡分开渲染（并行分支 vs 按序推进） -->
   <GuideSuggestionBlock

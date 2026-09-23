@@ -2,19 +2,22 @@
 import type {
   AskSlotPayload,
   AskSlotSubmitPayload,
+  AssistantNavigationPayload,
   GuideStepItem,
   GuideStepPayload,
   GuideSuggestionPayload,
 } from "@/api/chat/types";
-import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { AttachmentSource } from "@/hooks/useComposerAttachments";
+import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { onLoad, onShow } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { getConversationSummary } from "@/api/conversation-summary";
 import { getTodayListenBroadcast } from "@/api/listen-broadcast";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
+import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
@@ -37,6 +40,8 @@ import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, us
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
+import { consumePendingRepairCallback, stashPendingRepairCallback } from "@/utils/repair-callback";
+import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
@@ -61,6 +66,8 @@ const listenBroadcastLoading = ref(false);
 const listenReportRefreshKey = ref(0);
 const guideStepSheetVisible = ref(false);
 const guideStepSheetHeight = ref(0);
+/** 核对卡要顶到对话区顶部还缺的底部间距（px，由消息列表量出来） */
+const guideStepCardSpace = ref(0);
 
 let isDemoPage = false;
 
@@ -88,7 +95,16 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend();
+const {
+  sendMessage,
+  sendQuickPrompt,
+  sendAskSlotSelection,
+  sendAssistantCallback,
+  beginAsrPlaceholder,
+  discardAsrPlaceholder,
+  stopGenerating,
+  cancelActiveStream,
+} = useChatSend();
 const {
   iconCopyImage,
   iconSaveImage,
@@ -119,14 +135,106 @@ const photoPicker = useComposerAttachments();
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
-  // 步骤卡 / 追问卡贴底展开：列表底部让出卡片高度，回答与卡片之间不重叠
-  if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) return `${guideStepSheetHeight.value}px`;
+  // 步骤卡贴底展开：列表底部既要让开卡片高度，也要留够把核对卡顶到对话区最上方的间距
+  if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) {
+    return `${Math.max(guideStepSheetHeight.value, guideStepCardSpace.value)}px`;
+  }
   // 导航与输入栏始终固定在底部；无论是否显示首页快捷问题，都预留导航实际高度。
   return `calc(${composerBottomInset.value} + 88rpx)`;
 });
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 const askSlotQueue = ref<AskSlotPayload[]>([]);
 const askSlotDrawerVisible = ref(false);
+const assistantNavigationPayload = ref<AssistantNavigationPayload | null>(null);
+const assistantNavigationVisible = ref(false);
+let repairSummaryPollingTimer: ReturnType<typeof setTimeout> | null = null;
+let repairSummaryPollingAttempts = 0;
+const REPAIR_SUMMARY_POLL_INTERVAL_MS = 5_000;
+const REPAIR_SUMMARY_MAX_ATTEMPTS = 30;
+
+function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
+  if (payload.target !== "maintenance_assistant") return;
+  assistantNavigationPayload.value = payload;
+  assistantNavigationVisible.value = true;
+}
+
+function onAssistantNavigationConfirm(payload: AssistantNavigationPayload) {
+  if (payload.target !== "maintenance_assistant") return;
+  stashPendingRepairNavigationContext({
+    ...payload.context,
+    userId: userStore.userId,
+    sessionId: payload.sessionId,
+    conversationId: payload.conversationId,
+  });
+  const aiAskConversationId = String(payload.conversationId || "").trim();
+  const aiAskSessionId = String(payload.sessionId || "").trim();
+  if (aiAskConversationId && aiAskSessionId) {
+    stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
+  }
+  void navigateToScene("/pages/repair/index");
+}
+
+function clearRepairSummaryPolling() {
+  if (!repairSummaryPollingTimer) return;
+  clearTimeout(repairSummaryPollingTimer);
+  repairSummaryPollingTimer = null;
+}
+
+function startRepairSummaryCallback() {
+  const task = consumePendingRepairCallback();
+  if (!task) return;
+
+  clearRepairSummaryPolling();
+  repairSummaryPollingAttempts = 0;
+  const aiMsgId = `repair-summary-${Date.now()}`;
+  chatStore.messages.push({
+    id: aiMsgId,
+    role: "ai",
+    content: "",
+    blocks: [],
+    loading: true,
+    sessionId: chatStore.aiSessionId,
+    messageId: null,
+    waitingText: "维修助手-快速问答",
+    assistantCallbackTitle: "维修助手-快速问答",
+    processStatus: { phase: "thinking", title: "故障诊断中..." },
+  });
+  chatStore.scrollToBottom(true);
+
+  const poll = async () => {
+    repairSummaryPollingAttempts += 1;
+    try {
+      const data = await getConversationSummary(task);
+      // 快速问答没有状态字段，首次获取结果后直接回流，不进入轮询。
+      if (!data.status) {
+        await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
+        return;
+      }
+      // 故障诊断仅在状态为 Completed 时结束轮询并回流。
+      if (data.status === "Completed") {
+        clearRepairSummaryPolling();
+        await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
+        return;
+      }
+    }
+    catch (error) {
+      logger.error("failed to query repair conversation summary", error);
+    }
+
+    if (repairSummaryPollingAttempts >= REPAIR_SUMMARY_MAX_ATTEMPTS) {
+      clearRepairSummaryPolling();
+      chatStore.patchMessageById(aiMsgId, {
+        content: "维修助手结果暂未生成，请稍后再试。",
+        loading: false,
+        processStatus: { phase: "failed", title: "故障诊断未完成" },
+      });
+      return;
+    }
+    repairSummaryPollingTimer = setTimeout(poll, REPAIR_SUMMARY_POLL_INTERVAL_MS);
+  };
+
+  void poll();
+}
 
 function onAskSlotOpen(slot: AskSlotPayload) {
   const existingIndex = askSlotQueue.value.findIndex(item => item.slot_name === slot.slot_name);
@@ -151,11 +259,24 @@ const guideStepPayload = ref<GuideStepPayload | null>(null);
 /** 步骤卡按顺序露出：初始只给第一张，推进到第 N 步才显示前 N 张 */
 const guideStepCardCount = ref(1);
 
+/**
+ * 把当前显示的那张核对卡（对话区的 .chat-box__card）顶到对话区最上方。
+ * 步骤卡出现、翻页、卡片高度变化后都用它：卡片顶在上方才整张可见。
+ */
+function focusGuideStepCardAtTop() {
+  const steps = guideStepPayload.value?.steps || [];
+  const step = steps[Math.max(0, guideStepCardCount.value - 1)];
+  const stepId = String(step?.id || "").trim();
+  if (stepId) chatStore.focusStepBlock(stepId);
+}
+
 /** 步骤卡片：单步是多轮追问（点一下直接发），多步选好后确认，统一按普通问题发送。 */
 function onGuideStepOpen(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
   guideStepSheetVisible.value = true;
   guideStepCardCount.value = 1;
+  // 步骤卡弹出：把这一步的核对卡滚到对话区顶部
+  nextTick(() => focusGuideStepCardAtTop());
 }
 
 function onGuideStepSubmit(query: string) {
@@ -165,8 +286,14 @@ function onGuideStepSubmit(query: string) {
 
 function onGuideStepHeightChange(height: number) {
   guideStepSheetHeight.value = height;
-  // 底部间距刚生效，再贴一次底：核对卡才会停在步骤卡上方，而不是被压在下面
-  if (guideStepSheetVisible.value) nextTick(() => chatStore.scrollToBottom(true));
+  // 卡片高度 / 底部间距刚生效，按当前步骤重新对齐到对话区顶部
+  if (guideStepSheetVisible.value) nextTick(() => focusGuideStepCardAtTop());
+}
+
+/** 核对卡高度量出来了（底部间距跟着变），再对齐一次对话区顶部 */
+function onGuideStepCardSpaceChange(space: number) {
+  guideStepCardSpace.value = space;
+  if (guideStepSheetVisible.value) nextTick(() => focusGuideStepCardAtTop());
 }
 
 /**
@@ -181,14 +308,14 @@ async function onGuideStepPhoto(source: AttachmentSource) {
   chatInputRef.value?.focusTextInput();
 }
 
-/** 步骤卡片展开 / 翻页时，只显示这一步对应的核对卡，并把它定位到步骤卡上方 */
+/** 步骤卡片展开 / 翻页时，只显示这一步对应的核对卡，并把它顶到对话区顶部 */
 function onGuideStepChange(step: GuideStepItem | null) {
   const stepId = String(step?.id || "").trim();
   if (!stepId) return;
   const steps = guideStepPayload.value?.steps || [];
   const index = steps.findIndex(item => String(item?.id || "") === stepId);
   if (index >= 0) guideStepCardCount.value = index + 1;
-  nextTick(() => chatStore.focusStepBlock(stepId));
+  nextTick(() => focusGuideStepCardAtTop());
 }
 
 /**
@@ -502,8 +629,10 @@ onShow(() => {
   syncPageStage();
   chatStore.refreshQuickPrompts();
   refreshListenReportState();
+  startRepairSummaryCallback();
 });
 onBeforeUnmount(() => {
+  clearRepairSummaryPolling();
   stopNativeResume();
   uni.$off("listen-report-marked", refreshListenReportState);
   cancelActiveStream();
@@ -552,6 +681,8 @@ onBeforeUnmount(() => {
         :suppress-highlight="shareSuppressHighlight"
         :bottom-inset="messageBottomInset"
         :step-card-count="guideStepCardCount"
+        :pin-step-card="guideStepSheetVisible"
+        @card-space-change="onGuideStepCardSpaceChange"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :listen-broadcast="listenBroadcast"
@@ -563,6 +694,7 @@ onBeforeUnmount(() => {
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="sendQuickPrompt"
         @ask-slot-open="onAskSlotOpen"
+        @assistant-navigation-open="onAssistantNavigationOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @tts-click="onTtsClick"
@@ -579,6 +711,11 @@ onBeforeUnmount(() => {
         :visible="askSlotDrawerVisible"
         @close="closeAskSlotDrawer"
         @submit="onAskSlotSubmit"
+      />
+      <AiAssistantNavigationSheet
+        v-model:visible="assistantNavigationVisible"
+        :payload="assistantNavigationPayload"
+        @confirm="onAssistantNavigationConfirm"
       />
       <AiGuideStepSheet
         v-model:visible="guideStepSheetVisible"

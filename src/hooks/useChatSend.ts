@@ -9,7 +9,7 @@ import { useI18n } from "vue-i18n";
 import { interruptChat, sendBlockingChatMessage } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { buildInitialBlocks, consumeChatStream, extractDifyHistoryBlocks, parseReportInteraction, type AiBlock } from "@/utils/ai-stream";
+import { buildInitialBlocks, consumeChatStream, extractDifyHistoryBlocks, parseReportInteraction } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
 import { createLogger } from "@/utils/logger";
@@ -24,15 +24,6 @@ function isAbortError(error: unknown) {
   const name = err.name || "";
   const message = String(err.message || "").toLowerCase();
   return name === "AbortError" || message.includes("aborted") || message.includes("abort");
-}
-
-/**
- * 这一轮回答是否真的产出了可读内容。
- * think 只是思考过程、status 只是过程状态，单独出现不算答案——
- * 这类情况回答卡是空的，要按「系统繁忙」兜底。
- */
-function hasAnswerOutput(blocks: AiBlock[]) {
-  return blocks.some(block => block && block.type !== "think" && block.type !== "status");
 }
 
 export function useChatSend(scope?: string, handlers?: {
@@ -147,7 +138,7 @@ export function useChatSend(scope?: string, handlers?: {
     chatStore.scrollToBottom();
   }
 
-  function createChatRequest(content: string, files: ChatFile[]) {
+  function createChatRequest(content: string, files: ChatFile[], extraInputs: Record<string, unknown> = {}) {
     const scene = handlers?.scene ?? "ASK";
     return {
       query: content,
@@ -168,6 +159,7 @@ export function useChatSend(scope?: string, handlers?: {
         : {
             scene,
             ...(handlers?.getExtraInputs?.() ?? {}),
+            ...extraInputs,
           },
       files,
     };
@@ -193,29 +185,20 @@ export function useChatSend(scope?: string, handlers?: {
     files: ChatFile[];
     hadSessionId: boolean;
     requestSeq: number;
+    extraInputs?: Record<string, unknown>;
   }) {
-    const { aiMsgId, userMsgId, content, files, hadSessionId, requestSeq } = options;
+    const { aiMsgId, userMsgId, content, files, hadSessionId, requestSeq, extraInputs } = options;
     let receivedContent = false;
 
     try {
-      const snapshot = await consumeChatStream({
-        source: stream(createChatRequest(content, files), { idleTimeoutMs: 60_000 }),
+      await consumeChatStream({
+        source: stream(createChatRequest(content, files, extraInputs), { idleTimeoutMs: 60_000 }),
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
           applySnapshot(aiMsgId, userMsgId, snapshot);
         },
       });
-
-      // 接口正常结束、但整轮没有任何可读内容（作业指导等场景可能只回一个 message_end）：
-      // 回答卡里补一句兜底提示，避免用户看到一张空白卡片。
-      if (requestSeq === chatStore.activeRequestSeq && !hasAnswerOutput(snapshot.blocks)) {
-        chatStore.patchMessageById(aiMsgId, {
-          content: t("ai-busy-retry-later"),
-          blocks: buildInitialBlocks(),
-        });
-        logger.warn("[chat] empty answer, fallback hint applied", snapshot.processStatus?.phase);
-      }
     } catch (error) {
       const index = chatStore.findMessageIndex(aiMsgId);
       const aiMessage = index >= 0 ? chatStore.messages[index] : null;
@@ -367,6 +350,49 @@ export function useChatSend(scope?: string, handlers?: {
     else await sendAiFlow(options);
   }
 
+  async function sendAssistantCallback(content: string, options: {
+    aiMsgId?: string;
+    waitingText?: string;
+  } = {}) {
+    const query = String(content || "").trim();
+    if (!query) return;
+
+    cancelActiveStream();
+    const requestSeq = chatStore.nextRequestSeq();
+    const hadSessionId = Boolean(chatStore.aiSessionId);
+    const aiMsgId = options.aiMsgId || `assistant-callback-${Date.now()}`;
+    const conversationId = chatStore.aiSessionId;
+
+    chatStore.showQuickPrompts = false;
+    chatStore.isLoading = true;
+    if (chatStore.findMessageIndex(aiMsgId) < 0) {
+      chatStore.messages.push({
+        id: aiMsgId,
+        role: "ai",
+        content: "",
+        blocks: buildInitialBlocks(),
+        loading: true,
+        interrupted: false,
+        sessionId: conversationId,
+        messageId: null,
+        waitingText: options.waitingText || "维修助手-快速问答",
+        processStatus: { phase: "thinking" },
+      });
+    }
+    chatStore.activeMessageId = aiMsgId;
+    chatStore.scrollToBottom(true);
+
+    await sendAiFlow({
+      aiMsgId,
+      userMsgId: "",
+      content: query,
+      files: [],
+      hadSessionId,
+      requestSeq,
+      extraInputs: { entry_type: "assistant_callback" },
+    });
+  }
+
   /** 语音松手后立刻插入「识别中...」占位，等 ASR 回来再改成真正的问题和回答 */
   function beginAsrPlaceholder() {
     const pending = chatStore.messages.find(item => item.role === "user" && item.asrPending);
@@ -419,6 +445,7 @@ export function useChatSend(scope?: string, handlers?: {
     sendMessage,
     sendQuickPrompt,
     sendAskSlotSelection,
+    sendAssistantCallback,
     beginAsrPlaceholder,
     discardAsrPlaceholder,
     stopGenerating,

@@ -232,9 +232,23 @@ export interface AskSlotSubmitPayload {
   remark?: string;
 }
 
+/** 首页问答建议跳转到指定业务助手的确认弹层。 */
+export interface AssistantNavigationPayload extends Record<string, unknown> {
+  target: "maintenance_assistant";
+  title?: string;
+  confirm_text?: string;
+  cancel_text?: string;
+  context?: Record<string, unknown>;
+  /** 来源 SSE 的 conversation_id，进入维修助手时映射为 sessionId。 */
+  sessionId?: Identifier;
+  /** 来源 SSE 的 message_id，进入维修助手时映射为 conversationId。 */
+  conversationId?: Identifier;
+  auto_open?: boolean;
+}
+
 export interface RichContentEvent {
   event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source" | "ask_slot"
-    | "guide_step" | "guide_check" | "guide_suggestion";
+    | "assistant_navigation" | "guide_step" | "guide_check" | "guide_suggestion";
   conversationId: Identifier;
   messageId: Identifier;
   taskId?: Identifier;

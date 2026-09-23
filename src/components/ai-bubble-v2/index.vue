@@ -2,6 +2,7 @@
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
 import { computed, nextTick, ref } from "vue";
+import { useI18n } from "vue-i18n";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOff from "@/assets/img/icon-action-radio-off.svg";
@@ -45,11 +46,14 @@ const props = defineProps({
   noAnswerGroup: { type: Boolean, default: false },
   /** 语音已松手、ASR 尚未返回：展示「识别中...」占位 */
   asrPending: { type: Boolean, default: false },
+  /** 维修助手回流的本地 QA 卡片标题。 */
+  assistantCallbackTitle: { type: String, default: "" },
 });
 
 const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
+  "assistant-navigation-open",
   "guide-step-open",
   "guide-suggestion-open",
   "tts-click",
@@ -59,6 +63,8 @@ const emit = defineEmits([
   "select-toggle",
   "longpress-copy",
 ]);
+
+const { t } = useI18n();
 
 /** 工作流结束事件的 elapsed_time 已在流层换算为毫秒；展示时统一转换为秒。 */
 const durationSeconds = computed(() => {
@@ -221,6 +227,16 @@ const hasGuideStepCard = computed(() => visibleBlocks.value.some(block => block?
 const hideBody = computed(() => !isUser.value && !props.loading && hasGuideStepCard.value);
 
 /**
+ * 兜底提示：回答已经结束，但回复区里既没有正文、也没有任何内容块
+ * （例如接口只回了过程进度，或只回了语音播报这类不落正文的场景）时，
+ * 在操作栏上方补一句「系统繁忙，请稍后重试」，避免只留一个空回复区。
+ * 用户主动停止的那一轮不算（那种情况显示的是「已停止」等待条）。
+ */
+const showBusyFallback = computed(
+  () => !props.loading && !props.interrupted && !hideBody.value && isBareBody.value,
+);
+
+/**
  * 等待条：模型还没吐出内容时的占位。
  * 被中断后不撤掉，只把状态字改成「已停止」——否则没来得及出内容的那一轮
  * 会变成一个空气泡，用户看不出这轮发生了什么。
@@ -252,6 +268,10 @@ function onSuggestionTap(event) {
 
 function onAskSlotOpen(payload) {
   emit("ask-slot-open", payload);
+}
+
+function onAssistantNavigationOpen(payload) {
+  emit("assistant-navigation-open", payload);
 }
 
 function onGuideStepOpen(payload) {
@@ -402,6 +422,9 @@ function onNegativeFeedback() {
       </template>
 
       <template v-else>
+        <view v-if="props.assistantCallbackTitle" class="ai-bubble-v2__assistant-callback-title">
+          <text>{{ props.assistantCallbackTitle }}</text>
+        </view>
         <view
           v-if="showProcessStatus"
           class="ai-bubble-v2__process-status"
@@ -457,9 +480,16 @@ function onNegativeFeedback() {
           :loading="props.loading"
           @suggestion-tap="onSuggestionTap"
           @ask-slot-open="onAskSlotOpen"
+          @assistant-navigation-open="onAssistantNavigationOpen"
           @guide-step-open="onGuideStepOpen"
           @guide-suggestion-open="onGuideSuggestionOpen"
         />
+        <!-- 空回答兜底：回复区没有内容时给一句提示，位置就在操作栏上方 -->
+        <view v-if="showBusyFallback" class="ai-bubble-v2__busy-hint">
+          <text class="ai-bubble-v2__busy-hint-text">
+            {{ t("ai-busy-retry-later") }}
+          </text>
+        </view>
         <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
           <view
             v-if="props.ttsEnabled"
@@ -757,6 +787,15 @@ function onNegativeFeedback() {
   line-height: 30rpx;
 }
 
+.ai-bubble-v2__assistant-callback-title {
+  margin-bottom: 24rpx;
+  color: #1a1a1a;
+  font-family: "PingFang SC";
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 42rpx;
+}
+
 .ai-bubble-v2__waiting {
   display: flex;
   align-items: center;
@@ -901,6 +940,20 @@ function onNegativeFeedback() {
   margin-top: 32rpx;
   padding-top: 28rpx;
   border-top: 2rpx solid #f0f0f2;
+}
+/* 空回答兜底提示：外观对齐回答正文卡（灰底圆角 + 正文字号） */
+.ai-bubble-v2__busy-hint {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 24rpx 32rpx;
+  border-radius: 20rpx;
+  background: #f9f9f9;
+}
+.ai-bubble-v2__busy-hint-text {
+  font-size: 28rpx;
+  line-height: 42rpx;
+  color: #2f323c;
+  word-break: break-word;
 }
 .ai-bubble-v2__action-btn {
   width: 32rpx;

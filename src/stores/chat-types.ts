@@ -58,6 +58,8 @@ export interface UiChatMessage {
   noAnswerGroup?: boolean;
   /** 语音已松手、ASR 尚未返回：用户气泡展示「识别中...」 */
   asrPending?: boolean;
+  /** 维修助手回流产生的本地 QA 卡片标题。 */
+  assistantCallbackTitle?: string;
 }
 
 export interface ShareRound {
