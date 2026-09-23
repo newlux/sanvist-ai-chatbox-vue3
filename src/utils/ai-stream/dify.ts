@@ -141,7 +141,7 @@ export function splitMarkdownTables(source: string): DifyHistoryBlockData[] {
 
 export interface DifyHistoryBlockData {
   type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion" | "ask-slot"
-    | "guide-step" | "guide-check" | "guide-suggestion";
+    | "assistant-navigation" | "guide-step" | "guide-check" | "guide-suggestion";
   payload: Record<string, unknown>;
 }
 
@@ -310,6 +310,18 @@ function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockD
     const slot = parseAskSlotPayload(data);
     return slot ? { type: "ask-slot", payload: slot } : null;
   }
+  if (type === "navigation" && data.target === "maintenance_assistant") {
+    return {
+      type: "assistant-navigation",
+      payload: {
+        target: "maintenance_assistant",
+        title: String(data.title || "").trim() || undefined,
+        confirm_text: String(data.confirm_text || "").trim() || undefined,
+        cancel_text: String(data.cancel_text || "").trim() || undefined,
+        context: asRecord(data.context) || {},
+      },
+    };
+  }
   return null;
 }
 
@@ -319,6 +331,9 @@ function parseAskStreamEvent(value: Record<string, unknown> | null) {
   if (block?.type === "table") return { event: "table" as const, data: block.payload };
   if (block?.type === "chart") return { event: "chart" as const, data: block.payload };
   if (block?.type === "ask-slot") return { event: "ask_slot" as const, data: { ...block.payload, auto_open: true } };
+  if (block?.type === "assistant-navigation") {
+    return { event: "assistant_navigation" as const, data: { ...block.payload, auto_open: true } };
+  }
   return null;
 }
 

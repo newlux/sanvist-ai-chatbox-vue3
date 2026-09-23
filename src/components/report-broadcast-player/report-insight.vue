@@ -24,10 +24,13 @@ const props = withDefaults(defineProps<{
   playing?: boolean;
   /** 重播退场中：整层按入场动画逆向还原，动画走完由宿主卸载。 */
   leaving?: boolean;
+  /** 入场是否播放过渡动画：仅播报结束与语音跳转开启，异常处理回到列表时直接呈现。 */
+  animated?: boolean;
 }>(), {
   embedded: false,
   playing: false,
   leaving: false,
+  animated: true,
 });
 
 const emit = defineEmits<{
@@ -59,6 +62,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
     :class="{
       'report-insight--embedded': props.embedded,
       'report-insight--leaving': props.leaving,
+      'report-insight--instant': !props.animated,
     }"
     :style="contentBottomStyle"
   >
@@ -471,6 +475,19 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
 
 .report-insight--leaving .report-insight__list-scroll {
   animation: report-insight-list-drawer-out 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* 非过渡入场：整层直接呈现，不播头像形变、标题淡入与列表上抽。
+   排除退场态，保证收起态重播仍走原有逆向动画。 */
+.report-insight--instant:not(.report-insight--leaving) {
+  .report-insight__nav,
+  .report-insight__portrait,
+  .report-insight__portrait-image,
+  .report-insight__summary-copy,
+  .report-insight__replay,
+  .report-insight__list-scroll {
+    animation: none;
+  }
 }
 
 .report-insight__list {
