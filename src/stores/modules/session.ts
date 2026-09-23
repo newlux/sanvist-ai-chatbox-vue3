@@ -80,6 +80,20 @@ function mapHistoryAttachments(value: unknown) {
   }).filter((file): file is NonNullable<typeof file> => Boolean(file && (file.fileId || file.url)));
 }
 
+function parseAssistantCallbackDetails(query: string) {
+  if (!query) return [];
+  try {
+    const data = JSON.parse(query) as Record<string, unknown>;
+    const details = [
+      { label: "设备", value: [data.equipmentCategory, data.model, data.deviceId].filter(Boolean).join(" ") },
+      { label: "问题", value: String(data.problem || data.conclusion || data.treatment || "") },
+    ];
+    return details.filter(item => item.value);
+  } catch {
+    return [];
+  }
+}
+
 export function mapHistoryMessages(
   list: unknown[],
   fallbackSessionId: Identifier | null,
@@ -121,7 +135,12 @@ export function mapHistoryMessages(
         positive: feedback?.rating === "like" ? true : feedback?.rating === "dislike" ? false : null,
         feedbackValue: feedback?.rating === "like" ? "good" : feedback?.rating === "dislike" ? "bad" : "",
         feedbackRemark: feedback?.content || "",
-        ...(isAssistantCallback ? { assistantCallbackTitle: "维修助手-快速问答" } : {}),
+        ...(isAssistantCallback
+          ? {
+              assistantCallbackTitle: "维修助手-快速问答",
+              assistantCallbackDetails: parseAssistantCallbackDetails(userText),
+            }
+          : {}),
       });
     }
   });

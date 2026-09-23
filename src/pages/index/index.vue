@@ -195,9 +195,9 @@ function startRepairSummaryCallback() {
     loading: true,
     sessionId: chatStore.aiSessionId,
     messageId: null,
-    waitingText: "维修助手-快速问答",
-    assistantCallbackTitle: "维修助手-快速问答",
-    processStatus: { phase: "thinking", title: "故障诊断中..." },
+    waitingText: "维修助手-故障诊断",
+    assistantCallbackTitle: "维修助手-故障诊断",
+    processStatus: { phase: "thinking", title: "故障诊断中" },
   });
   chatStore.scrollToBottom(true);
 
@@ -206,13 +206,16 @@ function startRepairSummaryCallback() {
     try {
       const data = await getConversationSummary(task);
       // 快速问答没有状态字段，首次获取结果后直接回流，不进入轮询。
-      if (!data.status) {
-        await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
-        return;
-      }
-      // 故障诊断仅在状态为 Completed 时结束轮询并回流。
-      if (data.status === "Completed") {
+      if (!data.status || data.status === "Completed") {
         clearRepairSummaryPolling();
+        const details = [
+          { label: "设备", value: [data.equipmentCategory, data.model, data.deviceId].filter(Boolean).join(" ") },
+          { label: "问题", value: data.problem || data.conclusion || data.treatment || "" },
+        ].filter(item => item.value);
+        chatStore.patchMessageById(aiMsgId, {
+          assistantCallbackTitle: "维修助手-快速问答",
+          assistantCallbackDetails: details,
+        });
         await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
         return;
       }
