@@ -9,12 +9,12 @@ import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOff from "@/assets/img/icon-action-radio-off.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconShare from "@/assets/img/icon-action-share.svg";
+import iconArrowNext from "@/assets/img/icon-arrow-red.svg";
 import iconBadFilled from "@/assets/img/icon-bad-fill.svg";
 import iconBad from "@/assets/img/icon-bad.svg";
 import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
-import iconRepair from "@/assets/img/icon-repair.svg";
-import iconArrowNext from "@/assets/img/slot-drawer-arrow-next.svg";
+import iconRepair from "@/assets/img/icon-repair-dark.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { toInlineImageUrl } from "@/utils/image-preview";
@@ -51,6 +51,8 @@ const props = defineProps({
   asrPending: { type: Boolean, default: false },
   /** 维修助手回流的 QA 卡片标题。 */
   assistantCallbackTitle: { type: String, default: "" },
+  /** 回流卡片副标题：故障诊断 / 快问快答。 */
+  assistantCallbackStatus: { type: String, default: "" },
   assistantCallbackDetails: {
     type: Array as PropType<Array<{ label: string; value: string }>>,
     default: () => [],
@@ -223,8 +225,13 @@ const suggestionBlocks = computed(() =>
   visibleBlocks.value.filter(block => block && block.type === "suggestion"),
 );
 
-/** 只有独立卡片、没有正文时，气泡不再画白卡外壳（操作栏仍保留），避免留一个空框 */
-const isBareBody = computed(() => !isUser.value && !contentBlocks.value.length && !props.content);
+/** 只有独立卡片、没有正文和过程状态时，气泡不再画白卡外壳（操作栏仍保留），避免留一个空框。 */
+const isBareBody = computed(() =>
+  !isUser.value
+  && !contentBlocks.value.length
+  && !props.content
+  && !props.processStatus,
+);
 
 /**
  * 作业指导的步骤卡回答：思考结束、步骤卡出现后气泡正文（含空的答复与操作栏）不再展示。
@@ -263,8 +270,17 @@ const processStatusText = computed(() => {
 
 const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusText.value));
 const showAssistantCallbackResult = computed(() => Boolean(props.assistantCallbackTitle) && !props.loading && !props.interrupted);
-const hasProcessContent = computed(() => Boolean(contentBlocks.value.length || props.content));
-const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(props.processSubtitle?.trim()));
+/** 回流卡片副标题：故障诊断与快问快答文案不同，缺省沿用故障诊断 */
+const assistantCallbackStatusText = computed(() =>
+  showAssistantCallbackResult.value
+    ? props.assistantCallbackStatus || "诊断报告生成已完成"
+    : processStatusText.value,
+);
+const processSubtitleText = computed(() =>
+  props.processSubtitle?.trim()
+  || (props.loading && showProcessStatus.value && !props.assistantCallbackTitle ? "模型正在思考，请稍候" : ""),
+);
+const showProcessSubtitle = computed(() => Boolean(processSubtitleText.value));
 
 function onSelectTap() {
   if (props.selectMode && !props.disabled) emit("select-toggle");
@@ -399,10 +415,11 @@ function onNegativeFeedback() {
     </view>
 
     <view
-      v-if="(!isUser || props.content) && !hideBody && (!props.assistantCallbackTitle || !props.loading)"
+      v-if="(!isUser || props.content) && !hideBody"
       class="ai-bubble-v2__body"
       :class="{
         'ai-bubble-v2__body--bare': isBareBody,
+        'ai-bubble-v2__body--process': showProcessStatus && !props.assistantCallbackTitle,
         'ai-bubble-v2__body--assistant-callback': Boolean(props.assistantCallbackTitle),
       }"
     >
@@ -441,15 +458,18 @@ function onNegativeFeedback() {
                 {{ props.assistantCallbackTitle }}
               </text>
               <text class="ai-bubble-v2__assistant-callback-status">
-                {{ showAssistantCallbackResult ? "答案回复生成" : processStatusText }}
+                {{ assistantCallbackStatusText }}
               </text>
             </view>
             <image class="ai-bubble-v2__assistant-callback-arrow" :src="iconArrowNext" mode="aspectFit" />
           </view>
           <view v-if="showAssistantCallbackResult && props.assistantCallbackDetails.length" class="ai-bubble-v2__assistant-callback-details">
             <view v-for="(item, index) in props.assistantCallbackDetails" :key="`${item.label}-${index}`" class="ai-bubble-v2__assistant-callback-detail">
+              <text class="ai-bubble-v2__assistant-callback-index">
+                {{ index + 1 }}
+              </text>
               <text class="ai-bubble-v2__assistant-callback-label">
-                {{ index + 1 }} {{ item.label }}
+                {{ item.label }}
               </text>
               <text class="ai-bubble-v2__assistant-callback-value">
                 {{ item.value }}
@@ -463,7 +483,7 @@ function onNegativeFeedback() {
           :class="[
             `ai-bubble-v2__process-status--${props.processStatus?.phase}`,
             {
-              'ai-bubble-v2__process-status--with-content': hasProcessContent && !showProcessSubtitle,
+              'ai-bubble-v2__process-status--with-content': !showProcessSubtitle,
               'ai-bubble-v2__process-status--with-subtitle': showProcessSubtitle,
             },
           ]"
@@ -478,13 +498,9 @@ function onNegativeFeedback() {
             耗时 {{ durationSeconds }} 秒
           </text>
         </view>
-        <view
-          v-if="showProcessSubtitle"
-          class="ai-bubble-v2__process-subtitle"
-          :class="{ 'ai-bubble-v2__process-subtitle--with-content': hasProcessContent }"
-        >
-          <text :key="props.processSubtitle" class="ai-bubble-v2__process-subtitle-text">
-            {{ props.processSubtitle }}
+        <view v-if="showProcessSubtitle" class="ai-bubble-v2__process-subtitle">
+          <text :key="processSubtitleText" class="ai-bubble-v2__process-subtitle-text">
+            {{ processSubtitleText }}
           </text>
         </view>
         <view
@@ -662,6 +678,14 @@ function onNegativeFeedback() {
   background: transparent;
   box-shadow: none;
 }
+/* 流式过程尚未产生正文时，状态与说明仍使用标准 AI 回复卡片。 */
+.ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--process {
+  padding: 40rpx;
+  border: 1rpx solid #eeeeee;
+  border-radius: 32rpx;
+  background: #ffffff;
+  box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
+}
 .ai-bubble-v2--no-answer-group:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
   padding: 0;
   border: 0;
@@ -832,10 +856,8 @@ function onNegativeFeedback() {
   display: flex;
   box-sizing: border-box;
   width: 100%;
-  min-height: 240rpx;
-  padding: 24rpx 36rpx;
+  padding: 36rpx;
   flex-direction: column;
-  justify-content: center;
   border: 1px solid #efefef;
   border-radius: 32rpx;
   background: #ffffff;
@@ -844,14 +866,14 @@ function onNegativeFeedback() {
 .ai-bubble-v2__assistant-callback-heading {
   display: flex;
   width: 100%;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .ai-bubble-v2__assistant-callback-icon {
   flex: 0 0 auto;
   width: 32rpx;
   height: 32rpx;
-  margin-right: 8rpx;
+  margin: 1rpx 8rpx 0 0;
 }
 
 .ai-bubble-v2__assistant-callback-copy {
@@ -873,10 +895,11 @@ function onNegativeFeedback() {
 }
 
 .ai-bubble-v2__assistant-callback-status {
+  margin-top: 12rpx;
   overflow: hidden;
   color: #999999;
   font-size: 22rpx;
-  line-height: 28rpx;
+  line-height: 26rpx;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -885,37 +908,48 @@ function onNegativeFeedback() {
   flex: 0 0 auto;
   width: 40rpx;
   height: 40rpx;
-  margin-left: 12rpx;
+  margin: 14rpx 6rpx 0 8rpx;
 }
 
 .ai-bubble-v2__assistant-callback-details {
   display: flex;
   width: 100%;
-  margin-top: 18rpx;
+  margin-top: 32rpx;
   flex-direction: column;
-  gap: 12rpx;
+  gap: 20rpx;
 }
 
 .ai-bubble-v2__assistant-callback-detail {
   display: flex;
+  width: 100%;
   min-width: 0;
-  align-items: baseline;
-  gap: 12rpx;
+  align-items: flex-start;
+}
+
+.ai-bubble-v2__assistant-callback-index {
+  flex: 0 0 auto;
+  width: 26rpx;
+  color: #999999;
+  font-size: 24rpx;
+  line-height: 30rpx;
 }
 
 .ai-bubble-v2__assistant-callback-label {
   flex: 0 0 auto;
   color: #999999;
-  font-size: 22rpx;
-  line-height: 32rpx;
+  font-size: 24rpx;
+  line-height: 30rpx;
 }
 
 .ai-bubble-v2__assistant-callback-value {
+  flex: 1;
   min-width: 0;
+  margin-left: 24rpx;
   overflow: hidden;
-  color: #202027;
-  font-size: 22rpx;
-  line-height: 32rpx;
+  color: #1a1a1a;
+  font-size: 24rpx;
+  line-height: 30rpx;
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -975,9 +1009,6 @@ function onNegativeFeedback() {
   color: #999999;
   font-size: 24rpx;
   line-height: 36rpx;
-}
-.ai-bubble-v2__process-subtitle--with-content {
-  margin-bottom: 32rpx;
 }
 .ai-bubble-v2__process-subtitle-text {
   display: block;

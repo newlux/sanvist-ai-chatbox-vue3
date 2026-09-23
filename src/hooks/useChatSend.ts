@@ -102,6 +102,7 @@ export function useChatSend(scope?: string, handlers?: {
       processSubtitle?: string | null;
       ended?: boolean;
     },
+    preserveProcessStatus = false,
   ) {
     const index = chatStore.findMessageIndex(aiMsgId);
     if (index < 0) return;
@@ -114,8 +115,8 @@ export function useChatSend(scope?: string, handlers?: {
       messageId: snapshot.messageId ?? aiMessage.messageId,
       taskId: snapshot.taskId ?? aiMessage.taskId,
       durationMs: snapshot.metadata?.duration_ms ?? aiMessage.durationMs,
-      processStatus: snapshot.processStatus ?? aiMessage.processStatus,
-      processSubtitle: snapshot.processSubtitle === undefined
+      processStatus: preserveProcessStatus ? aiMessage.processStatus : snapshot.processStatus ?? aiMessage.processStatus,
+      processSubtitle: preserveProcessStatus || snapshot.processSubtitle === undefined
         ? aiMessage.processSubtitle
         : snapshot.processSubtitle,
       loading: !snapshot.ended,
@@ -186,8 +187,9 @@ export function useChatSend(scope?: string, handlers?: {
     hadSessionId: boolean;
     requestSeq: number;
     extraInputs?: Record<string, unknown>;
+    preserveProcessStatus?: boolean;
   }) {
-    const { aiMsgId, userMsgId, content, files, hadSessionId, requestSeq, extraInputs } = options;
+    const { aiMsgId, userMsgId, content, files, hadSessionId, requestSeq, extraInputs, preserveProcessStatus } = options;
     let receivedContent = false;
 
     try {
@@ -196,7 +198,7 @@ export function useChatSend(scope?: string, handlers?: {
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
-          applySnapshot(aiMsgId, userMsgId, snapshot);
+          applySnapshot(aiMsgId, userMsgId, snapshot, preserveProcessStatus);
         },
       });
     } catch (error) {
@@ -353,6 +355,7 @@ export function useChatSend(scope?: string, handlers?: {
   async function sendAssistantCallback(content: string, options: {
     aiMsgId?: string;
     waitingText?: string;
+    preserveProcessStatus?: boolean;
   } = {}) {
     const query = String(content || "").trim();
     if (!query) return;
@@ -390,6 +393,7 @@ export function useChatSend(scope?: string, handlers?: {
       hadSessionId,
       requestSeq,
       extraInputs: { entry_type: "assistant_callback" },
+      preserveProcessStatus: options.preserveProcessStatus,
     });
   }
 

@@ -60,7 +60,9 @@ export interface UiChatMessage {
   asrPending?: boolean;
   /** 维修助手回流产生的 QA 卡片标题。 */
   assistantCallbackTitle?: string;
-  /** 维修助手摘要卡片中的设备与问题信息。 */
+  /** 维修助手回流卡片副标题：带 status 的是故障诊断，没有的是快问快答。 */
+  assistantCallbackStatus?: string;
+  /** 维修助手诊断摘要卡片中的设备、问题、结论和处理信息。 */
   assistantCallbackDetails?: Array<{ label: string; value: string }>;
 }
 

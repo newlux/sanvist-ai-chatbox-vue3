@@ -31,7 +31,7 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
 
 <template>
   <scroll-view class="table-block" scroll-x :show-scrollbar="false" enhanced>
-    <view class="table-block__table" :style="{ width: tableWidth }">
+    <view class="table-block__table" :style="{ minWidth: tableWidth }">
       <view class="table-block__row table-block__row--head">
         <text
           v-for="(column, index) in columns"
@@ -59,7 +59,7 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
   background: #fff;
 }
 .table-block__table {
-  min-width: 100%;
+  width: 100%;
 }
 .table-block__row {
   display: flex;
@@ -75,9 +75,8 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
   font-weight: 600;
 }
 .table-block__cell {
-  width: 180rpx;
-  min-width: 180rpx;
-  flex: 0 0 180rpx;
+  flex: 1 1 0;
+  min-width: 0;
   padding: 24rpx;
   box-sizing: border-box;
   font-size: 24rpx;

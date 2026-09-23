@@ -40,7 +40,7 @@ import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, us
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
-import { consumePendingRepairCallback, stashPendingRepairCallback } from "@/utils/repair-callback";
+import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -171,6 +171,9 @@ function onAssistantNavigationConfirm(payload: AssistantNavigationPayload) {
   if (aiAskConversationId && aiAskSessionId) {
     stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
   }
+  else {
+    clearPendingRepairCallback();
+  }
   void navigateToScene("/pages/repair/index");
 }
 
@@ -195,8 +198,8 @@ function startRepairSummaryCallback() {
     loading: true,
     sessionId: chatStore.aiSessionId,
     messageId: null,
-    waitingText: "维修助手-故障诊断",
-    assistantCallbackTitle: "维修助手-故障诊断",
+    waitingText: "维修助手-机型诊断",
+    assistantCallbackTitle: "维修助手-机型诊断",
     processStatus: { phase: "thinking", title: "故障诊断中" },
   });
   chatStore.scrollToBottom(true);
@@ -208,15 +211,18 @@ function startRepairSummaryCallback() {
       // 快速问答没有状态字段，首次获取结果后直接回流，不进入轮询。
       if (!data.status || data.status === "Completed") {
         clearRepairSummaryPolling();
-        const details = [
-          { label: "设备", value: [data.equipmentCategory, data.model, data.deviceId].filter(Boolean).join(" ") },
-          { label: "问题", value: data.problem || data.conclusion || data.treatment || "" },
-        ].filter(item => item.value);
+        const summaryPayload = JSON.stringify(data);
+        const summary = parseRepairCallbackSummary(summaryPayload);
         chatStore.patchMessageById(aiMsgId, {
-          assistantCallbackTitle: "维修助手-快速问答",
-          assistantCallbackDetails: details,
+          assistantCallbackTitle: summary.title,
+          assistantCallbackStatus: summary.statusText,
+          assistantCallbackDetails: summary.details,
         });
-        await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
+        await sendAssistantCallback(summaryPayload, {
+          aiMsgId,
+          waitingText: summary.title,
+          preserveProcessStatus: true,
+        });
         return;
       }
     }
