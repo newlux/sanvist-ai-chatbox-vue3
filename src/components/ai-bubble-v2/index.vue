@@ -57,6 +57,8 @@ const props = defineProps({
     type: Array as PropType<Array<{ label: string; value: string }>>,
     default: () => [],
   },
+  /** 维修助手侧会话 ID，有值时摘要卡可跳转到详情。 */
+  assistantCallbackConversationId: { type: String, default: "" },
 });
 
 const emit = defineEmits([
@@ -71,6 +73,7 @@ const emit = defineEmits([
   "copy-click",
   "select-toggle",
   "longpress-copy",
+  "assistant-callback-open",
 ]);
 
 const { t } = useI18n();
@@ -81,6 +84,11 @@ const durationSeconds = computed(() => {
   if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
   return (milliseconds / 1000).toFixed(2).replace(/\.00$/, "");
 });
+
+function onAssistantCallbackOpen() {
+  const conversationId = props.assistantCallbackConversationId.trim();
+  if (conversationId) emit("assistant-callback-open", conversationId);
+}
 
 async function copyText(text) {
   const value = String(text || "").trim();
@@ -450,7 +458,12 @@ function onNegativeFeedback() {
       </template>
 
       <template v-else>
-        <view v-if="props.assistantCallbackTitle" class="ai-bubble-v2__assistant-callback-card">
+        <view
+          v-if="props.assistantCallbackTitle"
+          class="ai-bubble-v2__assistant-callback-card"
+          :class="{ 'ai-bubble-v2__assistant-callback-card--clickable': props.assistantCallbackConversationId }"
+          @tap="onAssistantCallbackOpen"
+        >
           <view class="ai-bubble-v2__assistant-callback-heading">
             <image class="ai-bubble-v2__assistant-callback-icon" :src="iconRepair" mode="aspectFit" />
             <view class="ai-bubble-v2__assistant-callback-copy">
@@ -461,7 +474,12 @@ function onNegativeFeedback() {
                 {{ assistantCallbackStatusText }}
               </text>
             </view>
-            <image class="ai-bubble-v2__assistant-callback-arrow" :src="iconArrowNext" mode="aspectFit" />
+            <image
+              v-if="props.assistantCallbackConversationId"
+              class="ai-bubble-v2__assistant-callback-arrow"
+              :src="iconArrowNext"
+              mode="aspectFit"
+            />
           </view>
           <view v-if="showAssistantCallbackResult && props.assistantCallbackDetails.length" class="ai-bubble-v2__assistant-callback-details">
             <view v-for="(item, index) in props.assistantCallbackDetails" :key="`${item.label}-${index}`" class="ai-bubble-v2__assistant-callback-detail">

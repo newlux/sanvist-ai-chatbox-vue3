@@ -129,6 +129,7 @@ export function mapHistoryMessages(
               assistantCallbackTitle: callbackSummary.title,
               assistantCallbackStatus: callbackSummary.statusText,
               assistantCallbackDetails: callbackSummary.details,
+              assistantCallbackConversationId: callbackSummary.repairConversationId,
             }
           : {}),
       });

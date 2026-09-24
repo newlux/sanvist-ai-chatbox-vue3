@@ -158,6 +158,12 @@ function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
   assistantNavigationVisible.value = true;
 }
 
+function onAssistantCallbackOpen(conversationId: string) {
+  const id = String(conversationId || "").trim();
+  if (!id) return;
+  void navigateToScene(`/pages/repair/index?conversationId=${encodeURIComponent(id)}`);
+}
+
 function onAssistantNavigationConfirm(payload: AssistantNavigationPayload) {
   if (payload.target !== "maintenance_assistant") return;
   stashPendingRepairNavigationContext({
@@ -217,6 +223,7 @@ function startRepairSummaryCallback() {
           assistantCallbackTitle: summary.title,
           assistantCallbackStatus: summary.statusText,
           assistantCallbackDetails: summary.details,
+          assistantCallbackConversationId: summary.repairConversationId,
         });
         await sendAssistantCallback(summaryPayload, {
           aiMsgId,
@@ -704,6 +711,7 @@ onBeforeUnmount(() => {
         @suggestion-tap="sendQuickPrompt"
         @ask-slot-open="onAskSlotOpen"
         @assistant-navigation-open="onAssistantNavigationOpen"
+        @assistant-callback-open="onAssistantCallbackOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @tts-click="onTtsClick"

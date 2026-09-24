@@ -60,6 +60,8 @@ export interface RepairCallbackSummary {
   statusText: string;
   /** 卡片明细：设备 / 问题 / 结论 / 处理，空值会被过滤 */
   details: Array<{ label: string; value: string }>;
+  /** 维修助手侧会话 ID，有值时卡片可打开对应详情。 */
+  repairConversationId: string;
 }
 
 /** 故障诊断（回流数据带 status） */
@@ -85,6 +87,7 @@ export function parseRepairCallbackSummary(query: string): RepairCallbackSummary
     title: DIAGNOSIS_TITLE,
     statusText: DIAGNOSIS_STATUS,
     details: [],
+    repairConversationId: "",
   };
   if (!query) return fallback;
 
@@ -96,6 +99,7 @@ export function parseRepairCallbackSummary(query: string): RepairCallbackSummary
       title: isDiagnosis ? DIAGNOSIS_TITLE : QUICK_ANSWER_TITLE,
       statusText: isDiagnosis ? DIAGNOSIS_STATUS : QUICK_ANSWER_STATUS,
       details: pickRepairCallbackDetails(data),
+      repairConversationId: String(data.repairConversationId || data.repair_conversation_id || "").trim(),
     };
   }
   catch {
