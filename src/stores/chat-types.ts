@@ -64,6 +64,8 @@ export interface UiChatMessage {
   assistantCallbackStatus?: string;
   /** 维修助手诊断摘要卡片中的设备、问题、结论和处理信息。 */
   assistantCallbackDetails?: Array<{ label: string; value: string }>;
+  /** 维修助手侧会话 ID，有值时摘要卡可打开对应的诊断详情。 */
+  assistantCallbackConversationId?: string;
 }
 
 export interface ShareRound {

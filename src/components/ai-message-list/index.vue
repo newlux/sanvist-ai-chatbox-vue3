@@ -106,6 +106,7 @@ const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
   "assistant-navigation-open",
+  "assistant-callback-open",
   "guide-step-open",
   "guide-suggestion-open",
   "tts-click",
@@ -465,6 +466,7 @@ watch(
               :assistant-callback-title="msg.assistantCallbackTitle"
               :assistant-callback-status="msg.assistantCallbackStatus || ''"
               :assistant-callback-details="msg.assistantCallbackDetails || []"
+              :assistant-callback-conversation-id="msg.assistantCallbackConversationId || ''"
               :attachments="msg.attachments || []"
               :interrupted="!!msg.interrupted"
               :duration-ms="msg.durationMs"
@@ -480,6 +482,7 @@ watch(
               @suggestion-tap="onSuggestionTap($event, index)"
               @ask-slot-open="onAskSlotOpen($event, index)"
               @assistant-navigation-open="emit('assistant-navigation-open', $event)"
+              @assistant-callback-open="emit('assistant-callback-open', $event)"
               @guide-step-open="onGuideStepOpen"
               @guide-suggestion-open="onGuideSuggestionOpen"
               @tts-click="onTtsClick(index)"

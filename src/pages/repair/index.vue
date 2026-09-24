@@ -20,6 +20,7 @@ const embedUrl = ref("");
 const loadError = ref("");
 const repairIframeRef = ref<HTMLIFrameElement | null>(null);
 const repairNavigationContext = ref<Record<string, unknown>>({});
+const repairDetailConversationId = ref("");
 
 type RepairInboundMessage =
   | { type: "navigate_back"; source: "maix-chat" }
@@ -44,6 +45,7 @@ function buildEmbedUrl() {
       // userId: String(repairNavigationContext.value.userId || userStore.userId || "").trim() || undefined,
       sessionId: String(repairNavigationContext.value.sessionId || "").trim() || undefined,
       conversationId: String(repairNavigationContext.value.conversationId || "").trim() || undefined,
+      chatConversationId: repairDetailConversationId.value || undefined,
     });
     embedUrl.value = result.url;
     loadError.value = "";
@@ -111,6 +113,9 @@ function handleRepairMessage(event: MessageEvent) {
 
 onMounted(() => {
   repairNavigationContext.value = consumePendingRepairNavigationContext();
+  const pages = getCurrentPages();
+  const current = pages[pages.length - 1] as { options?: Record<string, unknown> } | undefined;
+  repairDetailConversationId.value = String(current?.options?.conversationId || "").trim();
   buildEmbedUrl();
   window.addEventListener("message", handleRepairMessage);
 });

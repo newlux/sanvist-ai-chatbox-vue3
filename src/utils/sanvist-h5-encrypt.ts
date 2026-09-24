@@ -51,6 +51,8 @@ export interface SanvistH5EncryptOptions {
   userId?: string;
   sessionId?: string;
   conversationId?: string;
+  /** 维修助手详情页的会话 ID，作为 `/chat/{id}` 路径参数。 */
+  chatConversationId?: string;
 }
 
 export interface SanvistH5EncryptResult {
@@ -130,10 +132,13 @@ export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): Sanvis
   const userId = String(options.userId || "").trim();
   const sessionId = String(options.sessionId || "").trim();
   const conversationId = String(options.conversationId || "").trim();
+  const chatConversationId = String(options.chatConversationId || "").trim();
   if (userId) params.set("userId", userId);
   if (sessionId) params.set("sessionId", sessionId);
   if (conversationId) params.set("conversationId", conversationId);
-  const url = `${frontend}/chat?${params.toString()}`;
+  const chatPath = chatConversationId ? `/chat/${encodeURIComponent(chatConversationId)}` : "/chat";
+  const url = `${frontend}${chatPath}?${params.toString()}`;
+  console.log("🚀 ~ buildSanvistH5Url ~ url:", url);
 
   return {
     payload,
