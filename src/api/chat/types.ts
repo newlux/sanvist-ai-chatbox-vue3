@@ -136,6 +136,12 @@ export interface AskSlotOption extends Record<string, unknown> {
 export interface AskSlotPayload extends Record<string, unknown> {
   slot_name: string;
   selection: "single" | "multiple";
+  /** 题型：text = 填一段文本（作业协同多步骤表单），choice = 勾选选项；缺省按 choice */
+  input_type?: "text" | "choice";
+  /** 文本题的输入框占位文案 */
+  placeholder?: string;
+  /** 多步骤表单：整张卡的全部题目（解析层展开，页面入队时按顺序拆成多道题） */
+  slots?: AskSlotPayload[];
   required?: boolean;
   min_select?: number;
   max_select?: number;
@@ -226,10 +232,18 @@ export interface GuideCheckPayload extends Record<string, unknown> {
   status?: string;
 }
 
+/** 作业协同多步骤表单里一道题的问答对 */
+export interface AskStepAnswer {
+  question: string;
+  answer: string;
+}
+
 export interface AskSlotSubmitPayload {
   slot: AskSlotPayload;
   selectedOptions: AskSlotOption[];
   remark?: string;
+  /** 多步骤表单：按题目顺序收集的问答，提交侧拼成 Q/A 文本 */
+  answers?: AskStepAnswer[];
 }
 
 /** 首页问答建议跳转到指定业务助手的确认弹层。 */

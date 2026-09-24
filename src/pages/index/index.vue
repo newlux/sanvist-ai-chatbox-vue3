@@ -139,12 +139,18 @@ const messageBottomInset = computed(() => {
   if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) {
     return `${Math.max(guideStepSheetHeight.value, guideStepCardSpace.value)}px`;
   }
+  // 追问卡（单选点即作答 / 多选确认提交）弹出时同样让出卡片高度
+  if (askSlotDrawerVisible.value && askSlotDrawerHeight.value > 0) {
+    return `${askSlotDrawerHeight.value}px`;
+  }
   // 导航与输入栏始终固定在底部；无论是否显示首页快捷问题，都预留导航实际高度。
   return `calc(${composerBottomInset.value} + 88rpx)`;
 });
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 const askSlotQueue = ref<AskSlotPayload[]>([]);
 const askSlotDrawerVisible = ref(false);
+/** 追问卡实时高度（px）：卡片弹出时给消息列表加底部间距，最后一条内容不会被盖住 */
+const askSlotDrawerHeight = ref(0);
 const assistantNavigationPayload = ref<AssistantNavigationPayload | null>(null);
 const assistantNavigationVisible = ref(false);
 let repairSummaryPollingTimer: ReturnType<typeof setTimeout> | null = null;
@@ -253,15 +259,25 @@ function startRepairSummaryCallback() {
 }
 
 function onAskSlotOpen(slot: AskSlotPayload) {
-  const existingIndex = askSlotQueue.value.findIndex(item => item.slot_name === slot.slot_name);
-  askSlotQueue.value = existingIndex < 0
-    ? [...askSlotQueue.value, slot]
-    : askSlotQueue.value.map((item, index) => index === existingIndex ? slot : item);
+  // 作业协同多步骤表单会一次带来整组题目（slot.slots），按顺序拆开入队；普通追问卡就是一道题
+  const incoming = Array.isArray(slot.slots) && slot.slots.length ? slot.slots : [slot];
+  incoming.forEach((item) => {
+    const existingIndex = askSlotQueue.value.findIndex(existing => existing.slot_name === item.slot_name);
+    askSlotQueue.value = existingIndex < 0
+      ? [...askSlotQueue.value, item]
+      : askSlotQueue.value.map((existing, index) => index === existingIndex ? item : existing);
+  });
   askSlotDrawerVisible.value = true;
 }
 
 function closeAskSlotDrawer() {
   askSlotDrawerVisible.value = false;
+}
+
+/** 追问卡高度量出来了：底部间距随之变化，贴一次底把内容抬到卡片上方 */
+function onAskSlotDrawerHeightChange(height: number) {
+  askSlotDrawerHeight.value = height;
+  if (askSlotDrawerVisible.value && height > 0) nextTick(() => chatStore.scrollToBottom(true));
 }
 
 function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
@@ -728,6 +744,7 @@ onBeforeUnmount(() => {
         :visible="askSlotDrawerVisible"
         @close="closeAskSlotDrawer"
         @submit="onAskSlotSubmit"
+        @height-change="onAskSlotDrawerHeightChange"
       />
       <AiAssistantNavigationSheet
         v-model:visible="assistantNavigationVisible"
