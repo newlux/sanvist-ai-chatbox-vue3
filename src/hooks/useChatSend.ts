@@ -430,13 +430,22 @@ export function useChatSend(scope?: string, handlers?: {
   }
 
   function buildAskSlotQuery(payload: AskSlotSubmitPayload) {
+    // 作业协同多步骤表单：按题目顺序拼「Q1: 问题，A1: 回答；Q2: …」
+    const answers = Array.isArray(payload.answers) ? payload.answers : [];
+    if (answers.length) {
+      return answers
+        .map((item, index) => `Q${index + 1}: ${item.question}，A${index + 1}: ${item.answer}`)
+        .join("；");
+    }
+
     const originalQuery = payload.slot.original_query.trim();
-    const selectedValues = payload.selectedOptions
-      .map(option => option.value.trim())
+    // 选项一律取 label 回发：value 是业务编码（如 time / space），对话里要给用户看得懂的文案
+    const selectedLabels = payload.selectedOptions
+      .map(option => String(option.label || option.value).trim())
       .filter(Boolean);
     // 「其他输入」填的自定义内容也算作答，跟选项一起按「、」拼进提问
     const remark = String(payload.remark || "").trim();
-    const answer = [selectedValues.join("、"), remark].filter(Boolean).join("、");
+    const answer = [selectedLabels.join("、"), remark].filter(Boolean).join("、");
     return [originalQuery, answer].filter(Boolean).join("：");
   }
 
