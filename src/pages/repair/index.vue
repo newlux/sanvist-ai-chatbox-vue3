@@ -33,7 +33,6 @@ const iframeSrc = computed(() => {
 
 const embedStyle = computed(() => ({
   paddingTop: `${safeTopPx.value}px`,
-  // paddingBottom: `${safeBottomPx.value}px`,
 }));
 
 function buildEmbedUrl() {
@@ -166,7 +165,7 @@ onBeforeUnmount(() => {
 .ai-page__iframe {
   display: block;
   width: 100vw;
-  height: 100vh;
+  height: 100%;
   border: 0;
   overflow: hidden;
 }
