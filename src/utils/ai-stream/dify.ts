@@ -50,7 +50,9 @@ function parseAskSlotPayload(value: Record<string, unknown>): AskSlotPayload | n
       }))
       .filter(item => item.label && item.value) as AskSlotOption[]
     : [];
-  if (!slotName || !selection || !options.length) return null;
+  // 文本题（input_type=text）没有选项，只要题目名与题型合法即可
+  if (!slotName || !selection) return null;
+  if (!options.length && value.input_type !== "text") return null;
   return { ...value, slot_name: slotName, original_query: originalQuery, selection, options };
 }
 
@@ -306,9 +308,53 @@ function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockD
     return table ? { type: "table", payload: table } : null;
   }
   if (type === "echarts") return { type: "chart", payload: { option: data } };
+  /**
+   * 作业协同的问答卡（scene=task / type=ask）：字段与追问槽位一致，
+   * 只是题目名放在 ask_name 上，选项额外带 action / candidate_name（原样透传，提交侧按 value 拼答案）。
+   *
+   * 标题与描述的位置相反：这份协议里 title 是卡片小标题（灰色标签行）、description 是问题/描述行，
+   * 而追问槽位是 description 作灰色标签、title 作问题行，所以这里对调后再交给同一条渲染链路。
+   */
+  if (type === "ask") {
+    const title = String(data.title || "").trim();
+    const description = String(data.description || "").trim();
+    const slot = parseAskSlotPayload({
+      ...data,
+      slot_name: data.ask_name || data.slot_name,
+      title: description || title,
+      description: description ? title : "",
+    });
+    return slot ? { type: "ask-slot", payload: slot } : null;
+  }
   if (type === "slot") {
     const slot = parseAskSlotPayload(data);
     return slot ? { type: "ask-slot", payload: slot } : null;
+  }
+  /**
+   * 作业协同的多步骤表单（scene=task / type=step）：每个 step 就是一道题，
+   * input_type=text 是填空题、choice 是选择题，复用追问卡的多步流程（上一题/下一题 + 确认提交）。
+   * 整组题目放在 slots 里返回，页面入队时按顺序拆成多道题，最后一步提交时拼成 Q/A 文本。
+   */
+  if (type === "step") {
+    const rows = Array.isArray(data.steps)
+      ? data.steps
+        .map(asRecord)
+        .filter((item): item is Record<string, unknown> => Boolean(item))
+      : [];
+    const slots = rows
+      .map(step => parseAskSlotPayload({
+        ...step,
+        // 题面取 step.title；灰色标签优先用整卡的 data.title（设计稿里写的是「回答」）
+        title: String(step.title || "").trim(),
+        description: String(step.description || data.title || "").trim() || "回答",
+        // 填空题没有选项，按单选处理；选择题沿用协议里的 selection
+        selection: step.input_type === "text" ? "single" : String(step.selection || "single"),
+        options: Array.isArray(step.options) ? step.options : [],
+        input_type: step.input_type === "text" ? "text" : "choice",
+      }))
+      .filter((slot): slot is AskSlotPayload => Boolean(slot));
+    if (!slots.length) return null;
+    return { type: "ask-slot", payload: { ...slots[0], slots } };
   }
   if (type === "navigation" && data.target === "maintenance_assistant") {
     return {
@@ -341,6 +387,7 @@ function parseAskStreamEvent(value: Record<string, unknown> | null) {
  * 新版协议在组件外又包了一层：<COMPONENT>{"scene":"ask","type":"table","data":{...}}</COMPONENT>。
  * 解包后按 scene 路由：
  * - ask（或缺省 scene，兼容老协议）→ 走交互组件渲染；
+ * - task（作业协同）→ 与 ask 同一套交互组件，复用同一条解析/渲染链路；
  * - guide → 走 GUIDE 卡片；
  * - 带 dify_event/event 的 → 仍按节点状态事件处理；
  * - voice 等只服务语音播报的场景 → 返回 null，正文直接丢弃，避免 JSON 泄漏到气泡与 TTS。
@@ -348,7 +395,9 @@ function parseAskStreamEvent(value: Record<string, unknown> | null) {
 function unwrapComponent(value: Record<string, unknown>) {
   const scene = String(value.scene || "").toLowerCase();
   if (scene === "guide") return { kind: "guide" as const, payload: value };
-  if (scene === "ask") return { kind: "ask" as const, payload: value };
+  // 作业协同的 table / echarts / slot 与 ai问问 是同一套协议（含 data.format=markdown 的表格），
+  // 一起走交互组件解析：parseAskBlock 认不出的类型（如 voice）仍会被丢弃，不会漏到正文里。
+  if (scene === "ask" || scene === "task") return { kind: "ask" as const, payload: value };
   if (!scene) {
     return value.event || value.dify_event
       ? { kind: "sanvist" as const, payload: value }

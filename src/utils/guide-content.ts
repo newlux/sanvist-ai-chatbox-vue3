@@ -35,3 +35,17 @@ export function openGuideResource(value: unknown) {
     success: () => uni.showToast({ title: "链接已复制", icon: "none" }),
   });
 }
+
+/**
+ * 复制来源地址并提示。
+ * PDF 这类文件不点开（H5 里会整页跳走或直接触发下载），统一复制链接交给用户自己粘贴。
+ */
+export function copyGuideResource(value: unknown) {
+  const url = normalizeGuideUrl(value);
+  if (!url) return;
+  uni.setClipboardData({
+    data: url,
+    success: () => uni.showToast({ title: "链接已复制", icon: "none", duration: 1500 }),
+    fail: () => uni.showToast({ title: "复制失败，请重试", icon: "none", duration: 1500 }),
+  });
+}

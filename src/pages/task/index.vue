@@ -3,7 +3,7 @@ import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import type { GuideStepItem, GuideStepPayload, GuideSuggestionPayload } from "@/api/chat/types";
+import type { AskSlotPayload, AskSlotSubmitPayload, GuideStepItem, GuideStepPayload, GuideSuggestionPayload } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import iconForm from "@/assets/img/icon-form.svg";
@@ -16,6 +16,7 @@ import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import AiSceneWelcome from "@/components/ai-scene-welcome/index.vue";
+import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
@@ -78,9 +79,14 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "TASK",
 });
+
+/** 页面统一发送入口：直接走真实接口 */
+function sendTaskMessage(payload?: Parameters<typeof sendMessage>[0]) {
+  void sendMessage(payload);
+}
 const {
   iconCopyImage,
   iconSaveImage,
@@ -119,6 +125,10 @@ const messageBottomInset = computed(() => {
   if (guideSuggestionSheetVisible.value && guideSuggestionSheetHeight.value > 0) {
     return `${guideSuggestionSheetHeight.value}px`;
   }
+  // 追问卡（单选点即作答 / 多选确认提交）弹出时同样让出卡片高度
+  if (askSlotDrawerVisible.value && askSlotDrawerHeight.value > 0) {
+    return `${askSlotDrawerHeight.value}px`;
+  }
   // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
   if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
   return composerBottomInset.value;
@@ -145,6 +155,44 @@ function focusGuideStepCardAtTop() {
   if (stepId) chatStore.focusStepBlock(stepId);
 }
 
+/**
+ * 追问卡片（COMPONENT scene=task / type=ask，与 scene=ask / type=slot 同一套数据）：
+ * 单选点一下就作答；多选 / 一屏多题才出底部「确认提交」，把所选拼成答案发出去。
+ * 队列按 slot_name 去重：同一题重复下发时以后来的为准。
+ */
+const askSlotQueue = ref<AskSlotPayload[]>([]);
+const askSlotDrawerVisible = ref(false);
+/** 追问卡实时高度（px）：卡片弹出时给消息列表加底部间距，最后一条内容不会被盖住 */
+const askSlotDrawerHeight = ref(0);
+
+function onAskSlotOpen(slot: AskSlotPayload) {
+  // 作业协同多步骤表单会一次带来整组题目（slot.slots），按顺序拆开入队；普通追问卡就是一道题
+  const incoming = Array.isArray(slot.slots) && slot.slots.length ? slot.slots : [slot];
+  incoming.forEach((item) => {
+    const existingIndex = askSlotQueue.value.findIndex(existing => existing.slot_name === item.slot_name);
+    askSlotQueue.value = existingIndex < 0
+      ? [...askSlotQueue.value, item]
+      : askSlotQueue.value.map((existing, index) => index === existingIndex ? item : existing);
+  });
+  askSlotDrawerVisible.value = true;
+}
+
+function closeAskSlotDrawer() {
+  askSlotDrawerVisible.value = false;
+}
+
+/** 追问卡高度量出来了：底部间距随之变化，贴一次底把内容抬到卡片上方 */
+function onAskSlotDrawerHeightChange(height: number) {
+  askSlotDrawerHeight.value = height;
+  if (askSlotDrawerVisible.value && height > 0) nextTick(() => chatStore.scrollToBottom(true));
+}
+
+function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
+  closeAskSlotDrawer();
+  askSlotQueue.value = [];
+  sendAskSlotSelection(payload);
+}
+
 /** 步骤卡片：单步是多轮追问（点一下直接发），多步选好后确认，统一按普通问题发送。 */
 function onGuideStepOpen(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
@@ -156,7 +204,7 @@ function onGuideStepOpen(payload: GuideStepPayload) {
 
 function onGuideStepSubmit(query: string) {
   guideStepSheetVisible.value = false;
-  sendQuickPrompt(query);
+  sendTaskMessage({ text: query });
 }
 
 function onGuideStepHeightChange(height: number) {
@@ -209,7 +257,7 @@ function onGuideSuggestionOpen(payload: GuideSuggestionPayload) {
 
 function onGuideSuggestionSubmit(query: string) {
   guideSuggestionSheetVisible.value = false;
-  sendQuickPrompt(query);
+  sendTaskMessage({ text: query });
 }
 
 function onGuideSuggestionHeightChange(height: number) {
@@ -223,7 +271,12 @@ function onTaskSuggestionTap(suggestion: string, messageIndex: number) {
     const blockIndex = message.blocks.findIndex(block => block.type === "suggestion");
     if (blockIndex >= 0) message.blocks.splice(blockIndex, 1);
   }
-  sendQuickPrompt(suggestion);
+  sendTaskMessage({ text: suggestion });
+}
+
+/** 欢迎页/快捷问题列表点进来的问题：与输入框发送走同一个入口 */
+function onTaskQuickPrompt(text: string) {
+  sendTaskMessage({ text });
 }
 /** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
 function onTtsClick(index: number) {
@@ -487,10 +540,11 @@ onUnload(() => {
         :pinned-to-bottom="pinnedToBottom"
         :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
         :realtime-tts-playing="realtimeTts.playing.value"
-        @quick-prompt="sendQuickPrompt"
+        @quick-prompt="onTaskQuickPrompt"
         @suggestion-tap="onTaskSuggestionTap"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
+        @ask-slot-open="onAskSlotOpen"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
@@ -605,7 +659,7 @@ onUnload(() => {
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
-        @send="sendMessage"
+        @send="sendTaskMessage"
         @stop="stopGenerating"
         @recognize-begin="beginAsrPlaceholder"
         @recognize-fail="discardAsrPlaceholder"
@@ -617,6 +671,14 @@ onUnload(() => {
         @dock-height-change="setInputDockHeight"
       />
 
+      <!-- 追问卡片（作业协同 type=ask / ai问问 type=slot）：单选点即作答，多选选完确认提交 -->
+      <AiSlotDrawer
+        :slots="askSlotQueue"
+        :visible="askSlotDrawerVisible"
+        @close="closeAskSlotDrawer"
+        @submit="onAskSlotSubmit"
+        @height-change="onAskSlotDrawerHeightChange"
+      />
       <AiGuideStepSheet
         v-model:visible="guideStepSheetVisible"
         :payload="guideStepPayload"
