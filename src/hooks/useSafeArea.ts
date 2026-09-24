@@ -1,6 +1,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useSystemStore } from "@/stores/modules/system";
 import { createLogger } from "@/utils/logger";
+import { callNative } from "@/utils/platform/mpaas";
 
 const logger = createLogger("safe-area");
 
@@ -14,6 +15,27 @@ const FALLBACK_STATUS_BAR_PX = { android: 28, ios: 44, other: 20 };
 function normalizeInset(rawValue: unknown) {
   const value = Number(rawValue);
   return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+let nativeStatusBarHeight: Promise<number> | null = null;
+
+function getNativeStatusBarHeight() {
+  nativeStatusBarHeight ||= callNative<{ statusBar?: unknown }>(
+    "getStatusBarAndNavBarHeight",
+    {},
+    { waitReadyMs: 500, timeoutMs: 1000, silent: true, silentTimeout: true },
+  )
+    .then(result => normalizeInset(result.statusBar))
+    .catch((error) => {
+      logger.debug("原生状态栏高度不可用", error);
+      return 0;
+    });
+  return nativeStatusBarHeight;
+}
+
+function getPixelRatio(systemPixelRatio: unknown) {
+  const browserPixelRatio = typeof window === "undefined" ? 0 : window.devicePixelRatio;
+  return normalizeInset(systemPixelRatio) || normalizeInset(browserPixelRatio) || 1;
 }
 
 function detectPlatform(): keyof typeof FALLBACK_STATUS_BAR_PX {
@@ -55,9 +77,11 @@ export function useSafeArea() {
     let source = "fallback";
     let top = 0;
     let bottom = 0;
+    let pixelRatio = getPixelRatio(systemStore.pixelRatio);
 
     try {
       const info = uni.getSystemInfoSync();
+      pixelRatio = getPixelRatio(info.pixelRatio) || pixelRatio;
       const screenHeight = normalizeInset(info.screenHeight || info.windowHeight);
       const safeAreaBottom = normalizeInset(info.safeArea?.bottom);
       const safeAreaInsetBottom = normalizeInset(info.safeAreaInsets?.bottom);
@@ -79,9 +103,25 @@ export function useSafeArea() {
     if (bottom <= 0) bottom = readCssInset("bottom");
 
     if (top <= 0) {
-      top = FALLBACK_STATUS_BAR_PX[platform];
-      source = "fallback";
-      logger.warn("拿不到状态栏高度，使用兜底值", { platform, top });
+      void getNativeStatusBarHeight().then((nativeTop) => {
+        const cssTop = nativeTop / pixelRatio;
+        if (cssTop > 0) {
+          systemStore.setStatusBarHeight(cssTop);
+          safeTopPx.value = Math.round(cssTop);
+          logger.debug("safe area", {
+            platform,
+            source: "native",
+            nativeTop,
+            pixelRatio,
+            top: safeTopPx.value,
+            bottom: safeBottomPx.value,
+          });
+          return;
+        }
+
+        safeTopPx.value = FALLBACK_STATUS_BAR_PX[platform];
+        logger.warn("拿不到状态栏高度，使用兜底值", { platform, top: safeTopPx.value });
+      });
     }
 
     safeTopPx.value = Math.round(top);
