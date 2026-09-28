@@ -963,13 +963,12 @@ function onNegativeFeedback() {
   flex: 1;
   min-width: 0;
   margin-left: 24rpx;
-  overflow: hidden;
   color: #1a1a1a;
   font-size: 24rpx;
   line-height: 30rpx;
   text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
+  white-space: normal;
 }
 
 .ai-bubble-v2__waiting {

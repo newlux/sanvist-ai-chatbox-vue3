@@ -124,7 +124,7 @@ export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): Sanvis
     sysCode,
     ciphertext,
     language: "zh-CN",
-    companyId: "8",
+    companyId: "69",
     organizationId: "2",
     isChinaMode: "true",
     isConsumer: "true",
