@@ -55,6 +55,13 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
+/**
+ * 播报主体高度避让：除输入栏高度外再减去键盘高度。
+ * 键盘弹起时播报内容整体留在键盘上方，避免字幕被键盘压住、输入栏被播报层遮挡。
+ */
+const broadcastDockOffset = computed(() =>
+  `calc(${composerDockOffset.value} + ${Math.max(0, Number(keyboardHeight.value) || 0)}px)`,
+);
 const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
 /** 本轮问答是否从异常列表发起：确认或取消后必须回到异常列表。 */
@@ -426,7 +433,7 @@ onBeforeUnmount(() => {
         }"
         :params="reportBroadcastParams"
         :portrait="reportBroadcastPortrait"
-        :dock-offset="composerDockOffset"
+        :dock-offset="broadcastDockOffset"
         :qa-loading="reportQaLoading"
         :qa-answer="reportQaAnswer"
         :can-minimize="canMinimize"
@@ -561,7 +568,9 @@ onBeforeUnmount(() => {
   }
 }
 
+/* 键盘弹起时输入栏要抬到播报层之上：播报层 z-index 为 2 且是不透明白底 */
 :deep(.chat-input) {
+  z-index: 3;
   background: #ffffff;
 }
 </style>
