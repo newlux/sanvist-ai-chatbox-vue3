@@ -167,6 +167,8 @@ function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
 function onAssistantCallbackOpen(conversationId: string) {
   const id = String(conversationId || "").trim();
   if (!id) return;
+  // 查看的是已生成的回流卡片详情：清掉待回流任务，从详情返回时不再重复请求诊断结果。
+  clearPendingRepairCallback();
   void navigateToScene(`/pages/repair/index?conversationId=${encodeURIComponent(id)}`);
 }
 

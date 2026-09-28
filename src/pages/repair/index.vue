@@ -38,7 +38,7 @@ const embedStyle = computed(() => ({
 function buildEmbedUrl() {
   try {
     const result = buildSanvistH5Url({
-      userId: "10",
+      userId: "66",
       externalUserId: String(userStore.userId || "").trim() || undefined,
       name: String(userStore.username || "").trim() || undefined,
       // userId: String(repairNavigationContext.value.userId || userStore.userId || "").trim() || undefined,
