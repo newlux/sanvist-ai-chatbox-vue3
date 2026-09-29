@@ -222,8 +222,8 @@ function startRepairSummaryCallback() {
     repairSummaryPollingAttempts += 1;
     try {
       const data = await getConversationSummary(task);
-      // 快速问答没有状态字段，首次获取结果后直接回流，不进入轮询。
-      if (!data.status || data.status === "Completed") {
+      // 快速问答没有状态字段；只要返回了 repairConversationId 就视为结果就绪，直接回流，不进入轮询。
+      if (!data.status || data.status === "Completed" || data.repairConversationId) {
         clearRepairSummaryPolling();
         const summaryPayload = JSON.stringify(data);
         const summary = parseRepairCallbackSummary(summaryPayload);
