@@ -34,6 +34,11 @@ export function useChatSend(scope?: string, handlers?: {
   onReportNavigation?: (action: ReportNavigationAction) => void;
   onReportWorkflowAction?: (action: ReportWorkflowAction) => void;
   onReportBlockingComplete?: () => void;
+  /**
+   * AI 消息回答完成（snapshot.ended = true，且非 interrupted）时回调一次。
+   * 由页面用来在普通问答场景触发自动听播；不传则不触发。
+   */
+  onAiMessageComplete?: (info: { aiMsgId: string; messageId: Identifier; sessionId: Identifier | null }) => void;
   /** 页面注入的额外 Dify inputs（如作业指导页的机型选择），每次发送时现取 */
   getExtraInputs?: () => Record<string, unknown>;
   /** 听播问答的异常列表输入。 */
@@ -48,6 +53,9 @@ export function useChatSend(scope?: string, handlers?: {
       if (!isAbortError(error)) logger.error("stream request failed", error);
     },
   });
+
+  /** 已回调过 onAiMessageComplete 的 aiMsgId，避免重入/重发。 */
+  const notifiedCompletedAiIds = new Set<string>();
 
   function cancelActiveStream(markStopped = false) {
     const activeId = String(chatStore.activeMessageId || "");
@@ -137,6 +145,22 @@ export function useChatSend(scope?: string, handlers?: {
       });
     }
     chatStore.scrollToBottom();
+
+    // 仅在「真正答完一轮」时通知一次：避免中间 snapshot 重入；status=stopped 视作被打断，不算完成。
+    if (
+      snapshot.ended
+      && snapshot.metadata?.status !== "stopped"
+      && (snapshot.conversationId ?? aiMessage.sessionId)
+      && (snapshot.messageId ?? aiMessage.messageId)
+      && !notifiedCompletedAiIds.has(aiMsgId)
+    ) {
+      notifiedCompletedAiIds.add(aiMsgId);
+      handlers?.onAiMessageComplete?.({
+        aiMsgId,
+        messageId: snapshot.messageId ?? aiMessage.messageId,
+        sessionId: snapshot.conversationId ?? aiMessage.sessionId,
+      });
+    }
   }
 
   function createChatRequest(content: string, files: ChatFile[], extraInputs: Record<string, unknown> = {}) {

@@ -104,7 +104,14 @@ const {
   discardAsrPlaceholder,
   stopGenerating,
   cancelActiveStream,
-} = useChatSend();
+} = useChatSend(undefined, {
+  // 回答完成自动听播：原流程要求用户点 AI 气泡上的播放按钮，这里把这一步省掉。
+  onAiMessageComplete({ aiMsgId }) {
+    const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
+    if (index < 0) return;
+    onTtsClick(index);
+  },
+});
 const {
   iconCopyImage,
   iconSaveImage,
