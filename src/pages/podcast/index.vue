@@ -5,10 +5,12 @@ import type { ReportInsightItem } from "@/hooks/useReportInsights";
 import { onLoad, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, onBeforeUnmount, ref } from "vue";
+import { getListenBroadcastConfig } from "@/api/listen-broadcast";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import ReportBroadcastPlayer from "@/components/report-broadcast-player/index.vue";
 import ReportInsight from "@/components/report-broadcast-player/report-insight.vue";
 import ReportVoiceSelector from "@/components/report-voice-selector/index.vue";
+import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
@@ -18,7 +20,7 @@ import { loadReportStyle, saveReportStyle } from "@/hooks/useReportStyle";
 import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useUserStore } from "@/stores";
-import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
+import { getCurrentListenReportDate, markListenReportListened } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { backFromScene, isSceneWindowRoot } from "@/utils/scene-navigation";
 
@@ -176,30 +178,34 @@ const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating,
   },
 });
 
-function startReportVoiceSelection() {
-  preferenceEntry.value = false;
-  reportBroadcastParams.value = null;
-  reportBroadcastPortrait.value = "";
-  showReportVoiceSelector.value = true;
+function restoreReportBroadcast() {
+  // 首页「去收听」直接进入播报：跳过音色/风格两步选择，使用默认配置。
+  const voice = loadReportVoice() || REPORT_VOICE_OPTIONS[0];
+  const savedStyle = loadReportStyle();
+  if (savedStyle && savedStyle.moduleCodes.length) {
+    applyReportBroadcastParams(voice, savedStyle.styleCode, savedStyle.moduleCodes);
+    return;
+  }
+  // 没有本地保存：拉一次配置，用第一个风格的默认模块兜底
+  void getListenBroadcastConfig()
+    .then((config) => {
+      const firstStyle = config?.styles?.[0];
+      if (!firstStyle) return;
+      const nextVoice = loadReportVoice() || REPORT_VOICE_OPTIONS[0];
+      applyReportBroadcastParams(nextVoice, firstStyle.code, firstStyle.defaultModules || []);
+    })
+    .catch((error) => {
+      logger.warn("failed to load listen broadcast config for default style", error);
+    });
+  // 接口返回前先按空 modules 启动，让播放器先出现；模块到位后由 store 拉取刷新。
+  applyReportBroadcastParams(voice, "operation-overview", []);
 }
 
-function restoreReportBroadcast() {
-  // 游客首次收听必须重新选择；已收听状态允许直接复用上次配置。
-  if (userStore.isVisitor === true && !isListenReportListened(reportBizDate.value)) {
-    startReportVoiceSelection();
-    return;
-  }
-
-  const voice = loadReportVoice();
-  const style = loadReportStyle();
-  if (!voice || !style || !style.moduleCodes.length) {
-    startReportVoiceSelection();
-    return;
-  }
+function applyReportBroadcastParams(voice: ReportVoiceOption, styleCode: string, moduleCodes: string[]) {
   reportBroadcastParams.value = {
     voice: voice.id,
-    styleCode: style.styleCode,
-    checkedModules: style.moduleCodes,
+    styleCode,
+    checkedModules: moduleCodes,
     bizDate: reportBizDate.value,
   };
   reportBroadcastPortrait.value = voice.hero;
