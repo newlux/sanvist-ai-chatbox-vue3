@@ -95,6 +95,8 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
+// 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用它做流式听播。
+const realtimeTts = useRealtimeTts();
 const {
   sendMessage,
   sendQuickPrompt,
@@ -105,11 +107,12 @@ const {
   stopGenerating,
   cancelActiveStream,
 } = useChatSend(undefined, {
-  // 回答完成自动听播：原流程要求用户点 AI 气泡上的播放按钮，这里把这一步省掉。
-  onAiMessageComplete({ aiMsgId }) {
+  // 问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
+  // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
+  onAiAnswerDelta({ aiMsgId, delta, ended }) {
     const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
     if (index < 0) return;
-    onTtsClick(index);
+    realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
   },
 });
 const {
@@ -136,7 +139,6 @@ const {
   onCopySharePoster,
 } = useChatShare(sharePosterWrap);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback();
-const realtimeTts = useRealtimeTts();
 /** 步骤卡「拍照」入口专用：独立实例，选完一张图直接把文件交给 sendMessage */
 const photoPicker = useComposerAttachments();
 

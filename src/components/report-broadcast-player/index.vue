@@ -20,6 +20,10 @@ const props = defineProps<{
   dockOffset: string;
   qaLoading: boolean;
   qaAnswer: string;
+  /** 答案按句切分后的段落，与 TTS 分句一一对应，用来在朗读时同步高亮。 */
+  qaAnswerSegments?: string[];
+  /** 当前正在朗读的段落索引（-1 表示还没开始）；驱动 ReportQaAnswer 的高亮位置。 */
+  qaCurrentSegmentIndex?: number;
   /** iframe 内嵌（from=sanvist_pc）时，头部露出「最小化」 */
   canMinimize?: boolean;
 }>();
@@ -192,7 +196,13 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       @open-preference="emit('open-preference')"
       @open-rate="openRatePanel"
     />
-    <ReportQaAnswer v-if="isQaVisible" :loading="qaLoading" :answer="qaAnswer" />
+    <ReportQaAnswer
+      v-if="isQaVisible"
+      :loading="qaLoading"
+      :answer="qaAnswer"
+      :segments="qaAnswerSegments"
+      :current-index="qaCurrentSegmentIndex"
+    />
     <ReportBroadcastContent
       v-else
       :portrait="portrait"
