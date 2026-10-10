@@ -9,7 +9,7 @@ import { storeToRefs } from "pinia";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
-import { getListenBroadcastConfig } from "@/api/listen-broadcast";
+import { getListenBroadcastConfig, getListenBroadcastPreference } from "@/api/listen-broadcast";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import ReportBroadcastPlayer from "@/components/report-broadcast-player/index.vue";
 import ReportInsight from "@/components/report-broadcast-player/report-insight.vue";
@@ -77,6 +77,12 @@ const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> 
 const showReportVoiceSelector = ref(false);
 /** 是否由播报页「偏好设置」进入配置流程：决定关闭配置页时回播报页还是退出页面。 */
 const preferenceEntry = ref(false);
+/**
+ * 进页拉取听播偏好过程中的 loading 态：
+ * 进页不再走 localStorage / 默认值兜底，必须等服务端的偏好回包后再决定展示播报还是选择页，
+ * 期间用一个轻量 loading 占位，避免在 rpx 放大屏型下出现"空白一闪"。
+ */
+const preferenceLoading = ref(true);
 const reportBroadcastParams = ref<PlayListenBroadcastParams | null>(null);
 const reportBroadcastPortrait = ref("");
 const reportBizDate = ref("");
@@ -336,14 +342,44 @@ function playAnswerTts(answer: string) {
 }
 
 function restoreReportBroadcast() {
-  // 首页「去收听」直接进入播报：跳过音色/风格两步选择，使用默认配置。
+  // 进页先拉服务端偏好：
+  //   - 服务端有偏好 → 直接拿服务端结果赋值音色 / 风格 / 汇报模块
+  //   - 服务端没有偏好 / 接口异常 / voiceCode 解析不到 → 落到默认配置（localStorage → 第一个音色 / 风格）
+  preferenceLoading.value = true;
+  void getListenBroadcastPreference()
+    .then((preference) => {
+      const voiceCode = String(preference?.voiceCode || "").trim();
+      const styleCode = String(preference?.styleCode || "").trim();
+      if (voiceCode && styleCode) {
+        const voice = REPORT_VOICE_OPTIONS.find(item => item.id === voiceCode);
+        if (voice) {
+          applyReportBroadcastParams(voice, styleCode, preference?.checkedModules || []);
+          return;
+        }
+        logger.warn("unknown voiceCode in preference, fall back to defaults", { voiceCode });
+      }
+      applyDefaultBroadcastParams();
+    })
+    .catch((error) => {
+      logger.warn("failed to load listen broadcast preference, fall back to defaults", error);
+      applyDefaultBroadcastParams();
+    })
+    .finally(() => {
+      preferenceLoading.value = false;
+    });
+}
+
+/**
+ * 服务端没有偏好时的默认配置：与首版进页行为保持一致。
+ * 优先用 localStorage 里用户上次选过的音色 / 风格；都没有再拉一次 config 接口取第一个风格的默认模块。
+ */
+function applyDefaultBroadcastParams() {
   const voice = loadReportVoice() || REPORT_VOICE_OPTIONS[0];
   const savedStyle = loadReportStyle();
   if (savedStyle && savedStyle.moduleCodes.length) {
     applyReportBroadcastParams(voice, savedStyle.styleCode, savedStyle.moduleCodes);
     return;
   }
-  // 没有本地保存：拉一次配置，用第一个风格的默认模块兜底
   void getListenBroadcastConfig()
     .then((config) => {
       const firstStyle = config?.styles?.[0];
@@ -558,6 +594,9 @@ onLoad(() => {
   insightLoaded = false;
   hasShownInsight = false;
   broadcastPlaying.value = false;
+  // 进页立刻进入拉取偏好的 loading 态；restoreReportBroadcast 内部会在 finally 里关闭
+  preferenceLoading.value = true;
+  showReportVoiceSelector.value = false;
   restoreReportBroadcast();
   // 每次进来都是全新一轮；发送场景由 useChatSend 固定为 PODCAST。
   chatStore.resetConversation();
@@ -585,8 +624,15 @@ onBeforeUnmount(() => {
   <view class="podcast-page" :style="safeAreaStyle">
     <!-- 所有页面共用宿主安全区；系统状态栏由手机原生绘制。 -->
     <view class="chat-header__statusbar" :style="statusbarStyle" />
+    <!-- 进页拉取听播偏好的 loading 占位：避免服务端返回前出现空白闪烁 -->
+    <view v-if="preferenceLoading" class="podcast-page__preference-loading">
+      <view class="preference-loading__indicator" />
+      <text class="preference-loading__text">
+        正在加载偏好
+      </text>
+    </view>
     <ReportVoiceSelector
-      v-if="showReportVoiceSelector"
+      v-else-if="showReportVoiceSelector"
       @confirm="confirmReportVoice"
       @close="closeReportVoiceSelector"
     />
@@ -667,6 +713,41 @@ onBeforeUnmount(() => {
   background: #ffffff;
   font-family: PingFang SC;
   overflow: hidden;
+}
+
+/* —— 进页拉取偏好的 loading 占位 —— */
+.podcast-page__preference-loading {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24rpx;
+  background: #ffffff;
+}
+
+.preference-loading__indicator {
+  width: 48rpx;
+  height: 48rpx;
+  border: 4rpx solid #f0e6e6;
+  border-top-color: #c8201e;
+  border-radius: 50%;
+  animation: podcast-preference-loading-spin 0.9s linear infinite;
+}
+
+.preference-loading__text {
+  color: #9a5f5d;
+  font-size: 26rpx;
+  font-weight: 500;
+  line-height: 36rpx;
+}
+
+@keyframes podcast-preference-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 顶部状态栏占位：撑开安全区，避免页面内容顶到状态栏底下 */
