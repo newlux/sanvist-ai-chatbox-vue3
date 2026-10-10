@@ -194,6 +194,9 @@ onMounted(() => {
           </text>
         </view>
       </view>
+    </view>
+    <!-- 底部按钮独立成 footer，无论内容是否溢出，按钮始终钉在视口底部 -->
+    <view class="footer">
       <view
         class="primary-btn"
         :class="{ 'primary-btn--disabled': submitDisabled }"
@@ -220,17 +223,25 @@ $color-text-warning: #a31717;
 
 .role-select {
   position: relative;
-  min-height: 100vh;
+  // 显式给一个高度，flex 子项才能正确分配剩余空间（min-height 在某些 WebView 下不够稳）
+  height: 100vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  // 取消居中：折屏内屏接近 1:1，rpx 折算后可用高度只有 ~500rpx，比内容总高还小，
+  // 居中会把底部"开始体验"按钮均分裁切掉。改为自然流式，配合 .content 的滚动兜底。
   // 内嵌 APP：上下各让出一段安全区
   padding-top: constant(safe-area-inset-top);
   padding-top: env(safe-area-inset-top);
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
   box-sizing: border-box;
+}
+
+@supports (height: 100dvh) {
+  .role-select {
+    height: 100dvh;
+  }
 }
 
 .phone-bg {
@@ -276,16 +287,33 @@ $color-text-warning: #a31717;
 .content {
   position: relative;
   z-index: 5;
-  padding: 0 60rpx;
+  // 内容区只占 footer 之上剩余的高度，折屏内屏放不下时可滚动
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  // 只留顶部间距，底部交给 .footer 处理
+  padding: 60rpx 60rpx 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.footer {
+  position: relative;
+  z-index: 5;
+  // 不参与 flex 拉伸，无论内容多高都钉在视口底部
+  flex-shrink: 0;
+  padding: 24rpx 60rpx 24rpx;
+  // 兜底 iOS 底部安全区
+  padding-bottom: max(24rpx, env(safe-area-inset-bottom));
 }
 
 .page-title {
   display: block;
-  margin-bottom: 52rpx;
+  // 标题到卡片距离从 52rpx 降到 32rpx，给折屏内屏多腾出 20rpx 空间
+  margin-bottom: 32rpx;
   color: $color-text-primary;
-  font-size: 48rpx;
+  font-size: 44rpx;
   font-weight: 700;
-  line-height: 68rpx;
+  line-height: 60rpx;
 }
 
 .role-select__error {
@@ -301,11 +329,12 @@ $color-text-warning: #a31717;
   display: flex;
   box-sizing: border-box;
   width: 630rpx;
-  min-height: 244rpx;
+  // min-height 从 244rpx 降到 180rpx，折屏内屏 rpx 放大后单卡少占 ~180px，两张卡能挤进可视区
+  min-height: 180rpx;
   align-items: flex-start;
   gap: 20rpx;
-  margin-bottom: 20rpx;
-  padding: 28rpx;
+  margin-bottom: 16rpx;
+  padding: 24rpx;
   border: 2rpx solid transparent;
   border-radius: 24rpx;
   background: $color-card-bg;
@@ -317,8 +346,8 @@ $color-text-warning: #a31717;
 }
 
 .card-avatar {
-  width: 102rpx;
-  height: 102rpx;
+  width: 88rpx;
+  height: 88rpx;
   flex-shrink: 0;
   overflow: hidden;
   border-radius: 50%;
@@ -368,14 +397,15 @@ $color-text-warning: #a31717;
 .primary-btn {
   display: flex;
   width: 630rpx;
-  height: 104rpx;
+  height: 96rpx;
   align-items: center;
   justify-content: center;
-  margin-top: 52rpx;
-  border-radius: 52rpx;
+  // 按钮已搬到 .footer，无需再给 margin-top
+  margin: 0 auto;
+  border-radius: 48rpx;
   background: $color-card-bg;
   color: $color-btn-red;
-  font-size: 36rpx;
+  font-size: 34rpx;
   font-weight: 700;
   line-height: 44rpx;
 }
