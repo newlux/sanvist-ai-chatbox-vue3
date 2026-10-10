@@ -79,13 +79,18 @@ function goToRoleSelect() {
   flex: 1;
   flex-direction: column;
   justify-content: space-between;
+  // 折屏内屏可用高度很小（rpx 随宽度放大），内容会超出可视区；
+  // 让内容区可滚动，同时 footer 固定，保证"开始体验"按钮一直可见。
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .welcome-visitor__title {
   display: flex;
   flex-direction: column;
   width: calc(100% - 96rpx);
-  margin: 200rpx 48rpx 0;
+  // 顶部间距从 200rpx 降到 120rpx，给按钮留出更多空间
+  margin: 120rpx 48rpx 0;
   color: #fff;
   font-size: 84rpx;
   font-weight: 700;
@@ -93,7 +98,8 @@ function goToRoleSelect() {
 }
 
 .welcome-visitor__note {
-  margin-bottom: 256rpx;
+  // 底部间距从 256rpx 大幅减小，避免把按钮顶出屏幕
+  margin-bottom: 60rpx;
   padding: 0 58rpx;
 }
 
