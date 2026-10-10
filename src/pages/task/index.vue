@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
+import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -79,14 +79,48 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
+// 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用实时 TTS 做流式听播。
+const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
+const realtimeTts = useRealtimeTts(chatScope);
 const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "TASK",
+  // 同首页 / 作业指导：问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
+  // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
+  onAiAnswerDelta({ aiMsgId, delta, ended }) {
+    const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
+    if (index < 0) return;
+    realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
+  },
 });
+
+/** 停掉本页两套听播引擎（实时流式 + 历史整段）：换交互 / 离开页面时统一走这里。 */
+function stopSceneTts() {
+  realtimeTts.stop();
+  stopHistoryTts();
+}
 
 /** 页面统一发送入口：直接走真实接口 */
 function sendTaskMessage(payload?: Parameters<typeof sendMessage>[0]) {
+  // 发送瞬间（文字会话 / 语音确认 / 步骤卡 / 建议卡 / 快捷提问，全部走这个入口）
+  // 立刻停掉正在进行的听播：同步停、不依赖 activeRequestSeq watcher，发出去就安静。
+  stopSceneTts();
   void sendMessage(payload);
 }
+
+/**
+ * 按住说话 / 再次识别按下的瞬间停掉听播。此时录音刚开始、请求还没发出，
+ * activeRequestSeq watcher 不会动 —— 但旧播报继续响会盖住用户对着麦克风说话，
+ * 还会被录进 ASR 里，必须按下即停。
+ */
+function stopSceneTtsOnVoiceStart() {
+  stopSceneTts();
+}
+
+// 「再次发起其他提问 / 切换会话 / 停止生成」时立刻停掉正在进行的听播（同首页 / 作业指导）：
+// activeRequestSeq 在新请求开始和取消/重置时都会变化，一个 watcher 兜底覆盖全部入口。
+watch(() => chatStore.activeRequestSeq, () => {
+  stopSceneTts();
+});
 const {
   iconCopyImage,
   iconSaveImage,
@@ -111,8 +145,6 @@ const {
   onCopySharePoster,
 } = useChatShare(sharePosterWrap, chatScope);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback(chatScope);
-const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
-const realtimeTts = useRealtimeTts(chatScope);
 /** 步骤卡「拍照」入口专用：独立实例，选完一张图直接把文件交给 sendMessage */
 const photoPicker = useComposerAttachments();
 
@@ -481,8 +513,14 @@ onShow(() => {
   if (sessionId) void openLocalHistory(sessionId, true);
 });
 
+// 离开页面时停止听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
+// 两个 TTS hook 自带的 onBeforeUnmount 清理不会触发，必须挂在 onHide / onUnload 上。
+onHide(() => {
+  stopSceneTts();
+});
 onUnload(() => {
   cancelActiveStream();
+  stopSceneTts();
 });
 </script>
 
@@ -661,6 +699,8 @@ onUnload(() => {
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendTaskMessage"
         @stop="stopGenerating"
+        @voice-start="stopSceneTtsOnVoiceStart"
+        @voice-restart="stopSceneTtsOnVoiceStart"
         @recognize-begin="beginAsrPlaceholder"
         @recognize-fail="discardAsrPlaceholder"
         @toggle-quick-list="toggleQuickList"
