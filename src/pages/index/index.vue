@@ -10,7 +10,7 @@ import type {
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { AttachmentSource } from "@/hooks/useComposerAttachments";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
-import { onLoad, onShow } from "@dcloudio/uni-app";
+import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -98,7 +98,7 @@ const {
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用它做流式听播。
 const realtimeTts = useRealtimeTts();
 const {
-  sendMessage,
+  sendMessage: sendChatMessage,
   sendQuickPrompt,
   sendAskSlotSelection,
   sendAssistantCallback,
@@ -114,6 +114,33 @@ const {
     if (index < 0) return;
     realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
   },
+});
+
+/**
+ * 发送新消息（文字会话 / 语音确认发送共用 @send 出口）时立刻停掉正在进行的听播。
+ * 同步停、不依赖 activeRequestSeq watcher —— 发出去的瞬间就安静，
+ * 避免旧播报一直响到新答案文字出来才被替换。
+ */
+function sendMessage(payload?: Parameters<typeof sendChatMessage>[0]) {
+  realtimeTts.stop();
+  return sendChatMessage(payload);
+}
+
+/**
+ * 按住说话 / 再次识别按下的瞬间停掉听播。此时录音刚开始、请求还没发出，
+ * activeRequestSeq watcher 不会动 —— 但旧播报继续响会盖住用户对着麦克风说话，
+ * 还会被录进 ASR 里，必须按下即停。
+ */
+function stopRealtimeTtsOnVoiceStart() {
+  realtimeTts.stop();
+}
+
+// 「再次发起其他提问 / 切换会话 / 停止生成」时立刻停掉正在进行的自动听播：
+// activeRequestSeq 在新请求开始（nextRequestSeq）和取消/重置（invalidateActiveRequest）
+// 时都会变化，一个 watcher 统一覆盖全部入口（输入框、快捷提问、建议、插槽、助手回调、历史切换）。
+// 不等到新答案首块文字才停 —— 那中间几秒旧播报还会继续响。
+watch(() => chatStore.activeRequestSeq, () => {
+  realtimeTts.stop();
 });
 const {
   iconCopyImage,
@@ -674,11 +701,20 @@ onShow(() => {
   refreshListenReportState();
   startRepairSummaryCallback();
 });
+// 离开页面时停止自动听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
+// useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
+onHide(() => {
+  realtimeTts.stop();
+});
+onUnload(() => {
+  realtimeTts.stop();
+});
 onBeforeUnmount(() => {
   clearRepairSummaryPolling();
   stopNativeResume();
   uni.$off("listen-report-marked", refreshListenReportState);
   cancelActiveStream();
+  realtimeTts.stop();
 });
 </script>
 
@@ -892,6 +928,8 @@ onBeforeUnmount(() => {
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendMessage"
         @stop="stopGenerating"
+        @voice-start="stopRealtimeTtsOnVoiceStart"
+        @voice-restart="stopRealtimeTtsOnVoiceStart"
         @recognize-begin="beginAsrPlaceholder"
         @recognize-fail="discardAsrPlaceholder"
         @toggle-quick-list="toggleQuickList"
