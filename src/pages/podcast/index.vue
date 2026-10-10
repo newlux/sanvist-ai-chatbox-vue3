@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import type { TtsStreamHandle } from "@/api/chat/tts-stream";
+import type { RealtimeTtsChunk } from "@/api/chat/types";
 import type { ListenBroadcastStyle, PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
 import type { ReportVoiceOption } from "@/config/report-voices";
 import type { ReportInsightItem } from "@/hooks/useReportInsights";
 import { onLoad, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, onBeforeUnmount, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { getListenBroadcastConfig } from "@/api/listen-broadcast";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import ReportBroadcastPlayer from "@/components/report-broadcast-player/index.vue";
@@ -33,6 +37,7 @@ import { backFromScene, isSceneWindowRoot } from "@/utils/scene-navigation";
 defineOptions({ name: "AiPodcastPage" });
 
 const logger = createLogger("podcast-page");
+const { locale } = useI18n();
 
 const chatScope = provideChatScope("podcast");
 const chatStore = useChatStore(chatScope);
@@ -151,6 +156,8 @@ const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating,
     qaAnswerShown = true;
     reportQaLoading.value = false;
     reportQaAnswer.value = answer;
+    // 答案回来了：用 TTS 把回答朗读出来，播报已经处于暂停态，无需再切。
+    playAnswerTts(answer);
   },
   onReportAdjustment(action) {
     reportQaLoading.value = false;
@@ -177,6 +184,156 @@ const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating,
     if (!qaAnswerShown) returnToInsightSource();
   },
 });
+
+// —— 回答 TTS：发问得到答案后，用停播 + TTS 朗读把结果播出来 ——
+// 流式合成（POST /speech/tts/stream）支持任意文本，不必依赖 chat/tts 的 messageId。
+interface AnswerTtsAudioItem {
+  dataUrl?: string | null;
+  audioBase64?: string | null;
+  format?: string | null;
+}
+let answerTtsSeq = 0;
+let answerTtsStream: TtsStreamHandle | null = null;
+let answerTtsActiveAudio: ReturnType<typeof uni.createInnerAudioContext> | null = null;
+let answerTtsQueue: AnswerTtsAudioItem[] = [];
+let answerTtsStreamFinished = false;
+/** 是否正在播放问答 TTS，供 UI 展示「正在朗读…」状态。 */
+const answerTtsPlaying = ref(false);
+
+function guessAnswerTtsMime(base64: string) {
+  return base64.startsWith("UklGR") ? "audio/wav" : "audio/mpeg";
+}
+
+/**
+ * 把后端返回的回答文本清洗成自然连贯的中文口播文本：
+ * 去掉残留的协议块、markdown 符号与多余换行，避免 TTS 把 * # 这类符号读出来。
+ */
+function cleanAnswerText(raw: string): string {
+  let text = String(raw || "");
+  text = text.replace(/<(SANVIST|ASK|GUIDE|COMPONENT|PODCAST)>[\s\S]*?<\/\1>/g, "");
+  text = text.replace(/```[\s\S]*?```/g, "");
+  text = text.replace(/`([^`]+)`/g, "$1");
+  text = text.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
+  text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  text = text.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2");
+  text = text.replace(/[*_~`#>\-]/g, "");
+  text = text.replace(/\n+/g, " ");
+  text = text.replace(/\s+/g, " ").trim();
+  if (text && !/[。！？!?；;]$/.test(text)) text += "。";
+  return text;
+}
+
+function resolveAnswerTtsLanguage(): "zh" | "en" {
+  const raw = String(locale.value || "zh").toLowerCase();
+  if (raw.startsWith("zh")) return "zh";
+  if (raw.startsWith("en")) return "en";
+  return "zh";
+}
+
+function playNextAnswerTtsChunk(seq: number) {
+  if (seq !== answerTtsSeq) return;
+  if (answerTtsActiveAudio) return;
+  const item = answerTtsQueue.shift();
+  if (!item) {
+    if (answerTtsStreamFinished) {
+      answerTtsPlaying.value = false;
+    }
+    return;
+  }
+  const dataUrl = String(item.dataUrl || "").trim();
+  const base64 = String(item.audioBase64 || "").trim();
+  // 占位/失败帧直接跳过
+  if (!dataUrl && !base64) {
+    playNextAnswerTtsChunk(seq);
+    return;
+  }
+  const audio = uni.createInnerAudioContext();
+  answerTtsActiveAudio = audio;
+  if (dataUrl) {
+    audio.src = dataUrl;
+  } else if (base64.startsWith("data:")) {
+    audio.src = base64;
+  } else {
+    audio.src = `data:${guessAnswerTtsMime(base64)};base64,${base64}`;
+  }
+  audio.onEnded(() => {
+    if (answerTtsActiveAudio !== audio) return;
+    answerTtsActiveAudio = null;
+    audio.destroy?.();
+    playNextAnswerTtsChunk(seq);
+  });
+  audio.onError((error) => {
+    if (answerTtsActiveAudio !== audio) return;
+    logger.warn("回答 TTS 单句播放失败", error);
+    answerTtsActiveAudio = null;
+    audio.destroy?.();
+    playNextAnswerTtsChunk(seq);
+  });
+  audio.autoplay = true;
+}
+
+function stopAnswerTts() {
+  answerTtsSeq += 1;
+  answerTtsStream?.cancel();
+  answerTtsStream = null;
+  answerTtsStreamFinished = true;
+  answerTtsQueue = [];
+  if (answerTtsActiveAudio) {
+    try {
+      answerTtsActiveAudio.stop();
+      answerTtsActiveAudio.destroy?.();
+    } catch (error) {
+      logger.warn("停止回答 TTS 失败", error);
+    }
+    answerTtsActiveAudio = null;
+  }
+  answerTtsPlaying.value = false;
+}
+
+function playAnswerTts(answer: string) {
+  stopAnswerTts();
+  const text = cleanAnswerText(answer);
+  if (!text) return;
+  const seq = ++answerTtsSeq;
+  answerTtsStreamFinished = false;
+  answerTtsPlaying.value = true;
+  const language = resolveAnswerTtsLanguage();
+  try {
+    answerTtsStream = consumeTextToSpeechStream(
+      { text, language },
+      (payload) => {
+        if (seq !== answerTtsSeq) return;
+        if (!payload || typeof payload !== "object") return;
+        const chunk = payload as RealtimeTtsChunk;
+        if (chunk.event === "done") return;
+        if (typeof chunk.seq === "number") {
+          answerTtsQueue.push({
+            dataUrl: chunk.dataUrl ?? null,
+            audioBase64: chunk.audioBase64 ?? null,
+            format: chunk.format ?? null,
+          });
+          playNextAnswerTtsChunk(seq);
+        }
+      },
+      (error) => {
+        if (seq !== answerTtsSeq) return;
+        logger.warn("回答 TTS 请求失败", error);
+        answerTtsStreamFinished = true;
+        playNextAnswerTtsChunk(seq);
+      },
+      () => {
+        if (seq !== answerTtsSeq) return;
+        answerTtsStreamFinished = true;
+        playNextAnswerTtsChunk(seq);
+      },
+    );
+  } catch (error) {
+    if (seq !== answerTtsSeq) return;
+    logger.warn("启动回答 TTS 失败", error);
+    answerTtsStreamFinished = true;
+    answerTtsPlaying.value = false;
+  }
+}
 
 function restoreReportBroadcast() {
   // 首页「去收听」直接进入播报：跳过音色/风格两步选择，使用默认配置。
@@ -347,6 +504,8 @@ function openInsightItem(item: ReportInsightItem) {
 }
 
 function dismissReportQa() {
+  // 用户主动关闭：把正在朗读的 TTS 也停掉，避免空场继续播音。
+  stopAnswerTts();
   reportQaLoading.value = false;
   reportQaAnswer.value = "";
   // answer 被关闭、识别失败或录音取消：这一轮同样要回到来源列表。
@@ -366,6 +525,8 @@ function enterReportQaLoading() {
 }
 
 function sendPodcastMessage(payload?: Parameters<typeof sendMessage>[0]) {
+  // 新一轮提问：先停掉上一轮可能还在朗读的 TTS，避免答案串台。
+  stopAnswerTts();
   enterReportQaLoading();
   pauseReportBroadcast();
   return sendMessage(payload);
@@ -407,6 +568,8 @@ onLoad(() => {
 onUnload(() => {
   if (markCurrentReportListened()) uni.$emit("listen-report-marked");
   cancelActiveStream();
+  // 离开页面时把回答 TTS 也停掉，避免后台还在朗读。
+  stopAnswerTts();
 });
 
 onBeforeUnmount(() => {
@@ -414,6 +577,7 @@ onBeforeUnmount(() => {
   reportAdjustmentActions.dispose();
   disposeInsights();
   cancelActiveStream();
+  stopAnswerTts();
 });
 </script>
 
