@@ -39,6 +39,12 @@ export function useChatSend(scope?: string, handlers?: {
    * 由页面用来在普通问答场景触发自动听播；不传则不触发。
    */
   onAiMessageComplete?: (info: { aiMsgId: string; messageId: Identifier; sessionId: Identifier | null }) => void;
+  /**
+   * 普通问答场景：答案文字流式渲染期间持续回调，文字开始出现就触发（不等 message_end /
+   * workflow_finished）。delta 为本次新增的答案文本；流结束（含异常/中止收尾）时以
+   * ended: true 收尾一次。页面用它实现「文字开始渲染就起听播」的流式 TTS。
+   */
+  onAiAnswerDelta?: (info: { aiMsgId: string; delta: string; ended: boolean }) => void;
   /** 页面注入的额外 Dify inputs（如作业指导页的机型选择），每次发送时现取 */
   getExtraInputs?: () => Record<string, unknown>;
   /** 听播问答的异常列表输入。 */
@@ -215,6 +221,20 @@ export function useChatSend(scope?: string, handlers?: {
   }) {
     const { aiMsgId, userMsgId, content, files, hadSessionId, requestSeq, extraInputs, preserveProcessStatus } = options;
     let receivedContent = false;
+    /** 当前请求里已通知过 onAiAnswerDelta 的答案文本长度，用于计算增量。 */
+    let lastSeenAnswerLength = 0;
+    /** 是否已发过 ended: true 的收尾通知，避免重入。 */
+    let answerDeltaEnded = false;
+
+    /** 把答案增量通知给页面（首块即触发，不等 message_end / workflow_finished）。 */
+    function notifyAnswerDelta(delta: string, ended: boolean) {
+      if (!handlers?.onAiAnswerDelta) return;
+      if (ended) {
+        if (answerDeltaEnded) return;
+        answerDeltaEnded = true;
+      }
+      handlers.onAiAnswerDelta({ aiMsgId, delta, ended });
+    }
 
     try {
       await consumeChatStream({
@@ -223,6 +243,23 @@ export function useChatSend(scope?: string, handlers?: {
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
           applySnapshot(aiMsgId, userMsgId, snapshot, preserveProcessStatus);
+
+          // 普通问答：答案文字边流边播。每收到新的一块 answer 文本就增量通知页面，
+          // 页面在第一块文字渲染出来的瞬间就可以起听播，后续文字持续续播。
+          // 聚合全部 answer 块（而非只取第一块）：answer 中途穿插了别的块时，
+          // 只取第一块会让后半段文字永远收不到增量、听播漏播。
+          // PODCAST 场景走 onReportQa 自己的 TTS，不在此触发。
+          if (handlers?.onAiAnswerDelta && handlers?.scene !== "PODCAST") {
+            const answerContent = snapshot.blocks
+              .filter(block => block.type === "answer")
+              .map(block => String(block.payload?.content || ""))
+              .join("");
+            if (answerContent.length > lastSeenAnswerLength) {
+              notifyAnswerDelta(answerContent.slice(lastSeenAnswerLength), false);
+              lastSeenAnswerLength = answerContent.length;
+            }
+            if (snapshot.ended) notifyAnswerDelta("", true);
+          }
         },
       });
     } catch (error) {
@@ -239,6 +276,8 @@ export function useChatSend(scope?: string, handlers?: {
         logger.error("stream consumption failed", error);
       }
     } finally {
+      // 流异常 / 被取消时也补一次 ended 收尾，避免页面的流式听播会话一直挂着 loading 态。
+      if (lastSeenAnswerLength > 0) notifyAnswerDelta("", true);
       finishRequest(aiMsgId, hadSessionId, requestSeq);
     }
   }
