@@ -6,12 +6,17 @@ import { getRoleOptions, getTodayAwakeningPrompt } from "@/api/user-role";
 import iconBoss from "@/assets/img/icon-boss.png";
 import iconOperator from "@/assets/img/icon-operator.png";
 import { VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { DEFAULT_CHAT_SCOPE, useChatStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { isGuestRole, setGuestRole } from "@/utils/request";
 
 defineOptions({ name: "RoleSelectPage" });
 const logger = createLogger("role-select");
+// 顶部安全距离：env(safe-area-inset-top) 在安卓 WebView / H5 里经常取到 0，
+// 用 useSafeArea 的多级兜底（宿主注入 > uni 系统信息 > CSS env > 原生桥 > 平台默认），
+// 保证「选择你的体验身份」在手机上始终留出状态栏高度。
+const { safeAreaStyle } = useSafeArea();
 interface ViewRole extends RoleOption {
   value: VisitorRole;
   description: string;
@@ -158,7 +163,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <view class="role-select">
+  <view class="role-select" :style="safeAreaStyle">
     <view class="phone-bg" />
     <view class="glow glow-blue" />
     <view class="glow glow-red" />
@@ -231,8 +236,11 @@ $color-text-warning: #a31717;
   // 取消居中：折屏内屏接近 1:1，rpx 折算后可用高度只有 ~500rpx，比内容总高还小，
   // 居中会把底部"开始体验"按钮均分裁切掉。改为自然流式，配合 .content 的滚动兜底。
   // 内嵌 APP：上下各让出一段安全区
-  padding-top: constant(safe-area-inset-top);
-  padding-top: env(safe-area-inset-top);
+  // 顶部用 useSafeArea 注入的 --safe-top-px（多级兜底）与 CSS env 取大者：
+  // 安卓 WebView / H5 里 env(safe-area-inset-top) 常为 0，只靠它标题会顶到状态栏底下。
+  // 底部维持原样：footer 自带 max(24rpx, env(...)) 兜底，根部再叠一层会把按钮顶得过高。
+  padding-top: max(var(--safe-top-px, 0px), constant(safe-area-inset-top));
+  padding-top: max(var(--safe-top-px, 0px), env(safe-area-inset-top));
   padding-bottom: constant(safe-area-inset-bottom);
   padding-bottom: env(safe-area-inset-bottom);
   box-sizing: border-box;
