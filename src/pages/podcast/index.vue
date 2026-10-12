@@ -569,6 +569,9 @@ function sendPodcastMessage(payload?: Parameters<typeof sendMessage>[0]) {
 }
 
 function onVoiceStart() {
+  // 按下瞬间上一轮答案的 TTS 可能还在朗读：立即停，避免盖住用户说话、被录进 ASR，
+  // 也不必等识别确认发送（sendPodcastMessage）才停 —— 那已经是几秒之后了。
+  stopAnswerTts();
   pauseReportBroadcast();
 }
 
@@ -688,6 +691,7 @@ onBeforeUnmount(() => {
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendPodcastMessage"
+        @voice-restart="onVoiceStart"
         @stop="stopGenerating"
         @voice-start="onVoiceStart"
         @recognize-begin="onRecognizeBegin"
