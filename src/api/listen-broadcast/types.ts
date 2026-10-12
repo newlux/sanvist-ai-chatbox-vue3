@@ -32,12 +32,19 @@ export interface SaveListenBroadcastPreferenceParams {
   reportTime?: string;
 }
 
-export interface ListenBroadcastPreference {
+/** 单条风格的用户偏好：后端按风格维度持久化，每种风格独立配。 */
+export interface ListenBroadcastStylePreference {
+  styleCode: string;
+  styleName?: string;
   voiceCode?: string;
-  styleCode?: string;
   checkedModules?: string[];
   reportTime?: string;
-  persisted: boolean;
+  /** 该风格是否已被用户配置过。 */
+  configured?: boolean;
+}
+
+export interface ListenBroadcastPreference {
+  styles: ListenBroadcastStylePreference[];
 }
 
 export interface PlayListenBroadcastParams {

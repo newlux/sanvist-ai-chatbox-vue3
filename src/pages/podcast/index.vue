@@ -343,21 +343,41 @@ function playAnswerTts(answer: string) {
 
 function restoreReportBroadcast() {
   // 进页先拉服务端偏好：
-  //   - 服务端有偏好 → 直接拿服务端结果赋值音色 / 风格 / 汇报模块
-  //   - 服务端没有偏好 / 接口异常 / voiceCode 解析不到 → 落到默认配置（localStorage → 第一个音色 / 风格）
+  //   - 偏好按「风格」分条返回：每条风格独立带音色 / 模块 / 时间
+  //   - 先确定「当前活跃的 styleCode」：用户本机上次选过的 → 没有才退而求其次取数组首条
+  //   - 在 preference.styles 里按 styleCode 命中同一条，把同条上的 voiceCode / checkedModules
+  //     一起拿出来赋给音色 / 风格 / 汇报模块
+  //   - 没命中 / voiceCode 解析不到 / 接口异常 → 落到默认配置
   preferenceLoading.value = true;
   void getListenBroadcastPreference()
     .then((preference) => {
-      const voiceCode = String(preference?.voiceCode || "").trim();
-      const styleCode = String(preference?.styleCode || "").trim();
-      if (voiceCode && styleCode) {
-        const voice = REPORT_VOICE_OPTIONS.find(item => item.id === voiceCode);
+      const styles = Array.isArray(preference?.styles) ? preference.styles : [];
+      const targetStyleCode = String(
+        loadReportStyle()?.styleCode
+        || styles[0]?.styleCode
+        || "",
+      ).trim();
+      const matched = targetStyleCode
+        ? styles.find(item => String(item?.styleCode || "").trim() === targetStyleCode)
+        : null;
+      if (matched) {
+        const voiceCode = String(matched.voiceCode || "").trim();
+        const modules = Array.isArray(matched.checkedModules) ? matched.checkedModules : [];
+        const voice = voiceCode
+          ? REPORT_VOICE_OPTIONS.find(item => item.id === voiceCode)
+          : null;
         if (voice) {
-          applyReportBroadcastParams(voice, styleCode, preference?.checkedModules || []);
+          applyReportBroadcastParams(voice, matched.styleCode, modules);
           return;
         }
-        logger.warn("unknown voiceCode in preference, fall back to defaults", { voiceCode });
+        // styleCode 命中但 voiceCode 解析不到：音色退回本机记忆 / 兜底第一项，风格/模块仍按偏好赋上
+        // （避免页面卡在默认配置、把用户已选过的汇报模块丢掉）
+        const fallbackVoice = loadReportVoice() || REPORT_VOICE_OPTIONS[0];
+        logger.warn("unknown voiceCode in preference style, fall back to default voice", { voiceCode });
+        applyReportBroadcastParams(fallbackVoice, matched.styleCode, modules);
+        return;
       }
+      logger.warn("no matching style in preference, fall back to defaults", { targetStyleCode });
       applyDefaultBroadcastParams();
     })
     .catch((error) => {
