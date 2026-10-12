@@ -180,7 +180,12 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   height: 100vh;
   min-height: 0;
   flex-direction: column;
-  overflow: hidden;
+  /* 折叠屏 / 短视口下 nav (100rpx) + summary (358rpx) 固定区可能超出可用高度，
+     父级改为纵向滚动而不是裁剪，让用户能看到完整的摘要 + 异常列表。
+     常规竖屏手机高度足够，不触发滚动。 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   box-sizing: border-box;
   background: #FFFFFF;
   font-family: PingFang SC;
@@ -430,7 +435,10 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
    列表整体从该基线向上抽出，形成抽屉观感 */
 .report-insight__list-stage {
   display: flex;
-  min-height: 0;
+  /* 短视口下不能让 flex 把列表压成 0，给一个底线高度保证异常列表始终可见，
+     溢出交给父级 .report-insight 滚动。
+     常规竖屏手机可用区远大于 280rpx，flex: 1 1 0 会让它继续 grow 占满剩余空间。 */
+  min-height: 280rpx;
   flex: 1 1 0;
   flex-direction: column;
   overflow: hidden;

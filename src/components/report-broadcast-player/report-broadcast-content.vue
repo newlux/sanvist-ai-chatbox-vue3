@@ -165,7 +165,11 @@ watch(() => props.currentSeq, updateTranscriptScroll);
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  overflow: hidden;
+  /* 折叠屏 / 短视口下 portrait-stage (510rpx) 可能超出可用区，
+     改为纵向滚动而不是裁剪，让用户能看到完整的人物 + transcript。 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 .report-broadcast-content__portrait-gap {
   height: 34rpx;
@@ -232,7 +236,10 @@ watch(() => props.currentSeq, updateTranscriptScroll);
 .report-broadcast-content__transcript {
   position: relative;
   width: 100%;
-  min-height: 0;
+  /* 折叠屏 / 短视口下不能让 flex 把 transcript 压成 0，
+     给一个底线高度保证字幕区始终可见，溢出交给父级 .report-broadcast-content 滚动。
+     常规竖屏手机可用区远大于 280rpx，flex: 1 1 auto 会让它继续 grow 占满剩余空间。 */
+  min-height: 280rpx;
   flex: 1 1 auto;
   padding: 32rpx 88rpx 0;
   box-sizing: border-box;

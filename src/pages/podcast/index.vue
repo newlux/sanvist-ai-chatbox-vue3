@@ -46,6 +46,22 @@ const { inputText, isLoading } = storeToRefs(chatStore);
 const { safeAreaStyle, safeTopPx } = useSafeArea();
 /** PC 端内嵌时播报头部露出「最小化」 */
 const { canMinimize, onMinimize } = useIframeMinimize();
+/**
+ * 折叠屏识别：优先匹配小米 Mix Fold 18 的 model / UA / platform；
+ * H5 / 桌面浏览器调试时 model 字段可能为空，但 UA 里通常仍带 Xiaomi / Fold 关键字。
+ */
+const isMixFold18 = computed(() => {
+  try {
+    const info = uni.getSystemInfoSync();
+    const model = String(info?.model || "");
+    const platform = String(info?.platform || "");
+    const ua = typeof navigator !== "undefined" ? String(navigator.userAgent || "") : "";
+    const combined = `${model} ${platform} ${ua}`;
+    return /mix\s*fold\s*18|xiaomi.*mix.*fold|xiaomi.*fold\s*18|xiaomi.*fold/i.test(combined);
+  } catch {
+    return false;
+  }
+});
 
 // 顶部状态栏占位：高度随真实机型状态栏高度，避免内容被顶到状态栏底下
 const statusbarStyle = computed(() => ({
@@ -644,7 +660,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <view class="podcast-page" :style="safeAreaStyle">
+  <view
+    class="podcast-page"
+    :class="{ 'podcast-page--mix-fold-18': isMixFold18 }"
+    :style="safeAreaStyle"
+  >
     <!-- 所有页面共用宿主安全区；系统状态栏由手机原生绘制。 -->
     <view class="chat-header__statusbar" :style="statusbarStyle" />
     <!-- 进页拉取听播偏好的 loading 占位：避免服务端返回前出现空白闪烁 -->
@@ -847,5 +867,30 @@ onBeforeUnmount(() => {
 :deep(.chat-input) {
   z-index: 3;
   background: #ffffff;
+}
+
+/* —— 折叠屏适配 (小米 Mix Fold 18) ——
+   听播内容 (report-broadcast-content) 已经在自身样式里开启 overflow-y: auto，
+   内屏竖/横任何短视口状态都能纵向滚动看到完整的人物 + transcript，不再用 scale 强行压。
+   这里只处理外屏 21:9 横向溢出（portrait 470rpx > 屏宽 360rpx，scale 是唯一不掉质量的方案），
+   以及 voice selector 在窄屏的尺寸上限。常规 16:9 / 19.5:9 / 20:9 完全不受影响。 */
+
+/* 外屏 (21:9 ≈ 0.43，竖屏)：极窄，必须按机型匹配，避免误伤 19.5:9 / 20:9 手机。
+   JS 检测把 isMixFold18 挂到根节点 .podcast-page--mix-fold-18。 */
+.podcast-page--mix-fold-18 {
+  :deep(.report-voice-selector) {
+    --vs-hero-size: min(420rpx, calc(100vw - 60rpx)) !important;
+    --vs-car-size: min(300rpx, calc(100vw - 60rpx)) !important;
+  }
+  :deep(.report-broadcast-content__portrait-stage) {
+    /* 只缩横向：保持 stage 高度 510rpx 让 transcript 有空间，portrait 视觉 470*0.5=235rpx 放进 360rpx 屏宽 */
+    transform: scale(0.5);
+    transform-origin: center top;
+  }
+  /* 折叠屏下 transcript 本身只有 280rpx 可视区，feedback-mask 再用 #fff 罩底会
+     把最后一段字幕完全遮住。这里只对外层蒙版去背景，里面的反馈按钮位置不动。 */
+  :deep(.report-broadcast-content__feedback-mask) {
+    background: transparent;
+  }
 }
 </style>
