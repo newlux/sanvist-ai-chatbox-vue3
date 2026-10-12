@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import type { AssistantNavigationPayload, AskSlotPayload, GuideStepPayload, GuideSuggestionPayload } from "@/api/chat/types";
+import type {
+  AssistantNavigationPayload,
+  AskSlotPayload,
+  GuideStepPayload,
+  GuideStepSelectEvent,
+  GuideSuggestionPayload,
+} from "@/api/chat/types";
 import AnswerBlock from "./blocks/AnswerBlock.vue";
 import AssistantNavigationBlock from "./blocks/AssistantNavigationBlock.vue";
 import AskSlotBlock from "./blocks/AskSlotBlock.vue";
@@ -41,7 +47,14 @@ defineProps({
   },
 });
 
-const emit = defineEmits(["suggestion-tap", "ask-slot-open", "assistant-navigation-open", "guide-step-open", "guide-suggestion-open"]);
+const emit = defineEmits([
+  "suggestion-tap",
+  "ask-slot-open",
+  "assistant-navigation-open",
+  "guide-step-open",
+  "guide-suggestion-open",
+  "guide-check-step-select",
+]);
 
 function onSuggestionTap(suggestion: unknown) {
   emit("suggestion-tap", suggestion);
@@ -61,6 +74,12 @@ function onGuideStepOpen(payload: GuideStepPayload) {
 
 function onGuideSuggestionOpen(payload: GuideSuggestionPayload) {
   emit("guide-suggestion-open", payload);
+}
+
+/** 点核对卡步骤条某一段：把步数（1 起）+ step_id 继续往上抛，由页面切步骤并打开底部白板 */
+function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
+  console.log("[guide-step-select] ② renderer", payload);
+  emit("guide-check-step-select", payload);
 }
 </script>
 
@@ -101,7 +120,12 @@ function onGuideSuggestionOpen(payload: GuideSuggestionPayload) {
     @open="onGuideSuggestionOpen"
   />
   <!-- id 落在根节点上：步骤卡片翻页时按 block.id 做 scroll-into-view 定位 -->
-  <GuideCheckBlock v-else-if="block.type === 'guide-check'" :id="block.id" :payload="block.payload" />
+  <GuideCheckBlock
+    v-else-if="block.type === 'guide-check'"
+    :id="block.id"
+    :payload="block.payload"
+    @select-step="onGuideCheckStepSelect"
+  />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
   <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />
