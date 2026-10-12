@@ -389,7 +389,7 @@ watch(
           </view>
           <template v-else>
             <view class="business-overview__title">
-              <text class="business-overview__title-name">
+              <text>
                 {{ overview.userName }}
               </text>
               <text>{{ overview.greetingSuffix }}</text>
