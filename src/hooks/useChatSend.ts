@@ -49,6 +49,12 @@ export function useChatSend(scope?: string, handlers?: {
   getExtraInputs?: () => Record<string, unknown>;
   /** 听播问答的异常列表输入。 */
   getPodcastExceptions?: () => unknown[] | null;
+  /**
+   * 发送时是否强制把对话列表滚到底部。默认 true（普通问答场景需要）。
+   * 作业指导这类「核对卡顶到对话区最上方」的页面传 false：发送后保留当前阅读位置，
+   * 由卡片置顶逻辑（focusStepBlock）把新出现的核对卡滚到顶部，不再被强制拽到底部。
+   */
+  keepScrollOnSend?: boolean;
 }) {
   const { t } = useI18n();
   const chatStore = useChatStore(scope);
@@ -409,7 +415,8 @@ export function useChatSend(scope?: string, handlers?: {
       processStatus: { phase: "thinking" },
     });
     chatStore.activeMessageId = aiMsgId;
-    chatStore.scrollToBottom(true);
+    // 作业指导等页面要求发送后保留阅读位置（不强制回底），由卡片置顶逻辑接管滚动
+    if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
     const options = { aiMsgId, userMsgId, content: query, files, hadSessionId, requestSeq };
     if (handlers?.scene === "PODCAST") await sendBlockingAiFlow(options);
     else await sendAiFlow(options);
@@ -473,7 +480,8 @@ export function useChatSend(scope?: string, handlers?: {
       sessionId: chatStore.aiSessionId,
       messageId: null,
     });
-    chatStore.scrollToBottom(true);
+    // 作业指导等页面：发送不强制回底，语音占位同样不拽到底部
+    if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
   }
 
   function discardAsrPlaceholder() {
@@ -484,7 +492,7 @@ export function useChatSend(scope?: string, handlers?: {
       chatStore.showQuickPrompts = true;
       chatStore.showQuickList = true;
     }
-    chatStore.scrollToBottom(true);
+    if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
   }
 
   function sendQuickPrompt(text: string) {

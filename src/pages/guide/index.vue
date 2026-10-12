@@ -88,6 +88,7 @@ const {
   keyboardHeight,
   voiceKeyboardHeight,
   composerBottomInset,
+  composerDockOffset,
   syncWindowHeight,
   setInputDockHeight,
   setTextInputFocused,
@@ -98,6 +99,9 @@ const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessa
 const realtimeTts = useRealtimeTts(chatScope);
 const { sendMessage: sendChatMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
+  // 作业指导是「核对卡顶到对话区最上方」的阅读方式：发送后保留当前阅读位置，不强制回底，
+  // 新出现的核对卡由 focusStepBlock 滚到顶部（见 onGuideStepOpen）。
+  keepScrollOnSend: true,
   // 机型与讲解模式都由用户在页面上选，每次发送时现取，避免切会话后带上旧值
   getExtraInputs: () => ({
     ...(selectedDeviceModel.value ? { device_model: selectedDeviceModel.value } : {}),
@@ -140,6 +144,17 @@ function stopSceneTtsOnVoiceStart() {
 // activeRequestSeq 在新请求开始和取消/重置时都会变化，一个 watcher 兜底覆盖全部入口。
 watch(() => chatStore.activeRequestSeq, () => {
   stopSceneTts();
+});
+
+/**
+ * 作业指导是「核对卡顶到对话区最上方」的阅读方式，所以这一页生成回答后不再往下跳：
+ * 发消息那一下仍然强制回到底部（能看到自己发的和等待占位），请求一开始就把「贴底跟随」关掉，
+ * 之后回答流式增长、追问/步骤卡渲染完、以及 120ms 的兜底补滚都不会再把视口拽到底部，
+ * 刚对齐到顶部的核对卡也不会被拉走。
+ * 用户自己滑到底部时，列表会重新上报 pinned（@pinned-change），跟随照旧。
+ */
+watch(() => chatStore.activeRequestSeq, () => {
+  chatStore.setPinnedToBottom(false);
 });
 const {
   iconCopyImage,
