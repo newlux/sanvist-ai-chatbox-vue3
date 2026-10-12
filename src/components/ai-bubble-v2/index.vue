@@ -18,6 +18,7 @@ import iconRepair from "@/assets/img/icon-repair-dark.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { toInlineImageUrl } from "@/utils/image-preview";
+import type { GuideStepSelectEvent } from "@/api/chat/types";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
@@ -74,6 +75,7 @@ const emit = defineEmits([
   "select-toggle",
   "longpress-copy",
   "assistant-callback-open",
+  "guide-check-step-select",
 ]);
 
 const { t } = useI18n();
@@ -314,6 +316,12 @@ function onGuideSuggestionOpen(payload) {
   emit("guide-suggestion-open", payload);
 }
 
+/** 点核对卡步骤条某一段：继续往上抛给消息列表 / 页面 */
+function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
+  console.log("[guide-step-select] ④ bubble", payload);
+  emit("guide-check-step-select", payload);
+}
+
 function onShareTap() {
   emit("share-click");
 }
@@ -550,6 +558,7 @@ function onNegativeFeedback() {
           @assistant-navigation-open="onAssistantNavigationOpen"
           @guide-step-open="onGuideStepOpen"
           @guide-suggestion-open="onGuideSuggestionOpen"
+          @guide-check-step-select="onGuideCheckStepSelect"
         />
         <!-- 空回答兜底：回复区没有内容时给一句提示，位置就在操作栏上方 -->
         <view v-if="showBusyFallback && !props.assistantCallbackTitle" class="ai-bubble-v2__busy-hint">

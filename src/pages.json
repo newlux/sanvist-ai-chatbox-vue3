@@ -82,6 +82,45 @@
         "allowsBounceVertical": "NO",
         "disableScroll": true
       }
+    },
+    {
+      "path": "pages/schedule/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "",
+        "transparentTitle": "always",
+        "allowsBounceVertical": "NO",
+        "enablePullDownRefresh": false,
+        "disableScroll": true,
+        "pageOrientation": "landscape"
+      }
+    },
+    {
+      "path": "pages/schedule-pre/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "",
+        "transparentTitle": "always",
+        "allowsBounceVertical": "NO",
+        "enablePullDownRefresh": false,
+        "disableScroll": true,
+        "pageOrientation": "landscape"
+      }
+    },
+    {
+      "path": "pages/schedule-gantt/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "",
+        "transparentTitle": "always",
+        "allowsBounceVertical": "NO",
+        "enablePullDownRefresh": false,
+        "disableScroll": true,
+        "pageOrientation": "landscape"
+      }
     }
   ],
   "globalStyle": {

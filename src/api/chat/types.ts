@@ -212,6 +212,12 @@ export interface GuideStepPayload extends Record<string, unknown> {
   steps: GuideStepItem[];
 }
 
+/** 点「核对任务与资料」卡片的步骤条：index 是步数（1 起），stepId 用于上层回溯这一轮的 steps */
+export interface GuideStepSelectEvent {
+  index: number;
+  stepId: string;
+}
+
 /** 「核对任务与资料」卡片：与某个步骤绑定，步骤卡片翻页时对话滚动到它 */
 export interface GuideCheckPayload extends Record<string, unknown> {
   title?: string;

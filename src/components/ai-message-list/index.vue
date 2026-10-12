@@ -5,6 +5,7 @@ import moment from "moment";
 import { computed, nextTick, ref, watch } from "vue";
 import iconWaveForm from "@/assets/img/icon-waveform.svg";
 import { isListenReportListened } from "@/utils/listen-report";
+import type { GuideStepSelectEvent } from "@/api/chat/types";
 import AiBlockRenderer from "../ai-bubble-v2/AiBlockRenderer.vue";
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
 
@@ -109,6 +110,7 @@ const emit = defineEmits([
   "assistant-callback-open",
   "guide-step-open",
   "guide-suggestion-open",
+  "guide-check-step-select",
   "tts-click",
   "share-click",
   "feedback-change",
@@ -214,6 +216,12 @@ function onGuideSuggestionOpen(payload) {
   emit("guide-suggestion-open", payload);
 }
 
+/** 点核对卡步骤条某一段：交给页面切步骤 + 打开底部白板 */
+function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
+  console.log("[guide-step-select] ⑤ message-list", payload);
+  emit("guide-check-step-select", payload);
+}
+
 function onTtsClick(index) {
   emit("tts-click", index);
 }
@@ -262,21 +270,40 @@ function onListenReport() {
   emit("listen-report", listenedReport.value);
 }
 /**
- * 步骤卡回答的独立卡片栈：只渲染当前那一张步骤详情卡。
+ * 每条消息的第一张核对卡在「全局」里排第几张（0 起）。
+ *
+ * 步骤卡会分散在多轮回答里（每轮一条消息，各带一张核对卡），所以要按全局序号定位：
+ * 只按单条消息 slice 的话，推进到第 2 步时每条消息都会切空，卡片直接消失。
+ */
+const guideCheckBaseIndexes = computed(() => {
+  const bases: number[] = [];
+  let base = 0;
+  props.messages.forEach((message) => {
+    bases.push(base);
+    base += (message?.blocks || []).filter(block => block?.type === "guide-check").length;
+  });
+  return bases;
+});
+
+/**
+ * 步骤卡回答的独立卡片栈：只渲染全局第 `stepCardCount` 张步骤详情卡。
  *
  * 带步骤卡的回答气泡正文不展示（见 ai-bubble-v2 的 hideBody），所以同一条回答的
  * 参考来源（source 组件）注入到步骤卡内：卡片里的顺序是 正文 → 该步骤参考图 → 参考来源。
  * 其它回答的参考来源仍留在气泡正文里。
  * 步骤卡按顺序逐个露出：初始只显示第一张，推进到第 N 步时只显示第 N 张，当前下标由页面传入。
  */
-function standaloneBlocks(message: UiChatMessage) {
+function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
   const blocks = (message?.blocks || []).filter(Boolean);
-  const current = Math.max(1, Number(props.stepCardCount) || 1);
-  const stepCards = blocks
-    .filter(block => block.type === "guide-check")
-    .slice(current - 1, current);
-  const stepCard = stepCards[0];
-  if (!stepCard) return [];
+  const stepCards = blocks.filter(block => block.type === "guide-check");
+  if (!stepCards.length) return [];
+
+  // stepCardCount 是「全局第几张」（1 起），换算成这条消息内部的下标
+  const globalIndex = Math.max(1, Number(props.stepCardCount) || 1) - 1;
+  const indexInMessage = globalIndex - (guideCheckBaseIndexes.value[messageIndex] ?? 0);
+  if (indexInMessage < 0 || indexInMessage >= stepCards.length) return [];
+
+  const stepCard = stepCards[indexInMessage];
 
   // 参考来源：低端安卓 WebView 不支持 flatMap，这里手写合并
   const evidence: unknown[] = [];
@@ -286,8 +313,8 @@ function standaloneBlocks(message: UiChatMessage) {
     evidence.push(...list);
   });
   const cards = evidence.length
-    ? stepCards.map(card => ({ ...card, payload: { ...card.payload, sources: evidence } }))
-    : stepCards;
+    ? [{ ...stepCard, payload: { ...stepCard.payload, sources: evidence } }]
+    : [stepCard];
 
   return cards;
 }
@@ -302,7 +329,7 @@ const listPadStyle = computed(() =>
  */
 const stepCardTargetId = computed(() => {
   for (let index = props.messages.length - 1; index >= 0; index -= 1) {
-    const card = standaloneBlocks(props.messages[index])[0];
+    const card = standaloneBlocks(props.messages[index], index)[0];
     if (card?.id) return String(card.id);
   }
   return "";
@@ -485,6 +512,7 @@ watch(
               @assistant-callback-open="emit('assistant-callback-open', $event)"
               @guide-step-open="onGuideStepOpen"
               @guide-suggestion-open="onGuideSuggestionOpen"
+              @guide-check-step-select="onGuideCheckStepSelect"
               @tts-click="onTtsClick(index)"
               @share-click="onShareClick(index, msg)"
               @select-toggle="onSelectToggle(index)"
@@ -493,11 +521,11 @@ watch(
             />
             <!-- 核对/步骤卡独立成卡，不放进回答气泡 -->
             <view
-              v-for="block in standaloneBlocks(msg)"
+              v-for="block in standaloneBlocks(msg, index)"
               :key="block.id"
               class="chat-box__card"
             >
-              <AiBlockRenderer :block="block" />
+              <AiBlockRenderer :block="block" @guide-check-step-select="onGuideCheckStepSelect" />
             </view>
           </view>
         </view>

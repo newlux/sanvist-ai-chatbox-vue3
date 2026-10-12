@@ -11,7 +11,7 @@ import CloseIcon from "@/assets/img/slot-drawer-close.svg";
  * 多选项追问卡片（设计稿 2667:3284「进入拆装」底部 375×430 白板）。
  *
  * 结构：灰色小标签 + 紧跟其后的进度 i/n + 右上 ×
- *      → 问题行 → 选项列表（末尾固定一行「其他输入」自由填写）
+ *      → 问题行 → 选项列表（末尾一行「其他输入」自由填写；作业协同场景不提供，见 `scene`）
  *      → 底部居中「内容由AI生成，请核实重要信息」。
  * 直角白板贴底、向上阴影，无全屏遮罩。
  *
@@ -23,6 +23,12 @@ defineOptions({ name: "AiSlotDrawer" });
 const props = defineProps({
   slots: { type: Array as () => AskSlotPayload[], default: () => [] },
   visible: { type: Boolean, default: false },
+  /**
+   * 场景标识（小写，如 task / guide）。
+   * 作业协同（task）的追问卡不提供「其他输入」入口，只允许在选项里作答；
+   * 不传或其它场景（ai问问 / 作业指导）保持原行为。
+   */
+  scene: { type: String, default: "" },
 });
 
 const emit = defineEmits<{
@@ -71,14 +77,19 @@ const currentRemark = computed({
   },
 });
 
+/** 是否作业协同场景：该场景不给「其他输入」入口 */
+const isTaskScene = computed(() => props.scene.trim().toLowerCase() === "task");
+
 /**
  * 是否渲染「其他输入」行：
+ * - 作业协同（task）场景一律不渲染，只允许在选项里作答；
  * - 没有 input_type 的题（ai问问 的追问卡）沿用原行为，始终带这一行；
  * - 多步骤表单（JSON 带 input_type）里只有明确给了输入框定义才渲染
  *   （`other_text` / `other_placeholder` 文案，或 `allow_other` / `other_input` 开关）——
  *   选项列表本身不算输入框定义；文本题（input_type=text）本身就是输入框，也不再叠加这一行。
  */
 const showOtherInput = computed(() => {
+  if (isTaskScene.value) return false;
   const slot = currentSlot.value;
   if (!slot) return false;
   if (!slot.input_type) return true;
