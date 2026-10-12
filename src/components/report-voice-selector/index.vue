@@ -3,6 +3,8 @@ import type { ListenBroadcastStyle } from "@/api/listen-broadcast/types";
 import type { ReportVoiceOption } from "@/config/report-voices";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import minimizeIcon from "@/assets/img/min_icon.png";
+import arrowLeftIcon from "@/assets/img/nav-arrow-left.svg";
+import arrowRightIcon from "@/assets/img/nav-arrow-right.svg";
 import microphoneBadge from "@/assets/img/voice-assistant/report-microphone-badge.png";
 import smallWave from "@/assets/img/voice-assistant/report-small-wave.png";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
@@ -10,6 +12,7 @@ import ReportStyleSelector from "@/components/report-style-selector/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
+import { usePcMode } from "@/hooks/usePcMode";
 import { useReportVoice } from "@/hooks/useReportVoice";
 
 const emit = defineEmits<{
@@ -19,6 +22,8 @@ const emit = defineEmits<{
 
 /** PC 端内嵌时顶栏右侧露出「最小化」，替换原来的空占位 */
 const { canMinimize, onMinimize } = useIframeMinimize();
+/** PC 端专用：把主视觉两侧的装饰声波替换成可点击的左右尖括号；APP / 移动端不渲染，仍是声波 */
+const { isPc } = usePcMode();
 
 // 报告听播音色交互：只在风格确认后一起保存，避免留下半完成配置
 const { saveReportVoice } = useReportVoice();
@@ -110,6 +115,14 @@ function selectVoice(index: number) {
   dragDeltaX.value = 0;
 }
 
+/** PC 端专用：尖括号点击切换音色，绕回（环型）轮播。复用 endDrag 的 wrap 行为。 */
+function stepVoice(step: number) {
+  const total = REPORT_VOICE_OPTIONS.length;
+  if (total < 2) return;
+  selectedIndex.value = (selectedIndex.value + step + total) % total;
+  dragDeltaX.value = 0;
+}
+
 function startDrag(event: TouchEvent) {
   const touch = event.touches[0];
   if (!touch) return;
@@ -198,12 +211,31 @@ function closeSelector() {
       </text>
 
       <!-- ④ 主视觉区(940:56 群组)：人物 + 左右声波 -->
+      <!--
+        PC 端把左右声波直接替换成可点击的尖括号（点哪个就把轮播往对应方向挪一格）；
+        APP / 移动端保持原声波装饰（拖动切音色、点中间头像也切）。两种视图占位一致，
+        切换时不会让标题/轮播区被顶得上下抖动。
+      -->
       <view class="report-voice-selector__hero">
-        <view class="report-voice-selector__wave report-voice-selector__wave--left" aria-hidden="true">
+        <view
+          v-if="isPc"
+          class="report-voice-selector__side-arrow report-voice-selector__side-arrow--prev"
+          @tap.stop="stepVoice(-1)"
+        >
+          <image class="report-voice-selector__side-arrow-icon" :src="arrowLeftIcon" mode="aspectFit" />
+        </view>
+        <view v-else class="report-voice-selector__wave report-voice-selector__wave--left" aria-hidden="true">
           <ReportWaveform :bars="leftWaveBars" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
         </view>
         <image class="report-voice-selector__hero-image" :src="selectedVoice.hero" mode="aspectFit" />
-        <view class="report-voice-selector__wave report-voice-selector__wave--right" aria-hidden="true">
+        <view
+          v-if="isPc"
+          class="report-voice-selector__side-arrow report-voice-selector__side-arrow--next"
+          @tap.stop="stepVoice(1)"
+        >
+          <image class="report-voice-selector__side-arrow-icon" :src="arrowRightIcon" mode="aspectFit" />
+        </view>
+        <view v-else class="report-voice-selector__wave report-voice-selector__wave--right" aria-hidden="true">
           <ReportWaveform :bars="rightWaveBars" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
         </view>
       </view>
@@ -254,8 +286,16 @@ function closeSelector() {
         </view>
       </view>
 
-      <!-- ⑩ 可滑动切换(940:31) -->
-      <text class="report-voice-selector__hint">
+      <!-- ⑩ PC：轮播指示点；APP / 移动端：保留「可滑动切换」文字提示（移动端靠拖动切，没有可见的进度反馈，靠文字更直接） -->
+      <view v-if="isPc" class="report-voice-selector__dots" aria-hidden="true">
+        <view
+          v-for="(voice, index) in REPORT_VOICE_OPTIONS"
+          :key="voice.id"
+          class="report-voice-selector__dot"
+          :class="{ 'report-voice-selector__dot--active': index === selectedIndex }"
+        />
+      </view>
+      <text v-else class="report-voice-selector__hint">
         可滑动切换
       </text>
 
@@ -432,6 +472,32 @@ function closeSelector() {
 
 .report-voice-selector__wave--left { left: calc(-88 * var(--vs-hero-u)); }
 .report-voice-selector__wave--right { right: calc(-110 * var(--vs-hero-u)); }
+
+// PC 端专用：占位与声波同位（左/右 + 同一 top / size 系数），整体布局不抖；
+// 内部画一个比声波略小的圆形按钮承载尖括号。
+.report-voice-selector__side-arrow {
+  position: absolute;
+  top: calc(156 * var(--vs-hero-u));
+  z-index: 6;
+  display: flex;
+  width: calc(120 * var(--vs-hero-u));
+  height: calc(120 * var(--vs-hero-u));
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(200, 120, 120, 0.22);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 4rpx 16rpx rgb(0 0 0 / 8%);
+}
+
+.report-voice-selector__side-arrow--prev { left: calc(-150 * var(--vs-hero-u)); }
+.report-voice-selector__side-arrow--next { right: calc(-180 * var(--vs-hero-u)); }
+
+.report-voice-selector__side-arrow-icon {
+  width: 60%;
+  height: 60%;
+}
 
 .report-voice-selector__wave .report-waveform {
   width: calc(140 * var(--vs-hero-u)) !important;
@@ -614,7 +680,7 @@ function closeSelector() {
   transform: translateX(-50%);
 }
 
-/* —— ⑩ 可滑动切换(940:31)：Inter Regular 12px=24rpx，色 #B5B5B5，与圆点间距 16px=33rpx —— */
+/* —— ⑩ 移动端「可滑动切换」文字提示：Inter Regular 12px=24rpx，色 #B5B5B5 —— */
 .report-voice-selector__hint {
   display: block;
   width: 100%;
@@ -625,6 +691,32 @@ function closeSelector() {
   line-height: 30rpx;
   text-align: center;
   flex-shrink: 0;
+}
+
+/* —— ⑩ PC 端轮播指示点：8 个音色对应 8 个圆点，active 拉成胶囊；颜色与主图风格保持一致 —— */
+.report-voice-selector__dots {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-top: calc(28 * var(--vs-gap-u));
+  flex-shrink: 0;
+}
+
+.report-voice-selector__dot {
+  width: 12rpx;
+  height: 12rpx;
+  margin: 0 6rpx;
+  border-radius: 50%;
+  background: #e2d6d6;
+  transition: width 0.2s ease, background 0.2s ease;
+}
+
+.report-voice-selector__dot--active {
+  width: 28rpx;
+  background: #c8201e;
+  border-radius: 999px;
 }
 
 /* —— ⑪ CTA 按钮(940:108)：319×56px=638×112rpx，圆角28px，白底
