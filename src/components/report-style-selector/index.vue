@@ -337,12 +337,7 @@ onMounted(() => {
   align-items: center;
   width: 100%;
   min-height: 0;
-  /* 折叠屏 / 短视口下风格头像 (stage) + 权限列表 + 按钮的最小底线加起来仍可能超出可用区，
-     改为纵向滚动而不是裁剪，让用户能滑到完整的「保存偏好」按钮。
-     常规竖屏手机高度足够，不触发滚动。横向仍 hidden 以裁掉绝对定位的装饰元素。 */
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
   color: #1a1a1a;
   background: #fff;
 }

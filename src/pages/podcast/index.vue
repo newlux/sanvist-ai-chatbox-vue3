@@ -707,6 +707,7 @@ onBeforeUnmount(() => {
       <view v-if="insightVisible" class="podcast-page__insight">
         <ReportInsight
           embedded
+          :portrait="reportBroadcastPortrait"
           :items="visibleInsightItems"
           :loading="insightLoading"
           :can-toggle-urgent="canToggleInsightUrgent"
