@@ -34,10 +34,13 @@ const props = withDefaults(defineProps<{
   visible?: boolean;
   /** 键盘高度（px）：末尾输入框聚焦时把卡片顶上去，别被键盘盖住 */
   keyboardHeight?: number;
+  /** 外部指定要显示第几步（0 起）：点核对卡步骤条时由页面传入，展开时按它定位 */
+  stepIndex?: number;
 }>(), {
   payload: null,
   visible: false,
   keyboardHeight: 0,
+  stepIndex: 0,
 });
 
 const emit = defineEmits<{
@@ -82,9 +85,26 @@ const questionText = computed(() => String(currentStep.value?.question_text || "
 const canSubmitText = computed(() => Boolean(draftText.value.trim()));
 const photoText = computed(() => String(currentStep.value?.photo_text || "").trim());
 
+/** 外部下标 → 合法步骤下标（夹在 [0, 步数-1]，数据异常时兜底 0） */
+function clampStepIndex(index: number) {
+  const total = steps.value.length;
+  if (!total) return 0;
+  const value = Number(index);
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(Math.max(Math.round(value), 0), total - 1);
+}
+
 watch(() => props.visible, (visible) => {
-  if (visible) currentIndex.value = 0;
+  console.log("[guide-step-select] ⑧ sheet visible", { visible, stepIndex: props.stepIndex, steps: steps.value.length });
+  // 展开时定位到外部指定的步（默认第 1 步）
+  if (visible) currentIndex.value = clampStepIndex(props.stepIndex);
   isSourcePickerOpen.value = false;
+});
+
+// 外部指定步骤变化（点核对卡步骤条、但白板已展开）：切过去
+watch(() => props.stepIndex, (index) => {
+  console.log("[guide-step-select] ⑧ sheet stepIndex prop", { index, clamped: clampStepIndex(index) });
+  currentIndex.value = clampStepIndex(index);
 });
 
 /** 把步骤标题按「、」拼成下一轮的提问（会话上下文里已有原问题，不再加前缀）。 */
@@ -162,6 +182,15 @@ function onPickAttachmentSource(source: "camera" | "album" | "file") {
 function close() {
   emit("update:visible", false);
 }
+
+/** 供页面调用：直接切到某一步（0 起）——点核对卡步骤条、但白板已经展开时兜底（stepIndex 可能没变化） */
+function goToStep(index: number) {
+  const clamped = clampStepIndex(index);
+  console.log("[guide-step-select] ⑧ sheet goToStep", { index, clamped });
+  currentIndex.value = clamped;
+}
+
+defineExpose({ goToStep });
 
 /**
  * 卡片高度会随当前步骤的文案变化，显隐与翻页后都重新量一次交给页面。

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { GuideStepSelectEvent } from "@/api/chat/types";
 import type { AiBlock } from "@/utils/ai-stream/chatStreamParser";
 import { computed } from "vue";
 import { expandChartFences, expandMarkdownTables } from "@/utils/ai-stream";
@@ -29,7 +30,14 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["suggestion-tap", "ask-slot-open", "assistant-navigation-open", "guide-step-open", "guide-suggestion-open"]);
+const emit = defineEmits([
+  "suggestion-tap",
+  "ask-slot-open",
+  "assistant-navigation-open",
+  "guide-step-open",
+  "guide-suggestion-open",
+  "guide-check-step-select",
+]);
 
 // 回答正文里的 Markdown 表格与 ECharts 围栏都在此转换为独立 block，统一走专用组件。
 const normalizedBlocks = computed(() => expandChartFences(expandMarkdownTables((props.blocks || []) as AiBlock[])));
@@ -84,6 +92,11 @@ function onGuideStepOpen(payload) {
 function onGuideSuggestionOpen(payload) {
   emit("guide-suggestion-open", payload);
 }
+
+function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
+  console.log("[guide-step-select] ③ content-blocks", payload);
+  emit("guide-check-step-select", payload);
+}
 </script>
 
 <template>
@@ -105,6 +118,7 @@ function onGuideSuggestionOpen(payload) {
         @assistant-navigation-open="onAssistantNavigationOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
+        @guide-check-step-select="onGuideCheckStepSelect"
       />
     </template>
   </view>

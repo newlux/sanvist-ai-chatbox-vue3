@@ -5,6 +5,7 @@ import type {
   AssistantNavigationPayload,
   GuideStepItem,
   GuideStepPayload,
+  GuideStepSelectEvent,
   GuideSuggestionPayload,
 } from "@/api/chat/types";
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
@@ -65,6 +66,10 @@ const listenBroadcast = ref<TodayListenBroadcast | null>(null);
 const listenBroadcastLoading = ref(false);
 const listenReportRefreshKey = ref(0);
 const guideStepSheetVisible = ref(false);
+/** 底部步骤白板实例：点核对卡步骤条时用它直接切到对应步 */
+const guideStepSheetRef = ref<{ goToStep: (index: number) => void } | null>(null);
+/** 请求白板显示的步骤下标（0 起）：点核对卡步骤条时带上，展开时按它定位 */
+const guideStepRequestedIndex = ref(0);
 const guideStepSheetHeight = ref(0);
 /** 核对卡要顶到对话区顶部还缺的底部间距（px，由消息列表量出来） */
 const guideStepCardSpace = ref(0);
@@ -343,6 +348,7 @@ function focusGuideStepCardAtTop() {
 /** 步骤卡片：单步是多轮追问（点一下直接发），多步选好后确认，统一按普通问题发送。 */
 function onGuideStepOpen(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
+  guideStepRequestedIndex.value = 0;
   guideStepSheetVisible.value = true;
   guideStepCardCount.value = 1;
   // 步骤卡弹出：把这一步的核对卡滚到对话区顶部
@@ -386,6 +392,53 @@ function onGuideStepChange(step: GuideStepItem | null) {
   const index = steps.findIndex(item => String(item?.id || "") === stepId);
   if (index >= 0) guideStepCardCount.value = index + 1;
   nextTick(() => focusGuideStepCardAtTop());
+}
+
+/**
+ * 按 step_id 回溯这次点击所属那一轮的步骤数据（气泡里的 guide-step）。
+ * 点核对卡时「当前这轮」不一定在 guideStepPayload 里（历史会话不带 auto_open、
+ * 或用户没点开过「操作步骤」入口），所以从消息里按 step_id 反查，取最后一条匹配的。
+ */
+function resolveGuidePayload(stepId: string): GuideStepPayload | null {
+  const id = String(stepId || "").trim();
+  for (let index = chatStore.messages.length - 1; index >= 0; index -= 1) {
+    const blocks = chatStore.messages[index]?.blocks || [];
+    for (const block of blocks) {
+      if (block?.type !== "guide-step") continue;
+      const steps = Array.isArray(block.payload?.steps) ? block.payload.steps as GuideStepItem[] : [];
+      if (!id || steps.some(step => String(step?.id || "") === id)) {
+        console.log("[guide-step-select] ⑥ resolve found", { id, stepsCount: steps.length, messageIndex: index });
+        return block.payload as GuideStepPayload;
+      }
+    }
+  }
+  console.log("[guide-step-select] ⑥ resolve miss", { id });
+  return null;
+}
+
+/**
+ * 点核对卡上的步骤条某一段：切到该步（1 起），并把底部步骤白板打开到同一步
+ * （参考任务协同多步骤卡的「上一题/下一题」随意切换）。
+ * 步骤数据优先用「当前这轮」，取不到就按 step_id 回溯；再取不到就只切核对卡。
+ */
+function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
+  console.log("[guide-step-select] ⑦ page handle", payload, {
+    curPayloadSteps: (guideStepPayload.value?.steps || []).length,
+  });
+  const target = Math.max(1, Math.round(Number(payload?.index) || 1));
+  const resolved = resolveGuidePayload(payload?.stepId || "") || guideStepPayload.value;
+  const steps = (resolved?.steps || []) as GuideStepItem[];
+  // 无论如何先把核对卡切过去
+  guideStepCardCount.value = steps.length ? Math.min(target, steps.length) : target;
+  console.log("[guide-step-select] ⑦ after-card", { target, steps: steps.length, cardCount: guideStepCardCount.value });
+  if (!steps.length) return;
+  guideStepPayload.value = resolved as GuideStepPayload;
+  const index = Math.min(target, steps.length) - 1;
+  guideStepRequestedIndex.value = index;
+  guideStepSheetVisible.value = true;
+  console.log("[guide-step-select] ⑦ open sheet", { index, requestedIndex: guideStepRequestedIndex.value });
+  // 白板已展开时 stepIndex 可能没变化（比如又切回上一步），用方法兜底再切一次
+  nextTick(() => guideStepSheetRef.value?.goToStep(index));
 }
 
 /**
@@ -777,6 +830,7 @@ onBeforeUnmount(() => {
         @assistant-callback-open="onAssistantCallbackOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
+        @guide-check-step-select="onGuideCheckStepSelect"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
@@ -799,8 +853,10 @@ onBeforeUnmount(() => {
         @confirm="onAssistantNavigationConfirm"
       />
       <AiGuideStepSheet
+        ref="guideStepSheetRef"
         v-model:visible="guideStepSheetVisible"
         :payload="guideStepPayload"
+        :step-index="guideStepRequestedIndex"
         :keyboard-height="keyboardHeight"
         @submit="onGuideStepSubmit"
         @height-change="onGuideStepHeightChange"
