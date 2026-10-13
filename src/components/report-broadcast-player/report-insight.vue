@@ -7,7 +7,6 @@ import operatorNextIcon from "@/assets/img/report-broadcast/insight-operator-nex
 import iconVoicePause from "@/assets/img/report-broadcast/pause-control.png";
 import iconVoicePlay from "@/assets/img/report-broadcast/play-control.png";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
-import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 
 const props = withDefaults(defineProps<{
@@ -26,11 +25,18 @@ const props = withDefaults(defineProps<{
   leaving?: boolean;
   /** 入场是否播放过渡动画：仅播报结束与语音跳转开启，异常处理回到列表时直接呈现。 */
   animated?: boolean;
+  /**
+   * 当前激活音色的主视觉头像（hero 大图）。
+   * 收敛页与播报页用同一份来源：宿主进页已经从 preference / finishHistory / finishDefault 三路对齐过，
+   * 这里再读一次 storage 会因为播报期从未 saveReportVoice 而取不到，所以直接由宿主传入。
+   */
+  portrait?: string;
 }>(), {
   embedded: false,
   playing: false,
   leaving: false,
   animated: true,
+  portrait: "",
 });
 
 const emit = defineEmits<{
@@ -49,7 +55,7 @@ function handleIconTap(item: ReportInsightItem) {
   emit("operator-item-open", item);
 }
 
-const voicePortrait = computed(() => loadReportVoice()?.hero || "");
+const voicePortrait = computed(() => props.portrait);
 const { safeBottomPx, safeTopPx } = useSafeArea();
 const statusbarStyle = computed(() => ({ height: `${safeTopPx.value}px` }));
 const contentBottomStyle = computed(() => ({ paddingBottom: `${safeBottomPx.value + 116}px` }));
@@ -180,12 +186,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   height: 100vh;
   min-height: 0;
   flex-direction: column;
-  /* 折叠屏 / 短视口下 nav (100rpx) + summary (358rpx) 固定区可能超出可用高度，
-     父级改为纵向滚动而不是裁剪，让用户能看到完整的摘要 + 异常列表。
-     常规竖屏手机高度足够，不触发滚动。 */
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
   box-sizing: border-box;
   background: #FFFFFF;
   font-family: PingFang SC;
@@ -435,10 +436,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
    列表整体从该基线向上抽出，形成抽屉观感 */
 .report-insight__list-stage {
   display: flex;
-  /* 短视口下不能让 flex 把列表压成 0，给一个底线高度保证异常列表始终可见，
-     溢出交给父级 .report-insight 滚动。
-     常规竖屏手机可用区远大于 280rpx，flex: 1 1 0 会让它继续 grow 占满剩余空间。 */
-  min-height: 280rpx;
+  min-height: 0;
   flex: 1 1 0;
   flex-direction: column;
   overflow: hidden;
@@ -697,5 +695,20 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   font-weight: 400;
   line-height: 34rpx;
   transform: translateX(-50%);
+}
+
+/* PC 端（鼠标/精确指针）隐藏异常列表滚动条：
+   scroll-view 在 H5 下即使只有 1 条数据也会保留滚动条轨道，
+   这里只在 PC 端隐藏，不影响 App/手机端原生滚动条行为。 */
+@media (hover: hover) and (pointer: fine) {
+  :deep(.report-insight__list-scroll) {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  :deep(.report-insight__list-scroll::-webkit-scrollbar) {
+    display: none;
+    width: 0;
+    height: 0;
+  }
 }
 </style>
