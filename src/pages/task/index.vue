@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
+import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -12,6 +12,7 @@ import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
+import AiGanttEntryCard from "@/components/ai-gantt-entry-card/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
@@ -74,53 +75,20 @@ const {
   keyboardHeight,
   voiceKeyboardHeight,
   composerBottomInset,
+  composerDockOffset,
   syncWindowHeight,
   setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-// 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用实时 TTS 做流式听播。
-const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
-const realtimeTts = useRealtimeTts(chatScope);
 const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "TASK",
-  // 同首页 / 作业指导：问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
-  // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
-  onAiAnswerDelta({ aiMsgId, delta, ended }) {
-    const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
-    if (index < 0) return;
-    realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
-  },
 });
-
-/** 停掉本页两套听播引擎（实时流式 + 历史整段）：换交互 / 离开页面时统一走这里。 */
-function stopSceneTts() {
-  realtimeTts.stop();
-  stopHistoryTts();
-}
 
 /** 页面统一发送入口：直接走真实接口 */
 function sendTaskMessage(payload?: Parameters<typeof sendMessage>[0]) {
-  // 发送瞬间（文字会话 / 语音确认 / 步骤卡 / 建议卡 / 快捷提问，全部走这个入口）
-  // 立刻停掉正在进行的听播：同步停、不依赖 activeRequestSeq watcher，发出去就安静。
-  stopSceneTts();
   void sendMessage(payload);
 }
-
-/**
- * 按住说话 / 再次识别按下的瞬间停掉听播。此时录音刚开始、请求还没发出，
- * activeRequestSeq watcher 不会动 —— 但旧播报继续响会盖住用户对着麦克风说话，
- * 还会被录进 ASR 里，必须按下即停。
- */
-function stopSceneTtsOnVoiceStart() {
-  stopSceneTts();
-}
-
-// 「再次发起其他提问 / 切换会话 / 停止生成」时立刻停掉正在进行的听播（同首页 / 作业指导）：
-// activeRequestSeq 在新请求开始和取消/重置时都会变化，一个 watcher 兜底覆盖全部入口。
-watch(() => chatStore.activeRequestSeq, () => {
-  stopSceneTts();
-});
 const {
   iconCopyImage,
   iconSaveImage,
@@ -145,6 +113,8 @@ const {
   onCopySharePoster,
 } = useChatShare(sharePosterWrap, chatScope);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback(chatScope);
+const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
+const realtimeTts = useRealtimeTts(chatScope);
 /** 步骤卡「拍照」入口专用：独立实例，选完一张图直接把文件交给 sendMessage */
 const photoPicker = useComposerAttachments();
 
@@ -309,6 +279,11 @@ function onTaskSuggestionTap(suggestion: string, messageIndex: number) {
 /** 欢迎页/快捷问题列表点进来的问题：与输入框发送走同一个入口 */
 function onTaskQuickPrompt(text: string) {
   sendTaskMessage({ text });
+}
+
+/** 甘特图入口卡：进入当天任务甘特图（横屏页，页内自行生成 mock 数据） */
+function onGanttEntryTap() {
+  uni.navigateTo({ url: "/pages/schedule-gantt/index" });
 }
 /** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
 function onTtsClick(index: number) {
@@ -513,14 +488,8 @@ onShow(() => {
   if (sessionId) void openLocalHistory(sessionId, true);
 });
 
-// 离开页面时停止听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
-// 两个 TTS hook 自带的 onBeforeUnmount 清理不会触发，必须挂在 onHide / onUnload 上。
-onHide(() => {
-  stopSceneTts();
-});
 onUnload(() => {
   cancelActiveStream();
-  stopSceneTts();
 });
 </script>
 
@@ -555,9 +524,13 @@ onUnload(() => {
       <AiSceneWelcome
         v-if="showSceneWelcome"
         title="欢迎使用任务协同助手"
-        subtitle="说清目标和现场变化，我来帮你协同安排。"
+        subtitle="我来帮你输出安排计划方案，下发任务"
         :icon="iconForm"
       />
+      <!-- 甘特图入口卡（设计稿 4708:743）：点它进入当天任务甘特图 -->
+      <!-- <view v-if="showSceneWelcome" class="task-scene-welcome-entry">
+        <AiGanttEntryCard @tap="onGanttEntryTap" />
+      </view> -->
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
         :messages="messages"
@@ -699,8 +672,6 @@ onUnload(() => {
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendTaskMessage"
         @stop="stopGenerating"
-        @voice-start="stopSceneTtsOnVoiceStart"
-        @voice-restart="stopSceneTtsOnVoiceStart"
         @recognize-begin="beginAsrPlaceholder"
         @recognize-fail="discardAsrPlaceholder"
         @toggle-quick-list="toggleQuickList"
@@ -711,9 +682,11 @@ onUnload(() => {
         @dock-height-change="setInputDockHeight"
       />
 
-      <!-- 追问卡片（作业协同 type=ask / ai问问 type=slot）：单选点即作答，多选选完确认提交 -->
+      <!-- 追问卡片（作业协同 type=ask / ai问问 type=slot）：单选点即作答，多选选完确认提交；
+           作业协同不提供「其他输入」入口，只允许在选项里作答 -->
       <AiSlotDrawer
         :slots="askSlotQueue"
+        scene="task"
         :visible="askSlotDrawerVisible"
         @close="closeAskSlotDrawer"
         @submit="onAskSlotSubmit"
@@ -755,6 +728,13 @@ $color-bg-phone: #fafafa;
 $color-bg-voice: #f5f5f5;
 $color-border-light: #efefef;
 $color-white: #ffffff;
+
+/* 甘特图入口卡（设计稿 4708:743）：与欢迎卡同宽（左右 20px），卡间距 13px */
+.task-scene-welcome-entry {
+  position: relative;
+  z-index: 2;
+  margin: 13px 20px 0;
+}
 
 .ai-page {
   min-height: 100vh;
