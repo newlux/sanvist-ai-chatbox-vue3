@@ -170,7 +170,7 @@ export function useListenBroadcastPlayer() {
         playbackRate.value = rollback;
         saveReportPlaybackRate(rollback);
         previousPlaybackRate = null;
-        startStream({ ...lastPlayParams, ttsSpeechRate: String(rollback) }, 1, true);
+        startStream({ ...lastPlayParams, ttsSpeechRate: rollback }, 1, true);
         return;
       }
       logger.warn("切倍速重播仍未收到可播音频，按播放失败处理", {
@@ -345,7 +345,7 @@ export function useListenBroadcastPlayer() {
     if (!inSession || !params) return;
 
     logger.info("切换听播倍速，按新语速重新拉流", { rate, resumeSeq, rollbackRate });
-    startStream({ ...params, ttsSpeechRate: String(rate) }, resumeSeq, true);
+    startStream({ ...params, ttsSpeechRate: rate }, resumeSeq, true);
     // 暂停中切倍速：新流按暂停态挂起，用户点继续时从起播点接上。
     if (wasPaused) pause();
   }
@@ -524,8 +524,8 @@ export function useListenBroadcastPlayer() {
     });
     activeStream = consumeListenBroadcastStream(
       // 当前播放倍速一并交给后端做 TTS 合成：显式传值优先，其次取用户选定的倍速，
-      // 都没有时由接口层兜底成正常倍速。倍速按字符串下发。
-      { ...params, ttsSpeechRate: params.ttsSpeechRate ?? String(playbackRate.value) },
+      // 都没有时由接口层兜底成正常倍速。
+      { ...params, ttsSpeechRate: params.ttsSpeechRate ?? playbackRate.value },
       payload => handleEvent(payload, id),
       streamError => finishStream(id, streamError),
       () => finishStream(id),

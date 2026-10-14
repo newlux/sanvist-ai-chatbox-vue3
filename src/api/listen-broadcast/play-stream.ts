@@ -7,7 +7,7 @@ export interface ListenBroadcastStreamHandle {
 }
 
 /** 调用方未指定语音倍速时的兜底：正常语速 1.0×。 */
-const NORMAL_TTS_SPEECH_RATE = "1";
+const NORMAL_TTS_SPEECH_RATE = 1;
 
 export function consumeListenBroadcastStream(
   params: PlayListenBroadcastParams,
