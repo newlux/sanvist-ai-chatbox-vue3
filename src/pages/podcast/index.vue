@@ -22,6 +22,7 @@ import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
+import PodcastQaOverlay from "@/components/podcast-qa-overlay/index.vue";
 import ReportBroadcastPlayer from "@/components/report-broadcast-player/index.vue";
 import ReportInsight from "@/components/report-broadcast-player/report-insight.vue";
 import ReportVoiceSelector from "@/components/report-voice-selector/index.vue";
@@ -155,6 +156,17 @@ const canToggleInsightUrgent = computed(() => userStore.visitorRole === "OWNER")
 let hasShownInsight = false;
 /** 本轮识别是否已给出 qa answer：有 answer 时视图必须留给 answer。 */
 let qaAnswerShown = false;
+
+/**
+ * 异常列表里发起的问答改用全屏覆盖层展示「正在理解 / 回答结果」。
+ * 条件：当前在异常列表 + 本轮问答来自异常列表 + 问答进行中（识别中或已返回答案）。
+ */
+const qaOverlayVisible = computed(
+  () =>
+    insightVisible.value
+    && reportQaFromInsight.value
+    && (reportQaLoading.value || Boolean(reportQaAnswer.value)),
+);
 const {
   rawItems: rawInsightItems,
   visibleItems: visibleInsightItems,
@@ -761,14 +773,37 @@ function dismissReportQa() {
   returnToInsightSource();
 }
 
+/**
+ * 异常列表发起的问答：用户在覆盖层上点确认 / 返回。
+ * 关闭覆盖层、停掉 TTS、清空问答状态，异常列表原地保留。
+ */
+function confirmReportQaOverlay() {
+  stopAnswerTts();
+  voiceRecording.value = false;
+  reportQaLoading.value = false;
+  reportQaAnswer.value = "";
+  reportQaFromInsight.value = false;
+  // 顺手关闭可能仍开着的追问/导航弹层，避免遮住异常列表
+  reportQaSlotVisible.value = false;
+  reportQaSlots.value = [];
+  reportQaGuideSuggestionVisible.value = false;
+  reportQaGuideStepVisible.value = false;
+  reportQaGuideStepIndex.value = 0;
+  reportQaNavigationVisible.value = false;
+  reportQaNavigation.value = null;
+}
+
 function enterReportQaLoading() {
-  // QA 答案只在播报视图内渲染，提问时先让出洞察层。
   // 本轮从哪发起就从哪回去：answer 里继续说“确认/取消”时来源保持不变。
   reportQaFromInsight.value = reportQaFromInsight.value || insightVisible.value;
   qaAnswerShown = false;
   clearInsightLeaveTimer();
-  insightLeaving.value = false;
-  insightVisible.value = false;
+  // 从异常列表发起的问答：保留 insightVisible，全屏覆盖层会盖在异常列表上展示问答内容。
+  // 仅在非异常列表来源（播报视图发起）时，才让出洞察层、回到播报视图内展示。
+  if (!reportQaFromInsight.value) {
+    insightLeaving.value = false;
+    insightVisible.value = false;
+  }
   reportQaAnswer.value = "";
   reportQaLoading.value = true;
 }
@@ -979,6 +1014,35 @@ onBeforeUnmount(() => {
         @confirm="onReportQaNavigationConfirm"
       />
     </view>
+
+    <!--
+      异常列表里发起的问答全屏覆盖层（独立组件，状态/事件由父组件透传）：
+      盖在异常列表之上展示「正在理解 / 回答结果」，点 ← 回到异常列表原地保留；
+      组件内自带 AiChatInput，可在覆盖层内继续追问。
+    -->
+    <PodcastQaOverlay
+      v-model:input-text="inputText"
+      :visible="qaOverlayVisible"
+      :loading="reportQaLoading"
+      :answer="reportQaAnswer"
+      :is-loading="isLoading"
+      :keyboard-height="keyboardHeight"
+      :voice-keyboard-height="voiceKeyboardHeight"
+      :safe-top-px="safeTopPx"
+      @confirm="confirmReportQaOverlay"
+      @send="sendPodcastMessage"
+      @stop="stopGenerating"
+      @voice-start="onVoiceStart"
+      @voice-restart="onVoiceStart"
+      @voice-cancel="onRecognizeFail"
+      @recognize-begin="onRecognizeBegin"
+      @recognize-fail="onRecognizeFail"
+      @input-focus="setTextInputFocused(true)"
+      @input-blur="setTextInputFocused(false)"
+      @voice-input-focus="setVoiceInputFocused(true)"
+      @voice-input-blur="setVoiceInputFocused(false)"
+      @dock-height-change="setInputDockHeight"
+    />
   </view>
 </template>
 
