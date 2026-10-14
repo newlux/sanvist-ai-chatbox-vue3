@@ -85,6 +85,8 @@ const {
 const broadcastDockOffset = computed(() =>
   `calc(${composerDockOffset.value} + ${Math.max(0, Number(keyboardHeight.value) || 0)}px)`,
 );
+/** 快捷导航贴在输入栏正上方，键盘弹起时随输入栏一起抬升。 */
+const quickNavStyle = computed(() => ({ bottom: `calc(${composerDockOffset.value} + 8px)` }));
 const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
 /** 本轮问答是否从异常列表发起：确认或取消后必须回到异常列表。 */
@@ -725,6 +727,19 @@ onBeforeUnmount(() => {
           @replay="replayInsightBroadcast"
         />
       </view>
+      <!-- 播报视图底部快捷导航：消异常 → 异常列表，回问问 → 回首页；洞察态隐藏避免盖住列表 -->
+      <view v-if="!insightVisible" class="podcast-page__quick-nav" :style="quickNavStyle">
+        <view class="podcast-page__quick-nav-button" @tap="showInsight()">
+          <text class="podcast-page__quick-nav-text">
+            消异常
+          </text>
+        </view>
+        <view class="podcast-page__quick-nav-button" @tap="closeReportBroadcast">
+          <text class="podcast-page__quick-nav-text">
+            回问问
+          </text>
+        </view>
+      </view>
       <AiChatInput
         v-model="inputText"
         :attachment-disabled="true"
@@ -844,6 +859,37 @@ onBeforeUnmount(() => {
   z-index: 0;
   overflow: hidden;
   background: transparent;
+}
+
+/* —— 播报视图底部快捷导航 —— */
+.podcast-page__quick-nav {
+  position: absolute;
+  left: 40rpx;
+  z-index: 3;
+  display: flex;
+  gap: 20rpx;
+}
+
+.podcast-page__quick-nav-button {
+  display: flex;
+  height: 64rpx;
+  align-items: center;
+  padding: 0 32rpx;
+  border: 1px solid #e8e8e8;
+  border-radius: 999px;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.podcast-page__quick-nav-button:active {
+  background: #f6f6f6;
+}
+
+.podcast-page__quick-nav-text {
+  color: #333333;
+  font-size: 26rpx;
+  font-weight: 400;
+  line-height: 36rpx;
 }
 
 @keyframes podcast-broadcast-hide {

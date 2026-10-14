@@ -49,6 +49,8 @@ const {
   paused,
   finished,
   currentSeq,
+  playbackProgress,
+  seekToSegment,
   nextText,
   transcriptSegments,
   error,
@@ -213,8 +215,10 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       :transcript-segments="transcriptSegments"
       :liked="liked"
       :like-loading="likeLoading"
+      :progress="playbackProgress"
       @play-pause="togglePlayback"
       @like="onToggleLike"
+      @seek="seekToSegment"
     />
     <ReportBroadcastHistory
       v-if="showHistory"

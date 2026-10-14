@@ -82,6 +82,11 @@ export function useListenBroadcastPlayer() {
   const error = ref<Error | null>(null);
   const playbackRate = ref(loadReportPlaybackRate());
   const active = computed(() => loading.value || playing.value);
+  /**
+   * 归一化播报进度（0~1）：流式分句没有总时长，按
+   * 「已完成句数 + 当前句内播放比例」/「已收到总句数」估算，供进度条展示。
+   */
+  const playbackProgress = ref(0);
 
   let sessionId = 0;
   let nextSeq = 1;
@@ -91,6 +96,13 @@ export function useListenBroadcastPlayer() {
   let gapTimer: ReturnType<typeof setTimeout> | null = null;
   let readyQueue: ListenBroadcastAudioChunk[] = [];
   const pendingChunks = new Map<number, ListenBroadcastAudioChunk>();
+  /** 全量分句缓存：往回 seek 时已播分句不在队列里了，用它重建待播队列。 */
+  const allChunks = new Map<number, ListenBroadcastAudioChunk>();
+  /** 进度估算 tick 句柄，卸载时清理。 */
+  let progressTimer: ReturnType<typeof setInterval> | null = null;
+  /** 单调化开关：分句陆续到达会让分母变大、估算值回退，正常播放只涨不跌；seek 时临时关闭允许回落。 */
+  let progressMonotonic = true;
+  let progressMonotonicTimer: ReturnType<typeof setTimeout> | null = null;
 
   function clearGapTimer() {
     if (!gapTimer) return;
@@ -238,6 +250,7 @@ export function useListenBroadcastPlayer() {
     }
     if (typeof chunk.seq !== "number" || pendingChunks.has(chunk.seq)) return;
     pendingChunks.set(chunk.seq, chunk);
+    allChunks.set(chunk.seq, chunk);
     drainContiguousChunks(id);
   }
 
@@ -260,6 +273,64 @@ export function useListenBroadcastPlayer() {
     } catch {
       logger.warn("切换听播倍速失败");
     }
+  }
+
+  /** 周期估算播放进度：已完成句数 + 当前句内比例，再除以已收到的总句数。 */
+  function updateProgress() {
+    const total = transcriptSegments.value.length;
+    if (!total || currentSeq.value == null) return;
+    const index = transcriptSegments.value.findIndex(segment => segment.seq === currentSeq.value);
+    if (index < 0) return;
+    let fraction = 0;
+    if (activeAudio) {
+      try {
+        const seekValue = activeAudio.seek();
+        const duration = activeAudio.duration();
+        const position = typeof seekValue === "number" ? seekValue : 0;
+        if (duration > 0) fraction = Math.min(1, Math.max(0, position / duration));
+      } catch {
+        fraction = 0;
+      }
+    }
+    const progress = (index + fraction) / total;
+    playbackProgress.value = progressMonotonic
+      ? Math.max(playbackProgress.value, progress)
+      : progress;
+  }
+
+  /**
+   * 跳到指定分句播放（拖动进度条）：用全量缓存重建该句及之后的待播队列。
+   * 暂停中仅换队列、恢复时从新位置继续；播完态拖动等同从该句重播；流还在收时不打断。
+   */
+  function seekToSegment(seq: number) {
+    const index = transcriptSegments.value.findIndex(segment => segment.seq === seq);
+    if (index < 0) return;
+    clearGapTimer();
+    if (activeAudio) {
+      const audio = activeAudio;
+      activeAudio = null;
+      try {
+        audio.stop();
+        audio.unload();
+      } catch {
+        // 忽略容器差异
+      }
+    }
+    const upcoming = [...allChunks.values()]
+      .filter(chunk => (chunk.seq ?? Number.MAX_SAFE_INTEGER) >= seq)
+      .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+    pendingChunks.clear();
+    readyQueue = upcoming;
+    nextSeq = (upcoming.length ? (upcoming[upcoming.length - 1].seq ?? seq) : seq) + 1;
+    finished.value = false;
+    playbackProgress.value = index / Math.max(1, transcriptSegments.value.length);
+    progressMonotonic = false;
+    if (progressMonotonicTimer) clearTimeout(progressMonotonicTimer);
+    progressMonotonicTimer = setTimeout(() => {
+      progressMonotonicTimer = null;
+      progressMonotonic = true;
+    }, 600);
+    playNext(sessionId);
   }
 
   function pause() {
@@ -316,6 +387,13 @@ export function useListenBroadcastPlayer() {
     nextText.value = "";
     transcriptSegments.value = [];
     error.value = null;
+    allChunks.clear();
+    playbackProgress.value = 0;
+    progressMonotonic = true;
+    if (progressMonotonicTimer) {
+      clearTimeout(progressMonotonicTimer);
+      progressMonotonicTimer = null;
+    }
     logger.info("听播已终止");
   }
 
@@ -331,7 +409,15 @@ export function useListenBroadcastPlayer() {
     );
   }
 
-  onBeforeUnmount(stop);
+  progressTimer = setInterval(updateProgress, 250);
+
+  onBeforeUnmount(() => {
+    if (progressTimer) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
+    stop();
+  });
 
   return {
     play,
@@ -346,6 +432,8 @@ export function useListenBroadcastPlayer() {
     paused,
     finished,
     currentSeq,
+    playbackProgress,
+    seekToSegment,
     previousText,
     currentText,
     nextText,

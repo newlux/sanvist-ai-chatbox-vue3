@@ -15,9 +15,11 @@ const props = defineProps<{
   transcriptSegments: Array<{ seq: number; text: string }>;
   liked: boolean;
   likeLoading: boolean;
+  /** 归一化播报进度（0~1），由播放器周期估算。 */
+  progress: number;
 }>();
 
-const emit = defineEmits<{ "play-pause": []; like: [] }>();
+const emit = defineEmits<{ "play-pause": []; like: []; seek: [seq: number] }>();
 const instance = getCurrentInstance();
 const transcriptScrollTop = ref(0);
 const leftWaveBars = [2, 2, 18, 4, 10, 4, 16, 8, 4, 16, 4, 30, 12, 20, 2, 1, 1];
@@ -81,6 +83,65 @@ function updateTranscriptScroll() {
   });
 }
 watch(() => props.currentSeq, updateTranscriptScroll);
+
+/* —— 播报进度条：随播放进度走，拖动换算到分句后上抛 seek —— */
+const progressDragging = ref(false);
+const progressDragRatio = ref(0);
+/** 轨道在视口中的位置缓存：touchstart 时刷新，move 期间视图不动可直接复用。 */
+let progressTrackRect: { left: number; width: number } | null = null;
+
+const displayProgress = computed(() =>
+  progressDragging.value ? progressDragRatio.value : props.progress,
+);
+const progressPercent = computed(
+  () => `${Math.min(1, Math.max(0, displayProgress.value)) * 100}%`,
+);
+
+function measureProgressTrack() {
+  const query = uni.createSelectorQuery().in(instance?.proxy);
+  query.select(".report-broadcast-content__progress-hit").boundingClientRect();
+  query.exec((rects) => {
+    const rect = rects?.[0] as UniApp.NodeInfo | undefined;
+    if (rect && typeof rect.left === "number" && typeof rect.width === "number" && rect.width > 0) {
+      progressTrackRect = { left: rect.left, width: rect.width };
+    }
+  });
+}
+
+function ratioFromClientX(clientX: number): number | null {
+  if (!progressTrackRect) return null;
+  return Math.min(1, Math.max(0, (clientX - progressTrackRect.left) / progressTrackRect.width));
+}
+
+function onProgressTouchStart(event: TouchEvent) {
+  if (!props.transcriptSegments.length) return;
+  progressDragging.value = true;
+  progressTrackRect = null;
+  measureProgressTrack();
+  const touch = event?.touches?.[0];
+  if (touch) {
+    // rect 异步测回来前保持原值，move 里会立即跟上
+    progressDragRatio.value = ratioFromClientX(touch.clientX) ?? progressDragRatio.value;
+  }
+}
+
+function onProgressTouchMove(event: TouchEvent) {
+  if (!progressDragging.value) return;
+  const touch = event?.touches?.[0];
+  if (!touch) return;
+  const ratio = ratioFromClientX(touch.clientX);
+  if (ratio != null) progressDragRatio.value = ratio;
+}
+
+function onProgressTouchEnd() {
+  if (!progressDragging.value) return;
+  progressDragging.value = false;
+  const total = props.transcriptSegments.length;
+  if (!total) return;
+  const index = Math.min(total - 1, Math.max(0, Math.floor(progressDragRatio.value * total)));
+  const seq = props.transcriptSegments[index]?.seq;
+  if (typeof seq === "number") emit("seek", seq);
+}
 </script>
 
 <template>
@@ -105,6 +166,22 @@ watch(() => props.currentSeq, updateTranscriptScroll);
           :src="playing ? iconVoicePlay : iconVoicePause"
           mode="aspectFit"
         />
+      </view>
+    </view>
+    <!-- 头像下方播报进度条：随播放进度走，拖动跳到对应分句 -->
+    <view v-if="transcriptSegments.length" class="report-broadcast-content__progress">
+      <view
+        class="report-broadcast-content__progress-hit"
+        :class="{ 'report-broadcast-content__progress-hit--dragging': progressDragging }"
+        @touchstart.stop="onProgressTouchStart"
+        @touchmove.stop.prevent="onProgressTouchMove"
+        @touchend.stop="onProgressTouchEnd"
+        @touchcancel.stop="onProgressTouchEnd"
+      >
+        <view class="report-broadcast-content__progress-rail">
+          <view class="report-broadcast-content__progress-fill" :style="{ width: progressPercent }" />
+          <view class="report-broadcast-content__progress-thumb" :style="{ left: progressPercent }" />
+        </view>
       </view>
     </view>
     <view class="report-broadcast-content__transcript">
@@ -228,6 +305,51 @@ watch(() => props.currentSeq, updateTranscriptScroll);
   width: 362.571rpx;
   height: 450rpx;
   background: rgb(255 216 216 / 40%);
+}
+/* —— 头像下方进度条 ——
+   容器 80rpx（上 48 留白让开头像底部的播放按钮，其底缘伸入 stage 下方 24rpx），
+   热区 32rpx 放底部，视觉轨道 6rpx 居中；左右 88rpx 与字幕区对齐。 */
+.report-broadcast-content__progress {
+  display: flex;
+  width: 100%;
+  height: 80rpx;
+  flex: 0 0 80rpx;
+  align-items: flex-end;
+  padding: 0 88rpx;
+  box-sizing: border-box;
+}
+.report-broadcast-content__progress-hit {
+  display: flex;
+  width: 100%;
+  height: 32rpx;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+.report-broadcast-content__progress-rail {
+  position: relative;
+  width: 100%;
+  height: 6rpx;
+  border-radius: 3rpx;
+  background: #ececec;
+}
+.report-broadcast-content__progress-fill {
+  height: 100%;
+  border-radius: 3rpx;
+  background: linear-gradient(90deg, #6e9fd8 0%, #c8201e 100%);
+}
+.report-broadcast-content__progress-thumb {
+  position: absolute;
+  top: 50%;
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 50%;
+  background: #c8201e;
+  transform: translate(-50%, -50%);
+  transition: transform 0.15s ease;
+}
+.report-broadcast-content__progress-hit--dragging .report-broadcast-content__progress-thumb {
+  transform: translate(-50%, -50%) scale(1.35);
 }
 .report-broadcast-content__transcript {
   position: relative;
