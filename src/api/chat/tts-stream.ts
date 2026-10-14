@@ -6,6 +6,9 @@ export interface TtsStreamHandle {
   cancel: () => void;
 }
 
+/** 调用方未指定语速时的固定默认值：1.2×。 */
+const DEFAULT_TTS_SPEECH_RATE = 1.2;
+
 /**
  * 分句并发合成的实时 TTS SSE 流（POST /speech/tts/stream）。
  *
@@ -21,6 +24,11 @@ export function consumeTextToSpeechStream(
 ): TtsStreamHandle {
   const controller = new AbortController();
   const url = `${getRequestBaseURL().replace(/\/$/, "")}/speech/tts/stream`;
+  // 语速由后端在合成时生效（int）；调用方不传时统一按默认语速下发。
+  const body = {
+    ...params,
+    ttsSpeechRate: params.ttsSpeechRate ?? DEFAULT_TTS_SPEECH_RATE,
+  };
 
   const session = createSseSession({
     onEvent,
@@ -35,7 +43,7 @@ export function consumeTextToSpeechStream(
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         }),
-        body: JSON.stringify(params),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
 

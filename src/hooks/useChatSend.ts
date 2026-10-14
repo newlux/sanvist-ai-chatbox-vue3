@@ -6,10 +6,10 @@ import type {
   ReportWorkflowAction,
 } from "@/utils/ai-stream";
 import { useI18n } from "vue-i18n";
-import { interruptChat, sendBlockingChatMessage } from "@/api/chat";
+import { interruptChat } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { buildInitialBlocks, consumeChatStream, extractDifyHistoryBlocks, parseReportInteraction } from "@/utils/ai-stream";
+import { buildInitialBlocks, consumeChatStream, parseReportInteraction } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
 import { createLogger } from "@/utils/logger";
@@ -27,8 +27,11 @@ function isAbortError(error: unknown) {
 }
 
 export function useChatSend(scope?: string, handlers?: {
-  /** 页面明确指定的 Dify 场景；未指定时默认为 ASK。 */
-  scene?: ChatScene;
+  /**
+   * 页面明确指定的 Dify 场景；未指定时默认为 ASK。
+   * 传函数时每次发送现取：听播页会按「普通播报问答 / 异常列表语音操作」切换场景。
+   */
+  scene?: ChatScene | (() => ChatScene);
   onReportQa?: (answer: string) => void;
   onReportAdjustment?: (action: ReportAdjustmentAction) => void;
   onReportNavigation?: (action: ReportNavigationAction) => void;
@@ -68,6 +71,19 @@ export function useChatSend(scope?: string, handlers?: {
 
   /** 已回调过 onAiMessageComplete 的 aiMsgId，避免重入/重发。 */
   const notifiedCompletedAiIds = new Set<string>();
+
+  /** 每次发送时现取场景：页面可以按当前所处视图决定走哪套后端分支。 */
+  function resolveScene(): ChatScene {
+    const value = handlers?.scene;
+    return (typeof value === "function" ? value() : value) ?? "ASK";
+  }
+
+  /**
+   * 听播问答链路：页面挂了汇报问答出口（onReportQa）时，这一轮答案一律从该出口交付
+   * （协议体派发动作 / 纯文本兜底当 qa 答案）。与 scene 解耦——听播页可能按视图下发
+   * ASK 或 PODCAST，但答案都要回播报页。
+   */
+  const usesReportAnswerOutlet = Boolean(handlers?.onReportQa);
 
   function cancelActiveStream(markStopped = false) {
     const activeId = String(chatStore.activeMessageId || "");
@@ -176,18 +192,19 @@ export function useChatSend(scope?: string, handlers?: {
   }
 
   function createChatRequest(content: string, files: ChatFile[], extraInputs: Record<string, unknown> = {}) {
-    const scene = handlers?.scene ?? "ASK";
+    const scene = resolveScene();
     return {
       query: content,
       // Dify 要求 user 非空；游客态（未选角色 / 已清空）统一用占位标识，
       // 口径与 /files/upload、反馈接口一致。
       user: String(userStore.userId || "guest"),
       conversationId: chatStore.aiSessionId,
+      // 听播问答与首页问答的 inputs 口径保持一致：只带场景，会话上下文交给顶层
+      // conversation_id / 会话 user 承载，不再重复下发。
+      // 听播独有的 exceptions（从异常列表发起时携带）保留，其他场景原样透传扩展入参。
       inputs: scene === "PODCAST"
         ? {
             scene: "PODCAST",
-            role_id: userStore.visitorRole || "guest",
-            conversation_id: chatStore.aiSessionId  ?? "",
             ...(() => {
               const exceptions = handlers?.getPodcastExceptions?.();
               return exceptions ? { exceptions: JSON.stringify(exceptions) } : {};
@@ -231,6 +248,8 @@ export function useChatSend(scope?: string, handlers?: {
     let lastSeenAnswerLength = 0;
     /** 是否已发过 ended: true 的收尾通知，避免重入。 */
     let answerDeltaEnded = false;
+    /** PODCAST：聚合流式答案正文，流结束后按汇报交互协议派发。 */
+    let podcastAnswer = "";
 
     /** 把答案增量通知给页面（首块即触发，不等 message_end / workflow_finished）。 */
     function notifyAnswerDelta(delta: string, ended: boolean) {
@@ -250,12 +269,19 @@ export function useChatSend(scope?: string, handlers?: {
           receivedContent = snapshot.receivedContent;
           applySnapshot(aiMsgId, userMsgId, snapshot, preserveProcessStatus);
 
+          // 听播问答：与首页共用同一条流式接口（/proxy/v1/chat-messages + streaming），
+          // 这里只聚合答案正文，流结束后按汇报交互协议解析后交给播报页（自己的 TTS 出口）。
+          if (usesReportAnswerOutlet) {
+            podcastAnswer = snapshot.blocks
+              .filter(block => block.type === "answer")
+              .map(block => String(block.payload?.content || ""))
+              .join("");
+          }
           // 普通问答：答案文字边流边播。每收到新的一块 answer 文本就增量通知页面，
           // 页面在第一块文字渲染出来的瞬间就可以起听播，后续文字持续续播。
           // 聚合全部 answer 块（而非只取第一块）：answer 中途穿插了别的块时，
           // 只取第一块会让后半段文字永远收不到增量、听播漏播。
-          // PODCAST 场景走 onReportQa 自己的 TTS，不在此触发。
-          if (handlers?.onAiAnswerDelta && handlers?.scene !== "PODCAST") {
+          else if (handlers?.onAiAnswerDelta) {
             const answerContent = snapshot.blocks
               .filter(block => block.type === "answer")
               .map(block => String(block.payload?.content || ""))
@@ -268,6 +294,11 @@ export function useChatSend(scope?: string, handlers?: {
           }
         },
       });
+      // 听播问答：流正常收尾后把答案交给播报页，出口与原来的阻塞链路保持一致；
+      // 已被新一轮请求 / 停止操作取代时不派发，避免过期答案串到播报页。
+      if (usesReportAnswerOutlet && requestSeq === chatStore.activeRequestSeq) {
+        applyPodcastAnswer(aiMsgId, podcastAnswer);
+      }
     } catch (error) {
       const index = chatStore.findMessageIndex(aiMsgId);
       const aiMessage = index >= 0 ? chatStore.messages[index] : null;
@@ -284,73 +315,50 @@ export function useChatSend(scope?: string, handlers?: {
     } finally {
       // 流异常 / 被取消时也补一次 ended 收尾，避免页面的流式听播会话一直挂着 loading 态。
       if (lastSeenAnswerLength > 0) notifyAnswerDelta("", true);
+      // 本轮听播问答收尾（含异常 / 取消）：播报页据此关掉「正在理解」或退回异常列表。
+      if (usesReportAnswerOutlet && requestSeq === chatStore.activeRequestSeq) {
+        handlers?.onReportBlockingComplete?.();
+      }
       finishRequest(aiMsgId, hadSessionId, requestSeq);
     }
   }
 
-  async function sendBlockingAiFlow(options: {
-    aiMsgId: string;
-    userMsgId: string;
-    content: string;
-    files: ChatFile[];
-    hadSessionId: boolean;
-    requestSeq: number;
-  }) {
-    const { aiMsgId, userMsgId, content, files, hadSessionId, requestSeq } = options;
+  /**
+   * 听播问答的答案出口：整轮答案已经在流式链路里聚合完，这里按汇报交互协议解析后派发。
+   *
+   * 与原阻塞链路的出口语义一致：
+   * - 协议体（<PODCAST>{...}</PODCAST> 交互体）只用于派发动作，不落到消息列表；
+   * - 显式协议体但解析不出来时什么都不给，绝不把 JSON 当答案念出来；
+   * - 其余纯文本兜底当作 qa 答案返回，避免换了接口后正文被丢掉。
+   */
+  function applyPodcastAnswer(aiMsgId: string, answer: string) {
+    const text = String(answer || "").trim();
+    if (!text) return;
 
-    try {
-      const response = await sendBlockingChatMessage(createChatRequest(content, files));
-      if (requestSeq !== chatStore.activeRequestSeq) return;
-      const reportInteraction = parseReportInteraction(response.answer);
-      if (reportInteraction?.interactionType === "qa") {
-        handlers?.onReportQa?.(reportInteraction.answer);
+    const reportInteraction = parseReportInteraction(text);
+    if (!reportInteraction) {
+      if (text.startsWith("{") || /^<PODCAST>/i.test(text)) {
+        logger.warn("unparsable podcast interaction payload", { length: text.length });
+        return;
       }
-      if (reportInteraction?.interactionType === "adjustment") {
-        handlers?.onReportAdjustment?.(reportInteraction.action);
-      }
-      if (reportInteraction?.interactionType === "navigation") {
-        handlers?.onReportNavigation?.(reportInteraction.action);
-      }
-      if (reportInteraction?.interactionType === "workflow") {
-        handlers?.onReportWorkflowAction?.(reportInteraction.action);
-      }
-
-      applySnapshot(aiMsgId, userMsgId, {
-        blocks: reportInteraction || !response.answer
-          ? buildInitialBlocks()
-          : extractDifyHistoryBlocks(response.answer).map((block, index) => ({
-              ...block,
-              id: `blocking-${block.type}-${index}`,
-              complete: true,
-            })),
-        conversationId: response.conversationId,
-        messageId: response.messageId,
-        taskId: response.taskId,
-        metadata: response.metadata?.elapsedTime == null
-          ? undefined
-          : { duration_ms: response.metadata.elapsedTime * 1000, status: "succeeded" },
-        processStatus: {
-          phase: "succeeded",
-          elapsedSeconds: response.metadata?.elapsedTime,
-        },
-        ended: true,
-      });
-    } catch (error) {
-      const index = chatStore.findMessageIndex(aiMsgId);
-      const aiMessage = index >= 0 ? chatStore.messages[index] : null;
-      if (aiMessage && requestSeq === chatStore.activeRequestSeq && !isAbortError(error)) {
-        chatStore.patchMessageById(aiMsgId, {
-          blocks: buildInitialBlocks(),
-          content: t("ai-unavailable-retry-later"),
-          loading: false,
-          processStatus: { ...aiMessage.processStatus, phase: "failed" },
-        });
-        logger.error("blocking chat request failed", error);
-      }
-    } finally {
-      if (requestSeq === chatStore.activeRequestSeq) handlers?.onReportBlockingComplete?.();
-      finishRequest(aiMsgId, hadSessionId, requestSeq);
+      handlers?.onReportQa?.(text);
+      return;
     }
+
+    if (reportInteraction.interactionType === "qa") {
+      handlers?.onReportQa?.(reportInteraction.answer);
+    }
+    if (reportInteraction.interactionType === "adjustment") {
+      handlers?.onReportAdjustment?.(reportInteraction.action);
+    }
+    if (reportInteraction.interactionType === "navigation") {
+      handlers?.onReportNavigation?.(reportInteraction.action);
+    }
+    if (reportInteraction.interactionType === "workflow") {
+      handlers?.onReportWorkflowAction?.(reportInteraction.action);
+    }
+    // 协议体不进消息列表：历史会话里只看得到普通回答。
+    chatStore.patchMessageById(aiMsgId, { blocks: buildInitialBlocks() });
   }
 
   /**
@@ -418,8 +426,8 @@ export function useChatSend(scope?: string, handlers?: {
     // 作业指导等页面要求发送后保留阅读位置（不强制回底），由卡片置顶逻辑接管滚动
     if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
     const options = { aiMsgId, userMsgId, content: query, files, hadSessionId, requestSeq };
-    if (handlers?.scene === "PODCAST") await sendBlockingAiFlow(options);
-    else await sendAiFlow(options);
+    // 听播问答与首页问答共用同一条流式接口，场景差异只体现在 inputs 与答案出口上。
+    await sendAiFlow(options);
   }
 
   async function sendAssistantCallback(content: string, options: {
