@@ -113,3 +113,43 @@ export function expandMarkdownTables(blocks: AiBlock[]): AiBlock[] {
   });
   return changed ? expanded : list;
 }
+
+/**
+ * 摘掉回答正文里的 Markdown 表格（听播问答只念正文、不展示表格）。
+ *
+ * 判定逻辑与 expandMarkdownTables 完全一致 —— 首页认定为表格的内容，在这里会被整段摘掉，
+ * 不会因为「首页是表格、听播是乱码竖线」而两端表现不一致。
+ */
+export function stripMarkdownTables(content: string): string {
+  const source = String(content || "");
+  if (!source.includes("|")) return source;
+
+  const lines = source.split(/\r?\n/);
+  const kept: string[] = [];
+  let codeFence = false;
+  let index = 0;
+
+  while (index < lines.length) {
+    if (isFence(lines[index])) {
+      codeFence = !codeFence;
+      kept.push(lines[index]);
+      index += 1;
+      continue;
+    }
+
+    if (!codeFence && lines[index].includes("|") && lines[index + 1]?.includes("|")) {
+      let end = index + 2;
+      while (end < lines.length && lines[end].includes("|")) end += 1;
+      if (parseMarkdownTable(lines.slice(index, end))) {
+        index = end;
+        continue;
+      }
+    }
+
+    kept.push(lines[index]);
+    index += 1;
+  }
+
+  // 表格整段摘掉后可能留下连续空行，压成单个空行再收尾。
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
