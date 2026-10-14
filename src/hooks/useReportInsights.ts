@@ -27,6 +27,14 @@ export interface ReportInsightItem {
   urgentText?: string;
   isUrgent: boolean;
   urgentLoading: boolean;
+  /**
+   * 异常详情弹窗要用到的原始字段：eventCategory / eventType / eventTime 来自后端
+   * ReportInsightEvent，toInsightItem 顺带保留，避免弹窗再回查 rawItems。
+   * 设备编号沿用 deviceId（= event.deviceNo）。
+   */
+  eventCategory: string;
+  eventType: string;
+  eventTime: string;
 }
 
 /** 事件类型码比对：服务端已过滤时不额外拦截，客户端仅做归一化后的兜底。 */
@@ -53,6 +61,9 @@ function toInsightItem(event: ReportInsightEvent): ReportInsightItem {
     urgentText: formatUrgentText(event.urgent, event.ownerTag),
     isUrgent: event.urgent,
     urgentLoading: false,
+    eventCategory: event.eventCategory,
+    eventType: event.eventType,
+    eventTime: event.eventTime,
   };
 }
 
