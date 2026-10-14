@@ -6,6 +6,9 @@ export interface ListenBroadcastStreamHandle {
   cancel: () => void;
 }
 
+/** 调用方未指定语音倍速时的兜底：正常语速 1.0×。 */
+const NORMAL_TTS_SPEECH_RATE = "1";
+
 export function consumeListenBroadcastStream(
   params: PlayListenBroadcastParams,
   onEvent: (payload: unknown) => void,
@@ -14,6 +17,10 @@ export function consumeListenBroadcastStream(
 ): ListenBroadcastStreamHandle {
   const controller = new AbortController();
   const url = `${getRequestBaseURL().replace(/\/$/, "")}/listen-broadcast/play`;
+  const body: PlayListenBroadcastParams = {
+    ...params,
+    ttsSpeechRate: params.ttsSpeechRate ?? NORMAL_TTS_SPEECH_RATE,
+  };
   const session = createSseSession({
     onEvent,
     isAborted: () => controller.signal.aborted,
@@ -27,7 +34,7 @@ export function consumeListenBroadcastStream(
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         }),
-        body: JSON.stringify(params),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
 
