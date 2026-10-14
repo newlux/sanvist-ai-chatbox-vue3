@@ -745,6 +745,7 @@ onUnload(() => {
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
+        :compact-voice-listening="true"
         @send="sendMessage"
         @stop="stopGenerating"
         @voice-start="stopSceneTtsOnVoiceStart"

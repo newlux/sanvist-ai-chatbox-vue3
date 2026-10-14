@@ -1,0 +1,30 @@
+<svg width="375" height="118" viewBox="0 0 375 118" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Ardot 11101:691 Frame 45（375×118 @ y694）底部波浪装饰。
+    · 11101:696 Rectangle 106 主色带：375×53 @ (-0.5, 65)，横向渐变
+      #EBB4E9 0% → #56ABFA 48.7179% → #9795E8 100%（色值经渲染像素逐一核对）
+    · 波浪剪影取自 11101:692 "Mask group" 的蒙版形状，路径由该节点 2x 渲染图逐列提取
+      （顶边 y 90 ~ 104.5，波谷在 x≈96-114 与 x≈276-294，波峰在 x≈186-204）
+    · 11101:695 Vector 87（449×100 蓝柔光，#295DC3 → #0D7ABA，blur 18）在原设计里被主色带
+      完全覆盖、渲染验证不可见，故此处不再绘制
+  -->
+  <defs>
+    <linearGradient id="voiceBandGradient" x1="-0.5" y1="0" x2="374.5" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#EBB4E9"/>
+      <stop offset="0.487179" stop-color="#56ABFA"/>
+      <stop offset="1" stop-color="#9795E8"/>
+    </linearGradient>
+    <clipPath id="voiceWaveClip">
+      <path d="M0 95 L6 95 L12 95 L18 95 L24 94.5 L30 94.5 L36 94.5 L42 94.5 L48 95 L54 95.5
+        L60 96.5 L66 97.5 L72 99.5 L78 101 L84 102.5 L90 103.5 L96 104.5 L102 104.5 L108 104.5 L114 104.5
+        L120 104 L126 103.5 L132 102.5 L138 101 L144 99.5 L150 97.5 L156 96 L162 94 L168 93 L174 91.5
+        L180 91 L186 90 L192 90 L198 90 L204 90 L210 90.5 L216 91 L222 92.5 L228 93.5 L234 95 L240 97
+        L246 98.5 L252 100 L258 101.5 L264 103 L270 104 L276 104.5 L282 104.5 L288 104.5 L294 104.5
+        L300 104 L306 103.5 L312 102.5 L318 101.5 L324 100 L330 98.5 L336 97 L342 96 L348 94.5 L354 93.5
+        L360 92.5 L366 91.5 L372 91 L374 91 L374 118 L0 118 Z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#voiceWaveClip)">
+    <rect x="-0.5" y="65" width="375" height="53" fill="url(#voiceBandGradient)"/>
+  </g>
+</svg>
