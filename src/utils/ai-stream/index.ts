@@ -27,4 +27,4 @@ export { consumeChatStream } from "./streamConsumer";
 
 export type { StreamFlusher, StreamFlusherOptions } from "./streamFlusher";
 export { createStreamFlusher } from "./streamFlusher";
-export { expandMarkdownTables } from "./tableFence";
+export { expandMarkdownTables, stripMarkdownTables } from "./tableFence";

@@ -1,16 +1,27 @@
 <script setup lang="ts">
 import type { TtsStreamHandle } from "@/api/chat/tts-stream";
-import type { RealtimeTtsChunk } from "@/api/chat/types";
+import type {
+  AskSlotPayload,
+  AskSlotSubmitPayload,
+  AssistantNavigationPayload,
+  GuideStepPayload,
+  GuideSuggestionPayload,
+  RealtimeTtsChunk,
+} from "@/api/chat/types";
 import type { ListenBroadcastStyle, PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
 import type { ReportVoiceOption } from "@/config/report-voices";
 import type { ReportInsightItem } from "@/hooks/useReportInsights";
-import { onLoad, onUnload } from "@dcloudio/uni-app";
+import { onHide, onLoad, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { getListenBroadcastConfig, getListenBroadcastPreference } from "@/api/listen-broadcast";
+import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
+import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
+import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
+import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import ReportBroadcastPlayer from "@/components/report-broadcast-player/index.vue";
 import ReportInsight from "@/components/report-broadcast-player/report-insight.vue";
 import ReportVoiceSelector from "@/components/report-voice-selector/index.vue";
@@ -24,9 +35,12 @@ import { loadReportStyle, saveReportStyle } from "@/hooks/useReportStyle";
 import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useUserStore } from "@/stores";
+import { stripMarkdownTables } from "@/utils/ai-stream";
 import { getCurrentListenReportDate, markListenReportListened } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
-import { backFromScene, isSceneWindowRoot } from "@/utils/scene-navigation";
+import { stashPendingRepairCallback } from "@/utils/repair-callback";
+import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
+import { backFromScene, isSceneWindowRoot, navigateToScene } from "@/utils/scene-navigation";
 
 /**
  * 听汇报页（播报播放器 + 底部输入栏）。
@@ -91,6 +105,20 @@ const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
 /** 按住说话录音中：字幕区先隐藏播报文字，识别态/回答结果随后接管。 */
 const voiceRecording = ref(false);
+/** 本轮问答的追问卡（首页同款「弹出确认」）：整组题目按顺序入队。 */
+const reportQaSlots = ref<AskSlotPayload[]>([]);
+const reportQaSlotVisible = ref(false);
+/** 指导追问卡（并行分支，选一项即下一轮提问）。 */
+const reportQaGuideSuggestion = ref<GuideSuggestionPayload | null>(null);
+const reportQaGuideSuggestionVisible = ref(false);
+/** 指导步骤卡（多步确认 / 逐轮追问）。 */
+const reportQaGuideStep = ref<GuideStepPayload | null>(null);
+const reportQaGuideStepVisible = ref(false);
+/** 听播页没有对话区核对卡，步骤卡固定从第 1 步打开。 */
+const reportQaGuideStepIndex = ref(0);
+/** 跳转确认（维修助手）。 */
+const reportQaNavigation = ref<AssistantNavigationPayload | null>(null);
+const reportQaNavigationVisible = ref(false);
 /** 本轮问答是否从异常列表发起：确认或取消后必须回到异常列表。 */
 const reportQaFromInsight = ref(false);
 const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> | null>(null);
@@ -173,7 +201,7 @@ const reportAdjustmentActions = useReportAdjustmentActions({
     void confirmInsightUrgent(action.confirmed, action.target);
   },
 });
-const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   /**
    * 场景按当前所处的视图现取：
    * - 从异常列表发起（汇报结束自动进入的洞察页 / 点「消异常」进入的列表）：必须走 PODCAST，
@@ -187,9 +215,13 @@ const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating,
   onReportQa(answer) {
     qaAnswerShown = true;
     reportQaLoading.value = false;
-    reportQaAnswer.value = answer;
+    // 表格不进听播：正文里的 Markdown 表格先摘掉，展示与朗读都不带表格。
+    const text = stripMarkdownTables(answer);
+    reportQaAnswer.value = text;
+    // 答案里带追问卡 / 步骤卡 / 跳转确认时，按首页同款逻辑自动弹起对应弹层。
+    openReportQaOverlays();
     // 答案回来了：用 TTS 把回答朗读出来，播报已经处于暂停态，无需再切。
-    playAnswerTts(answer);
+    playAnswerTts(text);
   },
   onReportAdjustment(action) {
     reportQaLoading.value = false;
@@ -457,7 +489,7 @@ function applyReportBroadcastParams(voice: ReportVoiceOption, styleCode: string,
  * 而本入口需要在用户中途退出时原样退回原来那一轮播报。
  */
 function openReportPreference() {
-  reportBroadcastPlayerRef.value?.pause();
+  stopPlaybackOnLeave();
   preferenceEntry.value = true;
   showReportVoiceSelector.value = true;
 }
@@ -491,6 +523,9 @@ function markCurrentReportListened(): boolean {
 }
 
 function closeReportBroadcast() {
+  // 退出播报（回问问 / 关场景窗口）前先收尾：页面对应的卸载回调在跳转后才执行，
+  // 这里主动停一次，避免过渡期间答案还在念。
+  stopPlaybackOnLeave();
   reportAdjustmentActions.dispose();
   if (markCurrentReportListened()) uni.$emit("listen-report-marked");
   reportBroadcastParams.value = null;
@@ -506,6 +541,17 @@ function pauseReportBroadcast() {
   reportBroadcastPlayerRef.value?.pause();
 }
 
+/**
+ * 离开播报视图前的统一收尾：正在朗读的答案 TTS 与播报一起停。
+ *
+ * 答案朗读是一次性的，直接 stop（回来不会再响）；
+ * 播报走 pause，返回本页时还能从当前句继续。
+ */
+function stopPlaybackOnLeave() {
+  stopAnswerTts();
+  pauseReportBroadcast();
+}
+
 function clearInsightLeaveTimer() {
   if (insightLeaveTimer === null) return;
   clearTimeout(insightLeaveTimer);
@@ -513,11 +559,11 @@ function clearInsightLeaveTimer() {
 }
 
 /**
- * 点「消异常」进异常列表：先把播报停下来再切洞察层，
- * 否则列表已经铺出来了，耳朵里还在念汇报。
+ * 点「消异常」进异常列表：先把播报与答案朗读都停下来再切洞察层，
+ * 否则列表已经铺出来了，耳朵里还在念。
  */
 function openInsightFromQuickNav() {
-  pauseReportBroadcast();
+  stopPlaybackOnLeave();
   showInsight();
 }
 
@@ -599,9 +645,107 @@ watch(broadcastPlaying, (isPlaying) => {
 });
 
 function openInsightItem(item: ReportInsightItem) {
+  // 点异常条目跳任务页：先把播报和答案朗读停掉，别跟着跳过去还在念
+  stopPlaybackOnLeave();
   uni.navigateTo({
     url: `/pages/task/index?eventId=${encodeURIComponent(item.id)}&title=${encodeURIComponent(item.title)}`,
   });
+}
+
+/**
+ * 开一轮新的听播问答：与输入栏提问保持同一套交互
+ * （先停答案朗读 → 问答区回到「正在理解」→ 暂停播报，等新答案回来）。
+ */
+function beginReportQaTurn() {
+  stopAnswerTts();
+  enterReportQaLoading();
+  pauseReportBroadcast();
+}
+
+/**
+ * 答案里需要弹层的块自动弹起：语义与首页各 Block 的 auto_open 完全一致
+ * （追问卡 / 指导追问卡 / 指导步骤卡 / 跳转确认），数据直接取本轮流式消息里
+ * 已解析好的 blocks —— 与首页共用同一份协议解析结果，不另做一套解析。
+ */
+function openReportQaOverlays() {
+  const message = [...chatStore.messages].reverse().find(item => item.role === "ai");
+  const blocks = Array.isArray(message?.blocks) ? message.blocks : [];
+
+  blocks.forEach((block) => {
+    if (block.payload?.auto_open !== true) return;
+
+    if (block.type === "ask-slot") {
+      const slot = block.payload as AskSlotPayload;
+      // 作业协同式多步骤表单会一次带来整组题目，拆开按顺序入队（与首页一致）
+      const incoming = Array.isArray(slot.slots) && slot.slots.length ? [...slot.slots] : [slot];
+      reportQaSlots.value = incoming;
+      reportQaSlotVisible.value = true;
+      return;
+    }
+    if (block.type === "guide-suggestion") {
+      reportQaGuideSuggestion.value = block.payload as GuideSuggestionPayload;
+      reportQaGuideSuggestionVisible.value = true;
+      return;
+    }
+    if (block.type === "guide-step") {
+      const payload = block.payload as GuideStepPayload;
+      // 听播页不提供附件入口（输入栏已关闭上传）：清掉附件按钮文案，避免出现点了没反应的按钮
+      const steps = Array.isArray(payload.steps)
+        ? payload.steps.map(step => ({ ...step, photo_text: "" }))
+        : [];
+      reportQaGuideStep.value = { ...payload, steps };
+      reportQaGuideStepIndex.value = 0;
+      reportQaGuideStepVisible.value = true;
+      return;
+    }
+    if (block.type === "assistant-navigation") {
+      const payload = block.payload as AssistantNavigationPayload;
+      if (payload.target !== "maintenance_assistant") return;
+      reportQaNavigation.value = payload;
+      reportQaNavigationVisible.value = true;
+    }
+  });
+}
+
+function closeReportQaSlot() {
+  reportQaSlotVisible.value = false;
+}
+
+/** 提交追问卡：作答拼成一句提问继续发送（与首页同一条 sendAskSlotSelection）。 */
+function onReportQaSlotSubmit(payload: AskSlotSubmitPayload) {
+  reportQaSlotVisible.value = false;
+  reportQaSlots.value = [];
+  beginReportQaTurn();
+  sendAskSlotSelection(payload);
+}
+
+/** 指导追问卡 / 步骤卡选完或填完的问题：按普通提问发出去，交互与输入栏一致。 */
+function onReportQaQuerySubmit(query: string) {
+  reportQaGuideSuggestionVisible.value = false;
+  reportQaGuideStepVisible.value = false;
+  const text = String(query || "").trim();
+  if (!text) return;
+  beginReportQaTurn();
+  void sendMessage({ text });
+}
+
+/** 跳转确认：与首页同一套上下文落盘 + 场景跳转。 */
+function onReportQaNavigationConfirm(payload: AssistantNavigationPayload) {
+  if (payload.target !== "maintenance_assistant") return;
+  stashPendingRepairNavigationContext({
+    ...payload.context,
+    userId: userStore.userId,
+    sessionId: payload.sessionId,
+    conversationId: payload.conversationId,
+  });
+  const conversationId = String(payload.conversationId || "").trim();
+  const sessionId = String(payload.sessionId || "").trim();
+  if (conversationId && sessionId) {
+    stashPendingRepairCallback({ aiAskConversationId: conversationId, aiAskSessionId: sessionId });
+  }
+  // 跳到维修助手前收尾：别把播报 / 答案朗读带过去
+  stopPlaybackOnLeave();
+  void navigateToScene("/pages/repair/index");
 }
 
 function dismissReportQa() {
@@ -674,6 +818,12 @@ onLoad(() => {
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
+});
+
+onHide(() => {
+  // 页面被别处盖住 / 切后台（点异常条目跳任务页、切宿主 tab、后台切换等）：
+  // 播报与答案朗读都停掉，别在看不见的页面上继续念；返回本页播报可从当前句继续。
+  stopPlaybackOnLeave();
 });
 
 onUnload(() => {
@@ -790,6 +940,34 @@ onBeforeUnmount(() => {
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
         @dock-height-change="setInputDockHeight"
+      />
+      <!-- 追问卡（首页同款弹层）：答案要求补充/确认时自动弹起，作答后按同一链路继续提问 -->
+      <AiSlotDrawer
+        :slots="reportQaSlots"
+        :visible="reportQaSlotVisible"
+        @close="closeReportQaSlot"
+        @submit="onReportQaSlotSubmit"
+      />
+      <!-- 指导追问卡（并行分支）：选一项即作为下一轮提问 -->
+      <AiGuideSuggestionSheet
+        v-model:visible="reportQaGuideSuggestionVisible"
+        :payload="reportQaGuideSuggestion"
+        :keyboard-height="keyboardHeight"
+        @submit="onReportQaQuerySubmit"
+      />
+      <!-- 指导步骤卡（多步确认 / 逐轮追问）：听播页没有核对卡，固定从第 1 步打开 -->
+      <AiGuideStepSheet
+        v-model:visible="reportQaGuideStepVisible"
+        :payload="reportQaGuideStep"
+        :step-index="reportQaGuideStepIndex"
+        :keyboard-height="keyboardHeight"
+        @submit="onReportQaQuerySubmit"
+      />
+      <!-- 跳转确认：进入维修助手 -->
+      <AiAssistantNavigationSheet
+        v-model:visible="reportQaNavigationVisible"
+        :payload="reportQaNavigation"
+        @confirm="onReportQaNavigationConfirm"
       />
     </view>
   </view>

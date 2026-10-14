@@ -4,6 +4,7 @@ import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
 import iconVoicePause from "@/assets/img/report-broadcast/pause-control.png";
 import iconVoicePlay from "@/assets/img/report-broadcast/play-control.png";
+import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 
 const props = defineProps<{
@@ -235,9 +236,8 @@ function onProgressTouchEnd() {
         class="report-broadcast-content__qa-scroll"
         scroll-y
       >
-        <text class="report-broadcast-content__qa-answer">
-          {{ qaAnswer }}
-        </text>
+        <!-- 与首页问答同一套富文本渲染：Markdown 的标题/列表/加粗等原样呈现 -->
+        <MarkdownRenderer class="report-broadcast-content__qa-answer" :content="qaAnswer" />
       </scroll-view>
       <view
         v-if="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
@@ -469,14 +469,10 @@ function onProgressTouchEnd() {
   padding-bottom: 48rpx;
   box-sizing: border-box;
 }
+/* 正文排版交给 MarkdownRenderer，这里只负责留白 */
 .report-broadcast-content__qa-answer {
   display: block;
   width: 100%;
-  color: #211b1b;
-  font-size: 36rpx;
-  font-weight: 500;
-  line-height: 50rpx;
-  white-space: normal;
 }
 .report-broadcast-content__top-fade {
   position: absolute;
