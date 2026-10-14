@@ -17,8 +17,6 @@ const MIN_KEYBOARD_HEIGHT_PX = 80;
 export function useChatViewport() {
   /** 输入栏实测高度；尚未量到时用一个接近胶囊+页脚的兜底值 */
   const FALLBACK_DOCK_HEIGHT_PX = 120;
-  /** 消息区在输入栏高度之外再留一点空隙，避免最后一条贴着输入栏 */
-  const MESSAGE_LIST_EXTRA_GAP_PX = 16;
 
   const windowHeight = ref(0);
   const inputDockHeight = ref(0);
@@ -67,10 +65,18 @@ export function useChatViewport() {
     (focusOwner.value === "voice" ? measuredKeyboardHeight.value : 0),
   );
 
+  /**
+   * 固定底部 UI 盖住消息列表的高度（输入栏 + 键盘抬升）。
+   *
+   * 这里只报「被盖住」的高度，不含最后一条与输入栏之间的空隙：
+   * 消息列表按这个值算「参考来源该藏到哪」，再自己加空隙当 padding。
+   * 混在一起的话，回复末尾会对齐到「遮挡 + 空隙」的位置，参考来源的头几个像素
+   * 正好露在空隙里，看着像被输入栏裁掉一行。
+   */
   const composerBottomInset = computed(() => {
     const lift = Math.max(0, Number(measuredKeyboardHeight.value) || 0);
     const dock = inputDockHeight.value || FALLBACK_DOCK_HEIGHT_PX;
-    return `${dock + MESSAGE_LIST_EXTRA_GAP_PX + lift}px`;
+    return `${dock + lift}px`;
   });
 
   const composerDockOffset = computed(() => {

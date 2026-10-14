@@ -91,7 +91,6 @@ function onGuideSuggestionOpen(payload) {
 }
 
 function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
-  console.log("[guide-step-select] ③ content-blocks", payload);
   emit("guide-check-step-select", payload);
 }
 

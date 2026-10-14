@@ -91,6 +91,9 @@ function onSourceTap(item: { fileType: string; url: string }) {
   flex-direction: column;
   gap: 10rpx;
   width: 100%;
+  /* 与回答正文之间留一段：滚到「回复末尾」时这段留白正好让正文最后一行
+     落在输入栏上方（参考来源整段被输入栏挡掉），不至于贴着输入栏 */
+  margin-top: 32rpx;
 }
 .guide-source-block__title {
   color: #999999;

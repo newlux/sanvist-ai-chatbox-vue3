@@ -297,7 +297,6 @@ function onGanttOpen(payload) {
 
 /** 点核对卡步骤条某一段：继续往上抛给消息列表 / 页面 */
 function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
-  console.log("[guide-step-select] ④ bubble", payload);
   emit("guide-check-step-select", payload);
 }
 
