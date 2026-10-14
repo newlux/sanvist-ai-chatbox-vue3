@@ -142,6 +142,8 @@ const insightLeaving = ref(false);
 const insightAnimated = ref(true);
 /** 播报播放态，由播放器上抛，用于收起态重播按钮的图标切换。 */
 const broadcastPlaying = ref(false);
+/** 播报内容加载中（准备中/字幕骨架屏）：期间隐藏底部消异常、回问问快捷导航。 */
+const broadcastPreparing = ref(false);
 /** 退场定时器句柄，卸载或让位给 QA 时必须清掉。 */
 let insightLeaveTimer: ReturnType<typeof setTimeout> | null = null;
 /** 洞察列表本次页面访问只加载一次，避免重播后再次收起时又闪骨架屏。 */
@@ -630,8 +632,9 @@ function replayInsightBroadcast() {
   }, INSIGHT_LEAVE_DURATION);
 }
 
-function onBroadcastPlaybackChange(payload: { playing: boolean }) {
+function onBroadcastPlaybackChange(payload: { playing: boolean; loading: boolean }) {
   broadcastPlaying.value = payload.playing;
+  broadcastPreparing.value = payload.loading;
 }
 
 // 继续播报：字幕区从问答态还原回播报文字，同时停掉答案朗读。
@@ -909,8 +912,13 @@ onBeforeUnmount(() => {
           @replay="replayInsightBroadcast"
         />
       </view>
-      <!-- 播报视图底部快捷导航：消异常 → 异常列表，回问问 → 回首页；洞察态隐藏避免盖住列表 -->
-      <view v-if="!insightVisible" class="podcast-page__quick-nav" :style="quickNavStyle">
+      <!-- 播报视图底部快捷导航：消异常 → 异常列表，回问问 → 回首页；洞察态隐藏避免盖住列表；
+           进页偏好加载中（骨架屏）与播报准备中（字幕骨架屏）也隐藏 -->
+      <view
+        v-if="!insightVisible && !preferenceLoading && !broadcastPreparing"
+        class="podcast-page__quick-nav"
+        :style="quickNavStyle"
+      >
         <view class="podcast-page__quick-nav-button" @tap="openInsightFromQuickNav">
           <text class="podcast-page__quick-nav-text">
             消异常
@@ -925,6 +933,7 @@ onBeforeUnmount(() => {
       <AiChatInput
         v-model="inputText"
         :attachment-disabled="true"
+        :compact-voice-listening="true"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"

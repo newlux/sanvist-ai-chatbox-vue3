@@ -694,6 +694,7 @@ onUnload(() => {
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
+        :compact-voice-listening="true"
         @send="sendTaskMessage"
         @stop="stopGenerating"
         @recognize-begin="beginAsrPlaceholder"

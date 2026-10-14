@@ -1,0 +1,17 @@
+<svg width="375" height="146" viewBox="0 0 375 146" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Ardot 11101:690 Rectangle 104（实为 VECTOR，375×146 @ (-1,683)）：面板粉色柔光。
+    形状为「顶部中央起尖、向两侧下滑」的五边形：
+      顶点 (185.5, 0) → 右下 (375, 33.5) → 右下角 (375, 146) → 左下角 (0, 146) → 左下 (0, 33.5) → 回到顶点
+    渐变按设计稿 gradientTransform matrix(0 146 -375 0 187.5 0) 还原为竖向：
+      x 恒为 187.5，y 从 0 到 146，即 #FFF1F1 → #FFFFFF(63.25%) → #FFFFFF
+  -->
+  <defs>
+    <linearGradient id="voicePanelGlow" x1="187.5" y1="0" x2="187.5" y2="146" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFF1F1"/>
+      <stop offset="0.6325" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#voicePanelGlow)" d="M185.5 0L375 33.5L375 146L0 146L0 33.5L185.5 0Z"/>
+</svg>
