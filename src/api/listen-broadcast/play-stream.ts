@@ -1,4 +1,5 @@
 import type { PlayListenBroadcastParams } from "./types";
+import { DEFAULT_REPORT_PLAYBACK_RATE } from "@/config/report-playback-rate";
 import { createSseSession } from "@/utils/ai-stream";
 import { getRequestBaseURL, getRequestHeaders } from "@/utils/request";
 
@@ -6,8 +7,11 @@ export interface ListenBroadcastStreamHandle {
   cancel: () => void;
 }
 
-/** 调用方未指定语音倍速时的兜底：正常语速 1.0×。 */
-const NORMAL_TTS_SPEECH_RATE = 1;
+/**
+ * 调用方未指定语音倍速时的兜底：与听播页默认倍速同一处口径（1.2×），
+ * 避免同一条链路上「页面显示 1.2x、下发给后端 1x」。
+ */
+const NORMAL_TTS_SPEECH_RATE: number = DEFAULT_REPORT_PLAYBACK_RATE;
 
 export function consumeListenBroadcastStream(
   params: PlayListenBroadcastParams,

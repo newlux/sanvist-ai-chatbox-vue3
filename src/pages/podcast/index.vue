@@ -174,7 +174,13 @@ const reportAdjustmentActions = useReportAdjustmentActions({
   },
 });
 const { sendMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
-  scene: "PODCAST",
+  /**
+   * 场景按当前所处的视图现取：
+   * - 从异常列表发起（汇报结束自动进入的洞察页 / 点「消异常」进入的列表）：必须走 PODCAST，
+   *   加急、取消加急、筛选列表这类语音动作由后端 PODCAST 分支下发协议体，否则只会得到一句普通回答；
+   * - 播报视图里的提问：沿用与首页问问一致的口径。
+   */
+  scene: () => (reportQaFromInsight.value ? "PODCAST" : "ASK"),
   getPodcastExceptions() {
     return hasShownInsight ? rawInsightItems.value : null;
   },
@@ -507,6 +513,15 @@ function clearInsightLeaveTimer() {
 }
 
 /**
+ * 点「消异常」进异常列表：先把播报停下来再切洞察层，
+ * 否则列表已经铺出来了，耳朵里还在念汇报。
+ */
+function openInsightFromQuickNav() {
+  pauseReportBroadcast();
+  showInsight();
+}
+
+/**
  * 播报播放结束或收到 open_insight 导航时，页内切换为洞察视图；仅首次加载列表。
  * animated 只在这两个入口传 true，异常处理回到列表时直接呈现，不做过渡。
  */
@@ -746,7 +761,7 @@ onBeforeUnmount(() => {
       </view>
       <!-- 播报视图底部快捷导航：消异常 → 异常列表，回问问 → 回首页；洞察态隐藏避免盖住列表 -->
       <view v-if="!insightVisible" class="podcast-page__quick-nav" :style="quickNavStyle">
-        <view class="podcast-page__quick-nav-button" @tap="showInsight()">
+        <view class="podcast-page__quick-nav-button" @tap="openInsightFromQuickNav">
           <text class="podcast-page__quick-nav-text">
             消异常
           </text>

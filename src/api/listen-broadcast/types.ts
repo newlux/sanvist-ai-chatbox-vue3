@@ -54,7 +54,7 @@ export interface PlayListenBroadcastParams {
   voice?: string;
   language?: string;
   bizDate?: string;
-  /** 语音（TTS 合成）倍速，int 类型（如 1.2）；调用方通常传当前播放倍速，缺省按正常倍速 1 处理。 */
+  /** 语音（TTS 合成）倍速，int 类型（如 1.2）；调用方通常传当前播放倍速，缺省按听播页默认倍速 1.2 处理。 */
   ttsSpeechRate?: number;
 }
 

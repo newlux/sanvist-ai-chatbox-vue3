@@ -466,6 +466,8 @@ export interface TextToSpeechResult {
 export interface RealtimeTtsParams {
   text: string;
   language?: string;
+  /** TTS 合成语速（int 类型，如 1.2）；不传时由接口层固定按默认语速下发。 */
+  ttsSpeechRate?: number;
 }
 
 /**
