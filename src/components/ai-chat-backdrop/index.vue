@@ -40,7 +40,7 @@ const backdropStyle = computed(() => (
 <style lang="scss" scoped>
 .chat-backdrop {
   position: absolute;
-  z-index: 0;
+  z-index: -1;
   left: 40rpx;
   width: calc(100% - 80rpx);
   opacity: 0.2;

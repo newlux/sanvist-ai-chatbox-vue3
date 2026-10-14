@@ -18,6 +18,14 @@ const logger = createLogger("chat");
 
 type ChatScene = "ASK" | "GUIDE" | "TASK" | "PODCAST";
 
+/**
+ * 页面场景 → 接口 `inputs.scene` 的取值。
+ *
+ * 任务协同的对话接口场景是 `test`（后端按这个值路由到任务协同应用），
+ * 应用内部仍沿用 TASK 这个场景标识：历史会话归属、听播分支等都按页面语义判断。
+ */
+const API_SCENE: Partial<Record<ChatScene, string>> = { TASK: "test" };
+
 function isAbortError(error: unknown) {
   if (!error) return false;
   const err = error as { name?: string; message?: string };
@@ -194,7 +202,8 @@ export function useChatSend(scope?: string, handlers?: {
             })(),
           }
         : {
-            scene,
+            // 任务协同这个场景发给后端的是 `test`（见 API_SCENE）
+            scene: API_SCENE[scene] ?? scene,
             ...(handlers?.getExtraInputs?.() ?? {}),
             ...extraInputs,
           },

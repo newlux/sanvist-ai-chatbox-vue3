@@ -1,27 +1,26 @@
 <script setup lang="ts">
-import type { PropType } from "vue";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
 import { computed, nextTick, ref } from "vue";
-import { useI18n } from "vue-i18n";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOff from "@/assets/img/icon-action-radio-off.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconShare from "@/assets/img/icon-action-share.svg";
-import iconArrowNext from "@/assets/img/icon-arrow-red.svg";
 import iconBadFilled from "@/assets/img/icon-bad-fill.svg";
 import iconBad from "@/assets/img/icon-bad.svg";
 import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
 import iconGood from "@/assets/img/icon-good.svg";
-import iconRepair from "@/assets/img/icon-repair-dark.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { toInlineImageUrl } from "@/utils/image-preview";
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import AiContentBlocks from "./AiContentBlocks.vue";
+import { useI18n } from "vue-i18n";
 
 defineOptions({ name: "AiBubbleV2" });
+
+const { t } = useI18n();
 
 const props = defineProps({
   role: { type: String, default: "ai" },
@@ -50,22 +49,11 @@ const props = defineProps({
   noAnswerGroup: { type: Boolean, default: false },
   /** 语音已松手、ASR 尚未返回：展示「识别中...」占位 */
   asrPending: { type: Boolean, default: false },
-  /** 维修助手回流的 QA 卡片标题。 */
-  assistantCallbackTitle: { type: String, default: "" },
-  /** 回流卡片副标题：故障诊断 / 快问快答。 */
-  assistantCallbackStatus: { type: String, default: "" },
-  assistantCallbackDetails: {
-    type: Array as PropType<Array<{ label: string; value: string }>>,
-    default: () => [],
-  },
-  /** 维修助手侧会话 ID，有值时摘要卡可跳转到详情。 */
-  assistantCallbackConversationId: { type: String, default: "" },
 });
 
 const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
-  "assistant-navigation-open",
   "guide-step-open",
   "guide-suggestion-open",
   "tts-click",
@@ -76,9 +64,8 @@ const emit = defineEmits([
   "longpress-copy",
   "assistant-callback-open",
   "guide-check-step-select",
+  "gantt-open",
 ]);
-
-const { t } = useI18n();
 
 /** 工作流结束事件的 elapsed_time 已在流层换算为毫秒；展示时统一转换为秒。 */
 const durationSeconds = computed(() => {
@@ -86,11 +73,6 @@ const durationSeconds = computed(() => {
   if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
   return (milliseconds / 1000).toFixed(2).replace(/\.00$/, "");
 });
-
-function onAssistantCallbackOpen() {
-  const conversationId = props.assistantCallbackConversationId.trim();
-  if (conversationId) emit("assistant-callback-open", conversationId);
-}
 
 async function copyText(text) {
   const value = String(text || "").trim();
@@ -220,10 +202,12 @@ const visibleBlocks = computed(() =>
     : props.blocks,
 );
 /**
- * 核对/步骤卡（guide-check）是独立白卡，不套在回答气泡里：
+ * 独立成卡的 block 类型：不套在回答气泡里。
+ * - guide-check：核对/步骤卡是独立白卡；
+ * - gantt：调度视图入口卡（4708:743）独立于回答框，跟在气泡下方、与气泡同宽。
  * 气泡只渲染正文/图片等，这些 block 由消息列表在气泡外单独成卡。
  */
-const STANDALONE_BLOCK_TYPES = ["guide-check"];
+const STANDALONE_BLOCK_TYPES = ["guide-check", "gantt"];
 const contentBlocks = computed(() => {
   const blocks = visibleBlocks.value
     .filter(block => block && block.type !== "suggestion" && !STANDALONE_BLOCK_TYPES.includes(block.type));
@@ -235,13 +219,8 @@ const suggestionBlocks = computed(() =>
   visibleBlocks.value.filter(block => block && block.type === "suggestion"),
 );
 
-/** 只有独立卡片、没有正文和过程状态时，气泡不再画白卡外壳（操作栏仍保留），避免留一个空框。 */
-const isBareBody = computed(() =>
-  !isUser.value
-  && !contentBlocks.value.length
-  && !props.content
-  && !props.processStatus,
-);
+/** 只有独立卡片、没有正文时，气泡不再画白卡外壳（操作栏仍保留），避免留一个空框 */
+const isBareBody = computed(() => !isUser.value && !contentBlocks.value.length && !props.content);
 
 /**
  * 作业指导的步骤卡回答：思考结束、步骤卡出现后气泡正文（含空的答复与操作栏）不再展示。
@@ -251,13 +230,22 @@ const hasGuideStepCard = computed(() => visibleBlocks.value.some(block => block?
 const hideBody = computed(() => !isUser.value && !props.loading && hasGuideStepCard.value);
 
 /**
+ * 消息里带独立卡片（核对卡 / 调度视图入口卡）时，气泡正文为空属于正常情况，
+ * 不能再补「系统繁忙」兜底提示——内容在气泡外那张卡上。
+ */
+const hasStandaloneCard = computed(() =>
+  visibleBlocks.value.some(block => block && STANDALONE_BLOCK_TYPES.includes(block.type)),
+);
+
+/**
  * 兜底提示：回答已经结束，但回复区里既没有正文、也没有任何内容块
  * （例如接口只回了过程进度，或只回了语音播报这类不落正文的场景）时，
  * 在操作栏上方补一句「系统繁忙，请稍后重试」，避免只留一个空回复区。
- * 用户主动停止的那一轮不算（那种情况显示的是「已停止」等待条）。
+ * 用户主动停止的那一轮不算（那种情况显示的是「已停止」等待条）；
+ * 带独立卡片（核对卡 / 调度视图入口卡）的那轮也不算。
  */
 const showBusyFallback = computed(
-  () => !props.loading && !props.interrupted && !hideBody.value && isBareBody.value,
+  () => !props.loading && !props.interrupted && !hideBody.value && !hasStandaloneCard.value && isBareBody.value,
 );
 
 /**
@@ -279,18 +267,8 @@ const processStatusText = computed(() => {
 });
 
 const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusText.value));
-const showAssistantCallbackResult = computed(() => Boolean(props.assistantCallbackTitle) && !props.loading && !props.interrupted);
-/** 回流卡片副标题：故障诊断与快问快答文案不同，缺省沿用故障诊断 */
-const assistantCallbackStatusText = computed(() =>
-  showAssistantCallbackResult.value
-    ? props.assistantCallbackStatus || "诊断报告生成已完成"
-    : processStatusText.value,
-);
-const processSubtitleText = computed(() =>
-  props.processSubtitle?.trim()
-  || (props.loading && showProcessStatus.value && !props.assistantCallbackTitle ? "模型正在思考，请稍候" : ""),
-);
-const showProcessSubtitle = computed(() => Boolean(processSubtitleText.value));
+const hasProcessContent = computed(() => Boolean(contentBlocks.value.length || props.content));
+const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(props.processSubtitle?.trim()));
 
 function onSelectTap() {
   if (props.selectMode && !props.disabled) emit("select-toggle");
@@ -304,16 +282,17 @@ function onAskSlotOpen(payload) {
   emit("ask-slot-open", payload);
 }
 
-function onAssistantNavigationOpen(payload) {
-  emit("assistant-navigation-open", payload);
-}
-
 function onGuideStepOpen(payload) {
   emit("guide-step-open", payload);
 }
 
 function onGuideSuggestionOpen(payload) {
   emit("guide-suggestion-open", payload);
+}
+
+/** 点调度视图入口卡：继续往上抛，由页面存数据并跳横屏调度视图 */
+function onGanttOpen(payload) {
+  emit("gantt-open", payload);
 }
 
 /** 点核对卡步骤条某一段：继续往上抛给消息列表 / 页面 */
@@ -433,11 +412,7 @@ function onNegativeFeedback() {
     <view
       v-if="(!isUser || props.content) && !hideBody"
       class="ai-bubble-v2__body"
-      :class="{
-        'ai-bubble-v2__body--bare': isBareBody,
-        'ai-bubble-v2__body--process': showProcessStatus && !props.assistantCallbackTitle,
-        'ai-bubble-v2__body--assistant-callback': Boolean(props.assistantCallbackTitle),
-      }"
+      :class="{ 'ai-bubble-v2__body--bare': isBareBody }"
     >
       <template v-if="isUser">
         <view v-if="props.asrPending" class="ai-bubble-v2__asr" aria-label="识别中">
@@ -467,49 +442,12 @@ function onNegativeFeedback() {
 
       <template v-else>
         <view
-          v-if="props.assistantCallbackTitle"
-          class="ai-bubble-v2__assistant-callback-card"
-          :class="{ 'ai-bubble-v2__assistant-callback-card--clickable': props.assistantCallbackConversationId }"
-          @tap="onAssistantCallbackOpen"
-        >
-          <view class="ai-bubble-v2__assistant-callback-heading">
-            <image class="ai-bubble-v2__assistant-callback-icon" :src="iconRepair" mode="aspectFit" />
-            <view class="ai-bubble-v2__assistant-callback-copy">
-              <text class="ai-bubble-v2__assistant-callback-title">
-                {{ props.assistantCallbackTitle }}
-              </text>
-              <text class="ai-bubble-v2__assistant-callback-status">
-                {{ assistantCallbackStatusText }}
-              </text>
-            </view>
-            <image
-              v-if="props.assistantCallbackConversationId"
-              class="ai-bubble-v2__assistant-callback-arrow"
-              :src="iconArrowNext"
-              mode="aspectFit"
-            />
-          </view>
-          <view v-if="showAssistantCallbackResult && props.assistantCallbackDetails.length" class="ai-bubble-v2__assistant-callback-details">
-            <view v-for="(item, index) in props.assistantCallbackDetails" :key="`${item.label}-${index}`" class="ai-bubble-v2__assistant-callback-detail">
-              <text class="ai-bubble-v2__assistant-callback-index">
-                {{ index + 1 }}
-              </text>
-              <text class="ai-bubble-v2__assistant-callback-label">
-                {{ item.label }}
-              </text>
-              <text class="ai-bubble-v2__assistant-callback-value">
-                {{ item.value }}
-              </text>
-            </view>
-          </view>
-        </view>
-        <view
-          v-if="showProcessStatus && !props.assistantCallbackTitle"
+          v-if="showProcessStatus"
           class="ai-bubble-v2__process-status"
           :class="[
             `ai-bubble-v2__process-status--${props.processStatus?.phase}`,
             {
-              'ai-bubble-v2__process-status--with-content': !showProcessSubtitle,
+              'ai-bubble-v2__process-status--with-content': hasProcessContent && !showProcessSubtitle,
               'ai-bubble-v2__process-status--with-subtitle': showProcessSubtitle,
             },
           ]"
@@ -524,9 +462,13 @@ function onNegativeFeedback() {
             耗时 {{ durationSeconds }} 秒
           </text>
         </view>
-        <view v-if="showProcessSubtitle" class="ai-bubble-v2__process-subtitle">
-          <text :key="processSubtitleText" class="ai-bubble-v2__process-subtitle-text">
-            {{ processSubtitleText }}
+        <view
+          v-if="showProcessSubtitle"
+          class="ai-bubble-v2__process-subtitle"
+          :class="{ 'ai-bubble-v2__process-subtitle--with-content': hasProcessContent }"
+        >
+          <text :key="props.processSubtitle" class="ai-bubble-v2__process-subtitle-text">
+            {{ props.processSubtitle }}
           </text>
         </view>
         <view
@@ -548,20 +490,19 @@ function onNegativeFeedback() {
           </text>
         </view>
         <AiContentBlocks
-          v-if="!props.assistantCallbackTitle"
           :blocks="contentBlocks"
           :force-thinking-expanded="props.forceThinkingExpanded"
           :no-answer-group="props.noAnswerGroup"
           :loading="props.loading"
           @suggestion-tap="onSuggestionTap"
           @ask-slot-open="onAskSlotOpen"
-          @assistant-navigation-open="onAssistantNavigationOpen"
           @guide-step-open="onGuideStepOpen"
           @guide-suggestion-open="onGuideSuggestionOpen"
           @guide-check-step-select="onGuideCheckStepSelect"
+          @gantt-open="onGanttOpen"
         />
         <!-- 空回答兜底：回复区没有内容时给一句提示，位置就在操作栏上方 -->
-        <view v-if="showBusyFallback && !props.assistantCallbackTitle" class="ai-bubble-v2__busy-hint">
+        <view v-if="showBusyFallback" class="ai-bubble-v2__busy-hint">
           <text class="ai-bubble-v2__busy-hint-text">
             {{ t("ai-busy-retry-later") }}
           </text>
@@ -689,14 +630,6 @@ function onNegativeFeedback() {
   background: #ffffff;
   box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
 }
-/* 维修助手回流卡片本身承担边框和底色，不使用通用 AI 气泡外壳。 */
-.ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--assistant-callback {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
 /* 没有正文只有独立卡片：不画白卡外壳，只留操作栏 */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--bare {
   padding: 0;
@@ -704,14 +637,6 @@ function onNegativeFeedback() {
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-}
-/* 流式过程尚未产生正文时，状态与说明仍使用标准 AI 回复卡片。 */
-.ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--process {
-  padding: 40rpx;
-  border: 1rpx solid #eeeeee;
-  border-radius: 32rpx;
-  background: #ffffff;
-  box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
 }
 .ai-bubble-v2--no-answer-group:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
   padding: 0;
@@ -879,107 +804,6 @@ function onNegativeFeedback() {
   line-height: 30rpx;
 }
 
-.ai-bubble-v2__assistant-callback-card {
-  display: flex;
-  box-sizing: border-box;
-  width: 100%;
-  padding: 36rpx;
-  flex-direction: column;
-  border: 1px solid #efefef;
-  border-radius: 32rpx;
-  background: #ffffff;
-}
-
-.ai-bubble-v2__assistant-callback-heading {
-  display: flex;
-  width: 100%;
-  align-items: flex-start;
-}
-
-.ai-bubble-v2__assistant-callback-icon {
-  flex: 0 0 auto;
-  width: 32rpx;
-  height: 32rpx;
-  margin: 1rpx 8rpx 0 0;
-}
-
-.ai-bubble-v2__assistant-callback-copy {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.ai-bubble-v2__assistant-callback-title {
-  overflow: hidden;
-  color: #1a1a1a;
-  font-family: "PingFang SC";
-  font-size: 28rpx;
-  font-weight: 500;
-  line-height: 34rpx;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ai-bubble-v2__assistant-callback-status {
-  margin-top: 12rpx;
-  overflow: hidden;
-  color: #999999;
-  font-size: 22rpx;
-  line-height: 26rpx;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ai-bubble-v2__assistant-callback-arrow {
-  flex: 0 0 auto;
-  width: 40rpx;
-  height: 40rpx;
-  margin: 14rpx 6rpx 0 8rpx;
-}
-
-.ai-bubble-v2__assistant-callback-details {
-  display: flex;
-  width: 100%;
-  margin-top: 32rpx;
-  flex-direction: column;
-  gap: 20rpx;
-}
-
-.ai-bubble-v2__assistant-callback-detail {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  align-items: flex-start;
-}
-
-.ai-bubble-v2__assistant-callback-index {
-  flex: 0 0 auto;
-  width: 26rpx;
-  color: #999999;
-  font-size: 24rpx;
-  line-height: 30rpx;
-}
-
-.ai-bubble-v2__assistant-callback-label {
-  flex: 0 0 auto;
-  color: #999999;
-  font-size: 24rpx;
-  line-height: 30rpx;
-}
-
-.ai-bubble-v2__assistant-callback-value {
-  flex: 1;
-  min-width: 0;
-  margin-left: 24rpx;
-  color: #1a1a1a;
-  font-size: 24rpx;
-  line-height: 30rpx;
-  text-align: right;
-  word-break: break-all;
-  white-space: normal;
-}
-
 .ai-bubble-v2__waiting {
   display: flex;
   align-items: center;
@@ -1035,6 +859,9 @@ function onNegativeFeedback() {
   color: #999999;
   font-size: 24rpx;
   line-height: 36rpx;
+}
+.ai-bubble-v2__process-subtitle--with-content {
+  margin-bottom: 32rpx;
 }
 .ai-bubble-v2__process-subtitle-text {
   display: block;
