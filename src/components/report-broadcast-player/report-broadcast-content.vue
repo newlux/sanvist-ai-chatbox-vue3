@@ -17,6 +17,12 @@ const props = defineProps<{
   likeLoading: boolean;
   /** 归一化播报进度（0~1），由播放器周期估算。 */
   progress: number;
+  /** 按住说话后的识别中状态：与回答结果一起占用字幕区，播报文字隐藏。 */
+  qaLoading?: boolean;
+  /** 问答返回的结果文本，渲染在字幕区内。 */
+  qaAnswer?: string;
+  /** 按住说话录音中：先隐藏播报文字，等识别态接管字幕区。 */
+  voiceRecording?: boolean;
 }>();
 
 const emit = defineEmits<{ "play-pause": []; like: []; seek: [seq: number] }>();
@@ -27,6 +33,8 @@ const rightWaveBars = [2, 2, 18, 10, 18, 4, 8, 8, 10, 2, 4, 8, 22, 6, 2, 1, 1];
 const showTranscriptSkeleton = computed(
   () => props.loading && props.transcriptSegments.length === 0,
 );
+/** 按住说话的识别/问答态：字幕区让位给「正在理解」与回答结果。 */
+const qaVisible = computed(() => Boolean(props.qaLoading || props.qaAnswer));
 const transcriptItems = computed(() => {
   const items = props.transcriptSegments.map(segment => ({
     key: `segment-${segment.seq}`,
@@ -195,7 +203,7 @@ function onProgressTouchEnd() {
         </view>
       </view>
       <scroll-view
-        v-show="!showTranscriptSkeleton"
+        v-show="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
         class="report-broadcast-content__transcript-content"
         scroll-y
         :scroll-top="transcriptScrollTop"
@@ -213,9 +221,36 @@ function onProgressTouchEnd() {
           </text>
         </view>
       </scroll-view>
-      <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__top-fade" />
-      <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__bottom-fade" />
-      <view v-if="!showTranscriptSkeleton" class="report-broadcast-content__feedback-mask">
+      <!-- 按住说话：识别中/回答结果直接占用字幕区，头像与播放控制保持不动 -->
+      <view v-if="!showTranscriptSkeleton && qaLoading" class="report-broadcast-content__qa-loading">
+        <text class="report-broadcast-content__qa-title">
+          正在理解你的内容
+        </text>
+        <text class="report-broadcast-content__qa-subtitle">
+          我会结合当前听播内容直接回答
+        </text>
+      </view>
+      <scroll-view
+        v-else-if="!showTranscriptSkeleton && qaAnswer"
+        class="report-broadcast-content__qa-scroll"
+        scroll-y
+      >
+        <text class="report-broadcast-content__qa-answer">
+          {{ qaAnswer }}
+        </text>
+      </scroll-view>
+      <view
+        v-if="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
+        class="report-broadcast-content__top-fade"
+      />
+      <view
+        v-if="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
+        class="report-broadcast-content__bottom-fade"
+      />
+      <view
+        v-if="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
+        class="report-broadcast-content__feedback-mask"
+      >
         <view
           class="report-broadcast-content__feedback-button"
           :class="{
@@ -407,6 +442,41 @@ function onProgressTouchEnd() {
   font-size: 36rpx;
   font-weight: 700;
   line-height: 50rpx;
+}
+/* —— 按住说话的识别/问答态：占用字幕区 —— */
+.report-broadcast-content__qa-loading {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+}
+.report-broadcast-content__qa-title {
+  color: #1a1a1a;
+  font-size: 36rpx;
+  font-weight: 400;
+}
+.report-broadcast-content__qa-subtitle {
+  color: #999;
+  font-size: 26rpx;
+  font-weight: 400;
+}
+.report-broadcast-content__qa-scroll {
+  width: 100%;
+  height: 100%;
+  padding-bottom: 48rpx;
+  box-sizing: border-box;
+}
+.report-broadcast-content__qa-answer {
+  display: block;
+  width: 100%;
+  color: #211b1b;
+  font-size: 36rpx;
+  font-weight: 500;
+  line-height: 50rpx;
+  white-space: normal;
 }
 .report-broadcast-content__top-fade {
   position: absolute;
