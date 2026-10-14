@@ -60,6 +60,7 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-5010520260709002",
     "@dcloudio/uni-mp-xhs": "3.0.0-5010520260709002",
     "@dcloudio/uni-quickapp-webview": "3.0.0-5010520260709002",
+    "dhtmlx-gantt": "^10.0.3",
     "echarts": "^5.4.3",
     "howler": "2.2.4",
     "html2canvas": "^1.4.1",
