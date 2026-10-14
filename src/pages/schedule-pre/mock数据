@@ -1,0 +1,262 @@
+const repRows: ScheduleRow[] = [
+  // ── 供料：1号搅拌站 ──
+  {
+    id: "supply-old",
+    tag: "旧",
+    category: "供料",
+    names: ["1号搅拌站", "供料线安排"],
+    bars: [
+      // 强调条（深色实线描边，稿子 7229:339）
+      { id: "s1", title: "1号基站 C20 80立方", timeText: "08:00-13:00", startMin: timeToMin("08:00"), endMin: timeToMin("13:00"), state: "planned", highlight: true, linkKey: "supply-1" },
+      // 已取消：灰字 + 深色实线描边（稿子 7229:302）
+      { id: "s2", title: "万达基地 C20 90立方", timeText: "13:30-19:00", startMin: timeToMin("13:30"), endMin: timeToMin("19:00"), state: "canceled", highlight: true, linkKey: "supply-2" },
+    ],
+  },
+  {
+    id: "supply-new",
+    tag: "新",
+    category: "供料",
+    names: ["1号搅拌站", "供料线安排"],
+    bars: [
+      { id: "s3", title: "1号基站 C20 80立方", timeText: "09:00-13:00", startMin: timeToMin("09:00"), endMin: timeToMin("13:00"), state: "new", linkKey: "supply-1" },
+      // 与旧排第 2 条同一趟任务（旧排里被取消，新排重新安排到 13:30-18:30）
+      { id: "s4", title: "万达基地 C20 90立方", timeText: "13:30-18:30", startMin: timeToMin("13:30"), endMin: timeToMin("18:30"), state: "new", linkKey: "supply-2" },
+    ],
+    separator: true,
+  },
+  // ── 13号车（白班）──
+  {
+    id: "t13-day-old",
+    tag: "旧",
+    category: "运输",
+    names: ["13号车|郑文斌", "湘A-P0078|白班"],
+    bars: [
+      { id: "t1", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("09:40"), endMin: timeToMin("11:10"), state: "planned", linkKey: "t13-day-1" },
+      { id: "t2", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("11:20"), endMin: timeToMin("12:50"), state: "planned", linkKey: "t13-day-2" },
+      { id: "t3", title: "万达基地 C20 …", timeText: "", startMin: timeToMin("13:00"), endMin: timeToMin("14:40"), state: "planned", linkKey: "t13-day-3" },
+      { id: "t4", title: "万达基地 C20 20立方", timeText: "15:0…", startMin: timeToMin("15:00"), endMin: timeToMin("19:10"), state: "planned", linkKey: "t13-day-4" },
+    ],
+  },
+  {
+    id: "t13-day-new",
+    tag: "新",
+    category: "运输",
+    names: ["13号车|郑文斌", "湘A-P0078|白班"],
+    bars: [
+      { id: "t5", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("10:10"), endMin: timeToMin("11:40"), state: "new", linkKey: "t13-day-1" },
+      { id: "t6", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("11:50"), endMin: timeToMin("13:20"), state: "new", linkKey: "t13-day-2" },
+      { id: "t7", title: "万达基地 C20 …", timeText: "", startMin: timeToMin("13:30"), endMin: timeToMin("15:00"), state: "new", linkKey: "t13-day-3" },
+      { id: "t8", title: "万达基地 C20 20立方", timeText: "15:0…", startMin: timeToMin("15:30"), endMin: timeToMin("19:40"), state: "new", linkKey: "t13-day-4" },
+    ],
+    separator: true,
+  },
+  // ── 13号车（晚班）──
+  {
+    id: "t13-night-old",
+    tag: "旧",
+    category: "运输",
+    names: ["13号车|肖鹏", "湘A-P0078|晚班"],
+    bars: [
+      { id: "t9", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("09:40"), endMin: timeToMin("11:10"), state: "planned", linkKey: "t13-night-1" },
+      { id: "t10", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("11:20"), endMin: timeToMin("13:20"), state: "planned", linkKey: "t13-night-2" },
+      { id: "t11", title: "万达基地 C20 20立方", timeText: "13:3…", startMin: timeToMin("13:30"), endMin: timeToMin("18:00"), state: "planned", linkKey: "t13-night-3" },
+    ],
+  },
+  {
+    id: "t13-night-new",
+    tag: "新",
+    category: "运输",
+    names: ["13号车|肖鹏", "湘A-P0078|晚班"],
+    bars: [
+      { id: "t12", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("10:10"), endMin: timeToMin("11:40"), state: "new", linkKey: "t13-night-1" },
+      { id: "t13", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("11:50"), endMin: timeToMin("13:40"), state: "new", linkKey: "t13-night-2" },
+      { id: "t14", title: "万达基地 C20 20立方", timeText: "14:0…", startMin: timeToMin("14:00"), endMin: timeToMin("18:30"), state: "new", linkKey: "t13-night-3" },
+    ],
+    separator: true,
+  },
+  // ── 12号车 ──
+  {
+    id: "t12-old",
+    tag: "旧",
+    category: "运输",
+    names: ["12号车|何志刚", "湘A-R6557|白班"],
+    bars: [
+      { id: "w1", title: "万达基地 C20 12立方", timeText: "09:40-12:10", startMin: timeToMin("09:40"), endMin: timeToMin("12:10"), state: "planned", linkKey: "t12-1" },
+      { id: "w2", title: "万达基地 C20 …", timeText: "12:50-15:20", startMin: timeToMin("12:50"), endMin: timeToMin("15:20"), state: "planned", linkKey: "t12-2" },
+      { id: "w3", title: "万达基地 C20 20立方", timeText: "15:40-18:10", startMin: timeToMin("15:40"), endMin: timeToMin("18:10"), state: "planned", linkKey: "t12-3" },
+    ],
+  },
+  {
+    id: "t12-new",
+    tag: "新",
+    category: "运输",
+    names: ["12号车|何志刚", "湘A-R6557|白班"],
+    bars: [
+      { id: "w4", title: "万达基地 C20 12立方", timeText: "08:30-11:00", startMin: timeToMin("08:30"), endMin: timeToMin("11:00"), state: "new", linkKey: "t12-1" },
+      { id: "w5", title: "万达基地 C20 …", timeText: "11:30-14:00", startMin: timeToMin("11:30"), endMin: timeToMin("14:00"), state: "new", linkKey: "t12-2" },
+      { id: "w6", title: "万达基地 C20 20立方", timeText: "14:30-17:30", startMin: timeToMin("14:30"), endMin: timeToMin("17:30"), state: "new", linkKey: "t12-3" },
+    ],
+    separator: true,
+  },
+  // ── 10号车 ──
+  {
+    id: "t10-old",
+    tag: "旧",
+    category: "运输",
+    names: ["10号车|黄立新", "湘A-TY678|白班"],
+    bars: [
+      { id: "x1", title: "万达基地 C20 12立方", timeText: "06:30-10:30", startMin: timeToMin("06:30"), endMin: timeToMin("10:30"), state: "planned", linkKey: "t10-1" },
+      { id: "x2", title: "万达基地 C20 20立方", timeText: "15:00-18:00", startMin: timeToMin("15:00"), endMin: timeToMin("18:00"), state: "planned", linkKey: "t10-2" },
+    ],
+  },
+  {
+    id: "t10-new",
+    tag: "新",
+    category: "运输",
+    names: ["10号车|黄立新", "湘A-TY678|白班"],
+    bars: [
+      { id: "x3", title: "万达基地 C20 12立方", timeText: "07:00-11:00", startMin: timeToMin("07:00"), endMin: timeToMin("11:00"), state: "new", linkKey: "t10-1" },
+      { id: "x4", title: "万达基地 C20 20立方", timeText: "15:30-18:30", startMin: timeToMin("15:30"), endMin: timeToMin("18:30"), state: "new", linkKey: "t10-2" },
+    ],
+    separator: true,
+  },
+  // ── 粤A-5667 ──
+  {
+    id: "ya5667-old",
+    tag: "旧",
+    category: "运输",
+    names: ["粤A-5667|何富有"],
+    bars: [
+      // 强调条：白底 + 深色实线描边（稿子 7229:350）
+      { id: "v1", title: "粤A-5667|何富有运输任务", timeText: "05:40", startMin: timeToMin("05:40"), endMin: timeToMin("13:00"), state: "planned", highlight: true, linkKey: "ya5667-1" },
+    ],
+  },
+  {
+    id: "ya5667-new",
+    tag: "新",
+    category: "运输",
+    names: ["粤A-5667|何富有"],
+    bars: [
+      { id: "v2", title: "粤A-5667|何富有运输任务", timeText: "06:00", startMin: timeToMin("06:00"), endMin: timeToMin("14:00"), state: "new", linkKey: "ya5667-1" },
+    ],
+    separator: true,
+  },
+  // ── 泵车PA-12 ──
+  {
+    id: "pump-old",
+    tag: "旧",
+    category: "泵车",
+    names: ["泵车PA-12|赵德海"],
+    bars: [
+      { id: "v3", title: "泵车PA-12|赵德海", timeText: "完成", startMin: timeToMin("08:00"), endMin: timeToMin("15:00"), state: "planned", linkKey: "pump-1" },
+    ],
+  },
+  {
+    id: "pump-new",
+    tag: "新",
+    category: "泵车",
+    names: ["泵车PA-12|赵德海"],
+    bars: [
+      { id: "v4", title: "泵车PA-12|赵德海", timeText: "完成", startMin: timeToMin("08:30"), endMin: timeToMin("15:30"), state: "new", linkKey: "pump-1" },
+    ],
+  },
+];
+
+
+
+
+
+const preRows: ScheduleRow[] = [
+  {
+    id: "pre-supply",
+    category: "供料",
+    names: ["1号搅拌站", "供料线安排"],
+    bars: [
+      { id: "p1", title: "万达基地 C20 80立方", timeText: "08:00-13:00", startMin: timeToMin("08:00"), endMin: timeToMin("13:00"), state: "pre" },
+      { id: "p2", title: "1号搅拌站 C20 90立方", timeText: "13:30-19:00", startMin: timeToMin("13:30"), endMin: timeToMin("19:00"), state: "pre" },
+    ],
+  },
+  {
+    id: "pre-pump",
+    category: "泵车",
+    names: ["47米臂架泵", "湘A-P0078|李海"],
+    bars: [
+      { id: "p3", title: "1号基站 C20 80立方", timeText: "08:00-13:00", startMin: timeToMin("08:00"), endMin: timeToMin("13:00"), state: "pre" },
+      { id: "p4", title: "万达基地 C20 20立方", timeText: "13:30-18:00", startMin: timeToMin("13:30"), endMin: timeToMin("18:00"), state: "pre" },
+    ],
+  },
+  {
+    id: "pre-t13-day",
+    category: "运输",
+    names: ["13号车|郑文斌", "湘A-P0078|白班"],
+    bars: [
+      // 稿子里这条是红描边的强调条（6464:358）
+      { id: "p5", title: "万达基地 C20 12立方", timeText: "08:30-11:00", startMin: timeToMin("08:30"), endMin: timeToMin("11:00"), state: "pre", highlight: true },
+      { id: "p6", title: "万达基地 C20 …", timeText: "13:00-14:40", startMin: timeToMin("13:00"), endMin: timeToMin("14:40"), state: "pre" },
+      { id: "p7", title: "万达基地 C20 20立方", timeText: "15:00-18:00", startMin: timeToMin("15:00"), endMin: timeToMin("18:00"), state: "pre" },
+    ],
+  },
+  {
+    id: "pre-t13-night",
+    category: "运输",
+    names: ["13号车|肖鹏", "湘A-P0078|晚班"],
+    bars: [
+      { id: "p8", title: "万达基地 C20 12立方", timeText: "08:30-11:00", startMin: timeToMin("08:30"), endMin: timeToMin("11:00"), state: "pre" },
+      { id: "p9", title: "万达基地 C20 …", timeText: "13:30-16:00", startMin: timeToMin("13:30"), endMin: timeToMin("16:00"), state: "pre" },
+      { id: "p10", title: "万达基地 C20 20立方", timeText: "16:30-19:30", startMin: timeToMin("16:30"), endMin: timeToMin("19:30"), state: "pre" },
+    ],
+  },
+  {
+    id: "pre-t12",
+    category: "运输",
+    names: ["12号车|何志刚", "湘A-R6557|白班"],
+    bars: [
+      // 这条用于演示「逾期未开始」的详情（稿子样本 4）：计划开始时间已过但未收到开始记录
+      { id: "p11", title: "万达基地 C20 12立方", timeText: "09:40-12:10", startMin: timeToMin("09:40"), endMin: timeToMin("12:10"), state: "pre", noStartRecord: true },
+      { id: "p12", title: "万达基地 C20 …", timeText: "12:50-15:20", startMin: timeToMin("12:50"), endMin: timeToMin("15:20"), state: "pre" },
+      { id: "p13", title: "万达基地 C20 20立方", timeText: "15:40-18:10", startMin: timeToMin("15:40"), endMin: timeToMin("18:10"), state: "pre" },
+    ],
+  },
+  {
+    id: "pre-t10",
+    category: "运输",
+    names: ["10号车|黄立新", "湘A-TY678|白班"],
+    bars: [
+      { id: "p14", title: "万达基地 C20 12立方", timeText: "06:30-10:30", startMin: timeToMin("06:30"), endMin: timeToMin("10:30"), state: "pre" },
+      { id: "p15", title: "万达基地 C20 20立方", timeText: "15:00-18:00", startMin: timeToMin("15:00"), endMin: timeToMin("18:00"), state: "pre" },
+    ],
+  },
+];
+
+
+
+TaskDetailPayload = {
+  driverName: "邓文斌",
+  dateText: "2026-09-16  今天",
+  vehicleText: "13号车（湘A65578）白班",
+  groups: [
+    {
+      route: "从1 号站→A3 基地",
+      items: [
+        { start: "08:00", end: "08:30", name: "C30混凝土12方", status: "done" },
+        { start: "08:30", end: "09:30", name: "C30混凝土12方", status: "done" },
+        { start: "09:30", end: "10:30", name: "C30混凝土20方", status: "running" },
+      ],
+    },
+    {
+      route: "从2 号站→万达广场基地",
+      items: [
+        { start: "08:00", end: "08:30", name: "C30混凝土12方", status: "canceled" },
+        { start: "08:30", end: "09:30", name: "C30混凝土12方", status: "pending" },
+      ],
+    },
+    {
+      route: "从1 号站→A3 基地",
+      items: [
+        { start: "08:00", end: "08:30", name: "C30混凝土12方", status: "pending" },
+        { start: "08:30", end: "09:30", name: "C30混凝土12方", status: "pending" },
+      ],
+    },
+  ],
+  note: "1631完成盼盼路运输并回站后自班结束。\n后续夜班任务由肖鹏接车执行。",
+};

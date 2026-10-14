@@ -4,8 +4,11 @@ import type {
   MessageEndEvent,
 } from "@/api/chat/types";
 
-export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "assistant-navigation" | "guide-step" | "guide-suggestion"
-  | "guide-check" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error";
+export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-suggestion"
+  | "guide-check" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error"
+  // assistant-navigation 解析层一直在产出（历史/流式都走它），之前漏在联合类型里导致两处 TS 报错；
+  // gantt 是调度视图入口卡（scene=task / type=gantt）。
+  | "assistant-navigation" | "gantt";
 
 /** 深度思考步骤：由 status 事件按 node 聚合而来 */
 export interface ThinkStep {
@@ -133,24 +136,6 @@ export function applyEventToBlocks(
         receivedContent: true,
       };
     }
-    case "assistant_navigation": {
-      const navigationIndex = blocks.filter(block => block.type === "assistant-navigation").length;
-      return {
-        ...base,
-        blocks: upsertBlock(
-          blocks,
-          stablePayloadId("assistant-navigation", [event.data.target], navigationIndex),
-          "assistant-navigation",
-          {
-            ...event.data,
-            sessionId: event.conversationId,
-            conversationId: event.messageId,
-          },
-          true,
-        ),
-        receivedContent: true,
-      };
-    }
     case "guide_step": {
       const steps = Array.isArray(event.data?.steps) ? event.data.steps : [];
       if (!steps.length) return base;
@@ -248,6 +233,16 @@ export function applyEventToBlocks(
       return {
         ...base,
         blocks: upsertBlock(blocks, `table-${tableIndex}`, "table", event.data, true),
+        receivedContent: true,
+      };
+    }
+    case "gantt": {
+      // 一张调度视图卡：同一 viewId 重复下发时覆盖同一块（避免多张卡）
+      const viewId = String(event.data?.viewId || "").trim();
+      const ganttIndex = blocks.filter(block => block.type === "gantt").length;
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, stablePayloadId("gantt", [viewId], ganttIndex), "gantt", event.data, true),
         receivedContent: true,
       };
     }

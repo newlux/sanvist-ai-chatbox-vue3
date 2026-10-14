@@ -3,6 +3,7 @@ import type {
   AskSlotPayload,
   AskSlotSubmitPayload,
   AssistantNavigationPayload,
+  GanttViewPayload,
   GuideStepItem,
   GuideStepPayload,
   GuideStepSelectEvent,
@@ -41,8 +42,10 @@ import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, us
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
-import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
+import { consumePendingRepairCallback, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
+import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
+import { stashPendingScheduleView } from "@/utils/schedule-view";
 import { navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
@@ -205,12 +208,13 @@ function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
   assistantNavigationVisible.value = true;
 }
 
-function onAssistantCallbackOpen(conversationId: string) {
-  const id = String(conversationId || "").trim();
-  if (!id) return;
-  // 查看的是已生成的回流卡片详情：清掉待回流任务，从详情返回时不再重复请求诊断结果。
-  clearPendingRepairCallback();
-  void navigateToScene(`/pages/repair/index?conversationId=${encodeURIComponent(id)}`);
+/**
+ * 点调度视图入口卡（AI 下发的 gantt 积木）：整包数据先落到本地存储，
+ * 再开横屏调度视图页；页面 onLoad 取走渲染（rows / bars，含接口还没排时间的任务）。
+ */
+function onGanttOpen(payload: GanttViewPayload) {
+  stashPendingScheduleView(payload);
+  void navigateToScene("/pages/schedule-gantt/index");
 }
 
 function onAssistantNavigationConfirm(payload: AssistantNavigationPayload) {
@@ -226,9 +230,6 @@ function onAssistantNavigationConfirm(payload: AssistantNavigationPayload) {
   if (aiAskConversationId && aiAskSessionId) {
     stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
   }
-  else {
-    clearPendingRepairCallback();
-  }
   void navigateToScene("/pages/repair/index");
 }
 
@@ -236,6 +237,15 @@ function clearRepairSummaryPolling() {
   if (!repairSummaryPollingTimer) return;
   clearTimeout(repairSummaryPollingTimer);
   repairSummaryPollingTimer = null;
+}
+
+/**
+ * 甘特图右下角输入条发来的问题：回到本页后取出来直接发送（发完即清）。
+ * 两条返回路径（navigateBack / 关掉场景窗口）都会走 onShow，所以在这里消费。
+ */
+function startPendingScheduleAsk() {
+  const text = consumePendingScheduleAsk();
+  if (text) sendQuickPrompt(text);
 }
 
 function startRepairSummaryCallback() {
@@ -253,9 +263,9 @@ function startRepairSummaryCallback() {
     loading: true,
     sessionId: chatStore.aiSessionId,
     messageId: null,
-    waitingText: "维修助手-机型诊断",
-    assistantCallbackTitle: "维修助手-机型诊断",
-    processStatus: { phase: "thinking", title: "故障诊断中" },
+    waitingText: "维修助手-快速问答",
+    assistantCallbackTitle: "维修助手-快速问答",
+    processStatus: { phase: "thinking", title: "故障诊断中..." },
   });
   chatStore.scrollToBottom(true);
 
@@ -263,22 +273,15 @@ function startRepairSummaryCallback() {
     repairSummaryPollingAttempts += 1;
     try {
       const data = await getConversationSummary(task);
-      // 快速问答没有状态字段；只要返回了 repairConversationId 就视为结果就绪，直接回流，不进入轮询。
-      if (!data.status || data.status === "Completed" || data.repairConversationId) {
+      // 快速问答没有状态字段，首次获取结果后直接回流，不进入轮询。
+      if (!data.status) {
+        await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
+        return;
+      }
+      // 故障诊断仅在状态为 Completed 时结束轮询并回流。
+      if (data.status === "Completed") {
         clearRepairSummaryPolling();
-        const summaryPayload = JSON.stringify(data);
-        const summary = parseRepairCallbackSummary(summaryPayload);
-        chatStore.patchMessageById(aiMsgId, {
-          assistantCallbackTitle: summary.title,
-          assistantCallbackStatus: summary.statusText,
-          assistantCallbackDetails: summary.details,
-          assistantCallbackConversationId: summary.repairConversationId,
-        });
-        await sendAssistantCallback(summaryPayload, {
-          aiMsgId,
-          waitingText: summary.title,
-          preserveProcessStatus: true,
-        });
+        await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
         return;
       }
     }
@@ -753,6 +756,7 @@ onShow(() => {
   chatStore.refreshQuickPrompts();
   refreshListenReportState();
   startRepairSummaryCallback();
+  startPendingScheduleAsk();
 });
 // 离开页面时停止自动听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
 // useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
@@ -827,7 +831,7 @@ onBeforeUnmount(() => {
         @suggestion-tap="sendQuickPrompt"
         @ask-slot-open="onAskSlotOpen"
         @assistant-navigation-open="onAssistantNavigationOpen"
-        @assistant-callback-open="onAssistantCallbackOpen"
+        @gantt-open="onGanttOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"

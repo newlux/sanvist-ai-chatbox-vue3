@@ -12,19 +12,19 @@ import { backFromScene } from "@/utils/scene-navigation";
  * 横屏调度视图·重排草案（稿子 7229:254）——每个资源的「旧 / 新」两排计划对照。
  * 预排是另一个页面：pages/schedule-pre（稿子 6464:150）。
  *
- * 版面：横屏 812×375（每小时 56px，时间轴 08:00–21:00）
+ * 版面：横屏 812×375（每小时 56px，时间轴以 08:00–21:00 为基准、按数据向外扩到整点）
  * - 顶部栏：标题「调度视图·重排草案」+ 日期 + 图例（原计划 / 新计划 / 已取消）
  *   +「查看全部任务」+ 返回对话按钮；
  * - 左侧资源列（140px）：每行「旧 / 新」标签 + 类别 + 资源名 + 车号|班次；
  * - 右侧排程区：时间轴 + 竖向网格 + 任务条（按起止时间定位），可横向滚动；
- * - 底部「任务置换」提示条（7229:449），可关闭。
+ * - 底部「任务置换」提示条（7229:449）：点任务条后按该趟的「旧 / 新」两条生成文案，可关闭。
  *
  * 横屏方式与 pages/schedule-gantt 一致：`useLandscape()` 默认把页面整体旋转 90° 模拟横屏
  * （设备竖屏持握、不申请全屏权限），离开页面自动还原；需要真锁方向时传 `{ lock: true }`。
  *
  * 任务条样式（稿子 7229:254）：26 高、单行——原计划 #F4F4F4 + 虚线 #D9D9D9、
- * 任务条只做展示、不可点（重排态不弹任务详情）
  * 新计划 白底 + 虚线 #9DB3CC、已取消同原计划但文案转灰、强调条为深色实线 #1A1A1A。
+ * 任务条可点：点任意一条即选中它那一趟（linkKey 相同的旧 / 新两条），底部提示条随之更新。
  */
 
 defineOptions({ name: "SchedulePage" });
@@ -35,10 +35,13 @@ const { rotated, exitLandscape } = useLandscape();
 /** 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志 */
 useScheduleGestures({ gridId: "schedule-grid", onRowsOffset: () => measureRowTops() });
 
-/** 时间轴：每小时 56px，08:00 起、21:00 止（设计稿刻度 6832:608…6832:644） */
+/** 时间轴：每小时 56px；稿子基准范围 08:00–21:00（设计稿刻度 6832:608…6832:644） */
 const HOUR_WIDTH = 56;
-const DAY_START_MIN = 8 * 60;
-const DAY_END_MIN = 21 * 60;
+const DESIGN_DAY_START_MIN = 8 * 60;
+const DESIGN_DAY_END_MIN = 21 * 60;
+/** 时间轴实际范围（分钟）：以稿子基准为底线，数据越界时由下面的 expandDayRange() 向外扩到整点 */
+let DAY_START_MIN = DESIGN_DAY_START_MIN;
+let DAY_END_MIN = DESIGN_DAY_END_MIN;
 const hourLabels = computed(() => {
   const labels: string[] = [];
   for (let hour = DAY_START_MIN / 60; hour <= DAY_END_MIN / 60; hour += 1) {
@@ -71,7 +74,10 @@ interface ScheduleBar {
   state: BarState;
   /** 强调条：预排用红描边（6464:358），重排用深色实线描边（7229:339/302/350） */
   highlight?: boolean;
-  /** 新旧关联键：同一 linkKey 的「旧」条与「新」条之间连线（同属一趟任务） */
+  /**
+   * 新旧关联键：同一个 linkKey 只在「旧行 ↔ 新行」之间连虚线（同属一趟任务）。
+   * 同一条泳道内的条一律不连；一侧多条对另一侧一条（拆趟 / 并趟）时两两相连。
+   */
   linkKey?: string;
 }
 
@@ -105,6 +111,8 @@ function barStyle(bar: ScheduleBar) {
  * 重排排程数据：**每辆车各有「旧 / 新」两行**——同一辆车的旧计划与新计划上下对照。
  * - `row.tag` = 旧 / 新；`row.names` = [车号|司机, 车牌|班次]（同一辆车两行的名字一致）；
  * - `bar.state` = 原计划(planned) / 新计划(new) / 已取消(canceled)；`highlight` = 稿子里的深色实线强调条；
+ * - `bar.linkKey` = 同一趟任务的关联键：只连「旧行 ↔ 新行」，同一条泳道内不连；
+ *   一侧多条对另一侧一条（拆趟 / 并趟）时两两相连——供料这组的旧排两条（s1 / s2）→ 新排一条（s3）就是多对一；
  * - 同一行内的任务首尾相接、互不重叠（旧 / 新两行是同一辆车的两个版本，本来就互相覆盖）。
  * 接入后端时替换成接口返回即可。
  */
@@ -119,6 +127,7 @@ const repRows: ScheduleRow[] = [
       // 强调条（深色实线描边，稿子 7229:339）
       { id: "s1", title: "1号基站 C20 80立方", timeText: "08:00-13:00", startMin: timeToMin("08:00"), endMin: timeToMin("13:00"), state: "planned", highlight: true, linkKey: "supply-1" },
       // 已取消：灰字 + 深色实线描边（稿子 7229:302）
+      // 与 s1 同 key：旧排这两条都指向新排的 s3（多对一，画两条跨泳道虚线）
       { id: "s2", title: "万达基地 C20 90立方", timeText: "13:30-19:00", startMin: timeToMin("13:30"), endMin: timeToMin("19:00"), state: "canceled", highlight: true, linkKey: "supply-1" },
     ],
   },
@@ -131,6 +140,7 @@ const repRows: ScheduleRow[] = [
       { id: "s3", title: "1号基站 C20 80立方", timeText: "09:00-13:00", startMin: timeToMin("09:00"), endMin: timeToMin("13:00"), state: "new", linkKey: "supply-1" },
       // 与旧排第 2 条同一趟任务（旧排里被取消，新排重新安排到 13:30-18:30）
       { id: "s4", title: "万达基地 C20 90立方", timeText: "13:30-18:30", startMin: timeToMin("13:30"), endMin: timeToMin("18:30"), state: "new", linkKey: "supply-2" },
+      // 注：s4 的 linkKey（supply-2）旧排里没有对应 → 属「新排新增」，不连线
     ],
     separator: true,
   },
@@ -272,6 +282,21 @@ const repRows: ScheduleRow[] = [
   },
 ];
 
+/**
+ * 时间轴范围外扩：数据里更早 / 更晚的任务要能看到（如 05:40、06:30 的班次），
+ * 否则会被裁在轴外面，看起来就是「时间轴只从 8 点开始、前面还有数据」。
+ */
+function expandDayRange(list: ScheduleRow[]) {
+  list.forEach((row) => {
+    row.bars.forEach((bar) => {
+      DAY_START_MIN = Math.min(DAY_START_MIN, Math.floor(bar.startMin / 60) * 60);
+      DAY_END_MIN = Math.max(DAY_END_MIN, Math.ceil(bar.endMin / 60) * 60);
+    });
+  });
+}
+
+expandDayRange(repRows);
+
 /** 「查看全部任务」/ 右下角折叠按钮：切换是否展开下半部分行 */
 const expanded = ref(true);
 const rows = computed(() => (expanded.value ? repRows : repRows.slice(0, 4)));
@@ -336,26 +361,39 @@ function linkLineStyle(from: { x: number; y: number }, to: { x: number; y: numbe
   };
 }
 
-/** 新旧关联：同一 linkKey 的「旧」条与「新」条之间连一条虚线（行序靠前的是旧排） */
+/** 任务条属于「新计划」那一侧：按行标签判断，行没给标签时退回任务条状态 */
+function isNewPlanBar(row: ScheduleRow, bar: ScheduleBar) {
+  return row.tag === "新" || bar.state === "new";
+}
+
+/**
+ * 新旧关联虚线：同一个 linkKey **只连「旧行 ↔ 新行」**。
+ * - 同一条泳道内的条（同一行）一律不连；
+ * - 支持多对一 / 一对多：旧侧 N 条、新侧 M 条就画 N×M 条（拆趟、并趟都能表达）；
+ * - 只有一侧有该 linkKey 时不画线，那就是「新增 / 取消」。
+ */
 const linkLines = computed(() => {
-  const groups = new Map<string, Array<{ rowIndex: number; bar: ScheduleBar }>>();
+  const groups = new Map<string, { old: Array<{ rowIndex: number; bar: ScheduleBar }>; fresh: Array<{ rowIndex: number; bar: ScheduleBar }> }>();
   rows.value.forEach((row, rowIndex) => {
     row.bars.forEach((bar) => {
       if (!bar.linkKey) return;
-      const list = groups.get(bar.linkKey) || [];
-      list.push({ rowIndex, bar });
-      groups.set(bar.linkKey, list);
+      const group = groups.get(bar.linkKey) || { old: [], fresh: [] };
+      // rowIndex 是泳道序号，barCenter() 用它算 y
+      const point = { rowIndex, bar };
+      if (isNewPlanBar(row, bar)) group.fresh.push(point);
+      else group.old.push(point);
+      groups.set(bar.linkKey, group);
     });
   });
+
   const lines: Array<{ key: string; style: Record<string, string> }> = [];
-  groups.forEach((list, key) => {
-    const sorted = [...list].sort((a, b) => a.rowIndex - b.rowIndex);
-    sorted.forEach((point, index) => {
-      if (index === 0) return;
-      const prev = sorted[index - 1];
-      lines.push({
-        key: `${key}-${index}`,
-        style: linkLineStyle(barCenter(prev.rowIndex, prev.bar), barCenter(point.rowIndex, point.bar)),
+  groups.forEach((group, linkKey) => {
+    group.old.forEach((from, oldIndex) => {
+      group.fresh.forEach((to, newIndex) => {
+        lines.push({
+          key: `${linkKey}-${oldIndex}-${newIndex}`,
+          style: linkLineStyle(barCenter(from.rowIndex, from.bar), barCenter(to.rowIndex, to.bar)),
+        });
       });
     });
   });
@@ -369,8 +407,93 @@ const legend = [
   { key: "canceled", label: "已取消" },
 ] as const;
 
-/** 重排模式底部提示条（稿子 7229:450「任务置换」+ 7229:453 说明），可关闭 */
-const notice = ref("13号车·经开区厂房→凤凰新城：弃缓保急，替换紧急翻趟增援大体积保供（11:45-12:45）");
+/** 分钟数 →「HH:MM」（提示文案用真实排班时间，不用条里可能被截断的 timeText） */
+function formatMinute(min: number) {
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
+
+function formatRange(bar: ScheduleBar) {
+  return `${formatMinute(bar.startMin)}-${formatMinute(bar.endMin)}`;
+}
+
+/** 命中的任务条 + 它所在的行（行里带资源名、旧 / 新标签） */
+interface BarHit {
+  row: ScheduleRow;
+  bar: ScheduleBar;
+}
+
+/**
+ * linkKey → 同一趟任务的「旧 / 新」两条。
+ * 点任意一条就能拿到对照的另一条：旧排给原时段、新排给调整后时段。
+ */
+const linkPairs = computed(() => {
+  const map = new Map<string, { old?: BarHit; new?: BarHit }>();
+  rows.value.forEach((row) => {
+    row.bars.forEach((bar) => {
+      if (!bar.linkKey) return;
+      const pair = map.get(bar.linkKey) || {};
+      // 与连线用同一套新旧判定，避免行标签缺失时两边归类不一致
+      if (isNewPlanBar(row, bar)) pair.new = { row, bar };
+      else pair.old = { row, bar };
+      map.set(bar.linkKey, pair);
+    });
+  });
+  return map;
+});
+
+/** 当前选中的那一趟任务（同一 linkKey 的旧 / 新两条一起高亮） */
+const activeLinkKey = ref("");
+
+/** 资源名取被点任务所在行（新排行优先，和左列显示的车号一致） */
+function resourceName(pair: { old?: BarHit; new?: BarHit }) {
+  const names = pair.new?.row.names || pair.old?.row.names || [];
+  return names[0] || "";
+}
+
+/**
+ * 底部「任务置换」提示文案：由被点击的旧 / 新任务现场拼出来——
+ * 「资源名·任务名：原时段 → 新时段」，取消 / 新增 / 未变三种情况分开说。
+ */
+const notice = computed(() => {
+  const pair = activeLinkKey.value ? linkPairs.value.get(activeLinkKey.value) : undefined;
+  if (!pair) return "";
+  const oldHit = pair.old;
+  const newHit = pair.new;
+  if (!oldHit && !newHit) return "";
+  const resource = resourceName(pair);
+  const title = newHit?.bar.title || oldHit?.bar.title || "";
+  const head = resource && title ? `${resource}·${title}` : resource || title;
+
+  if (oldHit && newHit) {
+    const oldRange = formatRange(oldHit.bar);
+    const newRange = formatRange(newHit.bar);
+    if (oldHit.bar.state === "canceled") {
+      return `${head}：原 ${oldRange} 已取消，调整至 ${newRange}`;
+    }
+    if (oldRange === newRange) {
+      return `${head}：${oldRange} 与原计划一致，未调整`;
+    }
+    return `${head}：${oldRange} 调整至 ${newRange}`;
+  }
+  if (newHit) {
+    return `${head}：新增任务，安排在 ${formatRange(newHit.bar)}`;
+  }
+  if (oldHit) {
+    return `${head}：原 ${formatRange(oldHit.bar)} 在新计划中不再安排`;
+  }
+  return "";
+});
+
+/** 点任务条：选中该趟任务（旧 / 新任意一条都行）生成提示；再点一次取消选中 */
+function onBarTap(bar: ScheduleBar) {
+  if (!bar.linkKey) return;
+  activeLinkKey.value = activeLinkKey.value === bar.linkKey ? "" : bar.linkKey;
+}
+
+/** 关闭提示条：文案清空，同时取消选中 */
+function closeNotice() {
+  activeLinkKey.value = "";
+}
 
 const dateText = "2025-09-26";
 
@@ -484,10 +607,13 @@ watch(() => rows.value.length, () => {
  * 左上角按钮：返回对话页面。
  * 先还原屏幕方向（撤掉 CSS 旋转 / 解锁方向 / 退全屏），再走场景返回：
  * 上一页是对话页就直接返回，若是独立场景窗口则关闭 webview 回到对话页。
+ *
+ * 兜底路由给作业协同对话页：本页都是从作业协同对话里进来的，没有上一页可退时
+ * 也要回那个会话（而不是首页），提问才落在原来的对话里。
  */
 function backToChat() {
   exitLandscape();
-  backFromScene();
+  backFromScene("/pages/task/index");
 }
 
 /**
@@ -633,8 +759,12 @@ function toggleExpand() {
               v-for="bar in row.bars"
               :key="bar.id"
               class="schedule__bar"
-              :class="[`schedule__bar--${bar.state}`, { 'schedule__bar--mark': bar.highlight }]"
+              :class="[
+                `schedule__bar--${bar.state}`,
+                { 'schedule__bar--mark': bar.highlight, 'schedule__bar--active': bar.linkKey && bar.linkKey === activeLinkKey },
+              ]"
               :style="barStyle(bar)"
+              @tap="onBarTap(bar)"
             >
               <text class="schedule__bar-title">
                 {{ bar.title }}
@@ -683,7 +813,7 @@ function toggleExpand() {
       <text class="schedule__notice-text">
         {{ notice }}
       </text>
-      <view class="schedule__notice-close" @tap="notice = ''" />
+      <view class="schedule__notice-close" @tap="closeNotice" />
     </view>
 
     <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态） -->
@@ -1185,6 +1315,17 @@ function toggleExpand() {
 .schedule--rep .schedule__bar--mark {
   border-style: solid;
   border-color: #1a1a1a;
+}
+
+/* 选中态：被点的那一趟任务（旧 / 新两条同时描深），底部提示文案就是它俩生成的 */
+.schedule--rep .schedule__bar {
+  cursor: pointer;
+}
+
+.schedule--rep .schedule__bar--active {
+  border-style: solid;
+  border-color: #1a1a1a;
+  box-shadow: 0 0 0 1px #1a1a1a inset;
 }
 
 /* 行高：40（条 26 + 上下留白）；左侧分组格的高度由模板按行数算 */
