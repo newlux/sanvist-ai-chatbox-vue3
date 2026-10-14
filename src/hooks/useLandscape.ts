@@ -18,7 +18,7 @@ const logger = createLogger("landscape");
  *   失败后「请求全屏 + 重试一次」；仍失败再退回 CSS 旋转；
  * - 小程序：方向由 `pages.json` 的 `pageOrientation: "landscape"` 控制，这里不处理。
  *
- * @param onReflow 方向/尺寸变化后的重排回调（如 DHTMLX Gantt 的 `gantt.setSizes()`）
+ * @param onReflow 方向/尺寸变化后的重排回调（尺寸变了要自己重新测量的画布 / 图表用；当前无页面传入）
  * @param options.lock 是否尝试真正锁定屏幕方向（默认 false：只用旋转模拟）
  */
 export function useLandscape(onReflow?: () => void, options: { lock?: boolean } = {}) {
