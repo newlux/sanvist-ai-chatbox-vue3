@@ -6,7 +6,7 @@ import type { ReportVoiceOption } from "@/config/report-voices";
 import type { ReportInsightItem } from "@/hooks/useReportInsights";
 import { onLoad, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { getListenBroadcastConfig, getListenBroadcastPreference } from "@/api/listen-broadcast";
@@ -89,6 +89,8 @@ const broadcastDockOffset = computed(() =>
 const quickNavStyle = computed(() => ({ bottom: `calc(${composerDockOffset.value} + 4px)` }));
 const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
+/** 按住说话录音中：字幕区先隐藏播报文字，识别态/回答结果随后接管。 */
+const voiceRecording = ref(false);
 /** 本轮问答是否从异常列表发起：确认或取消后必须回到异常列表。 */
 const reportQaFromInsight = ref(false);
 const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> | null>(null);
@@ -571,6 +573,16 @@ function onBroadcastPlaybackChange(payload: { playing: boolean }) {
   broadcastPlaying.value = payload.playing;
 }
 
+// 继续播报：字幕区从问答态还原回播报文字，同时停掉答案朗读。
+watch(broadcastPlaying, (isPlaying) => {
+  if (!isPlaying) return;
+  if (!reportQaLoading.value && !reportQaAnswer.value && !voiceRecording.value) return;
+  stopAnswerTts();
+  reportQaLoading.value = false;
+  reportQaAnswer.value = "";
+  voiceRecording.value = false;
+});
+
 function openInsightItem(item: ReportInsightItem) {
   uni.navigateTo({
     url: `/pages/task/index?eventId=${encodeURIComponent(item.id)}&title=${encodeURIComponent(item.title)}`,
@@ -580,6 +592,7 @@ function openInsightItem(item: ReportInsightItem) {
 function dismissReportQa() {
   // 用户主动关闭：把正在朗读的 TTS 也停掉，避免空场继续播音。
   stopAnswerTts();
+  voiceRecording.value = false;
   reportQaLoading.value = false;
   reportQaAnswer.value = "";
   // answer 被关闭、识别失败或录音取消：这一轮同样要回到来源列表。
@@ -610,15 +623,18 @@ function onVoiceStart() {
   // 按下瞬间上一轮答案的 TTS 可能还在朗读：立即停，避免盖住用户说话、被录进 ASR，
   // 也不必等识别确认发送（sendPodcastMessage）才停 —— 那已经是几秒之后了。
   stopAnswerTts();
+  voiceRecording.value = true;
   pauseReportBroadcast();
 }
 
 function onRecognizeBegin() {
+  voiceRecording.value = false;
   enterReportQaLoading();
   beginAsrPlaceholder();
 }
 
 function onRecognizeFail() {
+  voiceRecording.value = false;
   dismissReportQa();
   discardAsrPlaceholder();
 }
@@ -697,6 +713,7 @@ onBeforeUnmount(() => {
         :dock-offset="broadcastDockOffset"
         :qa-loading="reportQaLoading"
         :qa-answer="reportQaAnswer"
+        :voice-recording="voiceRecording"
         :can-minimize="canMinimize"
         @dismiss-qa="dismissReportQa"
         @minimize="onMinimize"
