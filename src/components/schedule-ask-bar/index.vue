@@ -60,7 +60,12 @@ const canSend = computed(() => Boolean(draft.value.trim()) && !recording.value &
 /** 声纹圆点透明度：稿子里 0.8 起、向两侧递减 */
 const waveDots = [0.8, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.05, 0.02];
 
-const barStyle = computed(() => (
+/**
+ * 键盘避让只作用在**输入胶囊**上：输入框显隐会开 / 收软键盘，
+ * 若把整条（含键盘按钮）一起平移，键盘按钮的位置就会跟着跳；
+ * 按钮固定在原处不动，抬升的只有胶囊。
+ */
+const pillStyle = computed(() => (
   keyboardHeight.value > 0 ? { transform: `translateX(${-keyboardHeight.value}px)` } : {}
 ));
 
@@ -255,9 +260,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <view class="schedule-ask" :style="barStyle">
-    <!-- 输入胶囊：稿子 6694:279（空态）/ 4704:234（有内容）/ 4704:260（语音态） -->
-    <view v-if="visible" class="schedule-ask__pill">
+  <view class="schedule-ask">
+    <!-- 输入胶囊：稿子 6694:279（空态）/ 4704:234（有内容）/ 4704:260（语音态）。
+         收起态只是隐藏（保留占位），键盘按钮的位置才不会跟着跳 -->
+    <view
+      class="schedule-ask__pill"
+      :class="{ 'schedule-ask__pill--hidden': !visible }"
+      :style="pillStyle"
+    >
       <!-- 语音态：中间 9 颗声纹圆点（稿子 4704:279） -->
       <view v-if="recording" class="schedule-ask__wave" aria-hidden="true">
         <view
@@ -316,13 +326,16 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .schedule-ask {
   position: absolute;
-  right: 16px;
+  /* 让开右侧那一列行内箭头（.schedule__scroll-btn--next：right 8px + 28 宽，占 8–36px），
+     键盘按钮不再压在箭头上，收起 / 展开都停在这一处不移动 */
+  right: 40px;
   bottom: 12px;
   z-index: 6;
   display: flex;
   align-items: center;
   gap: 10px;
-  transition: transform 0.16s ease-out;
+  /* 收起后胶囊留下的空位不要挡住下面的时间轴，只有胶囊和键盘按钮收手势 */
+  pointer-events: none;
 
   uni-image {
     width: 100%;
@@ -343,6 +356,15 @@ onBeforeUnmount(() => {
   border-radius: 14px;
   background: #ffffff;
   box-shadow: 0 3px 5px -1px rgba(0, 0, 0, 0.086);
+  pointer-events: auto;
+  /* 键盘避让的平移只作用在胶囊上（键盘按钮不跟着动） */
+  transition: transform 0.16s ease-out;
+}
+
+/* 收起态：只隐藏、不移除（保留 240×38 占位），键盘按钮位置因此保持不变 */
+.schedule-ask__pill--hidden {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* 麦克风：20×20 图标框（稿子里图形 11.9×14.7、色 #6B6B6B） */
@@ -443,6 +465,7 @@ onBeforeUnmount(() => {
   flex: 0 0 28px;
   width: 28px;
   height: 28px;
+  pointer-events: auto;
 
   image {
     width: 20px;

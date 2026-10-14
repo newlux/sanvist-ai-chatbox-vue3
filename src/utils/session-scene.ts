@@ -21,6 +21,9 @@ const SCENE_LABEL: Record<ChatScene, string> = {
 
 export function getSessionScene(session?: { inputs?: Record<string, unknown> } | null): ChatScene {
   const scene = String(session?.inputs?.scene || "").toUpperCase();
+  // 任务协同的对话接口场景值是 test（见 hooks/useChatSend 的 API_SCENE），
+  // 历史会话仍按「任务」场景归属：列表标签、点击跳转都走任务协同页。
+  if (scene === "TEST") return "TASK";
   if (scene === "GUIDE" || scene === "TASK" || scene === "PODCAST") return scene;
   return "ASK";
 }

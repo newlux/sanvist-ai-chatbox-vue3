@@ -2,15 +2,16 @@
 import type {
   AssistantNavigationPayload,
   AskSlotPayload,
+  GanttViewPayload,
   GuideStepPayload,
   GuideStepSelectEvent,
   GuideSuggestionPayload,
 } from "@/api/chat/types";
 import AnswerBlock from "./blocks/AnswerBlock.vue";
-import AssistantNavigationBlock from "./blocks/AssistantNavigationBlock.vue";
 import AskSlotBlock from "./blocks/AskSlotBlock.vue";
 import ChartBlock from "./blocks/ChartBlock.vue";
 import ErrorBlock from "./blocks/ErrorBlock.vue";
+import GanttBlock from "./blocks/GanttBlock.vue";
 import GuideCheckBlock from "./blocks/GuideCheckBlock.vue";
 import GuideImageBlock from "./blocks/GuideImageBlock.vue";
 import GuideSourceBlock from "./blocks/GuideSourceBlock.vue";
@@ -54,6 +55,7 @@ const emit = defineEmits([
   "guide-step-open",
   "guide-suggestion-open",
   "guide-check-step-select",
+  "gantt-open",
 ]);
 
 function onSuggestionTap(suggestion: unknown) {
@@ -64,8 +66,9 @@ function onAskSlotOpen(payload: AskSlotPayload) {
   emit("ask-slot-open", payload);
 }
 
-function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
-  emit("assistant-navigation-open", payload);
+/** 点调度视图入口卡：整包数据继续往上抛，由页面存数据并跳横屏调度视图 */
+function onGanttOpen(payload: GanttViewPayload) {
+  emit("gantt-open", payload);
 }
 
 function onGuideStepOpen(payload: GuideStepPayload) {
@@ -107,11 +110,6 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
     :embedded="embedded"
   />
   <AskSlotBlock v-else-if="block.type === 'ask-slot'" :payload="block.payload" @open="onAskSlotOpen" />
-  <AssistantNavigationBlock
-    v-else-if="block.type === 'assistant-navigation'"
-    :payload="block.payload"
-    @open="onAssistantNavigationOpen"
-  />
   <GuideStepBlock v-else-if="block.type === 'guide-step'" :payload="block.payload" @open="onGuideStepOpen" />
   <!-- 多轮追问卡：与步骤卡分开渲染（并行分支 vs 按序推进） -->
   <GuideSuggestionBlock
@@ -127,6 +125,8 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
     @select-step="onGuideCheckStepSelect"
   />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
+  <!-- 调度视图入口卡（COMPONENT scene=task / type=gantt）：点它跳横屏调度视图并带上整包数据 -->
+  <GanttBlock v-else-if="block.type === 'gantt'" :payload="block.payload" @open="onGanttOpen" />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
   <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />
   <GuideVideoBlock v-else-if="block.type === 'video'" :payload="block.payload" />

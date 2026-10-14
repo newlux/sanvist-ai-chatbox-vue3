@@ -14,7 +14,7 @@ import { backFromScene } from "@/utils/scene-navigation";
  * 横屏调度视图·预排草案（稿子 6464:150）——每个资源一行，行内平铺当班任务。
  * 重排是另一个页面：pages/schedule（稿子 7229:254，每个资源「旧 / 新」两排对照）。
  *
- * 版面：横屏 812×375（每小时 56px，时间轴 08:00–21:00）
+ * 版面：横屏 812×375（每小时 56px，时间轴以 08:00–21:00 为基准、按数据向外扩到整点）
  * - 顶部栏：标题「调度视图·预排草案」+ 日期；右侧为任务状态图例（6832:13，贴着返回按钮）
  *   + 返回对话按钮；
  * - 左侧资源列（140px，6464:279）：第一行「类别 + 名称」，第二行车号|班次；
@@ -42,10 +42,13 @@ const detail = ref<TaskDetailPanelPayload | null>(null);
 /** 稿子里的红色时间标记是 12:45，用当前时刻判断任务状态（mock 用；接后端时用接口给的 status） */
 const NOW_MIN = 12 * 60 + 45;
 
-/** 时间轴：每小时 56px，08:00 起、21:00 止（与稿子刻度一致） */
+/** 时间轴：每小时 56px；稿子基准范围 08:00–21:00（与稿子刻度一致） */
 const HOUR_WIDTH = 56;
-const DAY_START_MIN = 8 * 60;
-const DAY_END_MIN = 21 * 60;
+const DESIGN_DAY_START_MIN = 8 * 60;
+const DESIGN_DAY_END_MIN = 21 * 60;
+/** 时间轴实际范围（分钟）：以稿子基准为底线，数据越界时由下面的 expandDayRange() 向外扩到整点 */
+let DAY_START_MIN = DESIGN_DAY_START_MIN;
+let DAY_END_MIN = DESIGN_DAY_END_MIN;
 const hourLabels = computed(() => {
   const labels: string[] = [];
   for (let hour = DAY_START_MIN / 60; hour <= DAY_END_MIN / 60; hour += 1) {
@@ -90,23 +93,6 @@ function onTimelineScroll(event: { detail?: { scrollLeft?: number } }) {
   // 只记录当前位置，不回写 scroll-left
   currentScrollLeft.value = Number(event?.detail?.scrollLeft || 0);
 }
-
-/**
- * 每一行左右两侧还有被挡住的任务时，就在那一行的对应侧浮出箭头（稿子 6832:720）；
- * 点一下把时间轴滚到该行那一侧最近的任务。
- */
-const { rowHints, jumpToRow } = useTimelineEdgeHint({
-  rows: () => rows.value,
-  dayStartMin: DAY_START_MIN,
-  hourWidth: HOUR_WIDTH,
-  scrollLeft: currentScrollLeft,
-  viewportWidth: gridWidth,
-  contentWidth: () => timelineWidth.value,
-  scrollTo: (left) => {
-    smoothScroll.value = true;
-    applyScroll(left);
-  },
-});
 
 function measureGrid() {
   // #ifdef H5
@@ -272,6 +258,39 @@ const preRows: ScheduleRow[] = [
   },
 ];
 
+/**
+ * 时间轴范围外扩：数据里更早 / 更晚的任务要能看到（如 06:30 的班次），
+ * 否则会被裁在轴外面，看起来就是「时间轴只从 8 点开始、前面还有数据」。
+ */
+function expandDayRange(list: ScheduleRow[]) {
+  list.forEach((row) => {
+    row.bars.forEach((bar) => {
+      DAY_START_MIN = Math.min(DAY_START_MIN, Math.floor(bar.startMin / 60) * 60);
+      DAY_END_MIN = Math.max(DAY_END_MIN, Math.ceil(bar.endMin / 60) * 60);
+    });
+  });
+}
+
+expandDayRange(preRows);
+
+/**
+ * 每一行左右两侧还有被挡住的任务时，就在那一行的对应侧浮出箭头（稿子 6832:720）；
+ * 点一下把时间轴滚到该行那一侧最近的任务。
+ * 放在数据 / 轴范围之后：判定用的起点必须与任务条定位用的是同一个。
+ */
+const { rowHints, jumpToRow } = useTimelineEdgeHint({
+  rows: () => rows.value,
+  dayStartMin: DAY_START_MIN,
+  hourWidth: HOUR_WIDTH,
+  scrollLeft: currentScrollLeft,
+  viewportWidth: gridWidth,
+  contentWidth: () => timelineWidth.value,
+  scrollTo: (left) => {
+    smoothScroll.value = true;
+    applyScroll(left);
+  },
+});
+
 /** 收起/展开全部（稿子 6464:246 的 34×34 圆形图标按钮）：只显示前 4 个资源 */
 const expanded = ref(true);
 const rows = computed(() => (expanded.value ? preRows : preRows.slice(0, 4)));
@@ -285,10 +304,13 @@ const dateText = "2025-09-26";
  * 左上角按钮：返回对话页面。
  * 先还原屏幕方向（撤掉 CSS 旋转 / 解锁方向 / 退全屏），再走场景返回：
  * 上一页是对话页就直接返回，若是独立场景窗口则关闭 webview 回到对话页。
+ *
+ * 兜底路由给作业协同对话页：本页都是从作业协同对话里进来的，没有上一页可退时
+ * 也要回那个会话（而不是首页），提问才落在原来的对话里。
  */
 function backToChat() {
   exitLandscape();
-  backFromScene();
+  backFromScene("/pages/task/index");
 }
 
 /**

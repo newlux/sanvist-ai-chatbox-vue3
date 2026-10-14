@@ -143,7 +143,7 @@ export function splitMarkdownTables(source: string): DifyHistoryBlockData[] {
 
 export interface DifyHistoryBlockData {
   type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion" | "ask-slot"
-    | "assistant-navigation" | "guide-step" | "guide-check" | "guide-suggestion";
+    | "assistant-navigation" | "guide-step" | "guide-check" | "guide-suggestion" | "gantt";
   payload: Record<string, unknown>;
 }
 
@@ -368,6 +368,11 @@ function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockD
       },
     };
   }
+  /**
+   * 作业协同的调度视图（scene=task / type=gantt）：整包 data 透传（viewType/viewId/entry/card/rows…），
+   * 气泡里渲染入口卡，点击后把整包交给横屏调度视图页渲染。
+   */
+  if (type === "gantt") return { type: "gantt", payload: data };
   return null;
 }
 
@@ -380,6 +385,7 @@ function parseAskStreamEvent(value: Record<string, unknown> | null) {
   if (block?.type === "assistant-navigation") {
     return { event: "assistant_navigation" as const, data: { ...block.payload, auto_open: true } };
   }
+  if (block?.type === "gantt") return { event: "gantt" as const, data: block.payload };
   return null;
 }
 

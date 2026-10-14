@@ -64,10 +64,19 @@ export function isSceneWindowRoot() {
   return startupQuery.nativeSceneWindow === "1" && getCurrentPages().length <= 1;
 }
 
-export function backFromScene() {
+/**
+ * 返回来源场景。
+ *
+ * - 本页就是独立场景窗口（nativeSceneWindow=1 且栈里只有本页）：关掉 webview，回到打开它的那个窗口；
+ * - 否则优先 navigateBack 回到上一页（发起跳转的那个对话页），保持原来的会话实例；
+ * - 两者都不成立（比如直接用 url 打开本页）时退回到 `fallbackUrl`，**默认首页**。
+ *
+ * @param fallbackUrl 没有上一页、关窗也失败时的兜底路由
+ */
+export function backFromScene(fallbackUrl = "/pages/index/index") {
   const fallback = () => {
     if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
-    else uni.redirectTo({ url: "/pages/index/index" });
+    else uni.redirectTo({ url: fallbackUrl });
   };
   if (isSceneWindowRoot()) void closeWebview().catch(fallback);
   else fallback();

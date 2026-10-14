@@ -37,6 +37,7 @@ const emit = defineEmits([
   "guide-step-open",
   "guide-suggestion-open",
   "guide-check-step-select",
+  "gantt-open",
 ]);
 
 // 回答正文里的 Markdown 表格与 ECharts 围栏都在此转换为独立 block，统一走专用组件。
@@ -81,10 +82,6 @@ function onAskSlotOpen(payload) {
   emit("ask-slot-open", payload);
 }
 
-function onAssistantNavigationOpen(payload) {
-  emit("assistant-navigation-open", payload);
-}
-
 function onGuideStepOpen(payload) {
   emit("guide-step-open", payload);
 }
@@ -96,6 +93,11 @@ function onGuideSuggestionOpen(payload) {
 function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   console.log("[guide-step-select] ③ content-blocks", payload);
   emit("guide-check-step-select", payload);
+}
+
+/** 点调度视图入口卡：整包数据继续上抛给页面 */
+function onGanttOpen(payload) {
+  emit("gantt-open", payload);
 }
 </script>
 
@@ -115,10 +117,10 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
         :loading="loading"
         @suggestion-tap="onSuggestionTap"
         @ask-slot-open="onAskSlotOpen"
-        @assistant-navigation-open="onAssistantNavigationOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"
+        @gantt-open="onGanttOpen"
       />
     </template>
   </view>

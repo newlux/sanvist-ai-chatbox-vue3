@@ -106,11 +106,10 @@ const emit = defineEmits([
   "quick-prompt",
   "suggestion-tap",
   "ask-slot-open",
-  "assistant-navigation-open",
-  "assistant-callback-open",
   "guide-step-open",
   "guide-suggestion-open",
   "guide-check-step-select",
+  "gantt-open",
   "tts-click",
   "share-click",
   "feedback-change",
@@ -206,6 +205,11 @@ function onSuggestionTap(suggestion, messageIndex: number) {
 
 function onAskSlotOpen(payload, messageIndex: number) {
   emit("ask-slot-open", payload, messageIndex);
+}
+
+/** 点调度视图入口卡：整包数据交给页面（存数据 + 跳横屏调度视图） */
+function onGanttOpen(payload) {
+  emit("gantt-open", payload);
 }
 
 function onGuideStepOpen(payload) {
@@ -317,6 +321,15 @@ function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
     : [stepCard];
 
   return cards;
+}
+
+/**
+ * 调度视图入口卡（gantt 积木）：与核对卡一样独立于回答气泡——
+ * 气泡里不渲染（见 ai-bubble-v2 的 STANDALONE_BLOCK_TYPES），这里在气泡下方单独成卡，
+ * 版式沿用欢迎态那张入口卡（左右 20px、与气泡卡间距 13px，见 pages/task 的 .task-scene-welcome-entry）。
+ */
+function ganttBlocks(message: UiChatMessage) {
+  return (message?.blocks || []).filter(block => block?.type === "gantt");
 }
 
 const listPadStyle = computed(() =>
@@ -488,12 +501,8 @@ watch(
               :tts-enabled="!!msg.ttsEnabled"
               :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
               :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
-              :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted && !msg.assistantCallbackTitle"
+              :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted"
               :waiting-text="msg.waitingText"
-              :assistant-callback-title="msg.assistantCallbackTitle"
-              :assistant-callback-status="msg.assistantCallbackStatus || ''"
-              :assistant-callback-details="msg.assistantCallbackDetails || []"
-              :assistant-callback-conversation-id="msg.assistantCallbackConversationId || ''"
               :attachments="msg.attachments || []"
               :interrupted="!!msg.interrupted"
               :duration-ms="msg.durationMs"
@@ -508,11 +517,10 @@ watch(
               :asr-pending="!!msg.asrPending"
               @suggestion-tap="onSuggestionTap($event, index)"
               @ask-slot-open="onAskSlotOpen($event, index)"
-              @assistant-navigation-open="emit('assistant-navigation-open', $event)"
-              @assistant-callback-open="emit('assistant-callback-open', $event)"
               @guide-step-open="onGuideStepOpen"
               @guide-suggestion-open="onGuideSuggestionOpen"
               @guide-check-step-select="onGuideCheckStepSelect"
+              @gantt-open="onGanttOpen"
               @tts-click="onTtsClick(index)"
               @share-click="onShareClick(index, msg)"
               @select-toggle="onSelectToggle(index)"
@@ -526,6 +534,14 @@ watch(
               class="chat-box__card"
             >
               <AiBlockRenderer :block="block" @guide-check-step-select="onGuideCheckStepSelect" />
+            </view>
+            <!-- 调度视图入口卡：同样独立于回答气泡，紧跟在气泡下方 -->
+            <view
+              v-for="block in ganttBlocks(msg)"
+              :key="`gantt-${block.id}`"
+              class="chat-box__card chat-box__card--gantt"
+            >
+              <AiBlockRenderer :block="block" @gantt-open="onGanttOpen" />
             </view>
           </view>
         </view>
@@ -561,6 +577,11 @@ watch(
 /* 独立于回答气泡的卡片（核对/步骤卡） */
 .chat-box__card {
   margin: 24rpx 0;
+}
+
+/* 调度视图入口卡（4708:743）：跟随气泡时上方留 13px，左右 20px 由 .chat-box 的 padding 提供 */
+.chat-box__card--gantt {
+  margin: 13px 0 0;
 }
 .business-overview {
   padding: 148rpx 40rpx 0;
