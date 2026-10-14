@@ -45,6 +45,12 @@ const { t } = useI18n();
 const chatScope = provideChatScope("guide");
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
+/**
+ * 自动滚动的落点：回复内容末尾（不含参考来源）——参考来源不被贴底滚进视野，
+ * 以内容块容器高度减去参考来源高度为准（见 ai-message-list 的 alignToReplyEnd）。
+ * 回复里没有参考来源时，表现与原来的贴底一致。
+ */
+chatStore.setStopAtReplyEnd(true);
 const sessionStore = useSessionStore();
 const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
 /** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送 */
@@ -69,8 +75,13 @@ const guideStepSheetRef = ref<{ goToStep: (index: number) => void } | null>(null
 const guideStepRequestedIndex = ref(0);
 /** 步骤卡片实时高度（px）：卡片展开时把列表底部 padding 顶起来，最后一条回答不会被盖住 */
 const guideStepSheetHeight = ref(0);
-/** 步骤卡按顺序露出：初始只给第一张，推进到第 N 步才显示前 N 张 */
-const guideStepCardCount = ref(1);
+/**
+ * 当前要显示的那张核对卡属于哪一步（步骤 id）。
+ *
+ * 不用「第几张」：多步骤卡会被反复触发，每轮回答各带一张卡，序号法会把新一轮的卡
+ * 算到第一张卡的位置上。按步骤 id 交给消息列表定位，重复触发时取最新那一轮的卡。
+ */
+const guideStepCardStepId = ref("");
 /** 核对卡要顶到对话区顶部还缺的底部间距（px，由消息列表量出来） */
 const guideStepCardSpace = ref(0);
 
@@ -84,6 +95,7 @@ const {
   awakeningLoading,
   scrollIntoView,
   pinnedToBottom,
+  replyEndToken,
 } = storeToRefs(chatStore);
 const { sessions, isSessionSwitching } = storeToRefs(sessionStore);
 
@@ -103,9 +115,8 @@ const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessa
 const realtimeTts = useRealtimeTts(chatScope);
 const { sendMessage: sendChatMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
-  // 作业指导是「核对卡顶到对话区最上方」的阅读方式：发送后保留当前阅读位置，不强制回底，
-  // 新出现的核对卡由 focusStepBlock 滚到顶部（见 onGuideStepOpen）。
-  keepScrollOnSend: true,
+  // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
+  // 回复里的核对卡仍由 focusStepBlock 在卡片出现 / 翻页时顶到对话区最上方（见 onGuideStepOpen）。
   // 机型与讲解模式都由用户在页面上选，每次发送时现取，避免切会话后带上旧值
   getExtraInputs: () => ({
     ...(selectedDeviceModel.value ? { device_model: selectedDeviceModel.value } : {}),
@@ -151,15 +162,14 @@ watch(() => chatStore.activeRequestSeq, () => {
 });
 
 /**
- * 作业指导是「核对卡顶到对话区最上方」的阅读方式，所以这一页生成回答后不再往下跳：
- * 发消息那一下仍然强制回到底部（能看到自己发的和等待占位），请求一开始就把「贴底跟随」关掉，
- * 之后回答流式增长、追问/步骤卡渲染完、以及 120ms 的兜底补滚都不会再把视口拽到底部，
- * 刚对齐到顶部的核对卡也不会被拉走。
+ * 作业指导是「核对卡顶到对话区最上方」的阅读方式，所以核对卡一旦置顶就不能再被流式追加拽走：
+ * 关掉「贴底跟随」这件事只在 focusGuideStepCardAtTop 里做（见下），也就是真的把某张核对卡
+ * 顶到对话区顶部时才关。
+ *
+ * 不能像以前那样「请求一开始就一律关掉」：发送时那次强制回底（scrollToBottom(true)）会因此作废
+ * ——消息列表量 DOM 对齐时 pinned 已经是 false，回复只在可视区外面往下写，表现就是「回复不滚动」。
  * 用户自己滑到底部时，列表会重新上报 pinned（@pinned-change），跟随照旧。
  */
-watch(() => chatStore.activeRequestSeq, () => {
-  chatStore.setPinnedToBottom(false);
-});
 const {
   iconCopyImage,
   iconSaveImage,
@@ -207,10 +217,10 @@ const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
  * 步骤卡出现、翻页、卡片高度变化后都用它：卡片顶在上方才整张可见。
  */
 function focusGuideStepCardAtTop() {
-  const steps = guideStepPayload.value?.steps || [];
-  const step = steps[Math.max(0, guideStepCardCount.value - 1)];
-  const stepId = String(step?.id || "").trim();
-  if (stepId) chatStore.focusStepBlock(stepId);
+  // 顶成功了才关掉贴底跟随：卡片还没渲染出来（focusStepBlock 没命中）时保持跟随，
+  // 否则流式回答会停在可视区外面，看着就是「回复不滚动」。
+  const stepId = String(guideStepCardStepId.value || "").trim();
+  if (stepId && chatStore.focusStepBlock(stepId)) chatStore.setPinnedToBottom(false);
 }
 
 /** 步骤卡片：单步是多轮追问（点一下直接发），多步选好后确认，统一按普通问题发送。 */
@@ -218,7 +228,8 @@ function onGuideStepOpen(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
   guideStepRequestedIndex.value = 0;
   guideStepSheetVisible.value = true;
-  guideStepCardCount.value = 1;
+  // 这一轮的核对卡：按本轮第一步定位（每轮回答各带一套自己的卡，取最新那一轮）
+  guideStepCardStepId.value = String(payload?.steps?.[0]?.id || "");
   // 步骤卡弹出：把这一步的核对卡滚到对话区顶部
   nextTick(() => focusGuideStepCardAtTop());
 }
@@ -252,13 +263,13 @@ async function onGuideStepPhoto(source: AttachmentSource) {
   chatInputRef.value?.focusTextInput();
 }
 
-/** 步骤卡片展开 / 翻页时，只显示这一步对应的核对卡，并把它顶到对话区顶部 */
+/** 步骤卡片展开 / 翻页时，把这一步对应的核对卡（最新那一轮）顶到对话区顶部 */
 function onGuideStepChange(step: GuideStepItem | null) {
   const stepId = String(step?.id || "").trim();
   if (!stepId) return;
   const steps = guideStepPayload.value?.steps || [];
   const index = steps.findIndex(item => String(item?.id || "") === stepId);
-  if (index >= 0) guideStepCardCount.value = index + 1;
+  if (index >= 0) guideStepCardStepId.value = stepId;
   nextTick(() => focusGuideStepCardAtTop());
 }
 
@@ -274,13 +285,9 @@ function resolveGuidePayload(stepId: string): GuideStepPayload | null {
     for (const block of blocks) {
       if (block?.type !== "guide-step") continue;
       const steps = Array.isArray(block.payload?.steps) ? block.payload.steps as GuideStepItem[] : [];
-      if (!id || steps.some(step => String(step?.id || "") === id)) {
-        console.log("[guide-step-select] ⑥ resolve found", { id, stepsCount: steps.length, messageIndex: index });
-        return block.payload as GuideStepPayload;
-      }
+      if (!id || steps.some(step => String(step?.id || "") === id)) return block.payload as GuideStepPayload;
     }
   }
-  console.log("[guide-step-select] ⑥ resolve miss", { id });
   return null;
 }
 
@@ -290,21 +297,16 @@ function resolveGuidePayload(stepId: string): GuideStepPayload | null {
  * 步骤数据优先用「当前这轮」，取不到就按 step_id 回溯；再取不到就只切核对卡。
  */
 function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
-  console.log("[guide-step-select] ⑦ page handle", payload, {
-    curPayloadSteps: (guideStepPayload.value?.steps || []).length,
-  });
   const target = Math.max(1, Math.round(Number(payload?.index) || 1));
   const resolved = resolveGuidePayload(payload?.stepId || "") || guideStepPayload.value;
   const steps = (resolved?.steps || []) as GuideStepItem[];
-  // 无论如何先把核对卡切过去
-  guideStepCardCount.value = steps.length ? Math.min(target, steps.length) : target;
-  console.log("[guide-step-select] ⑦ after-card", { target, steps: steps.length, cardCount: guideStepCardCount.value });
   if (!steps.length) return;
   guideStepPayload.value = resolved as GuideStepPayload;
   const index = Math.min(target, steps.length) - 1;
+  // 先把核对卡切过去：按点击那一段的步骤 id 定位（同一份指导重复触发时切最新那一轮）
+  guideStepCardStepId.value = String(steps[index]?.id || payload?.stepId || "");
   guideStepRequestedIndex.value = index;
   guideStepSheetVisible.value = true;
-  console.log("[guide-step-select] ⑦ open sheet", { index, requestedIndex: guideStepRequestedIndex.value });
   // 白板已展开时 stepIndex 可能没变化（比如又切回上一步），用方法兜底再切一次
   nextTick(() => guideStepSheetRef.value?.goToStep(index));
 }
@@ -613,14 +615,16 @@ onUnload(() => {
         :show-quick-prompts="showQuickPrompts"
         :show-business-overview="false"
         :scroll-into-view="scrollIntoView"
+        :reply-end-token="replyEndToken"
         :show-quick-list="showQuickList"
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
         :bottom-inset="messageBottomInset"
-        :step-card-count="guideStepCardCount"
+        :step-card-step-id="guideStepCardStepId"
         :pin-step-card="guideStepSheetVisible"
         @card-space-change="onGuideStepCardSpaceChange"
+        @content-grow="chatStore.scrollToBottom()"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"

@@ -46,6 +46,15 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  /**
+   * 卡片在 DOM 上的 id 覆盖值（默认用 block.id）。
+   * 核对卡由消息列表独立渲染，block id 只按内容生成、多轮之间会重复，
+   * 消息列表会传入「并进消息 id」后的唯一 id，滚动定位才能指到是哪一轮的卡。
+   */
+  domId: {
+    type: String,
+    default: "",
+  },
 });
 
 const emit = defineEmits([
@@ -81,7 +90,6 @@ function onGuideSuggestionOpen(payload: GuideSuggestionPayload) {
 
 /** 点核对卡步骤条某一段：把步数（1 起）+ step_id 继续往上抛，由页面切步骤并打开底部白板 */
 function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
-  console.log("[guide-step-select] ② renderer", payload);
   emit("guide-check-step-select", payload);
 }
 </script>
@@ -117,10 +125,10 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
     :payload="block.payload"
     @open="onGuideSuggestionOpen"
   />
-  <!-- id 落在根节点上：步骤卡片翻页时按 block.id 做 scroll-into-view 定位 -->
+  <!-- id 落在根节点上：步骤卡片翻页时按它做 scroll-into-view 定位 -->
   <GuideCheckBlock
     v-else-if="block.type === 'guide-check'"
-    :id="block.id"
+    :id="domId || block.id"
     :payload="block.payload"
     @select-step="onGuideCheckStepSelect"
   />

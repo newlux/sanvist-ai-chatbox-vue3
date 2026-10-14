@@ -4,6 +4,7 @@ import { defineStore } from "pinia";
 import { getCurrentInstance, inject, nextTick, provide, ref, watch } from "vue";
 import { pickRoleQuickPrompts } from "@/config/quick-prompts";
 import { useUserStore } from "@/stores/modules/user";
+import { guideStepCardDomId } from "@/utils/guide-content";
 
 /** 默认会话域：首页那条主对话 */
 export const DEFAULT_CHAT_SCOPE = "main";
@@ -39,6 +40,14 @@ function defineChatStore(scope: string) {
     const scrollIntoView = ref("");
     /** 用户是否还贴着底：上翻看历史时暂停自动滚动，回到底部后恢复 */
     const pinnedToBottom = ref(true);
+    /**
+     * 为 true 时自动滚动的落点改成「回复内容末尾（不含参考来源）」：
+     * 以内容块容器 `.ai-content-blocks` 的高度减去参考来源 `.guide-source-block` 的高度为准，
+     * 参考来源留在对话区下方之外；没有参考来源时就是原来的贴底。
+     */
+    const stopAtReplyEnd = ref(false);
+    /** 滚动请求令牌：自增一次 = 一次请求，由消息列表量完 DOM 自己按 px 定位 */
+    const replyEndToken = ref(0);
     const requestSeq = ref(0);
     const activeRequestSeq = ref(0);
     /** 当前正在生成的那条 AI 消息 id。按 id 而不是下标记录，切会话后不会指错 */
@@ -126,19 +135,30 @@ function defineChatStore(scope: string) {
       scrollPending = true;
       nextTick(() => {
         scrollPending = false;
-        jumpToAnchor();
+        // 落点是「内容末尾（不含参考来源）」时，交给消息列表量完 DOM 按 px 定位
+        const atReplyEnd = stopAtReplyEnd.value;
+        if (atReplyEnd) replyEndToken.value += 1;
+        else jumpToAnchor();
         // 图表、表格、markdown 图片是渲染后才撑开高度的，
         // nextTick 这一次只能滚到旧高度，补一次延迟兜底
         if (settleTimer) clearTimeout(settleTimer);
         settleTimer = setTimeout(() => {
           settleTimer = null;
-          if (pinnedToBottom.value) jumpToAnchor();
+          if (!pinnedToBottom.value) return;
+          if (atReplyEnd) replyEndToken.value += 1;
+          else jumpToAnchor();
         }, 120);
       });
     }
 
     function setPinnedToBottom(pinned: boolean) {
+      if (pinned === pinnedToBottom.value) return;
       pinnedToBottom.value = pinned;
+    }
+
+    /** 进入 / 退出「落到内容末尾（不含参考来源）」模式（页面 setup 时打开一次） */
+    function setStopAtReplyEnd(value: boolean) {
+      stopAtReplyEnd.value = Boolean(value);
     }
 
     /**
@@ -147,12 +167,15 @@ function defineChatStore(scope: string) {
      * scroll-into-view 只在值变化时生效，同一张卡需要重新对齐时（卡片收起后再点开同一步、
      * 步骤卡高度/底部间距量出来后触发的二次对齐）必须先清空再设回，否则不会滚动；
      * 空值是 no-op（uni 的实现里只有非空才滚），不会把列表拉回顶部。
+     * 传的是元素在 DOM 上的 id：核对卡这类「多轮之间会撞 block id」的块，
+     * 要用 guideStepCardDomId 拼过的唯一 id（消息列表渲染时也是这么给的）。
      */
     function scrollBlockToTop(blockId: string) {
       if (scrollIntoView.value !== blockId) {
         scrollIntoView.value = blockId;
         return;
       }
+      // 同一个 id：uni 只在值变化时才滚，先清空再设回
       scrollIntoView.value = "";
       nextTick(() => {
         scrollIntoView.value = blockId;
@@ -168,15 +191,17 @@ function defineChatStore(scope: string) {
      * 这里只负责把滚动目标指向这张卡。
      * 注意这里不再贴底，也就不会把 pinnedToBottom 置回 true（贴底会让后续追加内容再滚一次、冲掉对齐）。
      * 从最后一条往前找，避免同一份步骤在历史里来回跳。
+     * 卡片在 DOM 上的 id 并进了消息 id（guideStepCardDomId），这里必须按同一规则拼，才能指到那张卡。
      */
     function focusStepBlock(stepId: string) {
       const target = String(stepId || "").trim();
       if (!target) return false;
       for (let index = messages.value.length - 1; index >= 0; index -= 1) {
-        const block = (messages.value[index]?.blocks || [])
+        const message = messages.value[index];
+        const block = (message?.blocks || [])
           .find(item => String(item?.payload?.step_id || "") === target);
         if (!block?.id) continue;
-        scrollBlockToTop(String(block.id));
+        scrollBlockToTop(guideStepCardDomId(message?.id, block.id));
         return true;
       }
       return false;
@@ -193,6 +218,7 @@ function defineChatStore(scope: string) {
       subagent,
       scrollIntoView,
       pinnedToBottom,
+      replyEndToken,
       requestSeq,
       activeRequestSeq,
       activeMessageId,
@@ -207,6 +233,7 @@ function defineChatStore(scope: string) {
       setSubagent,
       scrollToBottom,
       setPinnedToBottom,
+      setStopAtReplyEnd,
       focusStepBlock,
     };
   });
