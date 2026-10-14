@@ -43,6 +43,8 @@ const emit = defineEmits<{
   close: [];
   "operator-item-open": [item: ReportInsightItem];
   "urgent-toggle": [item: ReportInsightItem];
+  /** 点击异常条目正文：触发详情弹窗（仅在 canToggleUrgent=false 时使用；OWNER 由右侧闪电按钮走 urgent-toggle）。 */
+  "item-open": [item: ReportInsightItem];
   "load-more": [];
   replay: [];
 }>();
@@ -131,6 +133,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
             :key="item.id"
             class="report-insight__item"
             :class="{ 'report-insight__item--urgent': item.ownerTag }"
+            @tap="emit('item-open', item)"
           >
             <view class="report-insight__item-head">
               <text class="report-insight__item-title">
@@ -140,7 +143,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
                 v-if="props.canToggleUrgent"
                 class="report-insight__lightning report-insight__lightning--actionable"
                 :class="{ 'report-insight__lightning--loading': item.urgentLoading }"
-                @tap="handleIconTap(item)"
+                @tap.stop="handleIconTap(item)"
               >
                 <image
                   class="report-insight__lightning-icon"
@@ -148,7 +151,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
                   mode="aspectFit"
                 />
               </view>
-              <view v-else class="report-insight__operator-next" @tap="handleIconTap(item)">
+              <view v-else class="report-insight__operator-next" @tap.stop="handleIconTap(item)">
                 <image class="report-insight__operator-next-icon" :src="operatorNextIcon" mode="aspectFit" />
               </view>
             </view>

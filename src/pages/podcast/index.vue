@@ -25,6 +25,7 @@ import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import PodcastQaOverlay from "@/components/podcast-qa-overlay/index.vue";
 import ReportBroadcastPlayer from "@/components/report-broadcast-player/index.vue";
 import ReportInsight from "@/components/report-broadcast-player/report-insight.vue";
+import ReportInsightDetail from "@/components/report-insight-detail/index.vue";
 import ReportVoiceSelector from "@/components/report-voice-selector/index.vue";
 import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
 import { useChatSend } from "@/hooks/useChatSend";
@@ -668,6 +669,33 @@ function openInsightItem(item: ReportInsightItem) {
 }
 
 /**
+ * 异常详情弹窗（设计稿 11101:714）：汇报结束后点击异常条目正文触发。
+ * 父组件只持有当前选中的条目，弹窗自身管理显隐（v-if="detailItem"）。
+ */
+const detailItem = ref<ReportInsightItem | null>(null);
+
+function openInsightDetail(item: ReportInsightItem) {
+  detailItem.value = item;
+}
+
+function closeInsightDetail() {
+  detailItem.value = null;
+}
+
+/**
+ * 弹窗「加急处理」按钮：OWNER 走加急 toggle（与列表里的闪电按钮同语义，无需二次确认），
+ * 非 OWNER 则回退到跳任务页的原有路径。处理后顺手关闭弹窗。
+ */
+async function onInsightDetailUrgent(item: ReportInsightItem) {
+  if (canToggleInsightUrgent.value) {
+    await onInsightUrgentToggle(item);
+  } else {
+    openInsightItem(item);
+  }
+  closeInsightDetail();
+}
+
+/**
  * 开一轮新的听播问答：与输入栏提问保持同一套交互
  * （先停答案朗读 → 问答区回到「正在理解」→ 暂停播报，等新答案回来）。
  */
@@ -943,6 +971,7 @@ onBeforeUnmount(() => {
           @close="closeReportBroadcast"
           @operator-item-open="openInsightItem"
           @urgent-toggle="onInsightUrgentToggle"
+          @item-open="openInsightDetail"
           @load-more="loadMoreInsights"
           @replay="replayInsightBroadcast"
         />
@@ -1042,6 +1071,17 @@ onBeforeUnmount(() => {
       @voice-input-focus="setVoiceInputFocused(true)"
       @voice-input-blur="setVoiceInputFocused(false)"
       @dock-height-change="setInputDockHeight"
+    />
+
+    <!--
+      异常详情弹窗（设计稿 11101:714「异常弹窗-未加急」）：
+      点击异常条目正文打开；标题用 deviceNo，异常类型用 eventCategory+eventType，
+      发生时间用 eventTime，事件摘要用 description。点 X / 遮罩 / 加急处理后关闭。
+    -->
+    <ReportInsightDetail
+      :item="detailItem"
+      @close="closeInsightDetail"
+      @urgent="onInsightDetailUrgent"
     />
   </view>
 </template>
