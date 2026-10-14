@@ -3,7 +3,7 @@ import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import type { AskSlotPayload, AskSlotSubmitPayload, GuideStepItem, GuideStepPayload, GuideSuggestionPayload } from "@/api/chat/types";
+import type { AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideSuggestionPayload } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import iconForm from "@/assets/img/icon-form.svg";
@@ -28,7 +28,9 @@ import { useComposerAttachments, type AttachmentSource } from "@/hooks/useCompos
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
-import { backFromScene } from "@/utils/scene-navigation";
+import { backFromScene, navigateToScene } from "@/utils/scene-navigation";
+import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
+import { stashPendingScheduleView } from "@/utils/schedule-view";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
 /**
@@ -36,7 +38,7 @@ import { consumePendingHistorySession, getSessionId, navigateToSessionScene, pee
  *
  * 与首页 / 听汇报的区别：
  * - 独立会话域 "task"，不与首页主会话互相污染；
- * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=TASK；
+ * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=test（任务协同的接口场景值，见 useChatSend 的 API_SCENE）；
  * - 每次进入起一轮干净会话（与作业指导一致），返回再进时重新开一轮。
  */
 defineOptions({ name: "AiTaskPage" });
@@ -88,6 +90,16 @@ const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceh
 /** 页面统一发送入口：直接走真实接口 */
 function sendTaskMessage(payload?: Parameters<typeof sendMessage>[0]) {
   void sendMessage(payload);
+}
+
+/**
+ * 甘特图（横屏调度视图）右下角输入条发来的问题：回到本页后取出来，直接发在作业协同会话里（发完即清）。
+ * 两条返回路径（navigateBack / 关掉场景窗口）都会走 onShow，所以在这里消费；
+ * 先按需切会话再发，避免问题落到别的会话。
+ */
+function startPendingScheduleAsk() {
+  const text = consumePendingScheduleAsk();
+  if (text) sendTaskMessage({ text });
 }
 const {
   iconCopyImage,
@@ -284,6 +296,15 @@ function onTaskQuickPrompt(text: string) {
 /** 甘特图入口卡：进入当天任务甘特图（横屏页，页内自行生成 mock 数据） */
 function onGanttEntryTap() {
   uni.navigateTo({ url: "/pages/schedule-gantt/index" });
+}
+
+/**
+ * 点调度视图入口卡（AI 下发的 gantt 积木）：整包数据先落到本地存储，
+ * 再开横屏调度视图页；页面 onLoad 取走渲染（rows / bars，含接口还没排时间的任务）。
+ */
+function onGanttOpen(payload: GanttViewPayload) {
+  stashPendingScheduleView(payload);
+  void navigateToScene("/pages/schedule-gantt/index");
 }
 /** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
 function onTtsClick(index: number) {
@@ -485,7 +506,9 @@ onMounted(() => {
 onShow(() => {
   syncWindowHeight();
   const sessionId = consumePendingHistorySession("TASK");
-  if (sessionId) void openLocalHistory(sessionId, true);
+  // 有心跳转的会话就先切过去，再补发甘特图里问的问题，避免问错会话
+  if (sessionId) void openLocalHistory(sessionId, true).then(startPendingScheduleAsk);
+  else startPendingScheduleAsk();
 });
 
 onUnload(() => {
@@ -528,9 +551,9 @@ onUnload(() => {
         :icon="iconForm"
       />
       <!-- 甘特图入口卡（设计稿 4708:743）：点它进入当天任务甘特图 -->
-      <!-- <view v-if="showSceneWelcome" class="task-scene-welcome-entry">
+      <view v-if="showSceneWelcome" class="task-scene-welcome-entry">
         <AiGanttEntryCard @tap="onGanttEntryTap" />
-      </view> -->
+      </view>
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
         :messages="messages"
@@ -556,6 +579,7 @@ onUnload(() => {
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @ask-slot-open="onAskSlotOpen"
+        @gantt-open="onGanttOpen"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"

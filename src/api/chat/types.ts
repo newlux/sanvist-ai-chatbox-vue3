@@ -266,9 +266,73 @@ export interface AssistantNavigationPayload extends Record<string, unknown> {
   auto_open?: boolean;
 }
 
+/** 调度视图任务条（COMPONENT scene=task / type=gantt → data.rows[].bars[]） */
+export interface GanttViewBar extends Record<string, unknown> {
+  id: string;
+  /** 任务名，如「星沙国际社区二期 C30 12立方」 */
+  title?: string;
+  /** 条内时间文案；接口没给就按起止时间拼 */
+  timeText?: string;
+  /** 起止时间（当天分钟数）；接口还没排时间时为 null */
+  startMin: number | null;
+  endMin: number | null;
+  /** 任务状态：planned / new / running / done / canceled / overdue …（页面映射成四态配色） */
+  state?: string;
+  /** 新旧关联键（重排页画新旧连线用） */
+  linkKey?: string;
+  /** 计划开始时间已过、但未收到开始记录（详情里按「逾期未开始」提示） */
+  noStartRecord?: boolean;
+}
+
+/** 调度视图资源行（data.rows[]） */
+export interface GanttViewRow extends Record<string, unknown> {
+  id: string;
+  /** 类别：供料 / 泵车 / 运输 */
+  category?: string;
+  /** 资源名多行文案，如「12 号车|何志刚」「湘A·61E09|白班」 */
+  names?: string[];
+  bars?: GanttViewBar[];
+}
+
+/** 调度视图入口卡（data.card） */
+export interface GanttViewCard extends Record<string, unknown> {
+  title?: string;
+  /** 为 false 时气泡里不渲染这张卡 */
+  visible?: boolean;
+}
+
+/** 调度视图跳转说明（data.entry） */
+export interface GanttViewEntry extends Record<string, unknown> {
+  action?: string;
+  /** 目标页标识，如 schedule */
+  page?: string;
+  /** 目标页方向，如 landscape */
+  orientation?: string;
+  /** 数据解析方式，如 latest_by_view_id */
+  resolve?: string;
+}
+
+/**
+ * 调度视图（COMPONENT scene=task / type=gantt）：整包 data 透传，
+ * 气泡里渲染入口卡（card），点击后把整包交给横屏调度视图页渲染（rows）。
+ */
+export interface GanttViewPayload extends Record<string, unknown> {
+  viewType?: string;
+  /** 视图 id，后端按 latest_by_view_id 解析最新一版 */
+  viewId?: string;
+  entry?: GanttViewEntry;
+  card?: GanttViewCard;
+  rows?: GanttViewRow[];
+  /** 阶段：planning / planned / executing / finished … */
+  stage?: string;
+  statusText?: string;
+  /** 业务日期，如 2026-10-13 */
+  businessDate?: string;
+}
+
 export interface RichContentEvent {
   event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source" | "ask_slot"
-    | "assistant_navigation" | "guide_step" | "guide_check" | "guide_suggestion";
+    | "assistant_navigation" | "guide_step" | "guide_check" | "guide_suggestion" | "gantt";
   conversationId: Identifier;
   messageId: Identifier;
   taskId?: Identifier;

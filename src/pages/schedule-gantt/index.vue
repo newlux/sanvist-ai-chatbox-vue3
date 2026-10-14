@@ -1,100 +1,227 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import type { GanttViewRow } from "@/api/chat/types";
+import type { TaskDetailPanelPayload, TaskDetailPanelStatus } from "@/components/ai-task-detail-panel/types";
 
-import AiTaskDetailSheet from "@/components/ai-task-detail-sheet/index.vue";
-import type { TaskDetailPayload, TaskDetailStatus } from "@/components/ai-task-detail-sheet/types";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
+import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
 import { useLandscape } from "@/hooks/useLandscape";
+import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
-import { createLogger } from "@/utils/logger";
+import { backFromScene } from "@/utils/scene-navigation";
+import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
+import { consumePendingScheduleView } from "@/utils/schedule-view";
 
 /**
- * 横屏调度视图（任务状态版）——设计稿 6832:13「横屏」，基于 DHTMLX Gantt（Community 10.x，MIT）实现。
- * 文档：https://docs.dhtmlx.com/gantt/zh/
+ * 横屏调度视图（稿子 6832:13）——每个资源一行，行内平铺当班任务，任务条按状态配色。
  *
- * 说明：
- * - 只用 H5：DHTMLX Gantt 是 DOM 组件，小程序端不支持，全部逻辑包在 `#ifdef H5` 里（小程序构建会被剔除）；
- * - 数据模型按 Gantt 的约定：**资源 = 可折叠的父任务**（父行），**每条任务 = 一个子行**（一行一条任务条）。
- *   设计稿是「一个资源行里横排多条任务条」，Gantt 内核不支持一行多任务条（那是资源泳道视图，需要 DHTMLX
- *   Scheduler/PRO 资源面板或自绘，见 pages/schedule 那一版），这里按 Gantt 的标准形态落地；
- * - 状态配色/字号/当前时间标记均取自稿子（见下方状态表与 CSS）。
+ * 版面：横屏 812×375（每小时 56px，时间轴以 08:00–21:00 为基准、按数据与当前时间向外扩到整点）
+ * - 顶部栏：标题「调度视图」+ 日期（6832:15 / 6832:186），右侧是任务状态图例（6832:275）
+ *   与返回对话页按钮（10474:18，与预排 / 重排调度视图同款 28×28 纯图标）；
+ * - 左侧资源列（140px）：第一行「类别 + 名称」，第二行车号|班次；
+ * - 右侧排程区：时间轴刻度 + 竖向网格（#F3F3F3）+ 任务条（按起止时间定位）+ 时间线，可横向滚动；
+ * - 右下角输入条（components/schedule-ask-bar）：问的问题带回作业协同对话页再发送；
+ * - 点击任务条：右侧滑出任务详情面板（6832:292）。
  *
- * 状态视觉（设计稿节点）：
- *   执行中   底 #ECF5FF 描边 #FFFFFF 实线
- *   已完成   底 #F0F0F0 描边 #FFFFFF 实线
- *   待执行   底 #FFFFFF 描边 #F2F2F2 实线
- *   已逾期   底 #FFFFFF 描边 #767676 虚线 [2,2]（图例里叫「逾期未开始」）
+ * 横屏方式与其它调度视图一致：`useLandscape()` 默认把页面整体旋转 90° 模拟横屏
+ * （设备竖屏持握、不申请全屏权限），离开页面自动还原；需要真锁方向时传 `{ lock: true }`。
+ *
+ * 任务条（稿子 6832:13）：40 高、圆角 6、条内两行（任务名 + `[状态]起止`），按状态四态配色：
+ * 执行中 #ECF5FF + #FFFFFF 描边 / 已完成 #F0F0F0 / 待执行 #FFFFFF + #F2F2F2 / 已逾期 #FFFFFF + #767676 虚线。
+ *
+ * 时间线（稿子 6832:208 虚线 + 6832:209 胶囊）：**取系统当前时间**，每 30 秒刷新一次。
  */
 
 defineOptions({ name: "ScheduleGanttPage" });
 
-// #ifdef H5
-import "dhtmlx-gantt/codebase/dhtmlxgantt.css";
-// #endif
+/** 进入页面自动横屏（默认旋转模拟），离开时还原 */
+const { rotated, exitLandscape } = useLandscape();
 
-const CONTAINER_ID = "schedule-gantt-root";
+/** 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志 */
+useScheduleGestures({ gridId: "schedule-gantt-grid", onRowsOffset: () => measureRowTops() });
 
-const logger = createLogger("schedule-gantt");
+/** 任务详情面板（点击任务条从右侧滑出，稿子 6832:292） */
+const detailVisible = ref(false);
+const detail = ref<TaskDetailPanelPayload | null>(null);
 
-/** 时间轴范围（稿子：08:00–21:00，每小时一个刻度） */
-const AXIS_START_HOUR = 8;
-const AXIS_END_HOUR = 21;
-/** 每小时像素宽（与 DHTMLX 的 min_column_width 保持一致） */
+/** 时间轴：每小时 56px；稿子基准范围 08:00–21:00（与稿子刻度一致） */
 const HOUR_WIDTH = 56;
-/** 左列（资源 / 车辆人员）宽（与 DHTMLX 的 grid_width 保持一致，时间轴可视宽需减掉它） */
-const GRID_WIDTH = 140;
-/** 提示箭头相对所在行顶部的居中偏移（行高 44 - 按钮 28）/2 */
-const ROW_HINT_CENTER_OFFSET = 8;
-/** 当前时间标记（稿子 6832:209「12:45」） */
-const NOW = { hour: 12, minute: 45 };
+const DESIGN_DAY_START_MIN = 8 * 60;
+const DESIGN_DAY_END_MIN = 21 * 60;
+/** 时间轴实际范围（分钟）：以稿子基准为底线，数据 / 当前时间越界时由下面的 expandDayRange() 向外扩到整点 */
+let DAY_START_MIN = DESIGN_DAY_START_MIN;
+let DAY_END_MIN = DESIGN_DAY_END_MIN;
 
-type TaskStatus = "running" | "done" | "pending" | "overdue";
-
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  running: "执行中",
-  done: "已完成",
-  pending: "待执行",
-  overdue: "已逾期",
-};
-
-interface ScheduleTask {
-  id: number;
-  /** 任务名（条内第一行） */
-  title: string;
-  /** 所属资源（父任务） */
-  parent: number;
-  /** 起止时间「HH:MM」 */
-  start: string;
-  end: string;
-  status: TaskStatus;
+/* ---------- 时间线（稿子 6832:208 虚线 / 6832:209 胶囊）----------
+   取**系统当前时间**，每 30 秒刷新一次；任务状态优先用数据里的 status，没给才按当前时刻推。 */
+function currentMinutes() {
+  const date = new Date();
+  return date.getHours() * 60 + date.getMinutes();
 }
 
-interface ScheduleResource {
-  id: number;
-  /** 左列第一行：类别（供料 / 泵车 / 运输） */
+const nowMinutes = ref(currentMinutes());
+/** 时间线落在轴外时不画（轴已把当前时间包进来，正常不会出现） */
+const nowVisible = computed(() => nowMinutes.value >= DAY_START_MIN && nowMinutes.value <= DAY_END_MIN);
+/** 时间线在时间轴内的横向位置 */
+const nowStyle = computed(() => ({ left: `${((nowMinutes.value - DAY_START_MIN) / 60) * HOUR_WIDTH}px` }));
+/** 胶囊里的时间文案（HH:MM） */
+const nowText = computed(() => minutesToTime(nowMinutes.value));
+let nowTimer: ReturnType<typeof setInterval> | null = null;
+const hourLabels = computed(() => {
+  const labels: string[] = [];
+  for (let hour = DAY_START_MIN / 60; hour <= DAY_END_MIN / 60; hour += 1) {
+    labels.push(`${String(hour).padStart(2, "0")}:00`);
+  }
+  return labels;
+});
+/** 排程区总宽 = 小时数 × 每小时宽 */
+const timelineWidth = computed(() => ((DAY_END_MIN - DAY_START_MIN) / 60) * HOUR_WIDTH);
+
+/* ---------- 时间轴横向滚动 ----------
+   横屏是用 CSS 把页面旋转 90° 模拟的，手势方向跟着转（屏幕上左右 ↔ 内容里上下），
+   所以屏幕方向拖动由 hooks/useScheduleGestures 接管、原生滚动只读不回写。
+   关键：`:scroll-left` 只在拖动时赋值，**不能**拿 @scroll 的值回写，
+   否则每次滚动都会被赋回同一个值，表现就是一顿一顿的。 */
+/** 绑给 scroll-view 的位置（只在拖动时改） */
+const scrollLeftProp = ref(0);
+/** 实际滚动位置（从 @scroll 读，拖动起点与左右提示判定用） */
+const currentScrollLeft = ref(0);
+/** 拖动时关掉滚动动画（否则跟手迟滞） */
+const smoothScroll = ref(true);
+/** 时间轴可视宽度（H5 量一次） */
+const gridWidth = ref(0);
+
+function applyScroll(left: number) {
+  const next = Math.max(0, Math.round(left));
+  if (next === scrollLeftProp.value) return;
+  scrollLeftProp.value = next;
+  currentScrollLeft.value = next;
+}
+
+function onTimelineScroll(event: { detail?: { scrollLeft?: number } }) {
+  // 只记录当前位置，不回写 scroll-left
+  currentScrollLeft.value = Number(event?.detail?.scrollLeft || 0);
+}
+
+function measureGrid() {
+  // #ifdef H5
+  const el = document.getElementById("schedule-gantt-grid");
+  if (el) gridWidth.value = el.clientWidth;
+  // #endif
+}
+
+/** 每行箭头相对 .schedule__body 顶部的 Y（取行中心，px）；-1 表示该行没渲染出来 */
+const rowTops = ref<number[]>([]);
+
+/**
+ * 量出每一行的纵向中心。
+ * 这里的纵向滚动是 useScheduleGestures 用 `transform` 平移的（不是原生滚动），
+ * 所以直接量 .schedule__track 的当前位置即可；手势每次平移后会回调进来重算。
+ */
+function measureRowTops() {
+  // #ifdef H5
+  const body = document.querySelector<HTMLElement>(".schedule__body");
+  const tracks = Array.from(document.querySelectorAll<HTMLElement>(".schedule__track"));
+  if (!body || tracks.length === 0) return;
+  const bodyTop = body.getBoundingClientRect().top;
+  rowTops.value = rows.value.map((_row, index) => {
+    const el = tracks[index];
+    if (!el) return -1;
+    const rect = el.getBoundingClientRect();
+    return rect.top - bodyTop + rect.height / 2;
+  });
+  // #endif
+}
+
+function measureLayout() {
+  measureGrid();
+  measureRowTops();
+}
+
+onMounted(() => {
+  measureLayout();
+  // 首帧布局可能晚一点，下一帧再量一次行位置
+  nextTick(measureRowTops);
+  // 时间线取系统当前时间：每 30 秒对一次表（分钟级精度，不用每秒刷）
+  nowTimer = setInterval(() => {
+    nowMinutes.value = currentMinutes();
+  }, 30_000);
+  // #ifdef H5
+  window.addEventListener("resize", measureLayout);
+  // #endif
+});
+
+onBeforeUnmount(() => {
+  if (nowTimer) {
+    clearInterval(nowTimer);
+    nowTimer = null;
+  }
+  // #ifdef H5
+  window.removeEventListener("resize", measureLayout);
+  // #endif
+});
+
+// 「收起 / 展开全部」会改变行数，行位置需要重新量
+watch(() => rows.value.length, () => {
+  nextTick(measureRowTops);
+});
+
+/** 任务状态（稿子 6832:13 图例四态；「已取消」只出现在重排页，这里用不到） */
+type ScheduleBarStatus = Exclude<TaskDetailPanelStatus, "canceled">;
+
+interface ScheduleBar {
+  id: string;
+  /** 任务标题，如「1号基站 C20 80立方」 */
+  title: string;
+  /** 条内时间文案，如「08:00-13:00」 */
+  timeText: string;
+  /** 起点（当天分钟数） */
+  startMin: number;
+  /** 终点（当天分钟数） */
+  endMin: number;
+  /** 任务状态（接后端时用接口给的 status；没给就按当前时刻推） */
+  status?: ScheduleBarStatus;
+  /** 强调条：红描边 #C8201E（稿子 6464:358） */
+  highlight?: boolean;
+  /** 计划开始时间已过、但一直没收到开始记录 → 详情里按「逾期未开始」展示（稿子样本 4） */
+  noStartRecord?: boolean;
+}
+
+interface ScheduleRow {
+  id: string;
+  /** 类别：供料 / 泵车 / 运输 */
   category: string;
-  /** 左列第二行：资源名（1号搅拌站 / 13号车|郑文斌 …） */
-  name: string;
-  /** 左列第三行：车号|班次（可空） */
-  subName?: string;
-  tasks: ScheduleTask[];
+  /** 资源名（资源列内的多行文案，如「1号搅拌站」「供料线安排」） */
+  names: string[];
+  /** 该行的时间条 */
+  bars: ScheduleBar[];
+}
+
+function timeToMin(text: string) {
+  const [hour, minute] = text.split(":").map(Number);
+  return hour * 60 + (minute || 0);
+}
+
+/** 任务条按起止时间定位：每小时 56px（如 08:00-13:00 → x=0, w=280） */
+function barStyle(bar: ScheduleBar) {
+  const left = ((bar.startMin - DAY_START_MIN) / 60) * HOUR_WIDTH;
+  const width = Math.max(((bar.endMin - bar.startMin) / 60) * HOUR_WIDTH, HOUR_WIDTH / 2);
+  return { left: `${left}px`, width: `${width}px` };
 }
 
 /**
- * Mock 数据由页面自行生成（不依赖接口，方便直接打开页面看效果）。
- * 接入后端时把 `createMockResources()` 换成接口返回的同结构数据即可。
- *
- * 行规格：[任务名, 开始, 结束, 状态]，共 6 个资源行、15 条任务（与入口卡上的「任务数 15 个」一致）。
+ * 调度数据（mock）：每个资源一行，行内平铺当班任务；同一辆车的任务首尾相接、互不重叠。
+ * 行规格 [任务名, 开始, 结束, 状态]，共 6 个资源 / 15 条任务（与入口卡「任务数 15 个」一致）；
+ * 接入后端时把 MOCK_ROWS 换成接口返回、状态用接口给的 status 即可。
  */
-const MOCK_ROW_SPECS: Array<{
+const MOCK_ROWS: Array<{
   category: string;
-  name: string;
-  subName?: string;
-  tasks: Array<[string, string, string, TaskStatus]>;
+  names: string[];
+  tasks: Array<[string, string, string, ScheduleBarStatus]>;
 }> = [
   {
     category: "供料",
-    name: "1号搅拌站",
-    subName: "供料线安排",
+    names: ["1号搅拌站", "供料线安排"],
     tasks: [
       ["万达基地 C20 80立方", "08:00", "13:00", "running"],
       ["1号搅拌站 C20 90立方", "20:00", "20:40", "pending"],
@@ -102,8 +229,7 @@ const MOCK_ROW_SPECS: Array<{
   },
   {
     category: "泵车",
-    name: "47米臂架泵",
-    subName: "湘A-P0078|李海",
+    names: ["47米臂架泵", "湘A-P0078|李海"],
     tasks: [
       ["1号基站 C20 80立方", "08:00", "13:00", "running"],
       ["万达基地 C20 20立方", "20:10", "20:50", "pending"],
@@ -111,9 +237,7 @@ const MOCK_ROW_SPECS: Array<{
   },
   {
     category: "运输",
-    name: "13号车|郑文斌",
-    subName: "湘A-P0078|白班",
-    // 同一辆车（13号车）的任务首尾相接、互不重叠
+    names: ["13号车|郑文斌", "湘A-P0078|白班"],
     tasks: [
       ["万达基地 C20 12立方", "08:30", "11:00", "done"],
       ["万达基地 C20 …", "13:00", "14:40", "pending"],
@@ -122,8 +246,7 @@ const MOCK_ROW_SPECS: Array<{
   },
   {
     category: "运输",
-    name: "13号车|肖鹏",    subName: "湘A-P0078|晚班",
-    // 同一辆车（13号车·晚班）同样首尾相接
+    names: ["13号车|肖鹏", "湘A-P0078|晚班"],
     tasks: [
       ["万达基地 C20 12立方", "08:30", "11:00", "done"],
       ["万达基地 C20 …", "13:30", "16:00", "pending"],
@@ -132,9 +255,7 @@ const MOCK_ROW_SPECS: Array<{
   },
   {
     category: "运输",
-    name: "12号车|何志刚",
-    subName: "湘A-R6557|白班",
-    // 同一辆车（12号车）同样首尾相接
+    names: ["12号车|何志刚", "湘A-R6557|白班"],
     tasks: [
       ["万达基地 C20 12立方", "09:40", "12:10", "done"],
       ["万达基地 C20 …", "12:50", "15:20", "pending"],
@@ -143,585 +264,436 @@ const MOCK_ROW_SPECS: Array<{
   },
   {
     category: "运输",
-    name: "10号车|黄立新",
-    subName: "湘A-TY678|白班",
+    names: ["10号车|黄立新", "湘A-TY678|白班"],
     tasks: [
+      // 比稿子的 08:00 更早：轴要向外扩，否则会被裁在轴外面
       ["夜班收尾 C8 6立方", "07:20", "08:40", "running"],
       ["万达基地 C20 20立方", "20:10", "20:50", "pending"],
     ],
   },
 ];
 
-/** 由行规格生成排程数据：资源 id = 行号，任务 id = (行号+1)*100 + 序号（稳定可复现） */
-function createMockResources(): ScheduleResource[] {
-  return MOCK_ROW_SPECS.map((spec, rowIndex) => {
-    const resourceId = rowIndex + 1;
+const mockRows = computed<ScheduleRow[]>(() => MOCK_ROWS.map((row, rowIndex) => ({
+  id: `resource-${rowIndex + 1}`,
+  category: row.category,
+  names: row.names,
+  bars: row.tasks.map(([title, start, end, status], taskIndex) => ({
+    id: `task-${rowIndex + 1}-${taskIndex + 1}`,
+    title,
+    timeText: `${start}-${end}`,
+    startMin: timeToMin(start),
+    endMin: timeToMin(end),
+    status,
+  })),
+})));
+
+/* ------------------------------------------------------------------
+ * AI 下发的调度视图数据（COMPONENT scene=task / type=gantt → data）
+ * ------------------------------------------------------------------ */
+/**
+ * 气泡入口卡点进来时写下的整包 data，打开本页取走（取完即清）；
+ * 没有（比如从作业协同页的入口卡直接进来）就回退到下面的 mock。
+ */
+const viewPayload = consumePendingScheduleView();
+
+/** 接口 state → 页面四态；认不出 / 没给就留空，交给 statusOf() 按当前时刻推 */
+function statusFromState(state: unknown): ScheduleBarStatus | undefined {
+  const key = String(state || "").trim().toLowerCase();
+  if (key === "done" || key === "finished" || key === "completed") return "done";
+  if (key === "running" || key === "executing") return "running";
+  if (key === "overdue") return "overdue";
+  if (key === "planned" || key === "planning" || key === "new" || key === "pending") return "pending";
+  return undefined;
+}
+
+/** 接口还没排时间的条：每条按 2 小时一节依次排开 */
+const UNSCHEDULED_SLOT_MIN = 2 * 60;
+
+/**
+ * 接口 rows → 页面行模型。
+ * - 起止时间直传；**接口没排时间（startMin/endMin 为 null）**时按数组顺序在轴起点依次排开、
+ *   条内时间写「时间待定」——否则按 null 定位会算出 NaN，任务条直接跑出画面；
+ * - 状态取 `state` 映射，映射不到就留空（页面按当前时刻推）。
+ */
+function normalizeViewRows(viewRows: GanttViewRow[]): ScheduleRow[] {
+  return viewRows.map((row, rowIndex) => {
+    let cursor = DESIGN_DAY_START_MIN;
     return {
-      id: resourceId,
-      category: spec.category,
-      name: spec.name,
-      subName: spec.subName,
-      tasks: spec.tasks.map(([title, start, end, status], taskIndex) => ({
-        id: resourceId * 100 + taskIndex + 1,
-        title,
-        parent: resourceId,
-        start,
-        end,
-        status,
-      })),
+      id: String(row.id || `resource-${rowIndex + 1}`),
+      category: String(row.category || "").trim() || "—",
+      names: Array.isArray(row.names) ? row.names.map(name => String(name || "")) : [],
+      bars: (Array.isArray(row.bars) ? row.bars : []).map((bar, barIndex) => {
+        const start = Number(bar.startMin);
+        const end = Number(bar.endMin);
+        const planned = Number.isFinite(start) && Number.isFinite(end) && end > start;
+        const slotStart = cursor;
+        if (!planned) cursor += UNSCHEDULED_SLOT_MIN;
+        return {
+          id: String(bar.id || `task-${rowIndex + 1}-${barIndex + 1}`),
+          title: String(bar.title || "").trim(),
+          timeText: String(bar.timeText || "").trim() || (planned ? "" : "时间待定"),
+          startMin: planned ? start : slotStart,
+          endMin: planned ? end : slotStart + UNSCHEDULED_SLOT_MIN,
+          status: statusFromState(bar.state),
+          noStartRecord: Boolean(bar.noStartRecord),
+        };
+      }),
     };
   });
 }
 
-const resources: ScheduleResource[] = createMockResources();
+/** 有接口数据就用接口的，没有就用 mock */
+const rows = computed<ScheduleRow[]>(() => (
+  viewPayload?.rows?.length ? normalizeViewRows(viewPayload.rows) : mockRows.value
+));
 
-const legend: Array<{ key: TaskStatus; label: string }> = [
+/**
+ * 时间轴范围外扩：数据与「当前时间」越界的都包进来 ——
+ * 更早 / 更晚的任务（如 07:20 的夜班收尾）不能被裁在轴外面，
+ * 时间线取系统当前时间，落在轴外同样看不到。
+ */
+function expandDayRange(list: ScheduleRow[]) {
+  list.forEach((row) => {
+    row.bars.forEach((bar) => {
+      DAY_START_MIN = Math.min(DAY_START_MIN, Math.floor(bar.startMin / 60) * 60);
+      DAY_END_MIN = Math.max(DAY_END_MIN, Math.ceil(bar.endMin / 60) * 60);
+    });
+  });
+  DAY_START_MIN = Math.min(DAY_START_MIN, Math.floor(nowMinutes.value / 60) * 60);
+  DAY_END_MIN = Math.max(DAY_END_MIN, Math.ceil(nowMinutes.value / 60) * 60);
+}
+
+expandDayRange(rows.value);
+
+/**
+ * 每一行左右两侧还有被挡住的任务时，就在那一行的对应侧浮出箭头（稿子 6832:720）；
+ * 点一下把时间轴滚到该行那一侧最近的任务。
+ * 放在数据 / 轴范围之后：判定用的起点必须与任务条定位用的是同一个。
+ */
+const { rowHints, jumpToRow } = useTimelineEdgeHint({
+  rows: () => rows.value,
+  dayStartMin: DAY_START_MIN,
+  hourWidth: HOUR_WIDTH,
+  scrollLeft: currentScrollLeft,
+  viewportWidth: gridWidth,
+  contentWidth: () => timelineWidth.value,
+  scrollTo: (left) => {
+    smoothScroll.value = true;
+    applyScroll(left);
+  },
+});
+
+/** 顶部栏日期：取系统当天，与时间线一致 */
+function formatDate(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** 顶部栏日期：有接口给的业务日期就用它，否则取系统当天 */
+const dateText = String(viewPayload?.businessDate || "").trim() || formatDate(new Date());
+
+/**
+ * 左上角按钮：返回对话页面。
+ * 先还原屏幕方向（撤掉 CSS 旋转 / 解锁方向 / 退全屏），再走场景返回：
+ * 上一页是对话页就直接返回，若是独立场景窗口则关闭 webview 回到对话页。
+ *
+ * 兜底路由给作业协同对话页：本页都是从作业协同对话里进来的，没有上一页可退时
+ * 也要回那个会话（而不是首页），提问才落在原来的对话里。
+ */
+function backToChat() {
+  exitLandscape();
+  backFromScene("/pages/task/index");
+}
+
+/**
+ * 右下角输入条发送：先把问题记到本地（对话页 onShow 取走并发送），
+ * 再复用左上角那颗返回按钮的逻辑（收起横屏 → 回到作业协同对话页）。
+ */
+function onAskSend(text: string) {
+  stashPendingScheduleAsk(text);
+  backToChat();
+}
+
+/** 分钟数 → HH:MM */
+function minutesToTime(minutes: number) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+/** 时长（分钟）→「89分钟」/「3小时15分」（稿子样本的写法：2 小时内按分钟） */
+function lengthText(total: number) {
+  const minutes = Math.max(total, 0);
+  if (minutes < 120) return `${minutes}分钟`;
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return minute ? `${hour}小时${minute}分` : `${hour}小时`;
+}
+
+/** 条内时间文案（没给就按起止拼） */
+function barTimeText(bar: ScheduleBar) {
+  return bar.timeText || `${minutesToTime(bar.startMin)}-${minutesToTime(bar.endMin)}`;
+}
+
+/** 类别 → 作业内容（稿子样本：搅拌运输车「混凝土运输」、现场泵车「混凝土浇筑」） */
+const WORK_TYPE: Record<string, string> = {
+  供料: "混凝土供应",
+  泵车: "混凝土浇筑",
+  运输: "混凝土运输",
+};
+
+/**
+ * 任务状态：数据带了 status 就以它为准（接后端时用接口字段）；
+ * 没给才按当前时刻推 ——「计划开始时间已过 + 未收到开始记录」按逾期未开始处理（稿子样本 4）。
+ */
+function statusOf(bar: ScheduleBar): TaskDetailPanelStatus {
+  if (bar.status) return bar.status;
+  if (bar.noStartRecord && bar.startMin <= nowMinutes.value) return "overdue";
+  if (bar.endMin <= nowMinutes.value) return "done";
+  if (bar.startMin <= nowMinutes.value) return "running";
+  return "pending";
+}
+
+/** 任务条状态前缀（稿子 6832:13 的条内第二行写成「[执行中]08:00-13:00」） */
+const BAR_STATUS_TEXT: Record<TaskDetailPanelStatus, string> = {
+  running: "执行中",
+  done: "已完成",
+  pending: "待执行",
+  overdue: "已逾期",
+  canceled: "已取消",
+};
+
+/** 条内第二行：状态 + 时段 */
+function barTimeLabel(bar: ScheduleBar) {
+  return `[${BAR_STATUS_TEXT[statusOf(bar)]}]${barTimeText(bar)}`;
+}
+
+/** 任务条样式类：按状态取四态配色（稿子 6832:13） */
+function barClass(bar: ScheduleBar) {
+  return `schedule__bar--${statusOf(bar)}`;
+}
+
+/**
+ * 任务状态图例（稿子 6832:13）：已完成 / 执行中 / 待执行 / 逾期未开始。
+ * 对应的 10×10 色块：6832:212 / 6832:280 / 6832:278 / 6832:273。
+ */
+const legend = [
   { key: "done", label: "已完成" },
   { key: "running", label: "执行中" },
   { key: "pending", label: "待执行" },
   { key: "overdue", label: "逾期未开始" },
-];
-
-const dateText = "2025-09-26";
-
-/** 任务详情窗口（点击任务条弹出，设计稿 6832:464） */
-const detailVisible = ref(false);
-const detail = ref<TaskDetailPayload | null>(null);
-
-/** 任务条状态 → 详情窗口状态（Gantt 的「已逾期」在详情里按「待执行」展示） */
-function toDetailStatus(status: TaskStatus): TaskDetailStatus {
-  if (status === "done") return "done";
-  if (status === "running") return "running";
-  return "pending";
-}
-
-/** 点击任务条：用该任务所在的资源行拼出详情数据 */
-function openTaskDetail(taskId: unknown) {
-  const id = Number(taskId);
-  for (const resource of resources) {
-    const task = resource.tasks.find(item => item.id === id);
-    if (!task) continue;
-    detail.value = {
-      driverName: String(resource.name).split("|").pop() || resource.name,
-      dateText: `${dateText}  今天`,
-      vehicleText: [resource.name, resource.subName].filter(Boolean).join("  "),
-      groups: [
-        {
-          route: `${resource.category}｜${resource.name}`,
-          items: [
-            {
-              start: task.start,
-              end: task.end,
-              name: task.title,
-              status: toDetailStatus(task.status),
-            },
-          ],
-        },
-      ],
-      note: `${task.title}：${task.start}-${task.end}（${STATUS_LABEL[task.status]}）。`,
-    };
-    detailVisible.value = true;
-    return;
-  }
-}
-
-/** 把「HH:MM」换算成当天 Date */
-function timeOfDay(text: string) {
-  const [hour, minute] = text.split(":").map(Number);
-  const date = new Date();
-  date.setHours(hour, minute || 0, 0, 0);
-  return date;
-}
-
-function timeToMinutes(text: string) {
-  const [hour, minute] = text.split(":").map(Number);
-  return (hour || 0) * 60 + (minute || 0);
-}
-
-/* ------------------------------------------------------------------
- * DHTMLX Gantt 初始化（仅 H5）
- * ------------------------------------------------------------------ */
-let ganttInstance: { destructor?: () => void; setSizes?: () => void } | null = null;
-
-/** 可视区尺寸变化后让 Gantt 重新测量画布（横屏锁定/CSS 旋转都会改变容器尺寸） */
-function reflowGantt() {
-  try {
-    ganttInstance?.setSizes?.();
-  } catch {
-    // 画布尚未初始化时忽略
-  }
-  // setSizes 后滚动容器可能才出现，兜底确保监听挂上并同步一次尺寸
-  ensureScrollListener();
-}
-
-/** 进入页面自动横屏：App 锁屏幕方向，H5 锁方向 + 旋转兜底 */
-const { rotated, exitLandscape } = useLandscape(reflowGantt);
-
-interface GanttLike {
-  config: Record<string, unknown>;
-  templates: Record<string, unknown>;
-  plugins?: (cfg: Record<string, boolean>) => void;
-  i18n?: { setLocale: (locale: string) => void };
-  init: (el: HTMLElement | string) => void;
-  parse: (data: unknown) => void;
-  addMarker?: (cfg: Record<string, unknown>) => void;
-  attachEvent?: (name: string, handler: (...args: unknown[]) => unknown) => void;
-  setSizes?: () => void;
-  destructor?: () => void;
-}
+] as const;
 
 /**
- * 取 DHTMLX Gantt 实例：ESM 构建里实例可能挂在具名导出 `gantt` 上，
- * 也可能是 default 导出本身；取不到（没有 init）就当作失败返回 null。
+ * 点击任务条：按稿子 6832:292 + 6832:283 四态样本组装右侧详情面板的数据。
+ * 站点 / 规格 / 方量 / 上一程 / 下一程都从 mock 的任务条里推，接后端时换成接口字段即可；
+ * 「当前进度」与「逾期警告」按任务状态动态给。
  */
-async function resolveGantt() {
-  const mod = (await import("dhtmlx-gantt")) as Record<string, unknown>;
-  const defaultExport = mod.default as Record<string, unknown> | undefined;
-  const candidate = (mod.gantt ?? defaultExport?.gantt ?? defaultExport ?? mod) as Record<string, unknown>;
-  return typeof candidate?.init === "function" ? (candidate as unknown as GanttLike) : null;
-}
-
-/**
- * 当前时间标记（稿子 6832:208：红色胶囊 + 30% 红虚线）。
- * marker 在 v10 属于**插件能力**：`plugins({ marker: true })` 之后才有 `addMarker`。
- * 装不上时直接跳过——一个装饰性标记不能挡住整张表的渲染。
- */
-function addNowMarker(g: GanttLike) {
-  if (typeof g.addMarker !== "function") return false;
-  try {
-    const text = `${String(NOW.hour).padStart(2, "0")}:${String(NOW.minute).padStart(2, "0")}`;
-    g.addMarker({ start_date: timeOfDay(text), css: "sg-now", text });
-    return true;
-  } catch (error) {
-    logger.warn("当前时间标记添加失败，已跳过", error);
-    return false;
-  }
-}
-
-async function mountGantt() {
-  const g = await resolveGantt();
-  if (!g) {
-    logger.error("DHTMLX Gantt 实例未取到，甘特图不渲染");
-    return;
-  }
-  ganttInstance = g;
-
-  g.config.date_format = "%Y-%m-%d %H:%i";
-  // 稿子里的排程表是只读看板：关掉拖动/编辑/依赖线
-  g.config.readonly = true;
-  g.config.show_links = false;
-  g.config.show_errors = false;
-  g.config.row_height = 44;
-  g.config.bar_height = 40;
-  // 左列宽 140（稿子 6464:279 的 Rectangle 110 宽 140）
-  g.config.grid_width = GRID_WIDTH;
-  // 每小时 56px，与稿子的时间轴刻度一致（13 小时 ≈ 728px，横屏内基本一屏放下）
-  g.config.min_column_width = HOUR_WIDTH;
-  g.config.scales = [{ unit: "hour", step: 1, format: "%H:%i" }];
-  // 时间轴固定 08:00–21:00（与稿子一致，不被任务时间撑开）
-  g.config.start_date = timeOfDay(`${AXIS_START_HOUR}:00`);
-  g.config.end_date = timeOfDay(`${AXIS_END_HOUR}:00`);
-
-  // 左列：类别 / 资源名 / 车号|班次 三行，和稿子的资源列一致
-  g.config.columns = [
-    {
-      name: "text",
-      label: "资源与车辆人员",
-      width: 140,
-      tree: true,
-      template: (task: { gridHtml?: string }) => task.gridHtml || "",
-    },
-  ];
-
-  // 任务条：两行文案（任务名 + [状态]起止时间），类名带上状态用于配色
-  g.templates.task_class = (_start: Date, _end: Date, task: { status?: TaskStatus }) => `sg-bar sg-bar--${task.status || "pending"}`;
-  g.templates.task_text = (_start: Date, _end: Date, task: { title?: string; status?: TaskStatus; timeText?: string }) =>
-    `<div class="sg-bar__name">${task.title || ""}</div><div class="sg-bar__meta">[${STATUS_LABEL[task.status || "pending"]}]${task.timeText || ""}</div>`;
-
-  // marker 属插件能力：先启用一次，能加就先加
-  try {
-    g.plugins?.({ marker: true });
-  } catch (error) {
-    logger.warn("marker 插件启用失败", error);
-  }
-  let markerAdded = addNowMarker(g);
-  // marker 插件不可用时降级：给「当前时间所在的小时格」打类名，用 CSS 自绘虚线 + 时间胶囊
-  if (!markerAdded) {
-    g.templates.timeline_cell_class = (_task: unknown, date: Date) =>
-      date && date.getHours() === NOW.hour ? "sg-now-cell" : "";
-  }
-
-  try {
-    g.i18n?.setLocale("cn");
-  } catch {
-    // 语言包缺失时保持默认，不影响排程展示
-  }
-
-  const el = document.getElementById(CONTAINER_ID);
-  if (!el) {
-    logger.error("甘特图容器不存在，跳过渲染");
-    return;
-  }
-  // 降级方案用到的「当前时间在整点格内的偏移」与文案（12:45 → 75%，"12:45"）
-  el.style.setProperty("--sg-now-offset", `${(NOW.minute / 60) * 100}%`);
-  el.style.setProperty("--sg-now-text", `"${String(NOW.hour).padStart(2, "0")}:${String(NOW.minute).padStart(2, "0")}"`);
-  g.init(el);
-
-  // 说明：marker 只在 init 前试一次。若这里再重试成功，会和上面的降级线叠成两条，故不重试。
-
-  // 资源 = 父任务，任务 = 子行（parent 指向资源 id）
-  const data: Array<Record<string, unknown>> = [];
-  resources.forEach((resource) => {
-    data.push({
-      id: resource.id,
-      text: `${resource.category} ${resource.name}`,
-      gridHtml: `<div class="sg-cell"><div class="sg-cell__category">${resource.category}</div><div class="sg-cell__name">${resource.name}</div>${resource.subName ? `<div class="sg-cell__sub">${resource.subName}</div>` : ""}</div>`,
-      type: "project",
-      open: true,
-      start_date: timeOfDay("08:00"),
-      end_date: timeOfDay("21:00"),
-    });
-    resource.tasks.forEach((task) => {
-      data.push({
-        id: task.id,
-        text: task.title,
-        title: task.title,
-        status: task.status,
-        timeText: `${task.start}-${task.end}`,
-        start_date: timeOfDay(task.start),
-        end_date: timeOfDay(task.end),
-        parent: resource.id,
-      });
-    });
-  });
-
-  try {
-    g.parse({ data, links: [] });
-  } catch (error) {
-    logger.error("甘特图数据加载失败", error);
-    return;
-  }
-
-  // 点击任务条 → 弹出任务详情窗口（返回 false，避免进入选中/编辑态）
-  g.attachEvent?.("onTaskClick", (id: unknown) => {
-    openTaskDetail(id);
-    return false;
-  });
-
-  // 横/纵滚动都会触发：重算可视尺寸与每行 Y 坐标（DHTMLX 只渲染可视行，滚动后渲染的行会变）
-  g.attachEvent?.("onGanttScroll", () => {
-    syncTimelineMetrics();
-  });
-
-  // 监听时间轴横向滚动，实时更新隐藏任务提示（setSizes 后容器可能才出现，由 reflowGantt 兜底）
-  ensureScrollListener();
-
-  // 初始化完成后再按当前容器尺寸重排一次（横屏旋转/全屏会改变可视区）
-  setTimeout(reflowGantt, 0);
-}
-
-onMounted(() => {
-  // #ifdef H5
-  void mountGantt();
-  // #endif
-});
-
-onBeforeUnmount(() => {
-  try {
-    if (timelineScrollHandler && timelineScroller) {
-      timelineScroller.removeEventListener("scroll", timelineScrollHandler);
-    }
-  } catch {
-    // 监听移除失败不影响页面离开
-  }
-  timelineScrollHandler = null;
-  try {
-    ganttInstance?.destructor?.();
-  } catch {
-    // 卸载失败不影响页面离开
-  }
-  ganttInstance = null;
-});
-
-/* ---------- 时间轴横向滚动 ----------
-   DHTMLX 自身横向/纵向都能滚，但横屏是 CSS 旋转 90° 模拟的，手势方向跟着转，
-   所以在画布上加屏幕方向的滑动兜底，并给两个按钮（符合横屏可视方向）。 */
-/** 当前横向滚动位置（用于按钮可用态与隐藏任务提示） */
-const timelineScrollLeft = ref(0);
-/** 时间轴可视宽度 */
-const timelineViewportWidth = ref(0);
-/** 时间轴内容总宽 */
-const timelineContentWidth = ref(0);
-/**
- * 时间轴三件套（都做缓存，避免每次滚动全量扫 DOM）：
- * - scroller：原生横滚条 `.gantt_hor_scroll`（`scrollLeft` 与 `scroll` 事件来源）
- * - viewport：时间轴可视区 `.gantt_task`（宽度**不含左列**，与任务条同一坐标系）
- * - content ：时间轴内容层 `.gantt_task_bg`（宽度即内容总宽）
- */
-let timelineScroller: HTMLElement | null = null;
-let timelineViewport: HTMLElement | null = null;
-let timelineContent: HTMLElement | null = null;
-/** 滚动监听句柄（卸载时移除） */
-let timelineScrollHandler: (() => void) | null = null;
-
-function queryTimeline(selector: string, cache: HTMLElement | null): HTMLElement | null {
-  // #ifdef H5
-  if (cache?.isConnected) return cache;
-  const root = document.getElementById(CONTAINER_ID);
-  return root?.querySelector<HTMLElement>(selector) ?? null;
-  // #endif
-  return null;
-}
-
-/** 原生横滚条：时间轴的横向滚动都由它驱动 */
-function findTimelineScroller(): HTMLElement | null {
-  timelineScroller = queryTimeline(".gantt_hor_scroll", timelineScroller);
-  return timelineScroller;
-}
-
-/** 时间轴可视区：`clientWidth` 即可视宽（不含左侧冻结列） */
-function findTimelineViewport(): HTMLElement | null {
-  timelineViewport = queryTimeline(".gantt_task", timelineViewport);
-  return timelineViewport;
-}
-
-/** 时间轴内容层：`offsetWidth` 即内容总宽 */
-function findTimelineContent(): HTMLElement | null {
-  timelineContent = queryTimeline(".gantt_task_bg", timelineContent);
-  return timelineContent;
-}
-
-/**
- * 时间轴滚动度量。
- *
- * 关键：任务条的像素坐标是以「时间轴起点（08:00）」为 0 的，**不含左侧冻结列**。
- * DHTMLX 的原生横滚条 `.gantt_hor_scroll` 是 `width:100%`，它的 `clientWidth` 是
- * 「整张甘特图宽（含左列）」，拿它当可视宽会让右边界虚大一个左列宽，导致靠右的任务
- * 判定不出「被藏起来」。
- *
- * 所以可视宽取 `.gantt_task`（时间轴区，天然不含左列），内容总宽取 `.gantt_task_bg`，
- * `scrollLeft` 直接用横滚条的（与时间轴内容偏移一致）。
- */
-function syncTimelineMetrics() {
-  const scroller = findTimelineScroller();
-  const viewport = findTimelineViewport();
-  if (!scroller || !viewport) return;
-  const content = findTimelineContent();
-  timelineScrollLeft.value = scroller.scrollLeft;
-  timelineViewportWidth.value = viewport.clientWidth;
-  timelineContentWidth.value = content ? content.offsetWidth : 0;
-  measureRowTops();
-}
-
-function ensureScrollListener() {
-  const scroller = findTimelineScroller();
-  if (!scroller || timelineScrollHandler) {
-    // 滚动容器还没就绪时也先量一次行位置（横滚出现前就能量出每行 Y）
-    measureRowTops();
-    return;
-  }
-  timelineScrollHandler = syncTimelineMetrics;
-  scroller.addEventListener("scroll", timelineScrollHandler, { passive: true });
-  syncTimelineMetrics();
-}
-
-function scrollTimeline(direction: -1 | 1) {
-  const scroller = findTimelineScroller();
-  if (!scroller) return;
-  scroller.scrollLeft = Math.max(0, scroller.scrollLeft + direction * 112);
-  syncTimelineMetrics();
-}
-
-/** 左右两侧隐藏任务提示：按行（资源）分别判定，每行可各出一对箭头；点击只跳到该行最近任务 */
-const { rowHints, jumpToRow } = useTimelineEdgeHint({
-  rows: () => resources.map(resource => ({
-    bars: resource.tasks.map(task => ({
-      startMin: timeToMinutes(task.start),
-      endMin: timeToMinutes(task.end),
-    })),
-  })),
-  dayStartMin: AXIS_START_HOUR * 60,
-  hourWidth: HOUR_WIDTH,
-  scrollLeft: timelineScrollLeft,
-  viewportWidth: timelineViewportWidth,
-  contentWidth: () => timelineContentWidth.value,
-  scrollTo: (left) => {
-    const scroller = findTimelineScroller();
-    if (!scroller) return;
-    // 直接赋值：DHTMLX 会同步自己的滚动状态；smooth 动画会被 DHTMLX 的滚动同步顶掉
-    scroller.scrollLeft = left;
-    syncTimelineMetrics();
-  },
-});
-
-/** 每行提示箭头在画布内的纵向坐标（px，相对 .sg__gantt 顶部）；-1 表示该行未渲染（折叠/未就绪） */
-const rowTops = ref<number[]>([]);
-
-/** 量出每个资源行（取其首条任务的时间轴行）相对画布顶部的 Y 坐标；纵向滚动 / 横滚都会改变它 */
-function measureRowTops() {
-  const root = document.getElementById(CONTAINER_ID);
-  if (!root) return;
-  const containerRect = root.getBoundingClientRect();
-  const gantt = ganttInstance as unknown as {
-    getTaskRowNode?: (id: string | number) => HTMLElement | null;
-    getTaskNode?: (id: string | number) => HTMLElement | null;
+function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
+  const [vehicle = "", plate = ""] = row.names;
+  const [carNo = "", driver = ""] = String(vehicle).split("|");
+  const index = row.bars.findIndex(item => item.id === bar.id);
+  const prev = index > 0 ? row.bars[index - 1] : null;
+  const next = index >= 0 && index < row.bars.length - 1 ? row.bars[index + 1] : null;
+  const status = statusOf(bar);
+  const first = row.bars[0];
+  // 站点取条标题的第一段（「万达基地 C20 12立方」→「万达基地」），规格/方量取「C20」「12立方」
+  const site = String(bar.title || "").split(" ")[0] || "—";
+  const spec = (String(bar.title || "").match(/C\d+/) || [""])[0];
+  const volume = (String(bar.title || "").match(/[\d.]+立方/) || [""])[0].replace("立方", "方") || "—";
+  // 逾期分钟数（计划开始时间到系统当前时间）
+  const overdueMin = Math.max(nowMinutes.value - bar.startMin, 0);
+  detail.value = {
+    title: [carNo || vehicle, row.category, driver || plate].filter(Boolean).join("|"),
+    status,
+    site,
+    workType: WORK_TYPE[row.category] || "混凝土作业",
+    spec,
+    volume,
+    supplyNote: `预计 ${row.bars.length} 车次送料`,
+    planTime: `${minutesToTime(bar.startMin)} - ${minutesToTime(bar.endMin)}（${lengthText(bar.endMin - bar.startMin)}）`,
+    progress:
+      status === "running"
+        ? `作业中（已作业${lengthText(nowMinutes.value - bar.startMin)}）`
+        : status === "done"
+          ? "已完工"
+          : status === "pending"
+            ? "已就位，等待发车"
+            : "",
+    support: first ? `首车 ${carNo || vehicle} ${minutesToTime(first.startMin)} 到场，车队连续送料` : "—",
+    previous: prev ? `${barTimeText(prev)} ${prev.title}` : "—",
+    next: next ? `${barTimeText(next)} ${next.title}` : "—",
+    // 仅「逾期未开始」给警告块（稿子样本 4）
+    warning:
+      status === "overdue"
+        ? {
+            title: `计划未开始（逾期 ${overdueMin}分钟）`,
+            text: `计划 ${minutesToTime(bar.startMin)} 开始，截至 ${minutesToTime(nowMinutes.value)} 系统未收到开始记录，上一程已结束 ${overdueMin} 分钟，请核实现场情况。`,
+          }
+        : undefined,
   };
-  /** 任务条在行内上下各留的空隙：(行高 44 - 条高 40) / 2 */
-  const BAR_INSET = 2;
-  rowTops.value = resources.map((resource) => {
-    const firstTask = resource.tasks[0];
-    if (!firstTask) return -1;
-    const rowEl = gantt?.getTaskRowNode?.(firstTask.id);
-    if (rowEl) {
-      return rowEl.getBoundingClientRect().top - containerRect.top + ROW_HINT_CENTER_OFFSET;
-    }
-    // 兜底：行节点取不到时用任务条反推行顶
-    const barEl = gantt?.getTaskNode?.(firstTask.id);
-    if (!barEl) return -1;
-    return barEl.getBoundingClientRect().top - containerRect.top - BAR_INSET + ROW_HINT_CENTER_OFFSET;
-  });
-}
-
-/** 屏幕上横向拖动 → 连续换算成时间轴滚动（1:1 跟手；纵向为主的滑动交给 DHTMLX 自己滚） */
-let touchStartX = 0;
-let touchStartY = 0;
-let touchStartScroll = 0;
-let dragging = false;
-
-function onGanttTouchStart(event: TouchEvent) {
-  const touch = event?.touches?.[0];
-  touchStartX = Number(touch?.clientX || 0);
-  touchStartY = Number(touch?.clientY || 0);
-  touchStartScroll = findTimelineScroller()?.scrollLeft || 0;
-  dragging = false;
-}
-
-function onGanttTouchMove(event: TouchEvent) {
-  const touch = event?.touches?.[0];
-  const deltaX = Number(touch?.clientX || 0) - touchStartX;
-  const deltaY = Number(touch?.clientY || 0) - touchStartY;
-  if (!dragging) {
-    // 横向为主的滑动才算拖动，避免和 DHTMLX 的纵向滚动抢事件
-    if (Math.abs(deltaX) < 6 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
-    dragging = true;
-  }
-  const scroller = findTimelineScroller();
-  if (!scroller) return;
-  scroller.scrollLeft = Math.max(0, touchStartScroll - deltaX);
-  syncTimelineMetrics();
-}
-
-function onGanttTouchEnd() {
-  dragging = false;
-}
-
-/** 退出全屏：先还原屏幕方向（解锁方向 / 撤掉旋转 / 退全屏），再回到上一页 */
-function exitFullscreen() {
-  exitLandscape();
-  const pages = getCurrentPages?.();
-  if (Array.isArray(pages) && pages.length > 1) {
-    uni.navigateBack();
-    return;
-  }
-  uni.showToast({ title: "已是全屏视图", icon: "none" });
+  detailVisible.value = true;
 }
 </script>
 
 <template>
-  <view class="sg" :class="{ 'sg--rotated': rotated }">
-    <!-- 顶部栏（稿子 6832:15 标题 / 6832:186 日期 / 图例 6832:275 / 6832:203「退出全屏」） -->
-    <view class="sg__header">
-      <view class="sg__title-group">
-        <text class="sg__title">
+  <view class="schedule" :class="{ 'schedule--rotated': rotated }">
+    <!-- 顶部栏（稿子 6832:15 标题 / 6832:186 日期 / 6832:275 图例 / 10474:18 返回） -->
+    <view class="schedule__header">
+      <view class="schedule__title-group">
+        <text class="schedule__title">
           调度视图
         </text>
-        <text class="sg__date">
+        <text class="schedule__date">
           {{ dateText }}
         </text>
       </view>
 
-      <view class="sg__tools">
-        <view v-for="item in legend" :key="item.key" class="sg__legend">
-          <view class="sg__legend-chip" :class="`sg__legend-chip--${item.key}`" />
-          <text class="sg__legend-text">
-            {{ item.label }}
-          </text>
+      <view class="schedule__tools">
+        <!-- 任务状态图例（稿子 6832:275；色块 10×10 圆角 3），贴着返回按钮放 -->
+        <view class="schedule__legend">
+          <view v-for="item in legend" :key="item.key" class="schedule__legend-item">
+            <view class="schedule__legend-chip" :class="`schedule__legend-chip--${item.key}`" />
+            <text class="schedule__legend-text">
+              {{ item.label }}
+            </text>
+          </view>
         </view>
 
-        <view class="sg__exit" @tap="exitFullscreen">
-          <view class="sg__exit-icon" />
-          <text class="sg__exit-text">
-            退出全屏
-          </text>
+        <!-- 返回对话页（稿子 10474:18 图标 / 10474:16 底）：与预排、重排调度视图同款纯图标按钮 -->
+        <view class="schedule__exit" @tap="backToChat">
+          <view class="schedule__exit-icon">
+            <view class="schedule__exit-arrow" />
+          </view>
         </view>
       </view>
     </view>
 
-    <!-- DHTMLX Gantt 画布 + 提示层 -->
-    <view class="sg__gantt-wrap">
-      <!-- DHTMLX 容器（仅 H5 会初始化；小程序端该节点为空，逻辑已按条件编译剔除） -->
-      <view
-        :id="CONTAINER_ID"
-        class="sg__gantt"
-        @touchstart="onGanttTouchStart"
-        @touchmove="onGanttTouchMove"
-        @touchend="onGanttTouchEnd"
-        @touchcancel="onGanttTouchEnd"
-      />
-
-      <!-- 提示层必须放在 DHTMLX 容器【外面】：init/重排会清空容器，容器内的节点会被抹掉。
-           按行（资源）判定：某行在可视窗口外还有任务，就在那行左右各浮一个箭头；点击只跳到该行最近任务 -->
-      <view class="sg__hint-layer">
-        <template v-for="(resource, rowIndex) in resources" :key="resource.id">
-          <view
-            v-if="rowTops[rowIndex] >= 0 && rowHints[rowIndex] && rowHints[rowIndex].left"
-            :key="`l-${resource.id}`"
-            class="sg__hint sg__hint--left"
-            :style="{ top: `${rowTops[rowIndex]}px` }"
-            @tap="jumpToRow(-1, rowIndex)"
-          >
-            <view class="sg__scroll-btn">
-              <view class="sg__scroll-icon sg__scroll-icon--prev" />
+    <!-- 主体：左侧资源列 + 右侧排程区 -->
+    <view class="schedule__body">
+      <view class="schedule__side">
+        <view class="schedule__side-head">
+          <text class="schedule__side-head-text">
+            资源与车辆人员
+          </text>
+        </view>
+        <view class="schedule__side-view">
+          <view class="schedule__side-list">
+        <view v-for="row in rows" :key="row.id" class="schedule__side-row">
+          <!-- 左列两行：第一行「类别 + 名称」（6464:300 类别 / 6464:297 名称），第二行车号|班次（6464:296） -->
+          <view class="schedule__side-lines">
+            <view class="schedule__side-line">
+              <text class="schedule__side-category">
+                {{ row.category }}
+              </text>
+              <text v-if="row.names[0]" class="schedule__side-name schedule__side-name--main">
+                {{ row.names[0] }}
+              </text>
             </view>
+            <text v-for="name in row.names.slice(1)" :key="name" class="schedule__side-name">
+              {{ name }}
+            </text>
           </view>
-          <view
-            v-if="rowTops[rowIndex] >= 0 && rowHints[rowIndex] && rowHints[rowIndex].right"
-            :key="`r-${resource.id}`"
-            class="sg__hint sg__hint--right"
-            :style="{ top: `${rowTops[rowIndex]}px` }"
-            @tap="jumpToRow(1, rowIndex)"
-          >
-            <view class="sg__scroll-btn">
-              <view class="sg__scroll-icon sg__scroll-icon--next" />
-            </view>
+        </view>
           </view>
-        </template>
+        </view>
       </view>
-    </view>
 
-    <!-- 时间轴横向滚动：任务量超出屏幕时用（移动端点击 / 横向滑动）；纵向由 DHTMLX 自身滚动 -->
-    <view class="sg__scroller">
-      <view
-        class="sg__scroll-btn"
-        :class="{ 'sg__scroll-btn--dim': timelineScrollLeft <= 0 }"
-        @tap="scrollTimeline(-1)"
+      <scroll-view
+        id="schedule-gantt-grid"
+        class="schedule__grid"
+        scroll-x
+        :show-scrollbar="false"
+        :scroll-left="scrollLeftProp"
+        :scroll-with-animation="smoothScroll"
+        @scroll="onTimelineScroll"
       >
-        <view class="sg__scroll-icon sg__scroll-icon--prev" />
-      </view>
-      <view class="sg__scroll-btn" @tap="scrollTimeline(1)">
-        <view class="sg__scroll-icon sg__scroll-icon--next" />
+        <view class="schedule__grid-inner" :style="{ width: `${timelineWidth}px` }">
+          <!-- 时间轴刻度 -->
+          <view class="schedule__ruler">
+            <text
+              v-for="(label, index) in hourLabels"
+              :key="label"
+              class="schedule__ruler-label"
+              :style="{ left: `${index * HOUR_WIDTH + 7}px` }"
+            >
+              {{ label }}
+            </text>
+          </view>
+
+          <!-- 内容区：纵向滚动（时间轴刻度固定在上面） -->
+          <view class="schedule__rows">
+            <view class="schedule__rows-inner">
+          <!-- 排程行：每行一个时间条区域，按起止时间定位任务条 -->
+          <view v-for="row in rows" :key="row.id" class="schedule__track">
+            <view
+              v-for="bar in row.bars"
+              :key="bar.id"
+              class="schedule__bar"
+              :class="[barClass(bar), { 'schedule__bar--mark': bar.highlight }]"
+              :style="barStyle(bar)"
+              @tap="onTaskTap(bar, row)"
+            >
+              <text class="schedule__bar-title">
+                {{ bar.title }}
+              </text>
+              <!-- 第二行：状态 + 时段（稿子 6832:13） -->
+              <text class="schedule__bar-time">
+                {{ barTimeLabel(bar) }}
+              </text>
+            </view>
+          </view>
+            </view>
+          </view>
+
+          <!-- 时间线（稿子 6832:208 虚线 + 6832:209 胶囊）：取系统当前时间，画在刻度条下方的排程区上 -->
+          <view v-if="nowVisible" class="schedule__now" :style="nowStyle">
+            <view class="schedule__now-capsule">
+              {{ nowText }}
+            </view>
+          </view>
+        </view>
+      </scroll-view>
+
+      <!-- 每行独立：该行左右还有被挡住的任务时，就在那一行对应侧浮出箭头；点击跳到该行最近的任务（稿子 6832:720） -->
+      <view
+        v-for="(row, rowIndex) in rows"
+        :key="`hint-${row.id}`"
+        v-show="rowTops[rowIndex] >= 0"
+        class="schedule__hint-anchor"
+        :style="{ top: `${rowTops[rowIndex] || 0}px` }"
+      >
+        <view
+          v-if="rowHints[rowIndex] && rowHints[rowIndex].left"
+          class="schedule__scroll-btn schedule__scroll-btn--prev"
+          @tap="jumpToRow(-1, rowIndex)"
+        >
+          <view class="schedule__scroll-icon schedule__scroll-icon--prev" />
+        </view>
+        <view
+          v-if="rowHints[rowIndex] && rowHints[rowIndex].right"
+          class="schedule__scroll-btn schedule__scroll-btn--next"
+          @tap="jumpToRow(1, rowIndex)"
+        >
+          <view class="schedule__scroll-icon schedule__scroll-icon--next" />
+        </view>
       </view>
     </view>
 
-    <!-- 任务详情窗口（点击任务条弹出） -->
-    <AiTaskDetailSheet v-model:visible="detailVisible" :detail="detail" />
+
+    <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态） -->
+    <ScheduleAskBar @send="onAskSend" />
+
+    <!-- 任务详情面板（横屏右侧，点击任务条滑出，稿子 6832:292） -->
+    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" />
   </view>
 </template>
 
 <style lang="scss" scoped>
-/* 横屏稿：812 × 375。正常持握时铺满视口；锁定方向失败走 CSS 旋转兜底（见 useLandscape），
-   此时 body 已按「宽=100vh、高=100vw」旋转，页面跟着切成横屏尺寸 */
-.sg {
+/* 横屏稿件 6832:13：812 × 375，元素尺寸直接按稿件 px（横屏可视区宽约 812 时与稿一致，窄则横向滚动兜住）
+   版式要点：左列 140（底 #FBFBFB / 描边 #F2F2F2）、每小时 56px、行高 45、任务条 40 高按状态配色 */
+.schedule {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -733,13 +705,14 @@ function exitFullscreen() {
   font-family: "PingFang SC", "Inter", sans-serif;
 }
 
-.sg--rotated {
+/* 旋转模拟横屏时（useLandscape）：body 已旋转 90°，页面按横屏尺寸铺开 */
+.schedule--rotated {
   width: 100vh;
   height: 100vw;
 }
 
 /* ---------- 顶部栏 ---------- */
-.sg__header {
+.schedule__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -748,37 +721,37 @@ function exitFullscreen() {
   padding: 0 28px;
 }
 
-.sg__title-group {
+.schedule__title-group {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.sg__title {
+.schedule__title {
   font-size: 12px;
   font-weight: 500;
   color: #000000;
 }
 
-.sg__date {
+.schedule__date {
   font-size: 11px;
   color: #999999;
 }
 
-.sg__tools {
+/* 图例（稿子 6832:13）：色块 10×10 圆角 3 + 11px 标签；放在右侧工具区、贴返回按钮 */
+.schedule__legend {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.sg__legend {
+.schedule__legend-item {
   display: flex;
   align-items: center;
   gap: 5px;
 }
 
-/* 图例色块 10×10 圆角 3：与任务条三态同色 */
-.sg__legend-chip {
+.schedule__legend-chip {
   box-sizing: border-box;
   width: 10px;
   height: 10px;
@@ -787,116 +760,316 @@ function exitFullscreen() {
   background: #f0f0f0;
 }
 
-.sg__legend-chip--running {
+.schedule__legend-chip--running {
   background: #ecf5ff;
 }
 
-.sg__legend-chip--pending {
+.schedule__legend-chip--pending {
   border-color: #f2f2f2;
   background: #ffffff;
 }
 
-.sg__legend-chip--overdue {
+.schedule__legend-chip--overdue {
   border-color: #767676;
   border-style: dashed;
   background: #ffffff;
 }
 
-.sg__legend-text {
+.schedule__legend-text {
   font-size: 11px;
   color: #000000;
 }
 
-.sg__exit {
+.schedule__tools {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 21px;
-  padding: 0 8px;
+  gap: 16px;
+}
+
+/* 返回对话页（稿子 10474:16：底 #FBFBFB + 描边 #F2F2F2、圆角 6）——与预排 / 重排调度视图同款 28×28 纯图标按钮 */
+.schedule__exit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
   border: 1px solid #f2f2f2;
   border-radius: 6px;
   background: #fbfbfb;
 }
 
-.sg__exit:active {
+.schedule__exit:active {
   opacity: 0.7;
 }
 
-.sg__exit-icon {
+/* 返回图标：下方托盘（U 形，开口朝上）+ 中间向上箭头（#222 描边，13×14） */
+.schedule__exit-icon {
   position: relative;
-  width: 9px;
-  height: 9px;
-  border-top: 1.5px solid #666666;
-  border-left: 1.5px solid #666666;
+  width: 13px;
+  height: 14px;
+  rotate: 90deg;
 }
 
-.sg__exit-icon::after {
+.schedule__exit-icon::before {
   content: "";
   position: absolute;
-  right: -1.5px;
-  bottom: -1.5px;
-  width: 9px;
-  height: 9px;
-  border-right: 1.5px solid #666666;
-  border-bottom: 1.5px solid #666666;
+  left: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  width: 13px;
+  height: 8px;
+  border-right: 1.5px solid #222222;
+  border-bottom: 1.5px solid #222222;
+  border-left: 1.5px solid #222222;
+  border-radius: 0 0 3px 3px;
 }
 
-.sg__exit-text {
+.schedule__exit-arrow {
+  position: absolute;
+  left: 50%;
+  bottom: 1px;
+  width: 1.5px;
+  height: 11px;
+  margin-left: -0.75px;
+  background: #222222;
+}
+
+.schedule__exit-arrow::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  box-sizing: border-box;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-top: 1.5px solid #222222;
+  border-left: 1.5px solid #222222;
+  transform: rotate(45deg);
+}
+
+/* ---------- 主体：任务行超出屏幕时纵向可滚（左右两栏一起滚，保持行对齐） ----------
+   只允许纵向滚：横向必须 hidden，否则（overflow 一轴非 visible 时另一轴会变成 auto）
+   整块主体会被横向拖动，左列被推走、时间轴右侧还会露白底 */
+.schedule__body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: #fbfbfb;
+}
+
+/* 左侧资源列：宽 140（稿子 6464:279）、底 #FBFBFB、右描边 #F2F2F2 */
+.schedule__side {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 140px;
+  border-top: 1px solid #f2f2f2;
+  border-right: 1px solid #f2f2f2;
+  background: #fbfbfb;
+}
+
+.schedule__side-head {
+  display: flex;
+  align-items: flex-end;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  height: 45px;
+  padding: 0 0 8px 10px;
+}
+
+.schedule__side-head-text {
   font-size: 11px;
+  color: #000000;
+}
+
+/* 资源行：行高 45，与右侧 track 一一对应，内容上下居中 */
+.schedule__side-row {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  height: 45px;
+  padding: 0 8px 0 10px;
+  overflow: hidden;
+}
+
+.schedule__side-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 第一行：类别与名称同行（6464:300 / 6464:297） */
+.schedule__side-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.schedule__side-category {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 13px;
+  font-weight: 500;
   color: #666666;
 }
 
-/* ---------- Gantt 画布 ---------- */
-.sg__gantt-wrap {
-  position: relative;
+/* 副行（车号|班次）：11px 常规 #999（6464:296） */
+.schedule__side-name {
+  font-size: 11px;
+  line-height: 13px;
+  font-weight: 400;
+  color: #999999;
+  white-space: nowrap;
+}
+
+/* 第一行里的名称：11px Medium #000（6464:297） */
+.schedule__side-name--main {
+  font-weight: 500;
+  color: #000000;
+}
+
+/* 右侧排程区：横向可滚；底色与表体一致，时间轴尽头之外不露白
+   touch-action: none —— 真机上不要让浏览器原生接管手势（旋转页面里它常常失效还抢事件），
+   滚动统一由 hooks/useScheduleGestures 的 JS 手势和左右按钮驱动 */
+.schedule__grid {
   flex: 1 1 auto;
-  min-height: 0;
-  width: 100%;
+  min-width: 0;
+  background: #fbfbfb;
+  touch-action: none;
+  white-space: nowrap;
 }
 
-.sg__gantt {
+/* 隐藏 scroll-view 自带的横向滚动条（横向由屏幕方向拖动 / 行内箭头驱动） */
+.schedule__grid::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.schedule__grid-inner {
   position: relative;
-  z-index: 0;
-  width: 100%;
-  height: 100%;
+  /* 表体底色 #FBFBFB（6464:167），每小时一条竖网格线 #F3F3F3 */
+  background-color: #fbfbfb;
+  background-image: repeating-linear-gradient(
+    to right,
+    #f3f3f3 0,
+    #f3f3f3 1px,
+    transparent 1px,
+    transparent 56px
+  );
+  background-position: 0 45px;
 }
 
-/* ---------- 时间轴隐藏任务提示层：独立覆盖在 Gantt 容器之上（不会被 DHTMLX 清空） ---------- */
-.sg__hint-layer {
+.schedule__ruler {
+  position: relative;
+  flex-shrink: 0;
+  height: 45px;
+}
+
+.schedule__ruler-label {
   position: absolute;
-  inset: 0;
-  z-index: 10;
+  bottom: 8px;
+  font-size: 12px;
+  // font-style: italic;
+  color: #1a1a1e;
+}
+
+/* 每行高 45，与左侧资源行一一对应 */
+.schedule__track {
+  position: relative;
+  box-sizing: border-box;
+  height: 45px;
+}
+
+/* 任务条（稿子 6832:13）：40 高、圆角 6、条内两行；基础态按「待执行」白底 + #F2F2F2，其余状态见下方四态 */
+.schedule__bar {
+  position: absolute;
+  top: 2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 8px;
+  border: 1px solid #f2f2f2;
+  border-radius: 6px;
+  background: #ffffff;
   overflow: hidden;
-  /* 外层不拦截手势，只有箭头本身接收点击 */
+}
+
+/* 任务条四态（稿子 6832:13）：底 / 描边按状态切换 */
+.schedule__bar--running {
+  border-color: #ffffff;
+  background: #ecf5ff;
+}
+
+.schedule__bar--done {
+  border-color: #ffffff;
+  background: #f0f0f0;
+}
+
+.schedule__bar--pending {
+  border-color: #f2f2f2;
+  background: #ffffff;
+}
+
+/* 已逾期：白底 + #767676 虚线 [2,2] */
+.schedule__bar--overdue {
+  border-style: dashed;
+  border-color: #767676;
+  background: #ffffff;
+}
+
+.schedule__bar:active {
+  opacity: 0.85;
+}
+
+/* 强调条：红描边 #C8201E（6464:358） */
+.schedule__bar--mark {
+  border-color: #c8201e;
+}
+
+.schedule__bar-title {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 13px;
+  color: #1a1a1e;
+  white-space: nowrap;
+}
+
+.schedule__bar-time {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 13px;
+  color: #999999;
+  white-space: nowrap;
+}
+
+/* 每行的箭头锚点：贴着该行中心，宽与主体一致，自身不接收手势（只有箭头接收） */
+.schedule__hint-anchor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 5;
   pointer-events: none;
 }
 
-/* ---------- 时间轴隐藏任务提示箭头：挂在每行左右边缘，28×28 白底方按钮 + 深色箭头（稿子 6832:720/721） ---------- */
-.sg__hint {
-  position: absolute;
+/* ---------- 左右隐藏任务提示箭头：28×28 白底方按钮 + #F2F2F2 描边圆角 6 + 阴影（稿子 6832:720 / 6832:724） ---------- */
+.schedule__scroll-btn {
   pointer-events: auto;
-}
-
-.sg__hint--left {
-  left: 156px;
-}
-
-.sg__hint--right {
-  right: 16px;
-}
-
-/* ---------- 时间轴横向滚动按钮：右下角两个方形按钮（28×28，白底 + #F2F2F2 描边圆角 6） ---------- */
-.sg__scroller {
   position: absolute;
-  right: 16px;
-  bottom: 12px;
+  /* 竖直居中在排程区；左侧那颗要让开 140 宽的左列 */
+  top: 50%;
   z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.sg__scroll-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -906,240 +1079,101 @@ function exitFullscreen() {
   border: 1px solid #f2f2f2;
   border-radius: 6px;
   background: #ffffff;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.14);
+  transform: translateY(-50%);
 }
 
-.sg__scroll-btn:active {
+.schedule__scroll-btn--prev {
+  left: 148px;
+}
+
+.schedule__scroll-btn--next {
+  right: 8px;
+}
+
+.schedule__scroll-btn:active {
   opacity: 0.7;
 }
 
-/* 已经在最左端时按钮变淡 */
-.sg__scroll-btn--dim {
-  opacity: 0.4;
+/* 箭头：9×9 的直角旋转 45°（稿子 6832:719 / 10633:140，色 #1A1A1A） */
+.schedule__scroll-icon {
+  width: 9px;
+  height: 9px;
+  border-top: 1.5px solid #1a1a1a;
+  border-right: 1.5px solid #1a1a1a;
 }
 
-/* 箭头：8×8 的直角旋转 45° */
-.sg__scroll-icon {
-  width: 8px;
-  height: 8px;
-  border-top: 1.5px solid #1a1a1e;
-  border-right: 1.5px solid #1a1a1e;
-}
-
-.sg__scroll-icon--prev {
+.schedule__scroll-icon--prev {
   transform: rotate(-135deg);
 }
 
-.sg__scroll-icon--next {
+.schedule__scroll-icon--next {
   transform: rotate(45deg);
 }
-</style>
 
-<!-- DHTMLX Gantt 内部 DOM 不在 scoped 作用域内，样式需全局生效 -->
-<style lang="scss">
-#schedule-gantt-root {
-  /* 左列表头与时间轴刻度条：底 #FBFBFB、描边 #F2F2F2（稿子 6464:279 / 6464:167） */
-  .gantt_grid_scale,
-  .gantt_task_scale {
-    border-color: #f2f2f2;
-    background: #fbfbfb;
-  }
+/* ---------- 布局：外层横向滚动（时间轴方向）套「刻度 + 内容区」，内容区纵向滚动 ---------- */
+/* 左列：表头固定，行内容用 transform 跟右侧纵向滚动同步 */
+.schedule__side-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
 
-  /* 时间轴刻度：12px 斜体（稿子 6464:198） */
-  .gantt_scale_cell {
-    font-size: 12px;
-    font-style: italic;
-    color: #1a1a1e;
-  }
+.schedule__side-list {
+  will-change: transform;
+}
 
-  /* 左列表头「资源与车辆人员」：11px/400、深色、不斜体、不大写
-     （稿子 6464:280；DHTMLX 默认给表头 500 字重 + uppercase，这里一并覆盖） */
-  .gantt_grid_scale .gantt_grid_head_cell {
-    font-size: 11px;
-    font-weight: 400;
-    font-style: normal;
-    text-transform: none;
-    color: #000000;
-  }
+/* 右侧排程区：占满高度，内部再分「刻度 / 内容区」 */
+.schedule__grid {
+  height: 100%;
+}
 
-  /* 竖网格线：稿子 #F3F3F3 */
-  .gantt_task_vscroll {
-    background: #ffffff;
-  }
+.schedule__grid-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
 
-  .gantt_task_cell {
-    border-right: 1px solid #f3f3f3;
-  }
+.schedule__ruler {
+  flex-shrink: 0;
+}
 
-  .gantt_row,
-  .gantt_task_row,
-  .gantt_grid_data .gantt_row.odd,
-  .gantt_grid_data .gantt_row {
-    border-color: #f2f2f2;
-  }
+/* 内容区：上下滑动（裁剪视口；内容由 useScheduleGestures 用 transform 平移，不依赖原生滚动） */
+.schedule__rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
 
-  /* ---------- 左列（grid）单元格：稿子 6464:279 ----------
-     底色 #FBFBFB、行分隔线与右边界 #F2F2F2（140 宽）。
-     注意：DHTMLX 默认会把最后一列 gantt_last_cell 的右边框去掉，
-     而稿子里左列与时间轴之间有 1px 分隔线，这里补回来 */
-  .gantt_grid,
-  .gantt_grid_data,
-  .gantt_grid_data .gantt_row,
-  .gantt_grid_data .gantt_row.odd {
-    background: #fbfbfb;
-  }
+.schedule__rows-inner {
+  position: relative;
+  will-change: transform;
+}
 
-  .gantt_grid .gantt_cell,
-  .gantt_grid .gantt_cell_tree {
-    box-sizing: border-box;
-    background: #fbfbfb;
-    border-color: #f2f2f2;
-    padding: 0 8px 0 14px;
-    line-height: 13px;
-  }
+/* ---------- 时间线（稿子 6832:208 虚线 + 6832:209 胶囊）：取系统当前时间 ---------- */
+/* 虚线：从刻度条下沿一直拉到排程区底部；z-index 低于任务条，不挡内容 */
+.schedule__now {
+  position: absolute;
+  top: 45px;
+  bottom: 0;
+  z-index: 3;
+  width: 0;
+  border-left: 1px dashed rgba(200, 32, 30, 0.3);
+  pointer-events: none;
+}
 
-  .gantt_grid .gantt_cell_tree .gantt_tree_content {
-    line-height: 13px;
-  }
-
-  .gantt_grid .gantt_last_cell {
-    background: #fbfbfb;
-    border-right: 1px solid #f2f2f2;
-  }
-
-  /* 展开/收起图标弱化到 #999，与稿子的浅色界面一致 */
-  .gantt_grid .gantt_tree_icon {
-    color: #999999;
-  }
-
-  /* 左列资源单元格：类别 + 资源名 + 车号|班次 三行
-     （稿子 6464:300 类别 11px Medium #666；6464:297 名称 11px Medium #000；6464:296 副行 11px Regular #999） */
-  .sg-cell {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    height: 100%;
-    font-size: 11px;
-    line-height: 13px;
-    color: #000000;
-  }
-
-  .sg-cell__category {
-    font-size: 11px;
-    font-weight: 500;
-    color: #666666;
-  }
-
-  .sg-cell__name {
-    font-size: 11px;
-    font-weight: 500;
-    color: #000000;
-  }
-
-  .sg-cell__sub {
-    font-size: 11px;
-    font-weight: 400;
-    color: #999999;
-  }
-
-  /* 任务条基础：40px 高、圆角 6、两行文案 */
-  .gantt_task_line.sg-bar {
-    height: 40px;
-    border-radius: 6px;
-    padding: 0 7px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: flex-start;
-    overflow: hidden;
-  }
-
-  .sg-bar__name {
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 13px;
-    color: #1a1a1e;
-    white-space: nowrap;
-  }
-
-  .sg-bar__meta {
-    font-size: 11px;
-    line-height: 13px;
-    color: #999999;
-    white-space: nowrap;
-  }
-
-  /* 三态配色（设计稿） */
-  .gantt_task_line.sg-bar--running {
-    background: #ecf5ff;
-    border: 1px solid #ffffff;
-  }
-
-  .gantt_task_line.sg-bar--done {
-    background: #f0f0f0;
-    border: 1px solid #ffffff;
-  }
-
-  .gantt_task_line.sg-bar--pending {
-    background: #ffffff;
-    border: 1px solid #f2f2f2;
-  }
-
-  .gantt_task_line.sg-bar--overdue {
-    background: #ffffff;
-    border: 1px dashed #767676;
-  }
-
-  /* 进度条不显示（稿子只表达状态） */
-  .gantt_task_progress {
-    display: none;
-  }
-
-  /* 当前时间标记：红色胶囊 + 30% 红虚线（稿子 6832:208 / 6832:209） */
-  .gantt_marker.sg-now {
-    width: 0;
-    border-left: 1px dashed rgba(200, 32, 30, 0.3);
-    background: transparent;
-  }
-
-  .gantt_marker.sg-now .gantt_marker_content {
-    top: 2px;
-    padding: 1px 3px;
-    border-radius: 7px;
-    background: #c8201e;
-    color: #ffffff;
-    font-size: 10px;
-    line-height: 12px;
-    white-space: nowrap;
-  }
-
-  /* marker 插件不可用时的降级：当前时间所在的小时格里画虚线 + 时间胶囊（偏移由页面写入的 CSS 变量给） */
-  .gantt_task_cell.sg-now-cell {
-    position: relative;
-  }
-
-  .gantt_task_cell.sg-now-cell::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: var(--sg-now-offset, 75%);
-    border-left: 1px dashed rgba(200, 32, 30, 0.3);
-  }
-
-  .gantt_task_cell.sg-now-cell::before {
-    content: var(--sg-now-text, "12:45");
-    position: absolute;
-    z-index: 2;
-    top: 2px;
-    left: var(--sg-now-offset, 75%);
-    transform: translateX(-50%);
-    padding: 1px 3px;
-    border-radius: 7px;
-    background: #c8201e;
-    color: #ffffff;
-    font-size: 10px;
-    line-height: 12px;
-    white-space: nowrap;
-  }
+/* 时间胶囊：贴刻度条下沿、以时间线为中心 */
+.schedule__now-capsule {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  padding: 1px 3px;
+  border-radius: 7px;
+  background: #c8201e;
+  color: #ffffff;
+  font-size: 10px;
+  line-height: 12px;
+  white-space: nowrap;
+  transform: translateX(-50%);
 }
 </style>

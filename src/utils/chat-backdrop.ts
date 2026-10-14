@@ -1,8 +1,8 @@
-import craneBackground from "@/assets/img/chat-bg-crane.png";
-import pumpTruckBackground from "@/assets/img/chat-bg-pump-truck.png";
-
 /**
  * 对话框设备背景图（Ardot 7297:145 履带吊 / 7297:278 混凝土泵车）。
+ *
+ * 图片放在 src/static/chat-bg 下（uni-app 的静态资源目录，H5 产物里就是 /static/... 的独立文件）：
+ * 按固定路径引用，不进 JS 包、不做 base64 内联，也不写任何本地存储，换图直接替换文件即可。
  *
  * 两个类型的稿子只有「图 + 位置」不同，其余一致：左右各留 20px（375 宽稿）、透明度 20%。
  * - 履带吊：距页面顶部 122px（稿 812 高）→ 15%
@@ -13,14 +13,15 @@ export type ChatBackdropKey = "crane" | "pumpTruck";
 
 export interface ChatBackdrop {
   key: ChatBackdropKey;
+  /** 静态资源路径：src/static 会原样拷到产物根目录的 /static 下，路径固定 */
   src: string;
   /** 距页面顶部的百分比（按 812 高稿换算，适配不同屏高） */
   topPercent: number;
 }
 
 const BACKDROPS: Record<ChatBackdropKey, ChatBackdrop> = {
-  crane: { key: "crane", src: craneBackground, topPercent: 15 },
-  pumpTruck: { key: "pumpTruck", src: pumpTruckBackground, topPercent: 38.5 },
+  crane: { key: "crane", src: "/static/chat-bg/crane.png", topPercent: 15 },
+  pumpTruck: { key: "pumpTruck", src: "/static/chat-bg/pump-truck.png", topPercent: 38.5 },
 };
 
 /**
