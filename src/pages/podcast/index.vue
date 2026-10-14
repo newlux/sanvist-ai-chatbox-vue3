@@ -85,8 +85,11 @@ const {
 const broadcastDockOffset = computed(() =>
   `calc(${composerDockOffset.value} + ${Math.max(0, Number(keyboardHeight.value) || 0)}px)`,
 );
-/** 快捷导航贴在输入栏正上方，键盘弹起时随输入栏一起抬升。 */
-const quickNavStyle = computed(() => ({ bottom: `calc(${composerDockOffset.value} + 8px)` }));
+/**
+ * 快捷导航贴在输入栏顶沿，键盘弹起时随输入栏一起抬升。
+ * 不再额外留间距：输入栏 dock 自身顶部有 16rpx 内边距，视觉上仍与「按住说话」保持空隙。
+ */
+const quickNavStyle = computed(() => ({ bottom: composerDockOffset.value }));
 const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
 /** 本轮问答是否从异常列表发起：确认或取消后必须回到异常列表。 */
