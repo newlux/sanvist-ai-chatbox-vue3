@@ -9,7 +9,7 @@ import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
  * 设计要点：
  * 1. 作为独立组件承载整个问答「页面」：标题/正文/按住说话，状态由父组件通过 props 传入，
  *    事件通过透传 emit 回父组件，不在内部持有任何业务状态、不直接访问父组件的 store。
- * 2. 正文区域用 flex + center 居中：识别中态与答案态都在上下左右居中展示。
+ * 2. 正文区域水平居中、垂直靠上：识别中态与答案态都从顶部（header 下方留一点间距）开始排布。
  * 3. 底部沿用与首页同款的 AiChatInput，事件原样上抛。
  */
 const props = defineProps({
@@ -75,9 +75,10 @@ const headerTopStyle = computed(() => ({ top: `calc(${props.safeTopPx}px + 8rpx)
     </view>
 
     <!--
-      正文容器：flex + 双向居中。
-      - justify-content: center 让识别中态 / 答案块在垂直方向居中
-      - align-items: center + 内部块 max-width 让水平方向也居中
+      正文容器：水平居中、垂直靠上。
+      - justify-content: flex-start 让识别中态 / 答案块贴着顶部排布，不再上下居中
+      - align-items: center + 内部块 max-width 让水平方向居中
+      - 顶部留出 header 高度 + 一点间距，避免文字贴着导航栏
     -->
     <view class="podcast-qa-overlay__body">
       <!-- 识别中态：与播报视图内的「正在理解你的内容」同一套文案与版式 -->
@@ -209,19 +210,20 @@ const headerTopStyle = computed(() => ({ top: `calc(${props.safeTopPx}px + 8rpx)
   text-align: center;
 }
 
-/* 正文容器：上下左右都居中。
+/* 正文容器：水平居中、垂直靠上。
    - flex 1 1 auto 占满 header 与 footer 之间的空间
    - min-height 0 配合 scroll-view 的滚动
    - align-items: center 让子块（loading 块、scroll-view）水平居中
-   - justify-content: center 让子块垂直居中 */
+   - justify-content: flex-start 让子块从顶部开始排布，不再上下居中
+   - padding-top = 安全区 + 200rpx（header 88rpx + 顶部偏移 8rpx，再留 104rpx 间距） */
 .podcast-qa-overlay__body {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: calc(env(safe-area-inset-top) + 120rpx) 32rpx 32rpx;
+  justify-content: flex-start;
+  padding: calc(env(safe-area-inset-top) + 200rpx) 32rpx 32rpx;
   box-sizing: border-box;
   overflow: hidden;
 }
