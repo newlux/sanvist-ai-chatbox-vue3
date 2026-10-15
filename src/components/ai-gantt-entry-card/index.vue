@@ -2,11 +2,12 @@
 /**
  * 甘特图入口卡 —— 设计稿 4708:743 里的「任务协同-当天任务甘特图」卡片（节点 4750:17 / 4750:28）。
  *
- * 版式：335 宽白卡、描边 #EFEFEF、圆角 16
- *      → 左侧 16×17 甘特图小图标（#1A1A1E）
- *      → 标题 14px Medium #000000
+ * 版式：宽度 100% 随容器自适应（与 .scene-welcome 同思路，尺寸用 rpx、仅描边用 px），
+ *      白卡、描边 #EFEFEF、圆角 16px
+ *      → 左侧 16px 双人小图标（设计稿切图 icon-gantt-contacts.png）
+ *      → 标题 28rpx Medium #000000
  *      → 右侧箭头（红色描边 #E01313）
- *      → 三行键值：标签 11px #999999 左对齐，值 12px #000000 右对齐（状态 / 设备数 / 任务数）
+ *      → 三行键值：标签 22rpx #999999 左对齐，值 24rpx #000000 右对齐（状态 / 设备数 / 任务数）
  *
  * 只负责展示与点击上报，跳转由页面处理（emit `tap`）。
  */
@@ -32,12 +33,12 @@ const emit = defineEmits<{
 <template>
   <view class="gantt-entry" @tap="emit('tap')">
     <view class="gantt-entry__head">
-      <!-- 甘特图小图标：三根横条，纯 CSS 画（设计稿 4750:22 矢量） -->
-      <view class="gantt-entry__icon">
-        <view class="gantt-entry__icon-bar gantt-entry__icon-bar--1" />
-        <view class="gantt-entry__icon-bar gantt-entry__icon-bar--2" />
-        <view class="gantt-entry__icon-bar gantt-entry__icon-bar--3" />
-      </view>
+      <!-- 甘特图小图标：双人/联系人图形，设计稿切图（32×32 @2x → 显示 16×16） -->
+      <image
+        class="gantt-entry__icon"
+        src="@/assets/img/icon-gantt-contacts.png"
+        mode="aspectFit"
+      />
       <text class="gantt-entry__title">
         {{ title }}
       </text>
@@ -79,9 +80,10 @@ const emit = defineEmits<{
   flex-direction: column;
   box-sizing: border-box;
   width: 100%;
-  padding: 19px 18px 16px;
+  /* 参照 .scene-welcome：尺寸全部用 rpx 随屏宽自适应，仅描边保留 px */
+  padding: 38rpx 36rpx 32rpx;
   border: 1px solid #efefef;
-  border-radius: 16px;
+  border-radius: 32rpx;
   background: #ffffff;
 }
 
@@ -92,44 +94,22 @@ const emit = defineEmits<{
 .gantt-entry__head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 16rpx;
 }
 
-/* 甘特图标：16×17，三根圆角横条错落排布 */
+/* 甘特图标：32×34rpx 槽位，用设计稿切图（src/assets/img/icon-gantt-contacts.png，带透明通道） */
 .gantt-entry__icon {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
   flex-shrink: 0;
-  width: 16px;
-  height: 17px;
-}
-
-.gantt-entry__icon-bar {
-  height: 3px;
-  border-radius: 1.5px;
-  background: #1a1a1e;
-}
-
-.gantt-entry__icon-bar--1 {
-  width: 16px;
-}
-
-.gantt-entry__icon-bar--2 {
-  width: 11px;
-  margin-left: 5px;
-}
-
-.gantt-entry__icon-bar--3 {
-  width: 13px;
+  width: 32rpx;
+  height: 34rpx;
 }
 
 .gantt-entry__title {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 14px;
+  font-size: 28rpx;
   font-weight: 500;
-  line-height: 17px;
+  line-height: 34rpx;
   color: #000000;
   overflow: hidden;
   white-space: nowrap;
@@ -139,8 +119,8 @@ const emit = defineEmits<{
 /* 右侧箭头：红色「>」（设计稿 4750:20，描边 #E01313） */
 .gantt-entry__chevron {
   flex-shrink: 0;
-  width: 7px;
-  height: 7px;
+  width: 14rpx;
+  height: 14rpx;
   border-top: 1.5px solid #e01313;
   border-right: 1.5px solid #e01313;
   transform: rotate(45deg);
@@ -149,21 +129,21 @@ const emit = defineEmits<{
 .gantt-entry__rows {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  margin-top: 14px;
+  gap: 10rpx;
+  margin-top: 28rpx;
 }
 
 .gantt-entry__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 24rpx;
 }
 
 .gantt-entry__label {
   flex-shrink: 0;
-  font-size: 11px;
-  line-height: 14px;
+  font-size: 22rpx;
+  line-height: 28rpx;
   color: #999999;
 }
 
@@ -171,8 +151,8 @@ const emit = defineEmits<{
   flex: 1 1 auto;
   min-width: 0;
   text-align: right;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 24rpx;
+  line-height: 32rpx;
   color: #000000;
   overflow: hidden;
   white-space: nowrap;

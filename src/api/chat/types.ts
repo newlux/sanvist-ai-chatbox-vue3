@@ -295,10 +295,24 @@ export interface GanttViewRow extends Record<string, unknown> {
 }
 
 /** 调度视图入口卡（data.card） */
+/** 卡片「设备数」里的一项：{ type: "搅拌车", count: 9 } */
+export interface GanttCardDevice extends Record<string, unknown> {
+  /** 设备类型，如 搅拌车 / 泵车 / 搅拌站 */
+  type?: string;
+  /** 数量 */
+  count?: number | string;
+}
+
 export interface GanttViewCard extends Record<string, unknown> {
   title?: string;
   /** 为 false 时气泡里不渲染这张卡 */
   visible?: boolean;
+  /** 状态文案（后端直接给，如「已下发」）；缺省时由 stage 推导 */
+  status?: string;
+  /** 设备数（后端直接给）；缺省时按 rows 的类别归并推导 */
+  devices?: GanttCardDevice[] | string;
+  /** 任务数（后端直接给，如 74）；缺省时按 rows 求和推导 */
+  taskCount?: number | string;
 }
 
 /** 调度视图跳转说明（data.entry） */

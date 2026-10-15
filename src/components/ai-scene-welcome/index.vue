@@ -39,7 +39,11 @@ defineProps({
 <style lang="scss" scoped>
 .scene-welcome {
   position: relative;
-  z-index: 2;
+  /* 层叠：必须低于底部输入栏的层叠上下文（.chat-input 是 position: fixed + z-index: 1）。
+     附件来源弹窗挂在输入栏内部（遮罩 z-index 1010 只在输入栏内部有效），
+     卡片只要压过输入栏的 1 就会浮在蒙层上面；同时还要高于页面氛围光
+     （.ai-chat-glow z-index: 0 且在它之前渲染）。 */
+  z-index: 0;
   margin: 32rpx 40rpx 0;
   pointer-events: none;
 }
