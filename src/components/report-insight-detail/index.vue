@@ -133,9 +133,9 @@ function onUrgentTap(item: ReportInsightItem) {
       <!--
         11101:723 / 11101:724 / 11101:725：加急处理按钮
         260×42 r21 / Inter Medium 14px
-        底 / 描边 / 文字颜色跟随当前条目的加急态，跟外层列表的闪电图标（未加急灰 / 已加急红）保持一致：
-          - 未加急（item.isUrgent=false）：底 #F7F7F7，无描边，文字 #0D0D0D
-          - 已加急（item.isUrgent=true） ：底 #FFFFFF，描边/文字 #C8201E
+        底 / 描边 / 文字颜色跟随当前条目的加急态：
+          - 未加急（item.isUrgent=false）：底 #FFFFFF，描边/文字 #C8201E
+          - 已加急（item.isUrgent=true） ：底 #F7F7F7，无描边，文字 #0D0D0D
         位于详情框下方 32rpx（设计稿 266-113-137=16px = 32rpx）。
       -->
       <view
@@ -354,8 +354,8 @@ function onUrgentTap(item: ReportInsightItem) {
   11101:723 / 11101:724 加急处理按钮：260×42 r21
   rpx：520×84，圆角 42rpx
   底/描边/文字颜色随加急态切换：
-    - 未加急：底 #F7F7F7，无描边，文字 #0D0D0D
-    - 已加急：底 #FFFFFF，描边/文字 #C8201E（设计稿 11101:724 stroke / 11101:725 文字原色）
+    - 未加急：底 #FFFFFF，描边/文字 #C8201E（设计稿 11101:724 stroke / 11101:725 文字原色）
+    - 已加急：底 #F7F7F7，无描边，文字 #0D0D0D
   与详情框间距 32rpx（设计稿 266-113-137=16px = 32rpx）
   位于 flex column 底部，弹窗自然增高时跟着下移。
 */
@@ -367,16 +367,16 @@ function onUrgentTap(item: ReportInsightItem) {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  border: none;
+  border: 2rpx solid #c8201e;
   border-radius: 42rpx;
-  background: #f7f7f7;
+  background: #ffffff;
   transition: opacity 0.15s ease;
 }
 
-/* 已加急：底回白、加红描边（设计稿 11101:724 Rectangle 7 stroke #C8201E） */
+/* 已加急：底灰、去描边 */
 .insight-detail__action--urgent {
-  border: 2rpx solid #c8201e;
-  background: #ffffff;
+  border: none;
+  background: #f7f7f7;
 }
 
 .insight-detail__action--active {
@@ -384,7 +384,7 @@ function onUrgentTap(item: ReportInsightItem) {
 }
 
 /* 11101:725 加急处理：Inter Medium 14px → rpx 28rpx / 500
-   未加急 #0D0D0D；已加急由下方 --urgent 规则覆盖为 #C8201E */
+   未加急 #C8201E；已加急由下方 --urgent 规则覆盖为 #0D0D0D */
 .insight-detail__action-text {
   font-family:
     "PingFang SC",
@@ -395,11 +395,11 @@ function onUrgentTap(item: ReportInsightItem) {
   font-size: 28rpx;
   font-weight: 500;
   line-height: 40rpx;
-  color: #0d0d0d;
+  color: #c8201e;
   letter-spacing: 1rpx;
 }
 
 .insight-detail__action--urgent .insight-detail__action-text {
-  color: #c8201e;
+  color: #0d0d0d;
 }
 </style>

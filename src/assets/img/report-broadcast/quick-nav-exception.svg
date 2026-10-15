@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24">
+  <!-- 报告/清单：圆角方形 + 两条白色列表线 -->
+  <path fill="#6B6B6B" d="M4.6 2h8.8A2.6 2.6 0 0 1 16 4.6v11.8a2.6 2.6 0 0 1-2.6 2.6H4.6A2.6 2.6 0 0 1 2 16.4V4.6A2.6 2.6 0 0 1 4.6 2Z"/>
+  <rect x="4.8" y="5.6" width="8.4" height="1.9" rx="0.95" fill="#FFFFFF"/>
+  <rect x="4.8" y="9.4" width="5.2" height="1.9" rx="0.95" fill="#FFFFFF"/>
+  <!-- 右下角告警三角 -->
+  <path fill="#6B6B6B" d="M15.2 11 20.8 20.6H9.6L15.2 11Z"/>
+</svg>

@@ -17,6 +17,8 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { getListenBroadcastConfig, getListenBroadcastPreference } from "@/api/listen-broadcast";
+import quickNavAskIcon from "@/assets/img/report-broadcast/quick-nav-ask.svg";
+import quickNavExceptionIcon from "@/assets/img/report-broadcast/quick-nav-exception.svg";
 import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
@@ -984,11 +986,13 @@ onBeforeUnmount(() => {
         :style="quickNavStyle"
       >
         <view class="podcast-page__quick-nav-button" @tap="openInsightFromQuickNav">
+          <image class="podcast-page__quick-nav-icon" :src="quickNavExceptionIcon" mode="aspectFit" />
           <text class="podcast-page__quick-nav-text">
             消异常
           </text>
         </view>
         <view class="podcast-page__quick-nav-button" @tap="closeReportBroadcast">
+          <image class="podcast-page__quick-nav-icon" :src="quickNavAskIcon" mode="aspectFit" />
           <text class="podcast-page__quick-nav-text">
             回问问
           </text>
@@ -1197,6 +1201,7 @@ onBeforeUnmount(() => {
   display: flex;
   height: 64rpx;
   align-items: center;
+  gap: 8rpx;
   padding: 0 32rpx;
   border: 1px solid #e8e8e8;
   border-radius: 999px;
@@ -1206,6 +1211,13 @@ onBeforeUnmount(() => {
 
 .podcast-page__quick-nav-button:active {
   background: #f6f6f6;
+}
+
+/* 按钮左侧图标（消异常 / 回问问），尺寸与文字同高，色值 #6B6B6B */
+.podcast-page__quick-nav-icon {
+  width: 32rpx;
+  height: 32rpx;
+  flex: 0 0 32rpx;
 }
 
 .podcast-page__quick-nav-text {
