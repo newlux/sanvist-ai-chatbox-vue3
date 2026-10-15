@@ -186,7 +186,11 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
 </script>
 
 <template>
-  <view class="report-broadcast-player" :style="{ height: `calc(100% - ${dockOffset})` }">
+  <view
+    class="report-broadcast-player"
+    :class="{ 'report-broadcast-player--overlay': showHistory || showRatePanel }"
+    :style="{ height: `calc(100% - ${dockOffset})` }"
+  >
     <ReportBroadcastHeader
       :status="statusText"
       :qa-visible="isQaVisible"
@@ -244,5 +248,15 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
   overflow: visible;
   box-sizing: border-box;
   background: #fff;
+}
+
+/**
+ * 历史列表 / 语速面板等播放器内全屏弹层打开时，把整层抬到页面底部快捷导航
+ * （.podcast-page__quick-nav，z-index: 3）之上。
+ * 弹窗自身虽是 fixed + 高层级，但会被本层 z-index: 2 的层叠上下文锁住，
+ * 对外只按 2 参与比较，不抬升就会露出「消异常 / 回问问」浮在弹窗之上。
+ */
+.report-broadcast-player--overlay {
+  z-index: 4;
 }
 </style>
