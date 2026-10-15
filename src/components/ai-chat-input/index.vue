@@ -410,6 +410,9 @@ onBeforeUnmount(() => {
               @touchmove.prevent="updateVoiceGesture"
               @touchend.prevent="onVoiceTouchEnd"
               @touchcancel.prevent="onVoiceTouchCancel"
+              @mousedown.prevent="onVoiceTouchStart"
+              @mousemove.prevent="updateVoiceGesture"
+              @mouseup.prevent="onVoiceTouchEnd"
             >
               <!-- 11101:713 Ellipse 34 + 11101:706 Mask group（40.25×40.25）：白盘 + 描边 + 投影 -->
               <view class="voice-panel__disc">
@@ -459,6 +462,9 @@ onBeforeUnmount(() => {
               @touchmove.prevent="updateVoiceGesture"
               @touchend.prevent="onVoiceTouchEnd"
               @touchcancel.prevent="onVoiceTouchCancel"
+              @mousedown.prevent="onVoiceTouchStart"
+              @mousemove.prevent="updateVoiceGesture"
+              @mouseup.prevent="onVoiceTouchEnd"
             >
               <image
                 src="@/assets/img/icon-mic-red.svg"
@@ -556,6 +562,9 @@ onBeforeUnmount(() => {
             @touchmove.prevent="updateVoiceGesture"
             @touchend.prevent="onVoiceRestartEnd"
             @touchcancel.prevent="onVoiceRestartCancel"
+            @mousedown.prevent="onVoiceRestartStartUi"
+            @mousemove.prevent="updateVoiceGesture"
+            @mouseup.prevent="onVoiceRestartEnd"
           >
             <image
               src="@/assets/img/icon-voice-sm.svg"
@@ -601,6 +610,9 @@ onBeforeUnmount(() => {
           @touchmove.prevent="updateVoiceGesture"
           @touchend.prevent="onVoicePillTouchEnd"
           @touchcancel.prevent="onVoicePillTouchCancel"
+          @mousedown.prevent="onVoicePillTouchStart"
+          @mousemove.prevent="updateVoiceGesture"
+          @mouseup.prevent="onVoicePillTouchEnd"
         >
           <text class="input-bar__voice-hint">
             {{ isLoading ? "回答生成中..." : voice.isRecognizing ? "识别中..." : "按住 说话" }}
@@ -1316,6 +1328,9 @@ onBeforeUnmount(() => {
 
 .voice-action--recording {
   opacity: 0.6;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .voice-action__icon {
@@ -1369,6 +1384,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  touch-action: none; /* 桌面/触屏长按时禁用滚动/缩放，pointer 事件不被默认手势劫持 */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .input-bar__voice-pill--disabled {
