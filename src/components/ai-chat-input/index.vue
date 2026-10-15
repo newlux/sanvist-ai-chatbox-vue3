@@ -383,8 +383,15 @@ onBeforeUnmount(() => {
             />
 
             <!-- 11332:91 Frame 45（375×118 @ y694）：底部柔光波浪。
-                 11332:97 Rectangle 106（375×53 渐变色带）被 11332:94 Vector 87（449×100 波形，LAYER_BLUR 18）作 alpha 遮罩裁出软边 -->
-            <view class="voice-panel__wave" aria-hidden="true">
+                 11332:97 Rectangle 106（375×53 渐变色带）被 11332:94 Vector 87（449×100 波形，LAYER_BLUR 18）作 alpha 遮罩裁出软边。
+                 静态基线即设计稿；动效为增强：色带横向无缝流动 + 波形轮廓缓慢起伏。
+                 后层同轮廓、更低透明度、更慢反向流动，叠出液面层次 -->
+            <view
+              class="voice-panel__wave"
+              :class="{ 'voice-panel__wave--paused': voice.cancelling }"
+              aria-hidden="true"
+            >
+              <view class="voice-panel__wave-band voice-panel__wave-band--back" />
               <view class="voice-panel__wave-band" />
             </view>
 
@@ -787,14 +794,26 @@ onBeforeUnmount(() => {
 }
 
 /* 11332:97 Rectangle 106：375×53 @ (0,759)，横向渐变（#EBB4E9 → #56ABFA 48.72% → #9795E8）色带，
-   用 11332:94 Vector 87 波形（内建 feGaussianBlur 9 柔边）作 alpha 遮罩裁出软边 */
+   用 11332:94 Vector 87 波形（内建 feGaussianBlur 9 柔边）作 alpha 遮罩裁出软边。
+   动效：静态基线即设计稿三色带；为做到「横向流动不露边、不跳色」，
+   把三色带做成「镜像周期」——0 → 48.72% 是设计稿色带，48.72% → 100% 是它的镜像，
+   首尾同为 #EBB4E9，背景宽取两个窗口宽（1500rpx），位移一个周期即可无缝循环。
+   同时让遮罩左右小幅往复（波形轮廓缓慢起伏，画布两侧各留 ~120rpx 出血，不会露边）。 */
 .voice-panel__wave-band {
   position: absolute;
   top: 130rpx; /* y759 − y694 = 65px */
   left: 0;
   width: 750rpx; /* 375px */
   height: 106rpx; /* 53px */
-  background: linear-gradient(90deg, #ebb4e9 0%, #56abfa 48.72%, #9795e8 100%);
+  background: linear-gradient(
+    90deg,
+    #ebb4e9 0%,
+    #56abfa 24.36%, /* 设计稿 #56ABFA 在色带 48.72% → 半周期 24.36% */
+    #9795e8 50%, /* 设计稿色带末端 #9795E8 → 半周期端点 */
+    #56abfa 75.64%, /* 后半为镜像 */
+    #ebb4e9 100%
+  );
+  background-size: 1500rpx 100%; /* 两个窗口宽，配合镜像渐变实现无缝循环 */
   -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
   mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
   -webkit-mask-repeat: no-repeat;
@@ -803,6 +822,54 @@ onBeforeUnmount(() => {
   mask-size: 990rpx 286rpx;
   -webkit-mask-position: -121rpx -14rpx; /* 画布原点对齐页面 (−60.5, 752) */
   mask-position: -121rpx -14rpx;
+  animation:
+    voice-wave-color-flow 9s linear infinite,
+    voice-wave-sway 7.5s ease-in-out infinite alternate;
+  will-change: background-position, mask-position;
+}
+
+/* 后层波浪：轮廓相同、透明度更低、流动更慢且反向，叠出液面的层次感 */
+.voice-panel__wave-band--back {
+  opacity: 0.4;
+  transform: translateY(8rpx);
+  animation:
+    voice-wave-color-flow 13s linear infinite reverse,
+    voice-wave-sway 9.5s ease-in-out infinite alternate;
+}
+
+/* 取消态：波浪停止流动（与声纹条暂停逻辑一致） */
+.voice-panel__wave--paused .voice-panel__wave-band {
+  animation-play-state: paused;
+}
+
+/* 色带横向流动：位移一个背景周期（1500rpx），首尾同色，循环无缝 */
+@keyframes voice-wave-color-flow {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 1500rpx 0;
+  }
+}
+
+/* 波形轮廓缓慢起伏：基准 mask-position 为 (−121rpx, −14rpx)，±20rpx 摆动 */
+@keyframes voice-wave-sway {
+  from {
+    -webkit-mask-position: -141rpx -14rpx;
+    mask-position: -141rpx -14rpx;
+  }
+  to {
+    -webkit-mask-position: -101rpx -14rpx;
+    mask-position: -101rpx -14rpx;
+  }
+}
+
+/* 系统偏好减少动效时，波浪回到设计稿静态基线 */
+@media (prefers-reduced-motion: reduce) {
+  .voice-panel__wave-band {
+    animation: none;
+    transform: none;
+  }
 }
 
 /* 11101:689：单节点文案，14px Inter Regular #5E5E5E，文本块 120×17 居中 */
