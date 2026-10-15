@@ -369,9 +369,12 @@ onBeforeUnmount(() => {
         :class="compactVoiceListening ? 'voice-sheet--listening-compact' : 'voice-sheet--listening'"
       >
         <view class="voice-listening" :class="{ 'voice-listening--compact': compactVoiceListening }">
-          <!-- ===== 紧凑态：听播页底部语音面板，严格按 Ardot 11101:512 实现 ===== -->
+          <!-- ===== 紧凑态：底部语音面板，严格按 Ardot 11332:1（问答页语音输入中）实现，11101:512 同构 ===== -->
           <template v-if="compactVoiceListening">
-            <!-- 11101:690 Rectangle 104（375×146 @ y683）：顶部起尖、向两侧下滑的粉色柔光 -->
+            <!-- 11332:38 Rectangle 103（373×280 @ (2,532)）：#FAFAFA 渐隐遮罩，页面内容向上淡入白色 -->
+            <view class="voice-panel__fade" aria-hidden="true" />
+
+            <!-- 11332:104 Rectangle 104（375×146 @ (-0.5,676)）：顶部起尖、向两侧下滑的粉色柔光 -->
             <image
               class="voice-panel__glow"
               src="@/assets/img/voice-listening-glow.svg"
@@ -379,14 +382,10 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             />
 
-            <!-- 11101:691 Frame 45（375×118 @ y694）：波浪装饰，双层遮罩横向流动（11101:696 主色带渐变 + 无缝波浪遮罩） -->
-            <view
-              class="voice-panel__wave"
-              :class="{ 'voice-panel__wave--paused': voice.cancelling }"
-              aria-hidden="true"
-            >
-              <view class="voice-panel__wave-layer voice-panel__wave-layer--back" />
-              <view class="voice-panel__wave-layer voice-panel__wave-layer--front" />
+            <!-- 11332:91 Frame 45（375×118 @ y694）：底部柔光波浪。
+                 11332:97 Rectangle 106（375×53 渐变色带）被 11332:94 Vector 87（449×100 波形，LAYER_BLUR 18）作 alpha 遮罩裁出软边 -->
+            <view class="voice-panel__wave" aria-hidden="true">
+              <view class="voice-panel__wave-band" />
             </view>
 
             <!-- 11101:689 提示行：单节点文案，14px Inter Regular #5E5E5E，居中 -->
@@ -717,11 +716,10 @@ onBeforeUnmount(() => {
 }
 
 /* ==========================================================================
-   听播页底部语音面板（Ardot 11101:512 底部区域，1px = 2rpx）
-   面板范围：设计稿 y654 → y812，高 158px = 316rpx
-   纵向排布：11101:689 提示行(17px) --27px--> 11101:698 麦克风(46px)
-             --15px--> 11101:696 波浪色带(53px)
-   装饰层 11101:690（粉色柔光）与 11101:691（波浪）绝对定位，麦克风压在波浪之上。
+   底部语音面板（Ardot 11332:1 问答页语音输入中，11101:512 听播页同构，1px = 2rpx）
+   面板范围：设计稿 y532 → y812，高 280px = 560rpx
+   纵向排布：11332:2 提示行(17px @ y647) --24px--> 11332:71 麦克风(46px @ y688)
+   装饰层 11332:38（内容渐隐遮罩）、11332:104（粉色柔光）、11332:91（波浪）绝对定位。
    ========================================================================== */
 .voice-sheet--listening-compact {
   position: fixed;
@@ -729,12 +727,13 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   left: 0;
-  height: 316rpx; /* 158px */
+  height: 560rpx; /* 280px（y532 → y812） */
   overflow: hidden;
   border-radius: 0; /* 覆盖基类 .voice-sheet 的 64rpx 顶角圆角：贴合屏幕两边缘，无弹窗感 */
   background: transparent; /* 设计稿无面板容器：底色全透明，只叠柔性形状 */
   box-shadow: none; /* 覆盖基类上抛投影：装饰层直接落在页面上，不是浮层 */
   padding-bottom: 0; /* 覆盖基类 safe-area 内边距：波浪色带应贴到屏幕物理底边 */
+  pointer-events: none; /* 容器只承担视觉层，不挡页面滚动；手势收口在麦克风触达区 */
 }
 
 /* 复合类提高优先级：基础 .voice-listening 定义在本段之后 */
@@ -743,24 +742,41 @@ onBeforeUnmount(() => {
   display: flex;
   width: 100%;
   height: 100%;
-  padding-bottom: 136rpx; /* 15px 间距 + 53px 波浪色带 = 68px */
+  padding-top: 230rpx; /* y647 − y532 = 115px：提示行顶 */
   box-sizing: border-box;
   flex-direction: column;
   align-items: center;
-  gap: 54rpx; /* 提示行底(17px) → 麦克风顶(46px)：27px */
+  gap: 48rpx; /* 提示行底(y664) → 麦克风顶(y688)：24px */
 }
 
-/* 11101:690 Rectangle 104：375×146 @ (-1,683)，顶部起尖的五边形 + 竖向渐变 #FFF1F1 → #FFFFFF(63.25%) */
+/* 11332:38 Rectangle 103：373×280 @ (2,532)，#FAFAFA 自上而下 0 → 80%(21.16%) → 100%(35.86%)，
+   让页面内容在接近面板处逐渐隐入白色，消除面板顶缘的生硬分界 */
+.voice-panel__fade {
+  position: absolute;
+  top: 0;
+  left: 4rpx; /* x 2px */
+  width: 746rpx; /* 373px */
+  height: 560rpx; /* 280px */
+  background: linear-gradient(
+    180deg,
+    rgb(250 250 250 / 0%) 0%,
+    rgb(250 250 250 / 80%) 21.16%,
+    #fafafa 35.86%
+  );
+  pointer-events: none;
+}
+
+/* 11332:104 Rectangle 104：375×146 @ (-0.5,676)，顶部起尖的五边形 + 竖向渐变 #FFF1F1 → #FFFFFF(63.25%) */
 .voice-panel__glow {
   position: absolute;
-  top: 58rpx; /* y683 − y654 = 29px */
-  left: -2rpx; /* x −1px */
+  top: 288rpx; /* y676 − y532 = 144px */
+  left: -1rpx; /* x −0.5px */
   width: 750rpx; /* 375px */
   height: 292rpx; /* 146px，下沿超出画板，由容器裁切 */
   pointer-events: none;
 }
 
-/* 11101:691 Frame 45：375×118 @ (0,694)，双层波浪横向流动容器 */
+/* 11332:91 Frame 45：375×118 @ (0,694)，波浪装饰容器 */
 .voice-panel__wave {
   position: absolute;
   right: 0;
@@ -770,52 +786,23 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-/* 波浪层：11101:696 主色带横向渐变（#EBB4E9 → #56ABFA 48.72% → #9795E8），
-   用无缝波浪 SVG 作 alpha 遮罩剪出轮廓，动画位移 mask-position 实现横向流动 */
-.voice-panel__wave-layer {
+/* 11332:97 Rectangle 106：375×53 @ (0,759)，横向渐变（#EBB4E9 → #56ABFA 48.72% → #9795E8）色带，
+   用 11332:94 Vector 87 波形（内建 feGaussianBlur 9 柔边）作 alpha 遮罩裁出软边 */
+.voice-panel__wave-band {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  top: 130rpx; /* y759 − y694 = 65px */
   left: 0;
+  width: 750rpx; /* 375px */
+  height: 106rpx; /* 53px */
   background: linear-gradient(90deg, #ebb4e9 0%, #56abfa 48.72%, #9795e8 100%);
-  -webkit-mask-image: url("@/assets/img/voice-listening-wave-mask.svg");
-  mask-image: url("@/assets/img/voice-listening-wave-mask.svg");
-  -webkit-mask-repeat: repeat-x;
-  mask-repeat: repeat-x;
-  -webkit-mask-size: 750rpx 236rpx; /* 单个波浪周期 375×118 @2x */
-  mask-size: 750rpx 236rpx;
-  will-change: mask-position;
-}
-
-/* 前层：主波浪，7s 一个周期向右流 */
-.voice-panel__wave-layer--front {
-  animation: voice-wave-flow 7s linear infinite;
-}
-
-/* 后层：浅色次波浪，反向 + 更慢，叠出层次感 */
-.voice-panel__wave-layer--back {
-  opacity: 0.45;
-  transform: translateY(28rpx) scaleY(0.85);
-  transform-origin: bottom center;
-  animation: voice-wave-flow 11s linear infinite reverse;
-}
-
-/* 取消态：波浪停止流动（与声纹条暂停逻辑一致） */
-.voice-panel__wave--paused .voice-panel__wave-layer {
-  animation-play-state: paused;
-}
-
-/* 横向流动关键帧：位移正好一个遮罩周期（750rpx），repeat-x 下无缝循环 */
-@keyframes voice-wave-flow {
-  from {
-    -webkit-mask-position: 0 0;
-    mask-position: 0 0;
-  }
-  to {
-    -webkit-mask-position: 750rpx 0;
-    mask-position: 750rpx 0;
-  }
+  -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
+  mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 990rpx 286rpx; /* 遮罩画布 495×143（波形 449×100 四周留 blur 出血）@2x */
+  mask-size: 990rpx 286rpx;
+  -webkit-mask-position: -121rpx -14rpx; /* 画布原点对齐页面 (−60.5, 752) */
+  mask-position: -121rpx -14rpx;
 }
 
 /* 11101:689：单节点文案，14px Inter Regular #5E5E5E，文本块 120×17 居中 */
@@ -839,7 +826,7 @@ onBeforeUnmount(() => {
   color: #c8201e;
 }
 
-/* 11101:698 Frame：46×46 @ (164,698)，页面水平居中 */
+/* 11332:71 Frame：46×46 @ (164.5,688)，页面水平居中 */
 .voice-panel__mic {
   position: relative;
   display: flex;
@@ -847,6 +834,7 @@ onBeforeUnmount(() => {
   height: 92rpx;
   align-items: center;
   justify-content: center;
+  pointer-events: auto; /* 面板容器已整体关闭命中，录音手势只收口在这里 */
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;

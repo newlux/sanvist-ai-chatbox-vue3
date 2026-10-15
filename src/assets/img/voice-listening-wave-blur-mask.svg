@@ -1,0 +1,17 @@
+<svg width="495" height="143" viewBox="-23 -25 495 143" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Ardot 11332:94 / 11101:695 Vector 87（449×100 @ (-37.5,83) rel Frame 45）：
+    底部波浪的 alpha 遮罩素材。
+    填充必须用白色：部分内核按 luminance 解析 CSS mask（黑=透明），白色在 alpha/luminance 两种模式下都可见。
+    设计稿中该矢量带 LAYER_BLUR radius 18，此处按导出结果内建 feGaussianBlur stdDeviation 9，
+    避免在 CSS 侧再叠 filter（否则屏幕底边会被一起模糊）。
+    画布在波形四周留出 blur 出血区（x −23..472，y −25..118，与设计导出的 filter region 一致），
+    供 CSS mask-position 对位：画布原点对应页面坐标 (−60.5, 752)。
+  -->
+  <defs>
+    <filter id="voiceWaveBlurMask" color-interpolation-filters="sRGB" x="-23" y="-25" width="495" height="143" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="9" />
+    </filter>
+  </defs>
+  <path fill="#ffffff" filter="url(#voiceWaveBlurMask)" d="M1.684 36.2724C8.0057 -3.4154 2.8779 7.4337 60.5603 4.963C118.2427 2.4923 106.9817 16.0225 146.1457 15.3166C185.3097 14.6107 189.7462 0.9173 231.9132 0.0349C274.0801 -0.8476 285.2842 15.3166 320.8196 15.3166C356.3549 15.3166 359.4828 8.7279 384.8831 4.963C410.2834 1.198 429.0439 -6.1626 441.3062 13.0739C453.5684 32.3104 447.4969 100 447.4969 100L8.8757 98.9617C8.8757 98.9617 -4.6377 75.9602 1.684 36.2724Z"/>
+</svg>
