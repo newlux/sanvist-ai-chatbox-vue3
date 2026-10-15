@@ -38,7 +38,7 @@ import { consumePendingHistorySession, getSessionId, navigateToSessionScene, pee
  *
  * 与首页 / 听汇报的区别：
  * - 独立会话域 "task"，不与首页主会话互相污染；
- * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=TASK；
+ * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=TEST；
  * - 每次进入起一轮干净会话（与作业指导一致），返回再进时重新开一轮。
  */
 defineOptions({ name: "AiTaskPage" });
@@ -91,7 +91,8 @@ const {
   setVoiceInputFocused,
 } = useChatViewport();
 const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
-  scene: "TASK",
+  // 任务协同下发的场景标识：TEST（历史会话仍按任务协同归类，见 utils/session-scene）
+  scene: "TEST",
 });
 
 /** 页面统一发送入口：直接走真实接口 */
@@ -301,6 +302,9 @@ function onTaskSuggestionTap(suggestion: string, messageIndex: number) {
 function onTaskQuickPrompt(text: string) {
   sendTaskMessage({ text });
 }
+
+/** 甘特图入口卡开关：暂时屏蔽（schedule-gantt 页代码保留不动），改回 true 即恢复 */
+const SHOW_GANTT_ENTRY_CARD = false;
 
 /** 甘特图入口卡：进入当天任务甘特图（横屏页，页内自行生成 mock 数据） */
 function onGanttEntryTap() {
@@ -559,8 +563,8 @@ onUnload(() => {
         subtitle="我来帮你输出安排计划方案，下发任务"
         :icon="iconForm"
       />
-      <!-- 甘特图入口卡（设计稿 4708:743）：点它进入当天任务甘特图 -->
-      <view v-if="showSceneWelcome" class="task-scene-welcome-entry">
+      <!-- 甘特图入口卡（设计稿 4708:743）：点它进入当天任务甘特图。【暂时屏蔽】由 SHOW_GANTT_ENTRY_CARD 控制 -->
+      <view v-if="SHOW_GANTT_ENTRY_CARD && showSceneWelcome" class="task-scene-welcome-entry">
         <AiGanttEntryCard @tap="onGanttEntryTap" />
       </view>
       <AiMessageList
@@ -765,11 +769,13 @@ $color-bg-voice: #f5f5f5;
 $color-border-light: #efefef;
 $color-white: #ffffff;
 
-/* 甘特图入口卡（设计稿 4708:743）：与欢迎卡同宽（左右 20px），卡间距 13px */
+/* 甘特图入口卡（设计稿 4708:743）：与欢迎卡同宽（左右 40rpx），卡间距 26rpx。
+   层叠同 .scene-welcome：压在输入栏的层叠上下文（z-index: 1）之下，
+   附件来源弹窗的蒙层才能挡住这张卡（弹窗挂在输入栏里，遮罩层级只在输入栏内部生效）。 */
 .task-scene-welcome-entry {
   position: relative;
-  z-index: 2;
-  margin: 13px 20px 0;
+  z-index: 0;
+  margin: 26rpx 40rpx 0;
 }
 
 .ai-page {
