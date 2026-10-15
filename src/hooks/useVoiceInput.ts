@@ -501,11 +501,31 @@ export function useVoiceInput(options: VoiceInputOptions) {
   }
 
   /** 统一结束一次录音会话（正常松手 / 上划取消 / 短按） */
-  /** 重录按钮在 touchstart 后随面板卸载，元素 touchend 会丢；用窗口级兜底收尾一次 */
+  /** 重录按钮 / 麦克风按下后元素 touchend/mouseup 可能丢（松手时鼠标已移出按钮），
+   *  窗口级 touchend / mouseup 兜底收尾。mousemove 也挂窗口，
+   *  这样桌面端下移鼠标离开麦克风后，updateVoiceGesture 仍能持续计算 cancelling。 */
   function removeRestartWindowListeners() {
     if (typeof window === "undefined") return;
     window.removeEventListener("touchend", onRestartWindowEnd);
     window.removeEventListener("touchcancel", onRestartWindowCancel);
+    window.removeEventListener("mouseup", onRestartWindowEnd);
+    window.removeEventListener("mousemove", onRestartWindowMove);
+  }
+
+  /** 每次开始录音手势都注册一次，endVoiceRecording 时移除 */
+  function addRestartWindowListeners() {
+    if (typeof window === "undefined") return;
+    removeRestartWindowListeners(); // 幂等：先清再挂，避免极端路径重复注册
+    window.addEventListener("touchend", onRestartWindowEnd, { passive: false });
+    window.addEventListener("touchcancel", onRestartWindowCancel, { passive: false });
+    window.addEventListener("mouseup", onRestartWindowEnd, { passive: false });
+    window.addEventListener("mousemove", onRestartWindowMove, { passive: false });
+  }
+
+  /** 桌面端兜底：录音期间全程监听 window mousemove，保证鼠标移出按钮后仍能更新 cancelling */
+  function onRestartWindowMove(e: any) {
+    if (!state.gesture.active) return;
+    updateVoiceGesture(e);
   }
 
   async function onRestartWindowEnd() {
@@ -547,6 +567,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
     preventDefaultSafely(e);
     beginGesture(e, false);
     beginVoiceRecording({ restart: false });
+    addRestartWindowListeners();
   }
 
   async function onVoicePillTouchEnd(e: unknown) {
@@ -565,6 +586,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
     beginGesture(e, false);
     preventDefaultSafely(e);
     beginVoiceRecording({ restart: false });
+    addRestartWindowListeners();
   }
 
   async function onVoiceTouchEnd() {
@@ -582,10 +604,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
     preventDefaultSafely(e);
     beginGesture(e, true);
     beginVoiceRecording({ restart: true });
-    if (typeof window !== "undefined") {
-      window.addEventListener("touchend", onRestartWindowEnd, { passive: false });
-      window.addEventListener("touchcancel", onRestartWindowCancel, { passive: false });
-    }
+    addRestartWindowListeners();
   }
 
   async function onVoiceRestartEnd(e: unknown) {
