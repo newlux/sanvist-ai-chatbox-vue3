@@ -2,8 +2,9 @@
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { UiChatMessage } from "@/stores/chat-types";
 import moment from "moment";
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import iconWaveForm from "@/assets/img/icon-waveform.svg";
+import { guideStepCardDomId } from "@/utils/guide-content";
 import { isListenReportListened } from "@/utils/listen-report";
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import AiBlockRenderer from "../ai-bubble-v2/AiBlockRenderer.vue";
@@ -55,10 +56,10 @@ const props = defineProps({
     type: String,
     default: "",
   },
-  /** 独立步骤卡最多显示几张（初始 1 张，步骤卡推进后递增） */
-  stepCardCount: {
-    type: Number,
-    default: 1,
+  /** 当前要顶到对话区顶部的核对卡（多步骤卡）属于哪一步：按它从最新一轮往回找那张卡 */
+  stepCardStepId: {
+    type: String,
+    default: "",
   },
   /** 步骤卡（底部白板）是否展开：展开时要保证核对卡能顶到对话区最上方 */
   pinStepCard: {
@@ -98,6 +99,11 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  /** 滚动请求令牌：自增一次 = 一次请求，列表量完 DOM 后按 px 把内容末尾（不含参考来源）落到对话区底边 */
+  replyEndToken: {
+    type: Number,
+    default: 0,
+  },
 });
 
 const emit = defineEmits([
@@ -118,6 +124,8 @@ const emit = defineEmits([
   "listen-report",
   /** 把核对卡顶到对话区最上方还需要补多少底部间距（px），由页面并进 bottomInset */
   "card-space-change",
+  /** 贴底状态下内容长高了（图片、图表等后加载的内容撑开高度）：页面据此再贴一次底 */
+  "content-grow",
 ]);
 
 const FALLBACK_OVERVIEW = {
@@ -173,17 +181,80 @@ function findConversationGroup(aiIndex) {
 // 用滚动方向而不是高度差判断是否贴底：
 // 流式追加时列表高度一直在变，量高度既要额外查询节点，又容易误判。
 // 向上滑一定距离即视为用户在看历史，滚到底（scrolltolower）再恢复跟随。
+/**
+ * 消息区在固定底部 UI（输入栏 / 底部卡片）之外再留的空隙（px）：贴底时最后一条不贴着输入栏。
+ * 页面传来的 bottomInset 只表示「被盖住」的高度，空隙由这里加（见 listPadStyle）。
+ * 空隙不能算进「被盖住」里，否则回复末尾会把参考来源的头几个像素留在空隙中，看着像被输入栏裁了一半。
+ */
+const MESSAGE_LIST_EXTRA_GAP_PX = 16;
 const UNPIN_SCROLL_UP_PX = 12;
 let lastScrollTop = 0;
+
+/** 绑给 scroll-view 的像素滚动位置：只在「落到内容末尾」时赋值，不回写 @scroll 的值 */
+const scrollTopPx = ref(0);
+
+/**
+ * H5：取节点最近的「真正在滚」的祖先。
+ * uni 的 scroll-view 在 H5 会渲染好几层 div，`scroll-top` 的变化不会落到内层滚动容器上，
+ * 所以真要定位得自己找那个 overflow 生效、且确实溢出（scrollHeight 大于 clientHeight）的祖先。
+ */
+function findScrollableAncestor(node: Element | null): HTMLElement | null {
+  let current = node?.parentElement || null;
+  while (current) {
+    const overflowY = getComputedStyle(current).overflowY;
+    const scrollable = overflowY === "auto" || overflowY === "scroll";
+    const overflows = current.scrollHeight > current.clientHeight + 1;
+    if (scrollable && overflows) return current as HTMLElement;
+    current = current.parentElement;
+  }
+  return null;
+}
 
 function setPinned(pinned: boolean) {
   if (pinned === props.pinnedToBottom) return;
   emit("pinned-change", pinned);
 }
 
+/**
+ * 用户手势标记：@scroll 在 H5 里「程序化改 scrollTop」也会派发，
+ * 自动对齐往回上方收的时候（回复里冒出参考来源、图片后加载撑高）会被当成用户在翻历史，
+ * 把「贴底跟随」关掉——表现就是「生成到一半，后面还有内容却不跟着滚了」。
+ * 所以只在真的有触摸 / 滚轮手势时才取消跟随。
+ */
+const USER_GESTURE_IDLE_MS = 1200;
+let userScrollGesture = false;
+let gestureReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+let gestureBound: HTMLElement | null = null;
+
+function markUserScrollGesture() {
+  userScrollGesture = true;
+  if (gestureReleaseTimer) clearTimeout(gestureReleaseTimer);
+  // 撤手后的惯性滚动还会继续派发 scroll，晚一点再把手势标记收回
+  gestureReleaseTimer = setTimeout(() => {
+    gestureReleaseTimer = null;
+    userScrollGesture = false;
+  }, USER_GESTURE_IDLE_MS);
+}
+
+/** H5：在列表外层挂手势监听（触摸 / 滚轮事件从内层滚动容器冒泡上来） */
+function bindScrollGesture() {
+  // #ifdef H5
+  const list = document.querySelector(".msg-list") as HTMLElement | null;
+  if (!list || list === gestureBound) return;
+  gestureBound?.removeEventListener("touchstart", markUserScrollGesture);
+  gestureBound?.removeEventListener("touchmove", markUserScrollGesture);
+  gestureBound?.removeEventListener("wheel", markUserScrollGesture);
+  gestureBound = list;
+  list.addEventListener("touchstart", markUserScrollGesture, { passive: true });
+  list.addEventListener("touchmove", markUserScrollGesture, { passive: true });
+  list.addEventListener("wheel", markUserScrollGesture, { passive: true });
+  // #endif
+}
+
 function onScroll(e: { detail?: { scrollTop?: number } }) {
   const scrollTop = Number(e?.detail?.scrollTop) || 0;
-  if (scrollTop < lastScrollTop - UNPIN_SCROLL_UP_PX) setPinned(false);
+  // 只认用户手势：程序化的上移（自动对齐收回）不能把跟随关掉
+  if (userScrollGesture && scrollTop < lastScrollTop - UNPIN_SCROLL_UP_PX) setPinned(false);
   lastScrollTop = scrollTop;
 }
 
@@ -194,6 +265,193 @@ function onScrollToLower() {
 function onScrollTop() {
   emit("scroll-top");
 }
+
+/**
+ * 落到「回复内容末尾（不含参考来源）」。
+ *
+ * 口径按需求：以内容块容器 `.ai-content-blocks` 的高度减去参考来源 `.guide-source-block` 的高度为准
+ * ——参考来源整段留在对话区下方之外，可视区最后一条就是回复正文（含参考图）。
+ *
+ * 滚动位置不用 @scroll 记（H5 的 uni scroll-view 不保证派发滚动事件），改由 rect 反推：
+ * `.msg-list__inner` 是滚动内容原点，`列表顶 − 内容顶` = 当前 scrollTop；
+ * 目标 =（内容块容器底边 − 其中参考来源总高）− 对话区高。量不到容器就退回贴底。
+ *
+ * 对齐边分两种（见 visibleHeight / coveredVisibleHeight）：
+ * - 贴底：内容下面是空白留白，用「留白边」（含那 16px 空隙），最后一条抬到空隙之上；
+ * - 回复末尾：内容下面是参考来源，用「遮挡边」（不含空隙），尾巴才能整段藏到输入栏后面。
+ */
+/** 上一次对齐时已有的用户消息条数：变多说明刚发过消息，这次要强制落到回复位置（允许上拉） */
+let lastUserMessageCount = 0;
+
+/**
+ * 输入框遮挡的高度：输入栏是 fixed 覆盖在列表下方的，
+ * 页面用列表底部留白（padding-bottom = 输入栏高度）把内容顶上来，这里要减掉这段才不会被输入框挡住。
+ */
+function reservedBottomHeight() {
+  // #ifdef H5
+  const inner = document.querySelector(".msg-list__inner");
+  if (inner) return Number.parseFloat(getComputedStyle(inner).paddingBottom) || 0;
+  // #endif
+  return 0;
+}
+
+/**
+ * 真正被固定 UI 盖住的高度 = 底部留白 − 额外空隙。
+ *
+ * 留白下面是空的时候（贴底），最后一条抬到留白之上就行，那 16px 空隙是白送的；
+ * 留白下面要是还有内容（参考来源），就得把内容藏到「固定 UI 顶边」为止，
+ * 否则它的头几个像素会正好落在空隙里，看着像被输入栏裁掉一行。
+ */
+function occludedBottomHeight() {
+  return Math.max(0, reservedBottomHeight() - MESSAGE_LIST_EXTRA_GAP_PX);
+}
+
+/**
+ * @param forceUp 刚发过消息（强制回底）：允许把视图往上拉到落点；
+ *                自动跟随时只往下，不打断用户看历史
+ */
+function alignToReplyEnd(forceUp = false) {
+  // 用户已经上翻看历史了就别再拽下去（贴底状态下才会由 store 请求这里）
+  if (!props.pinnedToBottom) return;
+  uni.createSelectorQuery()
+    .select(".msg-list")
+    .boundingClientRect()
+    .select(".msg-list__inner")
+    .boundingClientRect()
+    .selectAll(".ai-content-blocks")
+    .boundingClientRect()
+    .selectAll(".guide-source-block")
+    .boundingClientRect()
+    .exec((rects) => {
+      const listRect = (Array.isArray(rects) ? rects[0] : null) as { top?: number; height?: number } | null;
+      const innerRect = (Array.isArray(rects) ? rects[1] : null) as { top?: number; height?: number } | null;
+      const blockRects = (Array.isArray(rects) ? rects[2] : null) as Array<{ top?: number; bottom?: number }> | null;
+      const sourceRects = (Array.isArray(rects) ? rects[3] : null) as Array<{ top?: number; height?: number }> | null;
+      const listTop = Number(listRect?.top);
+      const listHeight = Number(listRect?.height);
+      const innerTop = Number(innerRect?.top);
+      const contentHeight = Number(innerRect?.height);
+      if (!Number.isFinite(listTop) || !listHeight || !Number.isFinite(innerTop)) return;
+
+      // 有效可视高度：扣掉被输入框遮住的那段（含多留的空隙，贴底时用得上）
+      const visibleHeight = Math.max(0, listHeight - reservedBottomHeight());
+      // 藏尾巴时用的可视高度：只扣被盖住的那段，回复末尾正好落在固定 UI 顶边
+      const coveredVisibleHeight = Math.max(0, listHeight - occludedBottomHeight());
+
+      const lastBlocks = blockRects?.length ? blockRects[blockRects.length - 1] : null;
+      const blocksTop = Number(lastBlocks?.top);
+      const blocksBottom = Number(lastBlocks?.bottom);
+      // 只算落在最后一个内容块容器里的参考来源（其它回答的不算）
+      const sourcesHeight = (sourceRects || []).reduce((sum, rect) => {
+        const top = Number(rect?.top);
+        const inLastBlocks = Number.isFinite(blocksTop)
+          && Number.isFinite(blocksBottom)
+          && top >= blocksTop - 1
+          && top <= blocksBottom + 1;
+        return inLastBlocks ? sum + (Number(rect?.height) || 0) : sum;
+      }, 0);
+
+      // 目标：内容末尾（容器底边 − 参考来源高）落在「有效可视区」底边
+      const lastSourceTop = Number(sourceRects?.[sourceRects.length - 1]?.top);
+      let target: number;
+      if (forceUp) {
+        // 刚发出去：强制回到最新内容（自己的消息 + 等待回复的占位）底部
+        target = contentHeight - visibleHeight;
+      }
+      else if (Number.isFinite(blocksBottom)) {
+        // 内容块底边 − 其中参考来源总高
+        target = blocksBottom - sourcesHeight - innerTop - coveredVisibleHeight;
+      }
+      else if (Number.isFinite(lastSourceTop)) {
+        // 正文在卡片里（步骤卡问答，气泡隐藏、没有内容块容器）：以最后一块参考来源顶部为准
+        target = lastSourceTop - innerTop - coveredVisibleHeight;
+      }
+      else {
+        // 没有参考来源：贴底，与原逻辑一致
+        target = contentHeight - visibleHeight;
+      }
+      if (!Number.isFinite(target)) return;
+
+      const currentScrollTop = Math.max(0, listTop - innerTop);
+      const next = Math.max(0, Math.round(target));
+      // 落点是绝对值：不在落点上就对齐（发送后、以及回复里出现参考来源时，都可能要往上收回来）
+      if (next === Math.round(currentScrollTop)) return;
+      scrollTopPx.value = next;
+      // #ifdef H5
+      // uni 的 scroll-top 落不到内层滚动容器上，这里再直接操作一次 DOM
+      const scroller = findScrollableAncestor(document.querySelector(".msg-list__inner"));
+      if (scroller) scroller.scrollTop = next;
+      // #endif
+    });
+}
+
+watch(
+  () => props.replyEndToken,
+  async () => {
+    // 用户消息变多 = 刚发出去一轮，这一批对齐（含下面的补量）都允许上拉
+    const userCount = (props.messages || []).filter(message => message?.role === "user").length;
+    const forceUp = userCount > lastUserMessageCount;
+    lastUserMessageCount = userCount;
+    const token = props.replyEndToken;
+    await nextTick();
+    alignToReplyEnd(forceUp);
+    // 参考图 / 字体 / 底部间距是渲染后才撑开高度的，补量几次（目标是绝对值，重复量不会回撤）
+    [150, 450, 900].forEach(delay => setTimeout(() => {
+      // 流式期间每帧都可能刷新 token：过期的补量拿的是旧 DOM 量出来的位置，
+      // 照它滚会把已经对齐好的视口来回拉扯（也会顺带把「贴底跟随」误关掉）
+      if (props.replyEndToken !== token) return;
+      alignToReplyEnd(forceUp);
+    }, delay));
+  },
+  { flush: "post" },
+);
+
+/**
+ * 贴底时内容长高要重新贴底。
+ *
+ * 参考图（mode="widthFix"）、markdown 里的图、echarts、字体都是**渲染完才撑开高度**的：
+ * 贴底那一刻量到的还是旧高度，图加载完就留在可视区下面（表现为「只滚到文字末尾、图片看不见」）。
+ * 这里观察内容容器的高度：长高且仍贴着底时通知页面再贴一次底；用户上翻看历史时不动。
+ */
+let contentObserver: ResizeObserver | null = null;
+let lastContentHeight = 0;
+
+function observeContentHeight() {
+  // #ifdef H5
+  if (contentObserver || typeof ResizeObserver === "undefined") return;
+  const inner = document.querySelector(".msg-list__inner");
+  if (!inner) return;
+  lastContentHeight = inner.clientHeight;
+  contentObserver = new ResizeObserver(() => {
+    const height = inner.clientHeight;
+    if (Math.abs(height - lastContentHeight) < 1) return;
+    const grew = height > lastContentHeight;
+    lastContentHeight = height;
+    if (grew && props.pinnedToBottom) emit("content-grow");
+  });
+  contentObserver.observe(inner);
+  // #endif
+}
+
+onMounted(() => {
+  nextTick(() => {
+    observeContentHeight();
+    bindScrollGesture();
+  });
+});
+
+onBeforeUnmount(() => {
+  contentObserver?.disconnect();
+  contentObserver = null;
+  // #ifdef H5
+  if (gestureReleaseTimer) clearTimeout(gestureReleaseTimer);
+  gestureReleaseTimer = null;
+  gestureBound?.removeEventListener("touchstart", markUserScrollGesture);
+  gestureBound?.removeEventListener("touchmove", markUserScrollGesture);
+  gestureBound?.removeEventListener("wheel", markUserScrollGesture);
+  gestureBound = null;
+  // #endif
+});
 
 function onQuickPrompt(prompt) {
   emit("quick-prompt", prompt);
@@ -222,7 +480,6 @@ function onGuideSuggestionOpen(payload) {
 
 /** 点核对卡步骤条某一段：交给页面切步骤 + 打开底部白板 */
 function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
-  console.log("[guide-step-select] ⑤ message-list", payload);
   emit("guide-check-step-select", payload);
 }
 
@@ -274,53 +531,112 @@ function onListenReport() {
   emit("listen-report", listenedReport.value);
 }
 /**
- * 每条消息的第一张核对卡在「全局」里排第几张（0 起）。
- *
- * 步骤卡会分散在多轮回答里（每轮一条消息，各带一张核对卡），所以要按全局序号定位：
- * 只按单条消息 slice 的话，推进到第 2 步时每条消息都会切空，卡片直接消失。
+ * 与气泡的 hideBody 同一个判断（见 ai-bubble-v2）：带步骤卡的回答正文（含参考来源）不展示。
+ * 正文没被隐藏时，参考来源留在气泡里，不能再往卡片里塞一份。
  */
-const guideCheckBaseIndexes = computed(() => {
-  const bases: number[] = [];
-  let base = 0;
-  props.messages.forEach((message) => {
-    bases.push(base);
-    base += (message?.blocks || []).filter(block => block?.type === "guide-check").length;
-  });
-  return bases;
-});
+function hidesBody(message: UiChatMessage) {
+  return message?.role === "ai"
+    && !message?.loading
+    && (message?.blocks || []).some(block => block?.type === "guide-step");
+}
 
-/**
- * 步骤卡回答的独立卡片栈：只渲染全局第 `stepCardCount` 张步骤详情卡。
- *
- * 带步骤卡的回答气泡正文不展示（见 ai-bubble-v2 的 hideBody），所以同一条回答的
- * 参考来源（source 组件）注入到步骤卡内：卡片里的顺序是 正文 → 该步骤参考图 → 参考来源。
- * 其它回答的参考来源仍留在气泡正文里。
- * 步骤卡按顺序逐个露出：初始只显示第一张，推进到第 N 步时只显示第 N 张，当前下标由页面传入。
- */
-function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
-  const blocks = (message?.blocks || []).filter(Boolean);
-  const stepCards = blocks.filter(block => block.type === "guide-check");
-  if (!stepCards.length) return [];
-
-  // stepCardCount 是「全局第几张」（1 起），换算成这条消息内部的下标
-  const globalIndex = Math.max(1, Number(props.stepCardCount) || 1) - 1;
-  const indexInMessage = globalIndex - (guideCheckBaseIndexes.value[messageIndex] ?? 0);
-  if (indexInMessage < 0 || indexInMessage >= stepCards.length) return [];
-
-  const stepCard = stepCards[indexInMessage];
-
-  // 参考来源：低端安卓 WebView 不支持 flatMap，这里手写合并
+/** 参考来源：低端安卓 WebView 不支持 flatMap，这里手写合并 */
+function collectSourceEvidence(blocks: NonNullable<UiChatMessage["blocks"]>) {
   const evidence: unknown[] = [];
   blocks.forEach((block) => {
-    if (block.type !== "source") return;
+    if (block?.type !== "source") return;
     const list = Array.isArray(block.payload?.evidence) ? block.payload.evidence : [];
     evidence.push(...list);
   });
-  const cards = evidence.length
-    ? [{ ...stepCard, payload: { ...stepCard.payload, sources: evidence } }]
-    : [stepCard];
+  return evidence;
+}
 
-  return cards;
+/**
+ * 一轮问答对应哪张核对卡（步骤详情卡）的 key：优先用消息 id，没有就退回下标。
+ * 一轮里 expand 出来的多张详情卡是「同一份指导的每一步各一张」，但界面上每轮只展示其中一张。
+ */
+function stepCardMessageKey(message: UiChatMessage, messageIndex: number) {
+  const id = String(message?.id || "").trim();
+  return id || `idx-${messageIndex}`;
+}
+
+/** 这条消息里有没有那一步的核对卡 */
+function hasStepCardOf(message: UiChatMessage, stepId: string) {
+  return (message?.blocks || []).some(block => block?.type === "guide-check"
+    && String(block.payload?.step_id || "") === stepId);
+}
+
+/** 列表里有核对卡的那几轮 */
+function stepCardMessages() {
+  const messages = Array.isArray(props.messages) ? props.messages : [];
+  return messages
+    .map((message, index) => ({ message, index }))
+    .filter(item => (item.message?.blocks || []).some(block => block?.type === "guide-check"));
+}
+
+/**
+ * 每一轮各自展示的那张核对卡（按 step_id 记）。
+ *
+ * 一轮里每步都有一张详情卡，但一个问答只显示一张：默认是本轮第一张（也就是这一轮正在讲的那一步）；
+ * 底部白板翻页 / 点步骤条时，页面把「当前这一步」传进来，切成**最新那一轮**里这一步的卡——
+ * 同一份指导重复触发时，一张卡只被一轮认领，不会每轮都冒出来一张同名卡；
+ * 历史轮次停在自己展示的那张，不被后来的轮次拉走。
+ */
+const stepCardShownStepId = ref<Record<string, string>>({});
+/** 这次切卡落在哪一轮：量卡片高度、顶到对话区顶部都按它定位 */
+const stepCardActiveKey = ref("");
+
+function assignStepCard(key: string, stepId: string) {
+  stepCardActiveKey.value = key;
+  if (stepCardShownStepId.value[key] === stepId) return;
+  stepCardShownStepId.value = { ...stepCardShownStepId.value, [key]: stepId };
+}
+
+/** 把「当前这一步」落到最新那一轮上（没有那一步就保持不动） */
+function selectStepCard(stepId: string) {
+  const target = String(stepId || "").trim();
+  if (!target) return;
+  const rounds = stepCardMessages();
+  for (let index = rounds.length - 1; index >= 0; index -= 1) {
+    const { message, index: messageIndex } = rounds[index];
+    if (!hasStepCardOf(message, target)) continue;
+    assignStepCard(stepCardMessageKey(message, messageIndex), target);
+    return;
+  }
+}
+
+watch(
+  () => [props.stepCardStepId, stepCardMessages().length],
+  () => selectStepCard(String(props.stepCardStepId || "")),
+  { immediate: true, flush: "post" },
+);
+
+/**
+ * 一轮问答的独立卡片栈：只渲染这一轮当前展示的那一张核对卡（一个问答 = 一张卡）。
+ *
+ * 多轮作业指导各留一张自己的卡（N 轮 N 张，1:1），历史那一轮不再被后来的轮次顶掉。
+ *
+ * 渲染不改 block（保持对象身份稳定，历史卡片不会因为父组件重渲染而整片重画）；
+ * 卡片在 DOM 上的唯一 id 由模板给 AiBlockRenderer 传 domId（guideStepCardDomId，并进所属消息 id）：
+ * block id 只按内容生成（`guide-check-<step_id>`），同一份指导重复触发时多轮卡片会撞 id，
+ * 而 scroll-into-view / 选择器定位只认第一个同 id 元素。
+ *
+ * 带步骤卡的回答气泡正文不展示（见 hideBody），所以同一条回答的参考来源（source 组件）
+ * 要挪进这张卡里：卡片里的顺序是 正文 → 该步骤参考图 → 参考来源。
+ */
+function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
+  const blocks = (message?.blocks || []).filter(Boolean);
+  const cards = blocks.filter(block => block.type === "guide-check");
+  if (!cards.length) return [];
+
+  const shownStepId = String(stepCardShownStepId.value[stepCardMessageKey(message, messageIndex)] || "");
+  const card = (shownStepId
+    ? cards.find(item => String(item.payload?.step_id || "") === shownStepId)
+    : null) || cards[0];
+
+  const evidence = hidesBody(message) ? collectSourceEvidence(blocks) : [];
+  if (!evidence.length) return [card];
+  return [{ ...card, payload: { ...card.payload, sources: evidence } }];
 }
 
 /**
@@ -333,19 +649,26 @@ function ganttBlocks(message: UiChatMessage) {
 }
 
 const listPadStyle = computed(() =>
-  (props.bottomInset ? { paddingBottom: props.bottomInset } : {}),
+  (props.bottomInset
+    ? { paddingBottom: `calc(${props.bottomInset} + ${MESSAGE_LIST_EXTRA_GAP_PX}px)` }
+    : {}),
 );
 
 /**
- * 当前显示的那张核对卡的 block id：列表里可能有多轮指导留下的卡片，取最后一张
- * （也就是页面正在推进的那一步）。
+ * 当前要顶到对话区顶部的那张核对卡的 DOM id：切卡落在哪一轮，就顶那一轮正在展示的那张。
+ * 与 standaloneBlocks 用同一份选择状态，保证「量高度的那张」就是「滚上去的那张」。
  */
 const stepCardTargetId = computed(() => {
-  for (let index = props.messages.length - 1; index >= 0; index -= 1) {
-    const card = standaloneBlocks(props.messages[index], index)[0];
-    if (card?.id) return String(card.id);
-  }
-  return "";
+  const rounds = stepCardMessages();
+  if (!rounds.length) return "";
+  const key = stepCardActiveKey.value;
+  const active = key
+    ? rounds.find(item => stepCardMessageKey(item.message, item.index) === key)
+    : null;
+  const round = active || rounds[rounds.length - 1];
+  const card = standaloneBlocks(round.message, round.index)[0];
+  if (!card?.id) return "";
+  return guideStepCardDomId(round.message?.id, card.id);
 });
 
 /**
@@ -378,7 +701,7 @@ function measureCardPinSpace() {
 }
 
 watch(
-  () => [props.pinStepCard, props.stepCardCount],
+  () => [props.pinStepCard, props.stepCardStepId],
   async () => {
     if (!props.pinStepCard) {
       emit("card-space-change", 0);
@@ -398,6 +721,7 @@ watch(
       class="msg-list"
       scroll-y
       :scroll-into-view="scrollIntoView"
+      :scroll-top="scrollTopPx"
       :scroll-with-animation="false"
       @scroll="onScroll"
       @scrolltolower="onScrollToLower"
@@ -527,13 +851,18 @@ watch(
               @feedback-change="onFeedbackChange(index, msg, $event)"
               @copy-click="onCopyClick(index, msg)"
             />
-            <!-- 核对/步骤卡独立成卡，不放进回答气泡 -->
+            <!-- 核对/步骤卡独立成卡，不放进回答气泡；一轮问答一张，多轮各留一张 -->
             <view
               v-for="block in standaloneBlocks(msg, index)"
               :key="block.id"
               class="chat-box__card"
             >
-              <AiBlockRenderer :block="block" @guide-check-step-select="onGuideCheckStepSelect" />
+              <!-- domId 并进消息 id：同一份指导重复触发时 block id 会撞，滚动定位要能区分是哪一轮 -->
+              <AiBlockRenderer
+                :block="block"
+                :dom-id="guideStepCardDomId(msg?.id, block.id)"
+                @guide-check-step-select="onGuideCheckStepSelect"
+              />
             </view>
             <!-- 调度视图入口卡：同样独立于回答气泡，紧跟在气泡下方 -->
             <view

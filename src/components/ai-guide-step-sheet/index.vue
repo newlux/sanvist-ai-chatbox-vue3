@@ -95,7 +95,6 @@ function clampStepIndex(index: number) {
 }
 
 watch(() => props.visible, (visible) => {
-  console.log("[guide-step-select] ⑧ sheet visible", { visible, stepIndex: props.stepIndex, steps: steps.value.length });
   // 展开时定位到外部指定的步（默认第 1 步）
   if (visible) currentIndex.value = clampStepIndex(props.stepIndex);
   isSourcePickerOpen.value = false;
@@ -103,7 +102,6 @@ watch(() => props.visible, (visible) => {
 
 // 外部指定步骤变化（点核对卡步骤条、但白板已展开）：切过去
 watch(() => props.stepIndex, (index) => {
-  console.log("[guide-step-select] ⑧ sheet stepIndex prop", { index, clamped: clampStepIndex(index) });
   currentIndex.value = clampStepIndex(index);
 });
 
@@ -185,9 +183,7 @@ function close() {
 
 /** 供页面调用：直接切到某一步（0 起）——点核对卡步骤条、但白板已经展开时兜底（stepIndex 可能没变化） */
 function goToStep(index: number) {
-  const clamped = clampStepIndex(index);
-  console.log("[guide-step-select] ⑧ sheet goToStep", { index, clamped });
-  currentIndex.value = clamped;
+  currentIndex.value = clampStepIndex(index);
 }
 
 defineExpose({ goToStep });

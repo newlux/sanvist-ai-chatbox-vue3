@@ -48,7 +48,6 @@ const stepSegments = computed(() => Math.max(0, stepTotal.value));
 
 /** 点某一段 → 切到该步；越界（数据异常）不响应 */
 function onSelectStep(index: number) {
-  console.log("[guide-step-select] ① block tap", { index, total: stepSegments.value, stepId: props.payload?.step_id });
   if (index < 1 || index > stepSegments.value) return;
   emit("select-step", { index, stepId: String(props.payload?.step_id || "") });
 }
