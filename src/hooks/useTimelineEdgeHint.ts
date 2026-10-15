@@ -1,4 +1,5 @@
-import { computed, type Ref } from "vue";
+import type { Ref } from "vue";
+import { computed } from "vue";
 
 /**
  * 「左右两侧还有被挡住的任务」提示箭头（稿子 6832:720 / 6832:721：28×28 白底方按钮 + 深色箭头）。
@@ -9,8 +10,9 @@ import { computed, type Ref } from "vue";
  * - 全局版 `globalHint` / `showLeftHint` / `showRightHint` / `jumpToHidden`：把整条时间轴
  *   当一组看，整条轴上还有没看完的任务就浮一对箭头（预排草案 / 重排页用）。
  *
- * 判定方式：用当前滚动窗口 `[scrollLeft, scrollLeft + viewportWidth]` 去比任务条的像素区间，
- * **整条完全落在窗口左边**的才算该侧「有隐藏任务」，右边同理；只看得到一部分（半截）不算。
+ * 判定方式：用当前滚动窗口 `[scrollLeft, scrollLeft + viewportWidth]` 去比任务条的像素区间。
+ * **只要任务没看全就算该侧还有任务**：起点被裁在左缘外（`x1 < start`）、终点被裁在右缘外
+ * （`x2 > end`）都算 —— 露半截时用户同样看不到全貌，箭头要提示。
  * 目标滚动位把该条的起点/终点对到对应边缘（结果夹在 `[0, maxScroll]` 内）。
  *
  * 任务条的像素算法与页面里的 `barStyle()` 保持一致（最小半格宽），
@@ -80,9 +82,10 @@ export function useTimelineEdgeHint(options: TimelineEdgeHintOptions) {
   /**
    * 一组任务条的左右提示判定与目标滚动位（start/end 为可视窗口，viewport 为可视宽）。
    *
-   * 只统计**整条任务条完全落在可视窗外**的：只看得到一部分（半截）不算，
-   * 因为那种「没看全」不是箭头要提示的目标。左侧取 `x2` 最大（离视口最近）的那条，
-   * 把它的起点对到左缘；右侧取 `x1` 最小（最近）的那条，把它的终点对到右缘。
+   * 统计**没看全**的任务条：起点被裁在左缘外（`x1 < start - 1`）算左侧、终点被裁在右缘外
+   * （`x2 > end + 1`）算右侧；一长条两端都被裁时两侧都要提示，所以两条判定各自独立。
+   * 左侧取 `x1` 最大（起点离视口最近）的那条，把它的起点对到左缘；
+   * 右侧取 `x2` 最小（终点离视口最近）的那条，把它的终点对到右缘。
    */
   function computeHint(
     bars: ReadonlyArray<EdgeHintBar>,
@@ -95,11 +98,11 @@ export function useTimelineEdgeHint(options: TimelineEdgeHintOptions) {
 
     for (const bar of bars) {
       const box = range(bar);
-      if (box.x2 <= start + 1) {
-        if (!nearestLeft || box.x2 > nearestLeft.x2) nearestLeft = box;
+      if (box.x1 < start - 1) {
+        if (!nearestLeft || box.x1 > nearestLeft.x1) nearestLeft = box;
       }
-      else if (box.x1 >= end - 1) {
-        if (!nearestRight || box.x1 < nearestRight.x1) nearestRight = box;
+      if (box.x2 > end + 1) {
+        if (!nearestRight || box.x2 < nearestRight.x2) nearestRight = box;
       }
     }
 
