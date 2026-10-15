@@ -148,7 +148,7 @@ function onUrgentTap(item: ReportInsightItem) {
         @tap="onUrgentTap(item)"
       >
         <text class="insight-detail__action-text">
-          加急处理
+         {{ item.isUrgent ? '取消加急' : '加急处理' }} 
         </text>
       </view>
     </view>
