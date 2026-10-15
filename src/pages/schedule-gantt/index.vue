@@ -34,8 +34,11 @@ import { consumePendingScheduleView } from "@/utils/schedule-view";
 
 defineOptions({ name: "ScheduleGanttPage" });
 
-/** 进入页面自动横屏（默认旋转模拟），离开时还原 */
-const { rotated, exitLandscape } = useLandscape();
+/**
+ * 进入页面自动横屏（默认旋转模拟），离开时还原。
+ * 旋转会改变排程区的实际宽度：必须重排一次再量（否则用的是旋转前的竖屏宽度，箭头会判错、跳偏）。
+ */
+const { rotated, exitLandscape } = useLandscape(measureLayout);
 
 /** 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志 */
 useScheduleGestures({ gridId: "schedule-gantt-grid", onRowsOffset: () => measureRowTops() });
@@ -140,8 +143,8 @@ function measureLayout() {
 
 onMounted(() => {
   measureLayout();
-  // 首帧布局可能晚一点，下一帧再量一次行位置
-  nextTick(measureRowTops);
+  // 首帧布局可能晚一点（旋转也是下一帧才生效），下一帧再量一次
+  nextTick(measureLayout);
   // 时间线取系统当前时间：每 30 秒对一次表（分钟级精度，不用每秒刷）
   nowTimer = setInterval(() => {
     nowMinutes.value = currentMinutes();
@@ -161,9 +164,9 @@ onBeforeUnmount(() => {
   // #endif
 });
 
-// 「收起 / 展开全部」会改变行数，行位置需要重新量
+// 行数变化（收起 / 展开、接口数据晚到）：行位置与排程区宽度都要重新量
 watch(() => rows.value.length, () => {
-  nextTick(measureRowTops);
+  nextTick(measureLayout);
 });
 
 /** 任务状态（稿子 6832:13 图例四态；「已取消」只出现在重排页，这里用不到） */

@@ -9,8 +9,8 @@ import AiGanttEntryCard from "@/components/ai-gantt-entry-card/index.vue";
  *
  * payload 是接口整包 data（viewType / viewId / entry / card / rows / stage …）：
  * - 标题取 `card.title`（如「调度视图（执行中）」），`card.visible === false` 时整张卡不渲染；
- * - 「状态」取 `stage`；「设备数」按 rows 的类别归并（运输→搅拌车、泵车→泵车、供料→搅拌站）；
- * - 「任务数」= 所有行任务条之和；
+ * - 「状态」取 `card.status`，缺省按 `stage` 映射；「设备数」取 `card.devices`，缺省按 rows 类别归并
+ * - 「任务数」取 `card.taskCount`，缺省为所有行任务条之和；
  * - 点击把整包数据 emit 给页面：页面先落到本地存储，再跳横屏调度视图页渲染。
  */
 defineOptions({ name: "GanttBlock" });
@@ -51,28 +51,50 @@ const visible = computed(() => view.value.card?.visible !== false);
 const title = computed(() => String(view.value.card?.title || "").trim() || "任务协同-当天任务甘特图");
 
 const statusText = computed(() => {
+  const cardStatus = String(view.value.card?.status || "").trim();
+  if (cardStatus) return STAGE_LABEL[cardStatus.toLowerCase()] || cardStatus;
   const stage = String(view.value.stage || "").trim();
   if (!stage) return "已下发";
   return STAGE_LABEL[stage.toLowerCase()] || stage;
 });
 
-/** 设备数：按类别归并计数，顺序按出现先后（如「搅拌车 4 台｜泵车 1 台」） */
+/** 设备数：优先 `card.devices`，缺省按 rows 的类别归并计数（如「搅拌车 4 台｜泵车 1 台」） */
 const devicesText = computed(() => {
+  const cardDevices = view.value.card?.devices;
+  if (typeof cardDevices === "string") {
+    const text = cardDevices.trim();
+    if (text) return text;
+  }
+  if (Array.isArray(cardDevices) && cardDevices.length > 0) {
+    const parts = cardDevices
+      .map((device) => {
+        const type = String(device?.type || "").trim();
+        if (!type) return "";
+        const count = Number(device?.count ?? 0);
+        return Number.isFinite(count) ? `${type} ${count} 台` : type;
+      })
+      .filter(Boolean);
+    if (parts.length > 0) return parts.join("｜");
+  }
   const counts = new Map<string, number>();
   rows.value.forEach((row) => {
     const category = String(row?.category || "").trim();
     if (!category) return;
     counts.set(category, (counts.get(category) || 0) + 1);
   });
-  const parts: string[] = [];
+  const fallback: string[] = [];
   counts.forEach((count, category) => {
-    parts.push(`${CATEGORY_DEVICE[category] || category} ${count} 台`);
+    fallback.push(`${CATEGORY_DEVICE[category] || category} ${count} 台`);
   });
-  return parts.join("｜");
+  return fallback.join("｜");
 });
 
+/** 任务数：优先 `card.taskCount`，缺省按 rows 的任务条求和 */
 const taskCountText = computed(() => {
-  const total = rows.value.reduce((sum, row) => sum + (Array.isArray(row?.bars) ? row.bars.length : 0), 0);
+  const cardCount = Number(view.value.card?.taskCount);
+  const total = Number.isFinite(cardCount)
+    ? cardCount
+    : rows.value.reduce((sum, row) => sum + (Array.isArray(row?.bars) ? row.bars.length : 0), 0);
   return `${total} 个`;
 });
 
