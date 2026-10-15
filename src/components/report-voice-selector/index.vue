@@ -195,7 +195,7 @@ function closeSelector() {
             <text class="report-voice-selector__dot" />
             <text class="report-voice-selector__dot" />
             <text class="report-voice-selector__working-text">
-              Sanii 等你选..
+              Sani 等你选..
             </text>
           </view>
         </view>
