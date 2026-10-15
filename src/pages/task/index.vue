@@ -49,6 +49,12 @@ const { t } = useI18n();
 const chatScope = provideChatScope("task");
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
+/**
+ * 自动滚动的落点：回复内容末尾（不含参考来源）——参考来源不被贴底滚进视野，
+ * 以内容块容器高度减去参考来源高度为准（见 ai-message-list 的 alignToReplyEnd）。
+ * 回复里没有参考来源时，表现与原来的贴底一致。
+ */
+chatStore.setStopAtReplyEnd(true);
 const sessionStore = useSessionStore();
 const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
 /** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送 */
@@ -69,6 +75,7 @@ const {
   awakeningLoading,
   scrollIntoView,
   pinnedToBottom,
+  replyEndToken,
 } = storeToRefs(chatStore);
 const { sessions, isSessionSwitching } = storeToRefs(sessionStore);
 
@@ -153,8 +160,11 @@ const guideStepPayload = ref<GuideStepPayload | null>(null);
 const guideStepSheetVisible = ref(false);
 /** 步骤卡片实时高度（px）：卡片展开时把列表底部 padding 顶起来，最后一条回答不会被盖住 */
 const guideStepSheetHeight = ref(0);
-/** 步骤卡按顺序露出：初始只给第一张，推进到第 N 步才显示前 N 张 */
-const guideStepCardCount = ref(1);
+/**
+ * 当前要显示的那张核对卡属于哪一步（步骤 id）：多步骤卡每轮各带一张，
+ * 按 id 定位到最新一轮，避免新一轮的卡被算到第一张卡的位置上。
+ */
+const guideStepCardStepId = ref("");
 /** 核对卡要顶到对话区顶部还缺的底部间距（px，由消息列表量出来） */
 const guideStepCardSpace = ref(0);
 
@@ -163,9 +173,7 @@ const guideStepCardSpace = ref(0);
  * 步骤卡出现、翻页、卡片高度变化后都用它：卡片顶在上方才整张可见。
  */
 function focusGuideStepCardAtTop() {
-  const steps = guideStepPayload.value?.steps || [];
-  const step = steps[Math.max(0, guideStepCardCount.value - 1)];
-  const stepId = String(step?.id || "").trim();
+  const stepId = String(guideStepCardStepId.value || "").trim();
   if (stepId) chatStore.focusStepBlock(stepId);
 }
 
@@ -211,7 +219,8 @@ function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
 function onGuideStepOpen(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
   guideStepSheetVisible.value = true;
-  guideStepCardCount.value = 1;
+  // 这一轮的核对卡：按本轮第一步定位（每轮回答各带一张自己的卡）
+  guideStepCardStepId.value = String(payload?.steps?.[0]?.id || "");
   // 步骤卡弹出：把这一步的核对卡滚到对话区顶部
   nextTick(() => focusGuideStepCardAtTop());
 }
@@ -251,7 +260,7 @@ function onGuideStepChange(step: GuideStepItem | null) {
   if (!stepId) return;
   const steps = guideStepPayload.value?.steps || [];
   const index = steps.findIndex(item => String(item?.id || "") === stepId);
-  if (index >= 0) guideStepCardCount.value = index + 1;
+  if (index >= 0) guideStepCardStepId.value = stepId;
   nextTick(() => focusGuideStepCardAtTop());
 }
 
@@ -561,14 +570,16 @@ onUnload(() => {
         :show-quick-prompts="showQuickPrompts"
         :show-business-overview="false"
         :scroll-into-view="scrollIntoView"
+        :reply-end-token="replyEndToken"
         :show-quick-list="showQuickList"
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
         :bottom-inset="messageBottomInset"
-        :step-card-count="guideStepCardCount"
+        :step-card-step-id="guideStepCardStepId"
         :pin-step-card="guideStepSheetVisible"
         @card-space-change="onGuideStepCardSpaceChange"
+        @content-grow="chatStore.scrollToBottom()"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"

@@ -271,7 +271,8 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
  * step 组件展开成「一张步骤卡 + 每步一张详情卡」：
  * - 步骤卡（guide-step）负责提问：note 标签 + confirmation_question + 三个选项；
  * - 详情卡（guide-check）负责讲这一步做什么：steps.title / steps.action / steps.images；
- * 两者靠 step_id 关联，步骤卡翻页时对话滚动到对应详情卡，并且一次只显示当前那一步。
+ * 两者靠 step_id 关联：步骤卡翻页时对话滚动到对应详情卡，界面上每轮只展示其中一张
+ * （多轮指导各留一张自己的卡，同一步骤重复触发时切/滚最新那一轮，见消息列表的 standaloneBlocks）。
  * 每步恒定一张，保证详情卡下标与步骤顺序一一对应。其余 GUIDE 卡片原样返回。
  */
 function expandStepBlocks(block: { type: GuideBlockType; payload: Record<string, unknown> }) {
