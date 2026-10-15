@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance, nextTick, ref, watch } from "vue";
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
 import iconVoicePause from "@/assets/img/report-broadcast/pause-control.png";
@@ -29,6 +29,49 @@ const props = defineProps<{
 const emit = defineEmits<{ "play-pause": []; like: []; seek: [seq: number] }>();
 const instance = getCurrentInstance();
 const transcriptScrollTop = ref(0);
+/**
+ * 滚动视图的真实位置。transcriptScrollTop 是单向受控值，用户手动滚动时不会同步，
+ * 一旦两者脱节，切句时以受控值为基数算出的目标位置就是错的，高亮回不到中间。
+ */
+let transcriptRealScrollTop = 0;
+/** 自动居中滚动进行中：动画中间态不回写受控值，否则会自己打断自己。 */
+let transcriptAutoCentering = false;
+let transcriptAutoCenterTimer: ReturnType<typeof setTimeout> | null = null;
+/** 手动滚动停手后延迟这么久，若无新滚动就把当前高亮段拉回中间（不等下一句切句）。 */
+const TRANSCRIPT_RECENTER_DELAY_MS = 3000;
+let transcriptRecenterTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 取消已排定的「停手回中」，避免用户继续滚动时半路被打断。 */
+function cancelTranscriptRecenter() {
+  if (!transcriptRecenterTimer) return;
+  clearTimeout(transcriptRecenterTimer);
+  transcriptRecenterTimer = null;
+}
+
+/** 每次手动滚动都重新计时：只有真正停下来 TRANSCRIPT_RECENTER_DELAY_MS 才回中。 */
+function scheduleTranscriptRecenter() {
+  cancelTranscriptRecenter();
+  // 暂停时用户通常在看文字，不打扰；恢复播放后由切句逻辑接管回中
+  if (!props.playing) return;
+  transcriptRecenterTimer = setTimeout(() => {
+    transcriptRecenterTimer = null;
+    updateTranscriptScroll();
+  }, TRANSCRIPT_RECENTER_DELAY_MS);
+}
+
+/**
+ * 记录真实滚动位置；手动滚动时同步受控值到真实位置，
+ * 保证下次自动居中的目标值与旧值不同，scroll-view 才会真正滚动。
+ */
+function onTranscriptScroll(e: { detail?: { scrollTop?: number } }) {
+  const top = Number(e?.detail?.scrollTop ?? 0);
+  if (!Number.isFinite(top)) return;
+  transcriptRealScrollTop = top;
+  if (transcriptAutoCentering) return;
+  transcriptScrollTop.value = Math.max(0, top);
+  // 手动滚动：排定停手后回中，高亮段重新回到中间阅读带
+  scheduleTranscriptRecenter();
+}
 const leftWaveBars = [2, 2, 18, 4, 10, 4, 16, 8, 4, 16, 4, 30, 12, 20, 2, 1, 1];
 const rightWaveBars = [2, 2, 18, 10, 18, 4, 8, 8, 10, 2, 4, 8, 22, 6, 2, 1, 1];
 const showTranscriptSkeleton = computed(
@@ -87,11 +130,30 @@ function updateTranscriptScroll() {
         ? safeTop
         : safeTop + (safeBottom - safeTop - currentHeight) / 2;
       const offset = current.top - targetTop;
-      if (Math.abs(offset) > 1) transcriptScrollTop.value = Math.max(0, transcriptScrollTop.value + Math.round(offset));
+      if (Math.abs(offset) > 1) {
+        // 已经在自动回中，取消可能残留的停手排定，避免重复触发
+        cancelTranscriptRecenter();
+        // 以「真实滚动位置」为基数校正：受控值可能因用户手动滚动而与真实位置脱节，
+        // 用脱节的受控值做基数会把高亮滚偏，甚至新旧值相同导致 scroll-view 不滚动（表现为不复原）。
+        const nextTop = Math.max(0, Math.round(transcriptRealScrollTop + offset));
+        transcriptAutoCentering = true;
+        transcriptScrollTop.value = nextTop;
+        transcriptRealScrollTop = nextTop;
+        if (transcriptAutoCenterTimer) clearTimeout(transcriptAutoCenterTimer);
+        // 与 scroll-with-animation 的动画时长同量级，动画结束后恢复手动滚动回写
+        transcriptAutoCenterTimer = setTimeout(() => {
+          transcriptAutoCentering = false;
+        }, 360);
+      }
     });
   });
 }
 watch(() => props.currentSeq, updateTranscriptScroll);
+
+onBeforeUnmount(() => {
+  if (transcriptAutoCenterTimer) clearTimeout(transcriptAutoCenterTimer);
+  cancelTranscriptRecenter();
+});
 
 /* —— 播报进度条：随播放进度走，拖动换算到分句后上抛 seek —— */
 const progressDragging = ref(false);
@@ -209,6 +271,7 @@ function onProgressTouchEnd() {
         scroll-y
         :scroll-top="transcriptScrollTop"
         :scroll-with-animation="playing"
+        @scroll="onTranscriptScroll"
       >
         <view class="report-broadcast-content__transcript-track">
           <text
@@ -255,10 +318,8 @@ function onProgressTouchEnd() {
           class="report-broadcast-content__feedback-button"
           :class="{
             'report-broadcast-content__feedback-button--liked': liked,
-            'report-broadcast-content__feedback-button--loading': likeLoading,
           }"
-          :aria-disabled="likeLoading"
-          @tap.stop="!likeLoading && emit('like')"
+          @tap.stop="emit('like')"
         >
           <image
             class="report-broadcast-content__feedback-icon"
@@ -542,10 +603,6 @@ function onProgressTouchEnd() {
 }
 .report-broadcast-content__feedback-button:active {
   transform: scale(0.9);
-}
-.report-broadcast-content__feedback-button--loading {
-  pointer-events: none;
-  opacity: 0.45;
 }
 .report-broadcast-content__feedback-icon {
   width: 48rpx;
