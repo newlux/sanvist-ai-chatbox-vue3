@@ -16,7 +16,7 @@ import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("chat");
 
-/** TEST 是任务协同当前使用的场景标识（历史会话仍按任务协同归类，见 utils/session-scene） */
+/** TASK 是任务协同的场景标识（TEST 是早期标识，历史会话仍按任务协同归类，见 utils/session-scene） */
 type ChatScene = "ASK" | "GUIDE" | "TASK" | "TEST" | "PODCAST";
 
 function isAbortError(error: unknown) {
