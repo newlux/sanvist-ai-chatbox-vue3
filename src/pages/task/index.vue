@@ -38,7 +38,7 @@ import { consumePendingHistorySession, getSessionId, navigateToSessionScene, pee
  *
  * 与首页 / 听汇报的区别：
  * - 独立会话域 "task"，不与首页主会话互相污染；
- * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=TEST；
+ * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=TASK；
  * - 每次进入起一轮干净会话（与作业指导一致），返回再进时重新开一轮。
  */
 defineOptions({ name: "AiTaskPage" });
@@ -91,8 +91,8 @@ const {
   setVoiceInputFocused,
 } = useChatViewport();
 const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
-  // 任务协同下发的场景标识：TEST（历史会话仍按任务协同归类，见 utils/session-scene）
-  scene: "TEST",
+  // 任务协同下发的场景标识：TASK（早期下发过 TEST，历史会话仍按任务协同归类，见 utils/session-scene）
+  scene: "TASK",
 });
 
 /** 页面统一发送入口：直接走真实接口 */
