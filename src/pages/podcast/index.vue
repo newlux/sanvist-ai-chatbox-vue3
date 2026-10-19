@@ -42,7 +42,6 @@ import { provideChatScope, useChatStore, useUserStore } from "@/stores";
 import { stripMarkdownTables } from "@/utils/ai-stream";
 import { getCurrentListenReportDate, markListenReportListened } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
-import { stashPendingRepairCallback } from "@/utils/repair-callback";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { backFromScene, isSceneWindowRoot, navigateToScene } from "@/utils/scene-navigation";
 
@@ -783,11 +782,7 @@ function onReportQaNavigationConfirm(payload: AssistantNavigationPayload) {
     sessionId: payload.sessionId,
     conversationId: payload.conversationId,
   });
-  const conversationId = String(payload.conversationId || "").trim();
-  const sessionId = String(payload.sessionId || "").trim();
-  if (conversationId && sessionId) {
-    stashPendingRepairCallback({ aiAskConversationId: conversationId, aiAskSessionId: sessionId });
-  }
+  // 回调摘要轮询只保留在首页：听播页不写 pending，避免残留数据被首页误消费
   // 跳到维修助手前收尾：别把播报 / 答案朗读带过去
   stopPlaybackOnLeave();
   void navigateToScene("/pages/repair/index");

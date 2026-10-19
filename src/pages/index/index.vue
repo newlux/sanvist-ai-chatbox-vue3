@@ -743,7 +743,12 @@ function refreshListenReportState() {
   listenReportRefreshKey.value += 1;
 }
 
-const stopNativeResume = onNativeEvent("resume", refreshListenReportState);
+const stopNativeResume = onNativeEvent("resume", () => {
+  refreshListenReportState();
+  // 维修助手是独立场景窗口：关窗回到本页时原 webview 一直在，不会经历 onHide/onShow，
+  // 只靠 onShow 消费回调会漏，这里在原生 resume 上补一次（重复调用有 pending 判空，安全）。
+  startRepairSummaryCallback();
+});
 
 onShow(() => {
   syncWindowHeight();
