@@ -717,11 +717,12 @@ function onNegativeFeedback() {
   -webkit-user-select: text;
   user-select: text;
 }
+/* 回答气泡：背景 #EFEFEF */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
   padding: 40rpx;
   border: 1rpx solid #eeeeee;
   border-radius: 32rpx;
-  background: #ffffff;
+  background: #efefef;
   box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
 }
 /* 没有正文只有独立卡片：不画白卡外壳，只留操作栏 */
@@ -838,12 +839,14 @@ function onNegativeFeedback() {
   border-radius: 0;
   box-shadow: none;
 }
+/* 用户消息气泡：白底 + #EFEFEF 描边，文字 #0D0D0D（原为品牌红底白字） */
 .ai-bubble-v2--user .ai-bubble-v2__body {
   flex: 0 1 auto;
   max-width: calc(100% - 64rpx);
   padding: 22rpx 32rpx;
+  border: 1rpx solid #efefef;
   border-radius: 28rpx;
-  background: #c8201e;
+  background: #ffffff;
 }
 .ai-bubble-v2__body--highlighted {
   background: rgba(248, 49, 94, 0.06);
@@ -851,7 +854,7 @@ function onNegativeFeedback() {
 .ai-bubble-v2--user .ai-bubble-v2__user-content {
   font-size: 28rpx;
   line-height: 40rpx;
-  color: #ffffff;
+  color: #0d0d0d;
   white-space: pre-wrap;
   word-break: break-word;
   // 允许划词选中复制；长按仍走整条复制
@@ -864,7 +867,8 @@ function onNegativeFeedback() {
   align-items: baseline;
   font-size: 28rpx;
   line-height: 40rpx;
-  color: #ffffff;
+  // 气泡底色已改为白色，识别中文案同步用主文字色，避免白字看不见
+  color: #0d0d0d;
 }
 
 .ai-bubble-v2__asr-dot {

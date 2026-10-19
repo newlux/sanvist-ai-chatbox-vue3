@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { ThinkStep } from "@/utils/ai-stream";
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import thinkingGlow from "@/assets/img/report-broadcast/thinking-glow.png";
+import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
+import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 
@@ -70,8 +71,18 @@ function onTranscriptScroll(e: { detail?: { scrollTop?: number } }) {
   // 手动滚动：排定停手后回中，高亮段重新回到中间阅读带
   scheduleTranscriptRecenter();
 }
+// 与「偏好设置」音色选择页同一套声波参数（设计稿 309:2117 / 309:2155）
 const leftWaveBars = [2, 2, 18, 4, 10, 4, 16, 8, 4, 16, 4, 30, 12, 20, 2, 1, 1];
 const rightWaveBars = [2, 2, 18, 10, 18, 4, 8, 8, 10, 2, 4, 8, 22, 6, 2, 1, 1];
+// 左右声波共用同一套横向渐变：0% #3D21CD → 48.72% #1999FE → 76% #C067FA → 100% #FD90C4
+const waveGradient = [
+  { color: "#3D21CD", offset: 0 },
+  { color: "#1999FE", offset: 48.72 },
+  { color: "#C067FA", offset: 76 },
+  { color: "#FD90C4", offset: 100 },
+];
+/** 播放/暂停图标与声波同色系，多实例同页时渐变 id 需唯一 */
+const playIconGradientId = `report-broadcast-play-gradient-${Math.random().toString(36).slice(2, 9)}`;
 const showTranscriptSkeleton = computed(
   () => props.loading && props.transcriptSegments.length === 0,
 );
@@ -234,7 +245,16 @@ function onProgressTouchEnd() {
     <view class="report-broadcast-content__portrait-gap" />
     <view class="report-broadcast-content__portrait-stage">
       <view class="report-broadcast-content__wave report-broadcast-content__wave--left">
-        <ReportWaveform :active="playing" :bars="leftWaveBars" />
+        <ReportWaveform
+          :active="playing"
+          :bars="leftWaveBars"
+          :gradient="waveGradient"
+          :box-width="70"
+          :box-height="70"
+          :bar-width="2"
+          :spacing="4"
+          :origin-x="3"
+        />
       </view>
       <view class="report-broadcast-content__glow report-broadcast-content__glow--blue" />
       <view class="report-broadcast-content__glow report-broadcast-content__glow--red" />
@@ -242,14 +262,49 @@ function onProgressTouchEnd() {
         <image class="report-broadcast-content__portrait" :src="portrait" mode="aspectFit" />
       </view>
       <view class="report-broadcast-content__wave report-broadcast-content__wave--right">
-        <ReportWaveform :active="playing" :bars="rightWaveBars" />
-      </view>
-      <view class="report-broadcast-content__play-control" @tap="emit('play-pause')">
-        <image
-          class="report-broadcast-content__play-control-icon"
-          :src="playing ? iconVoicePlay : iconVoicePause"
-          mode="aspectFit"
+        <ReportWaveform
+          :active="playing"
+          :bars="rightWaveBars"
+          :gradient="waveGradient"
+          :box-width="70"
+          :box-height="70"
+          :bar-width="2"
+          :spacing="4"
+          :origin-x="3"
         />
+      </view>
+      <!-- 播放按钮（设计稿 339:1359）：白底圆形 + 同色系渐变图标 -->
+      <view class="report-broadcast-content__play-control" @tap="emit('play-pause')">
+        <svg class="report-broadcast-content__play-control-icon" viewBox="0 0 22 22" aria-hidden="true">
+          <defs>
+            <linearGradient
+              :id="playIconGradientId"
+              x1="0"
+              y1="0"
+              x2="22"
+              y2="0"
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0%" stop-color="#3D21CD" />
+              <stop offset="48.72%" stop-color="#1999FE" />
+              <stop offset="76%" stop-color="#C067FA" />
+              <stop offset="100%" stop-color="#FD90C4" />
+            </linearGradient>
+          </defs>
+          <!-- 播放中显示暂停双条，暂停时显示播放三角 -->
+          <g v-if="playing" :fill="`url(#${playIconGradientId})`">
+            <rect x="6.4" y="4.6" width="3.4" height="12.8" rx="1.7" />
+            <rect x="12.2" y="4.6" width="3.4" height="12.8" rx="1.7" />
+          </g>
+          <polygon
+            v-else
+            points="7.2,4.4 17,11 7.2,17.6"
+            fill="none"
+            :stroke="`url(#${playIconGradientId})`"
+            stroke-width="1.6"
+            stroke-linejoin="round"
+          />
+        </svg>
       </view>
     </view>
     <!-- 头像下方播报进度条：随播放进度走，拖动跳到对应分句 -->
@@ -406,9 +461,9 @@ function onProgressTouchEnd() {
   height: 450rpx;
   // background: rgb(255 216 216 / 40%);
 }
-/* —— 头像下方进度条 ——
+/* —— 头像下方进度条（设计稿 339:1247）——
    容器 80rpx（上 48 留白让开头像底部的播放按钮，其底缘伸入 stage 下方 24rpx），
-   热区 32rpx 放底部，视觉轨道 6rpx 居中；左右 88rpx 与字幕区对齐。 */
+   热区 32rpx 放底部，视觉轨道 4rpx 居中；左右 88rpx 与字幕区对齐。 */
 .report-broadcast-content__progress {
   display: flex;
   width: 100%;
@@ -429,22 +484,26 @@ function onProgressTouchEnd() {
 .report-broadcast-content__progress-rail {
   position: relative;
   width: 100%;
-  height: 6rpx;
-  border-radius: 3rpx;
-  background: #ececec;
+  height: 4rpx;
+  border-radius: 2rpx;
+  background: #e7e7e7;
 }
+/* 已播部分：与声波同一套渐变，渐变随填充宽度整体铺开 */
 .report-broadcast-content__progress-fill {
   height: 100%;
-  border-radius: 3rpx;
-  background: linear-gradient(90deg, #6e9fd8 0%, #c8201e 100%);
+  border-radius: 2rpx;
+  background: linear-gradient(90deg, #3d21cd 0%, #1999fe 48.72%, #c067fa 76%, #fd90c4 100%);
 }
 .report-broadcast-content__progress-thumb {
   position: absolute;
   top: 50%;
-  width: 18rpx;
-  height: 18rpx;
+  box-sizing: border-box;
+  width: 16rpx;
+  height: 16rpx;
+  border: 2rpx solid #fff;
   border-radius: 50%;
-  background: #c8201e;
+  background: #1166d6;
+  box-shadow: 0 2rpx 4rpx rgb(0 0 0 / 11%);
   transform: translate(-50%, -50%);
   transition: transform 0.15s ease;
 }
@@ -597,23 +656,28 @@ function onProgressTouchEnd() {
   pointer-events: none;
   background: linear-gradient(180deg, #fff 0%, rgb(255 255 255 / 86%) 52%, rgb(255 255 255 / 0%) 100%);
 }
+/* 播放按钮（设计稿 339:1359）：32×32 外框内 28×28 白底圆 + 1px 描边 + 柔和投影 */
 .report-broadcast-content__play-control {
   position: absolute;
   z-index: 3;
   bottom: -24rpx;
   left: 50%;
   display: flex;
+  box-sizing: border-box;
   width: 64rpx;
   height: 64rpx;
   align-items: center;
   justify-content: center;
+  border: 1px solid #e4e4e4;
   border-radius: 50%;
-  box-shadow: 0 8rpx 20rpx rgb(0 0 0 / 18%);
+  background: #fff;
+  box-shadow: 0 2rpx 22rpx rgb(0 0 0 / 10%);
   transform: translateX(-50%);
 }
 .report-broadcast-content__play-control-icon {
-  width: 64rpx;
-  height: 64rpx;
+  width: 48rpx;
+  height: 48rpx;
+  opacity: 0.6;
 }
 .report-broadcast-content__bottom-fade {
   position: absolute;

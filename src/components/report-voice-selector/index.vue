@@ -2,11 +2,11 @@
 import type { ListenBroadcastStyle } from "@/api/listen-broadcast/types";
 import type { ReportVoiceOption } from "@/config/report-voices";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import headerStatusLogo from "@/assets/img/header-status-logo.png";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import arrowLeftIcon from "@/assets/img/nav-arrow-left.svg";
 import arrowRightIcon from "@/assets/img/nav-arrow-right.svg";
 import microphoneBadge from "@/assets/img/voice-assistant/report-microphone-badge.png";
-import smallWave from "@/assets/img/voice-assistant/report-small-wave.png";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
 import ReportStyleSelector from "@/components/report-style-selector/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
@@ -32,10 +32,18 @@ const { saveReportVoice } = useReportVoice();
 const step = ref<"voice" | "style">("voice");
 const confirmedVoiceCode = ref("");
 
-// 设计稿 940:3 左声波 17 根柱高（px）
+// 设计稿 309:2117 左声波 17 根柱高（px）
 const leftWaveBars = [2, 2, 18, 4, 10, 4, 16, 8, 4, 16, 4, 30, 12, 20, 2, 1, 1];
-// 设计稿 940:110 右声波 17 根柱高（px）
+// 设计稿 309:2155 右声波 17 根柱高（px）
 const rightWaveBars = [2, 2, 18, 10, 18, 4, 8, 8, 10, 2, 4, 8, 22, 6, 2, 1, 1];
+// 左右声波共用同一套横向渐变（309:2117 fills）：
+// 0% #3D21CD → 48.72% #1999FE → 76% #C067FA → 100% #FD90C4
+const waveGradient = [
+  { color: "#3D21CD", offset: 0 },
+  { color: "#1999FE", offset: 48.72 },
+  { color: "#C067FA", offset: 76 },
+  { color: "#FD90C4", offset: 100 },
+];
 
 const selectedIndex = ref(2);
 const dragStartX = ref(0);
@@ -185,17 +193,21 @@ function closeSelector() {
       @close="onStyleBack"
     />
     <template v-else>
-      <!-- ② 顶部导航 Top Nav(1024:1)：关闭 + 工作胶囊 + Home -->
+      <!-- ② 顶部导航 Top Nav(309:2082)：关闭 + 工作胶囊 + Home -->
       <view class="report-voice-selector__topbar">
         <view class="report-voice-selector__close" @tap="closeSelector">
           <image class="report-voice-selector__close-icon" :src="closeIcon" mode="aspectFit" />
         </view>
+        <!-- 工作胶囊：设计稿 309:2085（hug×36，r18，白 90%，22×22 图标 + 14px 文案，间距 6） -->
         <view class="report-voice-selector__working">
           <view class="report-voice-selector__working-inner">
-            <text class="report-voice-selector__dot" />
-            <text class="report-voice-selector__dot" />
+            <image
+              class="report-voice-selector__working-icon"
+              :src="headerStatusLogo"
+              mode="aspectFit"
+            />
             <text class="report-voice-selector__working-text">
-              Sani 等你选..
+              等你选..
             </text>
           </view>
         </view>
@@ -205,12 +217,12 @@ function closeSelector() {
         <view v-else class="report-voice-selector__home-placeholder" />
       </view>
 
-      <!-- ③ 页面标题(940:79) -->
+      <!-- ③ 页面标题(309:2113) -->
       <text class="report-voice-selector__title">
         快来选择你的汇报助手吧
       </text>
 
-      <!-- ④ 主视觉区(940:56 群组)：人物 + 左右声波 -->
+      <!-- ④ 主视觉区(309:2101)：人物 + 左右声波(309:2117 / 309:2155) -->
       <!--
         PC 端把左右声波直接替换成可点击的尖括号（点哪个就把轮播往对应方向挪一格）；
         APP / 移动端保持原声波装饰（拖动切音色、点中间头像也切）。两种视图占位一致，
@@ -225,7 +237,7 @@ function closeSelector() {
           <image class="report-voice-selector__side-arrow-icon" :src="arrowLeftIcon" mode="aspectFit" />
         </view>
         <view v-else class="report-voice-selector__wave report-voice-selector__wave--left" aria-hidden="true">
-          <ReportWaveform :bars="leftWaveBars" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
+          <ReportWaveform :bars="leftWaveBars" :gradient="waveGradient" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
         </view>
         <image class="report-voice-selector__hero-image" :src="selectedVoice.hero" mode="aspectFit" />
         <view
@@ -236,11 +248,11 @@ function closeSelector() {
           <image class="report-voice-selector__side-arrow-icon" :src="arrowRightIcon" mode="aspectFit" />
         </view>
         <view v-else class="report-voice-selector__wave report-voice-selector__wave--right" aria-hidden="true">
-          <ReportWaveform :bars="rightWaveBars" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
+          <ReportWaveform :bars="rightWaveBars" :gradient="waveGradient" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
         </view>
       </view>
 
-      <!-- ⑤ 性格信息：名称(940:78) + 说明(940:107) -->
+      <!-- ⑤ 性格信息：名称(309:2150) + 说明(309:2115) -->
       <text class="report-voice-selector__name">
         {{ selectedVoice.name }}
       </text>
@@ -248,13 +260,7 @@ function closeSelector() {
         {{ selectedVoice.description }}
       </text>
 
-      <!-- ⑥ 正在播报胶囊(940:52) -->
-      <view class="report-voice-selector__broadcast">
-        <image class="report-voice-selector__broadcast-wave" :src="smallWave" mode="scaleToFill" />
-        <text>正在播报</text>
-      </view>
-
-      <!-- ⑦ 轮播区：轨道弧线(940:48) + 5 槽位 -->
+      <!-- ⑥ 轮播区：轨道弧线(309:2048) + 5 槽位 -->
       <view
         class="report-voice-selector__carousel"
         @touchstart="startDrag"
@@ -271,7 +277,7 @@ function closeSelector() {
           :style="`--slot-x: ${item.x * 2}; --slot-y: ${(item.y - 481) * 2}; --drag-x: ${dragDeltaX * 0.12}; opacity: ${item.opacity}`"
           @tap.stop="selectVoice(item.index)"
         >
-          <!-- 选中项外层椭圆(940:27)：粉渐变 + 红描边；非选中为空 -->
+          <!-- 选中项外层椭圆(309:2058)：浅蓝渐变 + 紫蓝渐变描边；非选中为空 -->
           <view v-if="item.index === selectedIndex" class="report-voice-selector__selected-halo" />
           <!-- 头像容器(940:67/102 等)：椭圆头像 -->
           <view class="report-voice-selector__avatar-wrap">
@@ -279,7 +285,7 @@ function closeSelector() {
           </view>
           <!-- 选中麦克风徽标(940:28) -->
           <image v-if="item.index === selectedIndex" class="report-voice-selector__mic" :src="microphoneBadge" mode="scaleToFill" />
-          <!-- 音色标签(940:83 等) -->
+          <!-- 音色标签(309:2104 / 309:2041 等) -->
           <text class="report-voice-selector__tag">
             {{ item.voice.tag }}
           </text>
@@ -299,7 +305,7 @@ function closeSelector() {
         可滑动切换
       </text>
 
-      <!-- ⑪ CTA 按钮(940:108) -->
+      <!-- ⑪ CTA 按钮(309:2076) -->
       <view class="report-voice-selector__button" @tap="confirmVoice">
         <text>下一步</text>
       </view>
@@ -345,7 +351,7 @@ function closeSelector() {
   width: 100%;
   min-height: 0;
   overflow: hidden;
-  color: #1a1a1a;
+  color: #0d0d0d;
   background: #fff;
 }
 
@@ -355,14 +361,14 @@ function closeSelector() {
   }
 }
 
-/* —— ② 顶部导航 Top Nav(1024:1) 高 54px=108rpx，flex 两端对齐 —— */
+/* —— ② 顶部导航 Top Nav(309:2082) 高 50px=100rpx，左右内边距 20px=40rpx，flex 两端对齐 —— */
 .report-voice-selector__topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   box-sizing: border-box;
   width: 100%;
-  height: 108rpx;
+  height: 100rpx;
   padding: 0 40rpx;
   flex-shrink: 0;
 }
@@ -391,66 +397,61 @@ function closeSelector() {
   height: 48rpx;
 }
 
-/* 工作胶囊(1024:2)：外层渐变描边(2rpx)，内层纯白实底。设计稿 1024:2 为纯白底 + 1.5px 渐变描边。
-   box-shadow(px)：0 2px 8px rgba(0,0,0,0.08) */
+/* 工作胶囊(309:2085)：hug×36px，内边距 12px，圆角 18px，填充 #FFFFFF 90%，
+   投影 0 2px 8px rgba(13,13,13,0.09)，无背景模糊；子项间距 6px */
 .report-voice-selector__working {
   display: flex;
   align-items: center;
   box-sizing: border-box;
   height: 72rpx;
-  padding: 2rpx;
+  padding: 0 24rpx;
   border-radius: 36rpx;
-  background: linear-gradient(135deg, #ff6b6b 0%, #c8201e 15%, #ffd6d1 40%, #ffd6d1 100%);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+  background: rgb(255 255 255 / 90%);
+  box-shadow: 0 4rpx 16rpx rgb(13 13 13 / 9%);
 }
 
-/* 内层：纯白实底，透明处露出外层渐变作为描边 */
 .report-voice-selector__working-inner {
   display: flex;
   align-items: center;
   gap: 12rpx;
-  box-sizing: border-box;
-  height: 100%;
-  padding: 0 28rpx;
-  border-radius: 34rpx;
-  background: #fff;
 }
 
-/* 胶囊脉冲点(1024:5/4)：6px→12rpx，红 #C8201E */
-.report-voice-selector__dot {
-  width: 12rpx;
-  height: 12rpx;
-  background: #c8201e;
-  border-radius: 50%;
+/* 胶囊图标(309:2087)：22×22px=44×44rpx */
+.report-voice-selector__working-icon {
+  display: block;
+  width: 44rpx;
+  height: 44rpx;
+  flex: 0 0 44rpx;
 }
 
-/* 胶囊文字(1024:3)：Inter Medium 13px=26rpx，颜色 #1A1A1A */
+/* 胶囊文字(309:2086)：14px=28rpx Regular，色 #0D0D0D */
 .report-voice-selector__working-text {
-  color: #1a1a1a;
-  font-size: 26rpx;
-  font-weight: 500;
-  line-height: 32rpx;
+  color: #0d0d0d;
+  font-size: 28rpx;
+  font-weight: 400;
+  line-height: 40rpx;
 }
 
-/* —— ③ 页面标题(940:79)：Inter SemiBold 17px=34rpx，与导航底间距 19px=38rpx —— */
+/* —— ③ 页面标题(309:2113)：18px=36rpx Bold，色 #0D0D0D，行高约 26px=52rpx，
+   与导航底间距 19px=38rpx —— */
 .report-voice-selector__title {
   display: block;
   width: 100%;
   margin-top: calc(38 * var(--vs-gap-u));
-  color: #1a1a1a;
-  font-size: 34rpx;
-  font-weight: 600;
-  line-height: 42rpx;
+  color: #0d0d0d;
+  font-size: 36rpx;
+  font-weight: 700;
+  line-height: 52rpx;
   text-align: center;
   flex-shrink: 0;
 }
 
-/* —— ④ 主视觉区(940:56 群组)：人物半身大图，与标题底间距 31px=62rpx —— */
+/* —— ④ 主视觉区(309:2101)：210×210px，与标题底间距 26px=52rpx —— */
 .report-voice-selector__hero {
   position: relative;
   width: var(--vs-hero-size);
   height: var(--vs-hero-size);
-  margin-top: calc(62 * var(--vs-gap-u));
+  margin-top: calc(52 * var(--vs-gap-u));
   flex-shrink: 0;
 }
 
@@ -513,61 +514,35 @@ function closeSelector() {
   flex-shrink: 0;
 }
 
-/* 名称(940:78)：Inter SemiBold 17px=34rpx，色 #9A5F5D */
+/* 名称(309:2150)：18px=36rpx Medium，色 #0D0D0D，与主视觉底间距 17px=34rpx */
 .report-voice-selector__name {
-  margin-top: calc(50 * var(--vs-gap-u));
-  color: #9a5f5d;
-  font-size: 34rpx;
-  font-weight: 600;
-  line-height: 48rpx;
+  margin-top: calc(34 * var(--vs-gap-u));
+  color: #0d0d0d;
+  font-size: 36rpx;
+  font-weight: 500;
+  line-height: 52rpx;
 }
 
-/* 说明(940:107)：Inter Regular 14px=28rpx，色 #B88F8D，与名称间距 2px=4rpx */
+/* 说明(309:2115)：14px=28rpx Regular，色 #8F8F8F，与名称间距 0 */
 .report-voice-selector__description {
-  margin-top: 4rpx;
-  color: #b88f8d;
+  margin-top: 0;
+  color: #8f8f8f;
   font-size: 28rpx;
   font-weight: 400;
   line-height: 40rpx;
 }
 
-/* —— ⑥ 正在播报胶囊(940:52)：82×22px=164×44rpx，圆角11px，底 #FFEDED，与说明间距 6px=12rpx —— */
-.report-voice-selector__broadcast {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8rpx;
-  box-sizing: border-box;
-  height: 44rpx;
-  margin-top: 12rpx;
-  padding: 0 22rpx;
-  color: #c8201e;
-  font-size: 22rpx;
-  font-weight: 400;
-  line-height: 28rpx;
-  background: #ffeded;
-  border-radius: 22rpx;
-  flex-shrink: 0;
-}
-
-/* 胶囊小声波(940:53)：12×12px=24×24rpx */
-.report-voice-selector__broadcast-wave {
-  display: block;
-  width: 24rpx;
-  height: 24rpx;
-}
-
-/* —— ⑦ 轮播区：轨道弧线(940:48) 高 72px=144rpx，与胶囊底间距 13px=26rpx —— */
+/* —— ⑥ 轮播区：轨道弧线(309:2048) 327×72px，与说明底间距 41px=82rpx —— */
 .report-voice-selector__carousel {
   position: relative;
   width: calc(750 * var(--vs-car-u));
   height: var(--vs-car-size);
-  margin-top: calc(34 * var(--vs-gap-u));
+  margin-top: calc(82 * var(--vs-gap-u));
   flex-shrink: 0;
   touch-action: pan-y;
 }
 
-/* 轨道弧线(940:48)：固定描边投影，几何随轮播区域统一缩放 */
+/* 轨道弧线(309:2048)：固定描边投影，几何随轮播区域统一缩放 */
 .report-voice-selector__track {
   position: absolute;
   top: 0;
@@ -597,7 +572,8 @@ function closeSelector() {
   z-index: 5;
 }
 
-/* 选中外层椭圆(940:27)：90×114px=180×228rpx，粉渐变 + 红描边 #C8201E */
+/* 选中外层椭圆(309:2058)：90×114px=180×228rpx
+   填充 180° 渐变 #F3F7FF → #E2EAFF；描边 1px=2rpx 渐变 #EBB4E9 → #56ABFA(48.72%) → #9795E8 */
 .report-voice-selector__selected-halo {
   position: absolute;
   top: 0;
@@ -606,10 +582,24 @@ function closeSelector() {
   box-sizing: border-box;
   width: calc(180 * var(--vs-car-u));
   height: calc(228 * var(--vs-car-u));
-  background: linear-gradient(180deg, #f5eaea 0%, #f2fbff 100%);
-  border: 1px solid #c8201e;
+  background: linear-gradient(180deg, #f3f7ff 0%, #e2eaff 100%);
   border-radius: 50%;
   transform: translateX(-50%);
+}
+
+/* 渐变描边环：渐变无法直接作用于 border，用 mask 挖空中间只留 2rpx 的环 */
+.report-voice-selector__selected-halo::after {
+  position: absolute;
+  inset: 0;
+  padding: 2rpx;
+  border-radius: 50%;
+  background: linear-gradient(90deg, #ebb4e9 0%, #56abfa 48.72%, #9795e8 100%);
+  content: "";
+  pointer-events: none;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
 }
 
 /* 头像容器：普通槽位 70×92px=140×184rpx，椭圆，底 #F4F4F4 描边 #EAEAEA */
@@ -626,7 +616,7 @@ function closeSelector() {
   background: #f4f4f4;
 }
 
-/* 选中头像(940:67)：缩到椭圆内且明显小于外层渐变，四周露出粉渐变 */
+/* 选中头像(309:2038)：保持原头像资源与几何，外层露出 #F3F7FF→#E2EAFF 渐变 */
 .report-voice-selector__item--selected .report-voice-selector__avatar-wrap {
   position: absolute;
   top: calc(20 * var(--vs-car-u));
@@ -658,34 +648,34 @@ function closeSelector() {
   transform: translateX(-50%);
 }
 
-/* 音色标签(940:71 等)：Inter Regular 13px=26rpx，色 #B78E8C */
+/* 音色标签(309:2041 等)：14px=28rpx Regular，色 #8F8F8F */
 .report-voice-selector__tag {
   display: block;
   margin-top: calc(16 * var(--vs-car-u));
-  color: #b78e8c;
-  font-size: calc(26 * var(--vs-car-u));
+  color: #8f8f8f;
+  font-size: calc(28 * var(--vs-car-u));
   font-weight: 400;
-  line-height: calc(32 * var(--vs-car-u));
+  line-height: calc(34 * var(--vs-car-u));
   white-space: nowrap;
 }
 
-/* 选中标签(940:83)：Inter SemiBold 13px=26rpx，色 #96605C，设计稿 y=609 → 相对槽位顶 248rpx */
+/* 选中标签(309:2104)：14px Medium，色 #0D0D0D，设计稿 y=609 → 相对槽位顶 248rpx */
 .report-voice-selector__item--selected .report-voice-selector__tag {
   position: absolute;
   top: calc(248 * var(--vs-car-u));
   left: 50%;
   margin-top: 0;
-  color: #96605c;
-  font-weight: 600;
+  color: #0d0d0d;
+  font-weight: 500;
   transform: translateX(-50%);
 }
 
-/* —— ⑩ 移动端「可滑动切换」文字提示：Inter Regular 12px=24rpx，色 #B5B5B5 —— */
+/* —— ⑦ 移动端「可滑动切换」文字提示(309:2075)：12px=24rpx Regular，色 #8E8E8E —— */
 .report-voice-selector__hint {
   display: block;
   width: 100%;
   margin-top: calc(33 * var(--vs-gap-u));
-  color: #b5b5b5;
+  color: #8e8e8e;
   font-size: 24rpx;
   font-weight: 400;
   line-height: 30rpx;
@@ -693,7 +683,8 @@ function closeSelector() {
   flex-shrink: 0;
 }
 
-/* —— ⑩ PC 端轮播指示点：8 个音色对应 8 个圆点，active 拉成胶囊；颜色与主图风格保持一致 —— */
+/* —— ⑧ PC 端轮播指示点(309:2050/2051/2112)：6×6px=12×12rpx，
+   选中 #0D0D0D，未选中 #D0D0D0 29.78% —— */
 .report-voice-selector__dots {
   display: flex;
   flex-direction: row;
@@ -709,33 +700,34 @@ function closeSelector() {
   height: 12rpx;
   margin: 0 6rpx;
   border-radius: 50%;
-  background: #e2d6d6;
-  transition: width 0.2s ease, background 0.2s ease;
+  background: rgb(208 208 208 / 29.78%);
+  transition: background 0.2s ease;
 }
 
 .report-voice-selector__dot--active {
-  width: 28rpx;
-  background: #c8201e;
-  border-radius: 999px;
+  background: #0d0d0d;
 }
 
-/* —— ⑪ CTA 按钮(940:108)：319×56px=638×112rpx，圆角28px，白底
-   box-shadow(px)：0 -2px 21px rgba(0,0,0,0.061) —— */
+/* —— ⑨ CTA 按钮(309:2076)：295×50px=590×100rpx，圆角 30px=60rpx，
+   白底 + 1px rgba(13,13,13,0.05) 描边，投影 0 2px 8px rgba(0,0,0,0.04)，
+   文案 Inter Regular 16px=32rpx / #0D0D0D，与提示间距 28px=56rpx —— */
 .report-voice-selector__button {
   display: flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: 638rpx;
-  height: 112rpx;
-  margin-top: calc(64 * var(--vs-gap-u));
-  color: #c8201e;
-  font-size: 34rpx;
+  width: 590rpx;
+  height: 100rpx;
+  margin-top: calc(56 * var(--vs-gap-u));
+  color: #0d0d0d;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 32rpx;
   font-weight: 400;
-  line-height: 42rpx;
+  line-height: 38rpx;
   background: #fff;
-  border-radius: 56rpx;
-  box-shadow: 0 -2px 21px rgb(0 0 0 / 6.1%);
+  border: 2rpx solid rgb(13 13 13 / 5%);
+  border-radius: 60rpx;
+  box-shadow: 0 4rpx 16rpx rgb(0 0 0 / 4%);
   flex-shrink: 0;
   /* 底部安全区：改由按钮自身承担。优先用真实 inset；安卓 WebView 读不到时为 0，
      兜底 48px（96rpx）避免贴底的「下一步」被系统导航栏/手势条遮挡。 */
