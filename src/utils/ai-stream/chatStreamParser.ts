@@ -247,10 +247,17 @@ export function applyEventToBlocks(
       };
     }
     case "assistant_navigation": {
-      // 跳转确认（维修助手）：一条回复只保留一个确认块，重复下发时覆盖同一块
+      // 跳转确认（维修助手）：一条回复只保留一个确认块，重复下发时覆盖同一块。
+      // SSE 顶层引用要映射进 payload（conversation_id → sessionId，message_id → conversationId），
+      // 进入维修助手后靠这两个值轮询 summary；缺了它们回调存储会被整段跳过。
+      const navigationPayload: Record<string, unknown> = {
+        ...event.data,
+        ...(event.conversationId ? { sessionId: event.conversationId } : {}),
+        ...(event.messageId ? { conversationId: event.messageId } : {}),
+      };
       return {
         ...base,
-        blocks: upsertBlock(blocks, "assistant-navigation-0", "assistant-navigation", event.data, true),
+        blocks: upsertBlock(blocks, "assistant-navigation-0", "assistant-navigation", navigationPayload, true),
         receivedContent: true,
       };
     }
