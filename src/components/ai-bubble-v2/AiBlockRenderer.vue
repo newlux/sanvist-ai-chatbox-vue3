@@ -9,6 +9,7 @@ import type {
 } from "@/api/chat/types";
 import AnswerBlock from "./blocks/AnswerBlock.vue";
 import AskSlotBlock from "./blocks/AskSlotBlock.vue";
+import AssistantNavigationBlock from "./blocks/AssistantNavigationBlock.vue";
 import ChartBlock from "./blocks/ChartBlock.vue";
 import ErrorBlock from "./blocks/ErrorBlock.vue";
 import GanttBlock from "./blocks/GanttBlock.vue";
@@ -75,6 +76,11 @@ function onAskSlotOpen(payload: AskSlotPayload) {
   emit("ask-slot-open", payload);
 }
 
+/** 跳转确认块（维修助手）：块自身不占位，只在 auto_open 时把 payload 往上抛给页面开弹框 */
+function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
+  emit("assistant-navigation-open", payload);
+}
+
 /** 点调度视图入口卡：整包数据继续往上抛，由页面存数据并跳横屏调度视图 */
 function onGanttOpen(payload: GanttViewPayload) {
   emit("gantt-open", payload);
@@ -118,6 +124,12 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
     :embedded="embedded"
   />
   <AskSlotBlock v-else-if="block.type === 'ask-slot'" :payload="block.payload" @open="onAskSlotOpen" />
+  <!-- 跳转确认块（navigation 积木）：只做 auto_open 触发，不占视觉位置 -->
+  <AssistantNavigationBlock
+    v-else-if="block.type === 'assistant-navigation'"
+    :payload="block.payload"
+    @open="onAssistantNavigationOpen"
+  />
   <GuideStepBlock v-else-if="block.type === 'guide-step'" :payload="block.payload" @open="onGuideStepOpen" />
   <!-- 多轮追问卡：与步骤卡分开渲染（并行分支 vs 按序推进） -->
   <GuideSuggestionBlock
