@@ -335,15 +335,17 @@ onBeforeUnmount(() => {
             class="chat-header__title-wrap"
             :class="{ 'chat-header__title-wrap--generating': props.generating }"
           >
-            <view v-if="props.generating" class="chat-header__generating-border">
-              <view class="chat-header__generating-border-inner" />
-            </view>
-            <view v-if="props.generating" class="chat-header__generating-mark">
-              <view />
-              <view />
-            </view>
+            <!-- Ardot 85:3217 描边：INSIDE 1.5px 渐变环（mask 挖空实现） -->
+            <view v-if="props.generating" class="chat-header__generating-border" />
+            <!-- 设计稿 326:1374 / 85:3218 状态胶囊：22×22 品牌图标 + 14px 文案，间距 6px
+                 等待中 / 正在回答两种状态共用同一枚图标 -->
+            <image
+              class="chat-header__title-logo"
+              src="@/assets/img/header-status-logo.png"
+              mode="aspectFit"
+            />
             <text class="chat-header__title">
-              {{ props.generating ? '正在生成回答' : 'Sani 等待中..' }}
+              {{ props.generating ? '正在回答' : '等待中..' }}
             </text>
           </view>
 
@@ -679,22 +681,31 @@ onBeforeUnmount(() => {
   box-shadow: 0 4rpx 8rpx rgba(238, 26, 26, 0.09);
 }
 
+/* ===== 正在回答：Ardot 85:3217 Working Capsule（1px = 2rpx）=====
+   容器 h36 / r18 / 白 90% / 左右内边距 14 / 子项间距 6 / 背景模糊 16 /
+   投影 0 2 8 rgba(0,0,0,.08) / clipsContent；宽度 hug，不设 min-width */
 .chat-header__title-wrap--generating {
   position: relative;
-  min-width: 260rpx;
-  height: 72rpx;
-  gap: 12rpx;
-  padding: 0 28rpx;
+  height: 72rpx; // 36px
+  gap: 12rpx; // 6px
+  padding: 0 28rpx; // 14px
   border: 0;
-  border-radius: 36rpx;
-  background: rgba(255, 255, 255, .9);
-  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, .08);
+  border-radius: 36rpx; // 18px
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.08); // 0 2px 8px rgba(0,0,0,.08)
+  overflow: hidden; // clipsContent: true
 }
 
 /**
- * 生成中的流光描边。
- * 小程序不支持 svg 元素（会直接报「元素不存在」），这里改用双层圆角视图模拟：
- * 外层跑渐变动画，内层用不透明底色盖住中间，只留下 2rpx 的环。
+ * 描边：INSIDE 1.5px 线性渐变（85:3217.strokes），带流光动效。
+ * 设计稿叠了 2 层同宽描边，第 2 层色标全不透明并完全盖住第 1 层，
+ * 因此这里只绘制可见的第 2 层；第 1 层色标留档：
+ *   0% #EBB4E9(alpha 0) / 48.72% #56ABFA(alpha 50%) / 100% #9795E8
+ * 用 mask 挖空中间，只保留 3rpx 的环（渐变无法直接作用于 border）。
+ *
+ * 动效：把设计稿的色标放在背景图的前半段（0→50%），后半段做镜像（50→100%），
+ * 背景宽度取 2 倍，色带整体左移一个图宽即可无缝循环；
+ * 静止帧（t=0 / 关闭动效时）与设计稿色标位置完全一致。
  */
 .chat-header__generating-border {
   position: absolute;
@@ -703,60 +714,72 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   left: 0;
+  padding: 3rpx; // 1.5px 描边宽度
   border-radius: 36rpx;
-  background: linear-gradient(90deg, #fff5f5, #ffd0d0, #ff9595, #ff5151, #d90000, #ff5151, #ff9595, #ffd0d0, #fff5f5);
-  background-size: 300% 100%;
-  animation: header-generating-border 2.4s linear infinite;
+  background-image: linear-gradient(
+    135deg,
+    #9197ea 0%,
+    #4392e4 16.515%,
+    #e3f1ff 24.42%,
+    #f8fbff 50%,
+    #e3f1ff 75.58%,
+    #4392e4 83.485%,
+    #9197ea 100%
+  );
+  background-size: 200% 100%;
+  animation: header-capsule-flow 4s linear infinite;
+  will-change: background-position;
+  /* 先写标准属性、再用 -webkit- 兜底：老 WebView 只认前缀版本 */
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
   pointer-events: none;
 }
 
-.chat-header__generating-border-inner {
-  position: absolute;
-  top: 2rpx;
-  right: 2rpx;
-  bottom: 2rpx;
-  left: 2rpx;
-  border-radius: 34rpx;
-  background: #fff;
+/* 色带左移一个背景图宽（200% 的元素宽即为一个完整图案周期），首尾同色，循环无缝 */
+@keyframes header-capsule-flow {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 200% 50%;
+  }
 }
 
+/* 系统偏好减少动效时停在设计稿的静态渐变 */
+@media (prefers-reduced-motion: reduce) {
+  .chat-header__generating-border {
+    animation: none;
+  }
+}
+
+/* 图标与文字压在描边环之上 */
 .chat-header__title-wrap--generating > *:not(.chat-header__generating-border) {
   position: relative;
   z-index: 1;
 }
 
-.chat-header__generating-mark {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
+// 品牌图标：设计稿 326:1376 / 85:3218（22×22），等待中与正在回答共用
+.chat-header__title-logo {
+  width: 44rpx; // 22px
+  height: 44rpx;
+  flex: 0 0 44rpx;
 }
 
-.chat-header__generating-mark view {
-  width: 12rpx;
-  height: 12rpx;
-  border-radius: 50%;
-  background: #fe0000;
-  animation: header-generating 1.2s ease-in-out infinite;
-}
-
-.chat-header__generating-mark view:nth-child(2) { animation-delay: .16s; }
-
+// 状态文案：设计稿 326:1377（等待中）/ 85:3219（正在回答）同为 14px Regular #0D0D0D，行高 AUTO ≈ 20px
 .chat-header__title {
-  font-size: 28rpx;
-  font-weight: 500;
-  color: #1a1a1a;
-  line-height: 36rpx;
+  font-family:
+    "Source Han Sans CN",
+    "PingFang SC",
+    "Noto Sans SC",
+    "Microsoft YaHei",
+    sans-serif;
+  font-size: 28rpx; // 14px
+  font-weight: 400;
+  color: #0d0d0d;
+  line-height: 40rpx; // 20px
   letter-spacing: 0;
-}
-
-@keyframes header-generating {
-  0%, 100% { opacity: .35; transform: scale(.84); }
-  50% { opacity: 1; transform: scale(1); }
-}
-
-@keyframes header-generating-border {
-  0% { background-position: 0 50%; }
-  100% { background-position: 300% 50%; }
 }
 
 // --- icons (用 CSS 近似 Figma 形状，后续可替换为 svg 资源) ---

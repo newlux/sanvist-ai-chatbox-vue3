@@ -2,13 +2,12 @@
 import type { ListenBroadcastConfig, ListenBroadcastStyle } from "@/api/listen-broadcast/types";
 import { computed, onMounted, ref } from "vue";
 import { getListenBroadcastConfig, saveListenBroadcastPreference } from "@/api/listen-broadcast";
+import headerStatusLogo from "@/assets/img/header-status-logo.png";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import arrowLeftIcon from "@/assets/img/voice-assistant/voice-arrow-left.svg";
 import arrowRightIcon from "@/assets/img/voice-assistant/voice-arrow-right.svg";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
 import bubbleGlowIcon from "@/assets/img/voice-assistant/voice-bubble-glow.svg";
-import capsuleGlowOff from "@/assets/img/voice-assistant/voice-capsule-glow-off.png";
-import capsuleGlowOn from "@/assets/img/voice-assistant/voice-capsule-glow-on.png";
 import checkOffIcon from "@/assets/img/voice-assistant/voice-check-off.svg";
 import checkOnIcon from "@/assets/img/voice-assistant/voice-check-on.svg";
 import chevronDownIcon from "@/assets/img/voice-assistant/voice-chevron-down.svg";
@@ -147,17 +146,21 @@ onMounted(() => {
 
 <template>
   <view class="report-style-selector">
-    <!-- ② 顶部导航 Top Nav(940:136)：关闭 + 工作胶囊（不与 Home 重名） -->
+    <!-- ② 顶部导航 Top Nav(309:2262)：关闭 + 工作胶囊（不与 Home 重名） -->
     <view class="report-style-selector__topbar">
       <view class="report-style-selector__close" @tap="emit('close')">
         <image class="report-style-selector__close-icon" :src="closeIcon" mode="aspectFit" />
       </view>
+      <!-- 工作胶囊(309:2273)：与偏好设置页一致 —— 22×22 图标 + 14px 文案，白 90%，r18 -->
       <view class="report-style-selector__working">
         <view class="report-style-selector__working-inner">
-          <text class="report-style-selector__dot" />
-          <text class="report-style-selector__dot" />
+          <image
+            class="report-style-selector__working-icon"
+            :src="headerStatusLogo"
+            mode="aspectFit"
+          />
           <text class="report-style-selector__working-text">
-            Sani 等你选..
+            等你选..
           </text>
         </view>
       </view>
@@ -167,12 +170,12 @@ onMounted(() => {
       <view v-else class="report-style-selector__topbar-space" />
     </view>
 
-    <!-- ③ 页面标题(940:131) -->
+    <!-- ③ 页面标题(309:2204) -->
     <text class="report-style-selector__title">
       请选择汇报内容
     </text>
 
-    <!-- ④ 汇报时间行(940:76) -->
+    <!-- ④ 汇报时间行(309:2224 / 309:2259 / 309:2283) -->
     <picker
       class="report-style-selector__time-picker"
       mode="time"
@@ -183,7 +186,10 @@ onMounted(() => {
     >
       <view class="report-style-selector__time-row" @tap="onReportTimePickerTap">
         <text class="report-style-selector__time-text">
-          汇报时间： {{ reportTime }}
+          汇报时间：
+        </text>
+        <text class="report-style-selector__time-text">
+          {{ reportTime }}
         </text>
         <image
           class="report-style-selector__time-chevron"
@@ -194,7 +200,7 @@ onMounted(() => {
       </view>
     </picker>
 
-    <!-- ⑤ 主体光晕 Bubble(1004:72)：风格名 + 说明 + 左右切换 -->
+    <!-- ⑤ 主体光晕 Bubble(309:2207 / 309:2278)：风格名 + 说明 + 左右切换 -->
     <view class="report-style-selector__stage">
       <!-- 左切换箭头(940:192 24×24px 图) -->
       <image
@@ -264,15 +270,12 @@ onMounted(() => {
           v-for="(module, index) in modules"
           :key="module.code"
           class="report-style-selector__capsule"
-          :class="`report-style-selector__capsule--${index + 1}`"
+          :class="[
+            `report-style-selector__capsule--${index + 1}`,
+            { 'report-style-selector__capsule--checked': checkedIds.includes(module.code) },
+          ]"
           @tap="toggleModule(module.code)"
         >
-          <!-- 胶囊底图：选中=设计稿导出粉光玻璃(1004:20)；未选=纯白玻璃(1024:25) -->
-          <image
-            class="report-style-selector__capsule-glow"
-            :src="checkedIds.includes(module.code) ? capsuleGlowOn : capsuleGlowOff"
-            mode="aspectFill"
-          />
           <image
             class="report-style-selector__capsule-check"
             :src="checkedIds.includes(module.code) ? checkOnIcon : checkOffIcon"
@@ -294,7 +297,7 @@ onMounted(() => {
       :class="{ 'report-style-selector__button--disabled': !canConfirm }"
       @tap="canConfirm && confirmStyle()"
     >
-      <text>{{ loading ? "加载中" : submitting ? "保存中" : "选择" }}</text>
+      <text>{{ loading ? "加载中" : submitting ? "保存中" : "开始收听" }}</text>
     </view>
   </view>
 </template>
@@ -338,7 +341,7 @@ onMounted(() => {
   width: 100%;
   min-height: 0;
   overflow: hidden;
-  color: #1a1a1a;
+  color: #0d0d0d;
   background: #fff;
 }
 
@@ -385,64 +388,59 @@ onMounted(() => {
   height: 48rpx;
 }
 
-/* 工作胶囊(940:143)：双层，外层渐变描边 2rpx + 内层纯白；
-   fill #FFFFFF(0.9)，stroke 线性渐变 135° #FF6B6B→#C8201E(15%)→#FFD6D1(40%)；
-   box-shadow(px)：0 2px 8px rgba(0,0,0,0.08) */
+/* 工作胶囊(309:2273)：hug×36px，内边距 12px，圆角 18px，填充 #FFFFFF 90%，
+   投影 0 2px 8px rgba(13,13,13,0.09)；子项间距 6px（与偏好设置页一致） */
 .report-style-selector__working {
   display: flex;
   align-items: center;
   box-sizing: border-box;
   height: 72rpx;
-  padding: 2rpx;
+  padding: 0 24rpx;
   border-radius: 36rpx;
-  background: linear-gradient(135deg, #ff6b6b 0%, #c8201e 15%, #ffd6d1 40%, #ffd6d1 100%);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+  background: rgb(255 255 255 / 90%);
+  box-shadow: 0 4rpx 16rpx rgb(13 13 13 / 9%);
 }
 
 .report-style-selector__working-inner {
   display: flex;
   align-items: center;
   gap: 12rpx;
-  box-sizing: border-box;
-  height: 100%;
-  padding: 0 28rpx;
-  border-radius: 34rpx;
-  background: #fff;
 }
 
-.report-style-selector__working .report-style-selector__dot {
-  width: 12rpx;
-  height: 12rpx;
-  background: #c8201e;
-  border-radius: 50%;
-  flex-shrink: 0;
+/* 胶囊图标(309:2274)：22×22px=44×44rpx */
+.report-style-selector__working-icon {
+  display: block;
+  width: 44rpx;
+  height: 44rpx;
+  flex: 0 0 44rpx;
 }
 
+/* 胶囊文字(309:2275)：14px=28rpx Regular，色 #0D0D0D */
 .report-style-selector__working-text {
-  color: #1a1a1a;
-  font-size: 26rpx;
-  font-weight: 500;
-  line-height: 32rpx;
+  color: #0d0d0d;
+  font-size: 28rpx;
+  font-weight: 400;
+  line-height: 40rpx;
 }
 
-/* —— ③ 页面标题(940:131)：17px=34rpx，Inter Medium，#1A1A1A，CENTER/TOP ——
-   与导航底(90)间距 gap=122-90=32px=64rpx */
+/* —— ③ 页面标题(309:2204)：18px=36rpx Bold，色 #0D0D0D，行高约 26px=52rpx，
+   与导航底(96)间距 19px=38rpx —— */
 .report-style-selector__title {
   display: block;
   width: 100%;
-  margin-top: calc(32 * var(--rs-gap-u));
-  color: #1a1a1a;
-  font-size: 34rpx;
-  font-weight: 500;
-  line-height: 42rpx;
+  margin-top: calc(38 * var(--rs-gap-u));
+  color: #0d0d0d;
+  font-size: 36rpx;
+  font-weight: 700;
+  line-height: 52rpx;
   text-align: center;
   flex-shrink: 0;
 }
 
-/* —— ④ 汇报时间行(940:76)：13px=26rpx，Inter Regular，#999999 ——
-   与标题底(143)间距 gap=157-143=14px=28rpx */
+/* —— ④ 汇报时间行(309:2224/309:2259/309:2283)：14px=28rpx Regular，色 #8F8F8F，
+   箭头 16×16px=32×32rpx；与标题底(141)间距 16px=32rpx —— */
 .report-style-selector__time-picker {
-  margin-top: calc(28 * var(--rs-gap-u));
+  margin-top: calc(32 * var(--rs-gap-u));
   flex-shrink: 0;
 }
 
@@ -450,22 +448,22 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8rpx;
-  min-height: 48rpx;
-  padding: 0 12rpx;
+  gap: 0;
+  min-height: 40rpx;
 }
 
 .report-style-selector__time-text {
-  color: #999999;
-  font-size: 26rpx;
+  color: #8f8f8f;
+  font-size: 28rpx;
   font-weight: 400;
-  line-height: 32rpx;
+  line-height: 40rpx;
 }
 
 .report-style-selector__time-chevron {
   display: block;
-  width: 24rpx;
-  height: 24rpx;
+  width: 32rpx;
+  height: 32rpx;
+  margin-left: 40rpx; /* 设计稿：时间文本右 231 → 箭头 251，间距 20px=40rpx */
   transition: transform 160ms ease;
 }
 
@@ -473,7 +471,7 @@ onMounted(() => {
   transform: rotate(180deg);
 }
 
-/* —— ⑤ 主体光晕 Bubble(1004:72 196×196px)：与时间行底(173)间距 gap=186-173=13px=26rpx —— */
+/* —— ⑤ 主体光晕 Bubble(309:2207 196×196px)：与时间行底(177)间距 9px=18rpx —— */
 .report-style-selector__stage {
   position: relative;
   display: flex;
@@ -481,14 +479,13 @@ onMounted(() => {
   justify-content: center;
   width: 100%;
   height: var(--rs-stage-size);
-  margin-top: calc(26 * var(--rs-gap-u));
+  margin-top: calc(18 * var(--rs-gap-u));
   flex-shrink: 0;
 }
 
-/* 外层椭圆(1004:69, 196×196px=392×392rpx)：白底(0.9) + 渐变描边 + 内外阴影；
-   stroke 线性渐变(垂直 [[0,1,0],[-1,0,1]]) #F9FDFF→#FFFFFF(49%)→#FFEBEB；
+/* 外层椭圆(309:2207, 196×196px=392×392rpx)：填充 #FFFFFF，描边 1px #FFFFFF；
    box-shadow(px)：0 5px 20px 2px rgba(166,166,166,0.25)  drop；
-                    inset 13px 19px 31px rgba(209,209,209,0.25)  inner */
+                    inset 13px 19px 31px rgba(173,173,173,0.25)  inner */
 .report-style-selector__bubble {
   position: relative;
   display: flex;
@@ -500,10 +497,10 @@ onMounted(() => {
   height: calc(392 * var(--rs-stage-u));
   border-radius: 50%;
   overflow: hidden;
-  background: linear-gradient(180deg, #f9fdff 0%, #ffffff 49%, #ffebeb 100%);
+  background: #ffffff;
   box-shadow:
     0 5px 20px 2px rgb(166 166 166 / 25%),
-    inset 13px 19px 31px rgb(209 209 209 / 25%);
+    inset 13px 19px 31px rgb(173 173 173 / 25%);
 }
 
 /* 内层径向光晕：直接用设计稿矢量(1004:72)，铺满并裁成圆形 */
@@ -544,33 +541,35 @@ onMounted(() => {
   margin-top: calc(12 * var(--rs-stage-u));
 }
 
-/* 汇报风格标签(940:191)：14px=28rpx，Inter Regular，#594342 */
+/* 汇报风格标签(309:2206)：14px=28rpx Regular，色 #0D0D0D，行高 20px=40rpx */
 .report-style-selector__style-label {
   position: relative;
-  color: #594342;
+  color: #0d0d0d;
   font-size: calc(28 * var(--rs-stage-u));
   font-weight: 400;
-  line-height: calc(34 * var(--rs-stage-u));
+  line-height: calc(40 * var(--rs-stage-u));
 }
 
-/* 风格名称(940:181)：33px=66rpx，Inter Bold，#1A1A1A；与标签底(252)间距=267-252=15px=30rpx */
+/* 风格名称(309:2282)：33px=66rpx Bold，色 #0D0D0D，行高 48px=96rpx；
+   与标签底(255)间距 6px=12rpx */
 .report-style-selector__style-name {
   position: relative;
-  margin-top: calc(30 * var(--rs-stage-u));
-  color: #1a1a1a;
+  margin-top: calc(12 * var(--rs-stage-u));
+  color: #0d0d0d;
   font-size: calc(66 * var(--rs-stage-u));
   font-weight: 700;
-  line-height: calc(76 * var(--rs-stage-u));
+  line-height: calc(96 * var(--rs-stage-u));
 }
 
-/* 风格说明(940:159)：14px=28rpx，Inter Regular，#999999；与名称底(307)间距=313-307=6px=12rpx */
+/* 风格说明(309:2290)：14px=28rpx Regular，色 #8F8F8F，行高 20px=40rpx；
+   与名称底(309)间距 4px=8rpx */
 .report-style-selector__style-desc {
   position: relative;
-  margin-top: calc(12 * var(--rs-stage-u));
-  color: #999999;
+  margin-top: calc(8 * var(--rs-stage-u));
+  color: #8f8f8f;
   font-size: calc(28 * var(--rs-stage-u));
   font-weight: 400;
-  line-height: calc(36 * var(--rs-stage-u));
+  line-height: calc(40 * var(--rs-stage-u));
 }
 
 /* 分页圆点(940:182 8×6px 当前 / 940:183 6×6px 其余)，白底 */
@@ -616,30 +615,31 @@ onMounted(() => {
   opacity: 0.35;
 }
 
-/* —— ⑥ 权限说明(940:154)：14px=28rpx，Inter Regular，#999999；与主体底(382)间距=410-382=28px=56rpx —— */
+/* —— ⑥ 权限说明(309:2203)：14px=28rpx Regular，色 #8F8F8F，行高 20px=40rpx；
+   与主体底(382)间距 28px=56rpx —— */
 .report-style-selector__permission-hint {
   display: block;
   width: 100%;
   margin-top: calc(56 * var(--rs-gap-u));
-  color: #999999;
+  color: #8f8f8f;
   font-size: 28rpx;
   font-weight: 400;
-  line-height: 34rpx;
+  line-height: 40rpx;
   text-align: center;
   flex-shrink: 0;
 }
 
-/* —— ⑦ 权限数据胶囊区(120×120px=240×240rpx)：与说明底(427)间距=449-427=22px=44rpx —— */
+/* —— ⑦ 权限数据胶囊区(120×120px=240×240rpx)：与说明底(430)间距 17px=34rpx —— */
 .report-style-selector__permission-stage {
   position: relative;
   width: calc(750 * var(--rs-permission-u));
   height: var(--rs-permission-size);
-  margin-top: calc(44 * var(--rs-gap-u));
+  margin-top: calc(34 * var(--rs-gap-u));
   flex-shrink: 0;
 }
 
-/* 胶囊(1004:17 等 120×120px=240×240rpx)：白底(0.9) + 渐变描边 + 内外阴影；
-   stroke 线性渐变(垂直) #DAF0FF→#FFFFFF(49%)→#FFEBEB；
+/* 胶囊(309:2246/2176/2225 120×120px=240×240rpx)：
+   选中填充 #FFFFFF，未选中 #F0F0F0；描边 1px #FFFFFF；
    box-shadow(px)：0 5px 20px 2px rgba(166,166,166,0.25)  drop；
                     inset 13px 19px 31px rgba(173,173,173,0.25)  inner */
 .report-style-selector__capsule {
@@ -650,12 +650,26 @@ onMounted(() => {
   box-sizing: border-box;
   width: calc(240 * var(--rs-permission-u));
   height: calc(240 * var(--rs-permission-u));
-  background: #ffffff;
+  /* 未选中：灰玻璃（309:2230 灰光效） */
+  background: linear-gradient(180deg, #f7f7f7 0%, #ebebeb 50%, #f9f9f9 100%);
+  border: 1px solid #ffffff;
   border-radius: 50%;
   overflow: hidden;
   box-shadow:
     0 5px 20px 2px rgb(166 166 166 / 25%),
     inset 13px 19px 31px rgb(173 173 173 / 25%);
+}
+
+/* 选中：白底 + 蓝色光晕(309:2252 三个模糊椭圆合成) + 顶部白色高光(309:2257) */
+.report-style-selector__capsule--checked {
+  background:
+    radial-gradient(64% 56% at 36% 54%, rgb(46 102 248 / 12%) 0%, rgb(46 102 248 / 0%) 76%),
+    linear-gradient(180deg, #edf1f9 0%, #e0e8fe 50%, #fbfdff 92%);
+}
+
+/* 未选中卡片不显示勾选（设计稿 309:2226 内勾选图层隐藏） */
+.report-style-selector__capsule:not(.report-style-selector__capsule--checked) .report-style-selector__capsule-check {
+  opacity: 0;
 }
 
 .report-style-selector__capsule--skeleton {
@@ -664,17 +678,10 @@ onMounted(() => {
   animation: report-style-selector-skeleton-pulse 1.2s ease-in-out infinite;
 }
 
-/* 胶囊底图：选中=粉光玻璃(1004:20)、未选=纯白玻璃(1024:25)，铺满并裁成圆形 */
-.report-style-selector__capsule-glow {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-/* 设计稿坐标（相对权限区顶, 1px=2rpx）：经营成本(32,449)、风险预警(213.5,447)、成本能耗(128.5,557) */
+/* 设计稿坐标（相对权限区顶 447, 1px=2rpx）：
+   经营成本 309:2246 (32,447)、风险预警 309:2176 (213.5,447)、成本能耗 309:2225 (128.5,557) */
 .report-style-selector__capsule--1 {
-  top: calc(4 * var(--rs-permission-u));
+  top: 0;
   left: calc(64 * var(--rs-permission-u));
 }
 
@@ -684,33 +691,34 @@ onMounted(() => {
 }
 
 .report-style-selector__capsule--3 {
-  top: calc(216 * var(--rs-permission-u));
+  top: calc(220 * var(--rs-permission-u));
   left: calc(257 * var(--rs-permission-u));
 }
 
-/* 勾选(940:161 20×20px=40×40rpx)：相对胶囊右上，top 15px=30rpx、right ~20px=40rpx（置于底图之上） */
+/* 勾选(309:2248 20×20px=40×40rpx)：相对胶囊右上，top 16px=32rpx、right 21.5px=43rpx（置于底图之上） */
 .report-style-selector__capsule-check {
   position: absolute;
-  top: calc(30 * var(--rs-permission-u));
-  right: calc(40 * var(--rs-permission-u));
+  top: calc(32 * var(--rs-permission-u));
+  right: calc(43 * var(--rs-permission-u));
   z-index: 2;
   display: block;
   width: calc(40 * var(--rs-permission-u));
   height: calc(40 * var(--rs-permission-u));
 }
 
-/* 胶囊文字(940:160)：13px=26rpx，Inter Medium，#0B0B0B（置于底图之上） */
+/* 胶囊文字(309:2247/309:2177/309:2240)：13px=26rpx，Medium，色 #0D0D0D（置于底图之上） */
 .report-style-selector__capsule-text {
   position: relative;
   z-index: 1;
-  color: #0b0b0b;
+  color: #0d0d0d;
   font-size: calc(26 * var(--rs-permission-u));
   font-weight: 500;
-  line-height: calc(32 * var(--rs-permission-u));
+  line-height: calc(38 * var(--rs-permission-u));
 }
 
-/* —— ⑧ CTA 按钮(940:132 319×56px=638×112rpx)：白底、radius 28px、红字 #C8201E；与胶囊底(677)间距=713-677=36px=72rpx；
-   box-shadow(px)：0 -2px 21px rgba(0,0,0,0.06) —— */
+/* —— ⑧ CTA 按钮(309:2285)：295×50px=590×100rpx，圆角 30px=60rpx，
+   白底 + 1px rgba(13,13,13,0.05) 描边 + 0 2px 8px rgba(0,0,0,0.04)，
+   文案 16px=32rpx Inter Regular #0D0D0D；与卡片底(677)间距 39px=78rpx —— */
 .report-style-selector__selection-hint {
   height: 36rpx;
   margin-top: calc(36 * var(--rs-gap-u));
@@ -724,16 +732,18 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: 638rpx;
-  height: 112rpx;
-  margin-top: calc(72 * var(--rs-gap-u));
-  color: #c8201e;
-  font-size: 34rpx;
+  width: 590rpx;
+  height: 100rpx;
+  margin-top: calc(78 * var(--rs-gap-u));
+  color: #0d0d0d;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 32rpx;
   font-weight: 400;
-  line-height: 42rpx;
+  line-height: 38rpx;
   background: #fff;
-  border-radius: 56rpx;
-  box-shadow: 0 -2px 21px rgb(0 0 0 / 6.1%);
+  border: 2rpx solid rgb(13 13 13 / 5%);
+  border-radius: 60rpx;
+  box-shadow: 0 4rpx 16rpx rgb(0 0 0 / 4%);
   flex-shrink: 0;
   /* 底部安全区：优先使用真实 inset，缺失时至少保留 48px，避免按钮贴近系统导航栏。 */
   margin-bottom: max(var(--safe-bottom-px, 0px), 48px);
