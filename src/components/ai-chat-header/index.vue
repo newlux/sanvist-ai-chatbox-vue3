@@ -335,17 +335,22 @@ onBeforeUnmount(() => {
             class="chat-header__title-wrap"
             :class="{ 'chat-header__title-wrap--generating': props.generating }"
           >
-            <!-- Ardot 85:3217 描边：INSIDE 1.5px 渐变环（mask 挖空实现） -->
-            <view v-if="props.generating" class="chat-header__generating-border" />
-            <!-- 设计稿 326:1374 / 85:3218 状态胶囊：22×22 品牌图标 + 14px 文案，间距 6px
-                 等待中 / 正在回答两种状态共用同一枚图标 -->
+            <view v-if="props.generating" class="chat-header__generating-border">
+              <view class="chat-header__generating-border-inner" />
+            </view>
+            <view v-if="props.generating" class="chat-header__generating-mark">
+              <view />
+              <view />
+            </view>
+            <!-- 设计稿 326:1374 状态胶囊：22×22 品牌图标 + 14px 文案，间距 6px -->
             <image
+              v-if="!props.generating"
               class="chat-header__title-logo"
               src="@/assets/img/header-status-logo.png"
               mode="aspectFit"
             />
             <text class="chat-header__title">
-              {{ props.generating ? '正在回答' : '等待中..' }}
+              {{ props.generating ? '正在生成回答' : '等待中..' }}
             </text>
           </view>
 
@@ -667,18 +672,19 @@ onBeforeUnmount(() => {
   flex: 0 0 48rpx;
 }
 
+// 状态胶囊：设计稿 326:1374（hug×36，r18，白 90%，内边距 12，间距 6）
 .chat-header__title-wrap {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 218rpx;
-  height: 72rpx;
-  padding: 0 24rpx;
+  gap: 12rpx; // 6px
+  height: 72rpx; // 36px
+  padding: 0 24rpx; // 12px
   background: rgba(255, 255, 255, 0.9);
-  border-radius: 36rpx;
+  border-radius: 36rpx; // 18px
   backdrop-filter: blur(32rpx);
   -webkit-backdrop-filter: blur(32rpx);
-  box-shadow: 0 4rpx 8rpx rgba(238, 26, 26, 0.09);
+  box-shadow: 0 4rpx 16rpx rgba(13, 13, 13, 0.09); // 0 2px 8px rgba(13,13,13,.09)
 }
 
 /* ===== 正在回答：Ardot 85:3217 Working Capsule（1px = 2rpx）=====
@@ -767,7 +773,15 @@ onBeforeUnmount(() => {
   flex: 0 0 44rpx;
 }
 
-// 状态文案：设计稿 326:1377（等待中）/ 85:3219（正在回答）同为 14px Regular #0D0D0D，行高 AUTO ≈ 20px
+.chat-header__generating-mark view:nth-child(2) { animation-delay: .16s; }
+
+// 品牌图标：设计稿 326:1376（22×22）
+.chat-header__title-logo {
+  width: 44rpx; // 22px
+  height: 44rpx;
+  flex: 0 0 44rpx;
+}
+
 .chat-header__title {
   font-family:
     "Source Han Sans CN",
@@ -780,6 +794,23 @@ onBeforeUnmount(() => {
   color: #0d0d0d;
   line-height: 40rpx; // 20px
   letter-spacing: 0;
+}
+
+// 等待中：设计稿 326:1377（14px Regular / #0D0D0D / 行高 20px），不影响生成中状态
+.chat-header__title-wrap:not(.chat-header__title-wrap--generating) .chat-header__title {
+  font-weight: 400;
+  color: #0d0d0d;
+  line-height: 40rpx;
+}
+
+@keyframes header-generating {
+  0%, 100% { opacity: .35; transform: scale(.84); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes header-generating-border {
+  0% { background-position: 0 50%; }
+  100% { background-position: 300% 50%; }
 }
 
 // --- icons (用 CSS 近似 Figma 形状，后续可替换为 svg 资源) ---
