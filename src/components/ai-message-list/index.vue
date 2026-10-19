@@ -1035,24 +1035,26 @@ watch(
   height: 36rpx;
 }
 
+// 问候标题：设计稿 326:1353（28px / 行高 41px / Bold / #0D0D0D）
 .business-overview__title {
   display: block;
-  color: #1a1a1a;
-  font-size: 56rpx;
+  color: #0d0d0d;
+  font-size: 56rpx; // 28px
   font-weight: 700;
-  line-height: 68rpx;
+  line-height: 82rpx; // 41px
 }
 
 .business-overview__title-name {
   color: #c8201e;
 }
 
+// 问候摘要：设计稿 326:1333（14px / 行高 22px / #6B6B6B），与标题间距 4px
 .business-overview__summary {
   display: block;
-  margin-top: 24rpx;
+  margin-top: 8rpx; // 4px
   color: #6b6b6b;
-  font-size: 28rpx;
-  line-height: 44rpx;
+  font-size: 28rpx; // 14px
+  line-height: 44rpx; // 22px
 }
 
 .business-overview__report {
@@ -1092,41 +1094,45 @@ watch(
 .business-overview__sound-bar--middle { height: 20rpx; }
 .business-overview__sound-bar--tall { height: 32rpx; }
 
+// 卡片内左右排布：设计稿 326:1345（间距 12px）
 .business-overview__report-info {
   display: flex;
   align-items: center;
   flex: 1;
-  margin-left: 32rpx;
-  gap: 36rpx;
+  margin-left: 24rpx; // 12px
+  gap: 24rpx; // 12px
 }
 
+// 设计稿 326:1347（16px / Bold / #0D0D0D）
 .business-overview__report-title {
-  color: #1a1a1a;
-  font-size: 30rpx;
+  color: #0d0d0d;
+  font-size: 32rpx; // 16px
   font-weight: 700;
-  line-height: 36rpx;
+  line-height: 46rpx; // 23px
   white-space: nowrap;
 }
 
+// 设计稿 326:1348（14px / #5E5E5E）
 .business-overview__report-date {
-  color: #6b6b6b;
-  font-size: 30rpx;
-  line-height: 36rpx;
+  color: #5e5e5e;
+  font-size: 28rpx; // 14px
+  line-height: 40rpx; // 20px
   white-space: nowrap;
 }
 
+// 设计稿 326:1351 去收听（70×32，r16，#3E64F8 → #56ABFA）
 .business-overview__listen {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 134rpx;
-  height: 64rpx;
+  width: 140rpx; // 70px
+  height: 64rpx; // 32px
   color: #fff;
-  font-size: 26rpx;
-  font-weight: 700;
-  line-height: 32rpx;
-  background: #c8201e;
+  font-size: 28rpx; // 14px
+  font-weight: 500;
+  line-height: 40rpx;
+  background: linear-gradient(90deg, #3e64f8 0%, #56abfa 100%);
   border-radius: 32rpx;
   transition: background-color 0.2s ease;
 }
@@ -1136,29 +1142,34 @@ watch(
   background: #f2f3f5;
 }
 
+// 设计稿：卡片底 351 → 分区标题 375 = 24px
 .business-overview__questions {
-  margin-top: 66rpx;
+  margin-top: 48rpx;
 }
 
+// 设计稿 326:1344（14px / Medium / #8F8F8F），标题底 → 列表 14px
 .business-overview__questions-title {
   display: block;
-  color: #999;
-  font-size: 30rpx;
-  margin-bottom: 16rpx;
+  color: #8f8f8f;
+  font-size: 28rpx; // 14px
+  font-weight: 500;
+  line-height: 40rpx; // 20px
+  margin-bottom: 28rpx; // 14px
 }
 
+// 设计稿 326:1356/1358/1360/1362：行高 52px（上下 16 + 文字 20）
 .business-overview__question {
   display: flex;
   align-items: center;
   padding: 32rpx 0;
-  color: #1a1a1a;
-  font-size: 30rpx;
-  line-height: 36rpx;
-  border-top: 1px solid #efefef;
+  color: #0d0d0d;
+  font-size: 28rpx; // 14px
+  line-height: 40rpx; // 20px
+  border-top: 1px solid #f3f3f3;
 }
 
 .business-overview__question:last-child {
-  border-bottom: 1px solid #efefef;
+  border-bottom: 1px solid #f3f3f3;
 }
 
 .business-overview__report:active,

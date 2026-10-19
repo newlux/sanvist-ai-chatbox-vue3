@@ -1014,6 +1014,7 @@ onBeforeUnmount(() => {
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
+        bottom-gradient
         :compact-voice-listening="true"
         @send="sendMessage"
         @stop="stopGenerating"

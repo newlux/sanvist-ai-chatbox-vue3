@@ -20,6 +20,11 @@ const props = defineProps({
    * 只占底部一小块，不整屏遮罩，页面主体保持可见。
    */
   compactVoiceListening: { type: Boolean, default: false },
+  /**
+   * 输入栏下方是否铺设计稿的底部氛围图形（326:1336 Frame 45）。
+   * 只在首页问答页开启，其它复用本组件的页面保持原样。
+   */
+  bottomGradient: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -575,6 +580,13 @@ onBeforeUnmount(() => {
         </view>
       </view>
     </view>
+    <!-- 底部氛围图形：设计稿 326:1336 Frame 45（375×118），压在输入栏下面 -->
+    <view
+      v-if="bottomGradient && !keyboardOpen && !voiceKeyboardOpen"
+      class="chat-input__bottom-art"
+      aria-hidden="true"
+    />
+
     <!-- 始终 fixed 贴底；键盘弹起时用 bottom 抬到键盘上方 -->
     <view v-if="!voiceKeyboardOpen" ref="dockRef" class="chat-input__dock">
       <!-- 页面自定义的贴底区域，会一起计入输入栏高度 -->
@@ -588,8 +600,19 @@ onBeforeUnmount(() => {
         @retry="retryAttachment"
       />
 
-      <!-- 底部输入栏：默认语音、键盘文本、发送和生成中状态 -->
-      <view class="input-bar" :class="{ 'input-bar--text': inputMode === 'text' }">
+      <!--
+        底部输入栏：默认语音、键盘文本、发送和生成中状态。
+        文本态空闲（input-bar--plain）走灰色胶囊样式：无文字时右侧是声波（切语音），
+        有文字时右侧是黑圆上箭头（发送）；生成中仍沿用的白色胶囊保持不变。
+      -->
+      <view
+        class="input-bar"
+        :class="{
+          'input-bar--text': inputMode === 'text',
+          'input-bar--plain': inputMode === 'text' && !isLoading && !voice.isRecognizing,
+          'input-bar--voice-idle': inputMode === 'voice' && !showSendButton && !isLoading,
+        }"
+      >
         <!-- 左侧：附件入口 -->
         <view
           v-if="!(attachmentDisabled || isLoading || voice.isRecognizing)"
@@ -599,24 +622,45 @@ onBeforeUnmount(() => {
           <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
         </view>
 
+        <!-- 语音态：设计稿 326:1335;85:191 语音胶囊（126×44，左键盘段 + 右白色语音段） -->
         <view
           v-if="inputMode === 'voice'"
           class="input-bar__voice-pill"
-          :class="{
-            'input-bar__voice-pill--disabled': isLoading || voice.isRecognizing,
-            'input-bar__voice-pill--no-plus': attachmentDisabled || isLoading || voice.isRecognizing,
-          }"
-          @touchstart.prevent="onVoicePillTouchStart"
-          @touchmove.prevent="updateVoiceGesture"
-          @touchend.prevent="onVoicePillTouchEnd"
-          @touchcancel.prevent="onVoicePillTouchCancel"
-          @mousedown.prevent="onVoicePillTouchStart"
-          @mousemove.prevent="updateVoiceGesture"
-          @mouseup.prevent="onVoicePillTouchEnd"
+          :class="{ 'input-bar__voice-pill--status': isLoading || voice.isRecognizing }"
         >
-          <text class="input-bar__voice-hint">
-            {{ isLoading ? "回答生成中..." : voice.isRecognizing ? "识别中..." : "按住 说话" }}
-          </text>
+          <template v-if="isLoading || voice.isRecognizing">
+            <text class="input-bar__voice-hint">
+              {{ isLoading ? "回答生成中..." : "识别中..." }}
+            </text>
+          </template>
+          <template v-else>
+            <!-- 键盘段：设计稿 48×36 / #F3F3F3，切到文字输入 -->
+            <view
+              v-if="!showSendButton"
+              class="input-bar__voice-keyboard"
+              :class="{ 'input-bar__voice-keyboard--disabled': voice.gesture.active }"
+              @tap="onToggleInputModeUi"
+            >
+              <image src="@/assets/img/icon-keyboard-dark.svg" mode="aspectFit" />
+            </view>
+            <!-- 语音段：设计稿 48×36 / #FFFFFF，按住说话 -->
+            <view
+              class="input-bar__voice-hold"
+              @touchstart.prevent="onVoicePillTouchStart"
+              @touchmove.prevent="updateVoiceGesture"
+              @touchend.prevent="onVoicePillTouchEnd"
+              @touchcancel.prevent="onVoicePillTouchCancel"
+              @mousedown.prevent="onVoicePillTouchStart"
+              @mousemove.prevent="updateVoiceGesture"
+              @mouseup.prevent="onVoicePillTouchEnd"
+            >
+              <image
+                class="input-bar__voice-wave"
+                src="@/assets/img/icon-voice-wave.svg"
+                mode="aspectFit"
+              />
+            </view>
+          </template>
         </view>
         <view
           v-else
@@ -631,7 +675,7 @@ onBeforeUnmount(() => {
             class="input-bar__textarea"
             :value="draft"
             :style="{ height: textTextareaHeight }"
-            placeholder="发消息"
+            placeholder="请输入内容"
             :disabled="isLoading"
             :auto-height="false"
             :adjust-position="false"
@@ -647,20 +691,25 @@ onBeforeUnmount(() => {
           />
         </view>
 
-        <!-- 语音/键盘切换与发送互斥：没有可发内容时才占这个位置。
-             生成回答期间同样保留，用户可以先把下一条消息的输入方式切好 -->
+        <!-- 文本态 / 语音生成中的切换入口（空闲语音态的键盘入口已收进胶囊左侧，见设计稿 85:191） -->
         <view
-          v-if="!showSendButton"
+          v-if="!showSendButton && (inputMode === 'text' || isLoading || voice.isRecognizing)"
           class="input-bar__mode"
           :class="{ 'input-bar__mode--disabled': voice.gesture.active || voice.isRecognizing }"
           @tap="onToggleInputModeUi"
         >
+          <!-- 文本态空闲：深色声波（切到语音输入）；生成中沿用原语音图标 -->
           <image
-            v-if="inputMode === 'voice'"
-            src="@/assets/img/icon-keyboard.svg"
+            v-if="inputMode === 'text' && !isLoading"
+            src="@/assets/img/icon-voice-wave-dark.svg"
             mode="aspectFit"
           />
-          <image v-else src="@/assets/img/icon-voice.svg" mode="aspectFit" />
+          <image
+            v-else-if="inputMode === 'text'"
+            src="@/assets/img/icon-voice.svg"
+            mode="aspectFit"
+          />
+          <image v-else src="@/assets/img/icon-keyboard-dark.svg" mode="aspectFit" />
         </view>
 
         <!-- 生成中只给停止按钮，不给发送 -->
@@ -672,8 +721,21 @@ onBeforeUnmount(() => {
           class="input-bar__send"
           @touchstart.stop.prevent="onTrySend"
         >
-          <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
+          <!-- 文本态：黑圆上箭头；语音态保持原红色发送 -->
+          <image
+            v-if="inputMode === 'text'"
+            src="@/assets/img/icon-send-up.svg"
+            mode="aspectFit"
+          />
+          <image v-else src="@/assets/img/icon-send.svg" mode="aspectFit" />
         </view>
+      </view>
+
+      <!-- 输入单元下提示（Figma: 41116:6071）。跟着输入栏一起上移，键盘弹起时同样要看得见 -->
+      <view class="chat-input__footer">
+        <text class="chat-input__footer-text">
+          内容由AI生成，请核实重要信息
+        </text>
       </view>
     </view>
 
@@ -698,6 +760,22 @@ onBeforeUnmount(() => {
     width: 100%;
     height: 100%;
   }
+}
+
+// 底部氛围图形：设计稿 326:1336 Frame 45（375×118）
+// 资源内含 40px 模糊的波浪蒙版 + rgba(239,239,238,0) → #0F7EEE 竖向渐变
+.chat-input__bottom-art {
+  position: absolute;
+  z-index: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 236rpx;
+  background-image: url("@/assets/img/chat-bottom-wave.svg");
+  background-position: center bottom;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  pointer-events: none;
 }
 
 .voice-sheet {
@@ -1354,6 +1432,22 @@ onBeforeUnmount(() => {
   box-shadow: 0 8rpx 28rpx rgba(32, 42, 60, 0.08);
 }
 
+// 语音态输入栏：设计稿 326:1335;85:183 Input Bar（375×64，上 8 / 下 12 / 左右 20，透明底）
+.input-bar:not(.input-bar--text) {
+  gap: 20rpx;
+  min-height: 128rpx;
+  margin: 0;
+  padding: 16rpx 40rpx 24rpx;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+// 空闲语音态：加号 + 胶囊作为一组水平居中（设计稿：加号 x=99.5）
+.input-bar--voice-idle {
+  justify-content: center;
+}
+
 .input-bar__mode {
   flex: 0 0 auto;
   display: flex;
@@ -1375,22 +1469,72 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
+// 语音胶囊：设计稿 326:1335;85:191（126×44，r22，底 #0D0D0D 3.61%）
+// 左右内边距 6 + 键盘段 48 + 间距 18 + 语音段 48 + 左右内边距 6 = 126
 .input-bar__voice-pill {
   display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 36rpx; // 18px
+  height: 88rpx; // 44px
+  padding: 8rpx 12rpx; // 上下 4px、左右 6px
+  box-sizing: border-box;
+  border-radius: 44rpx; // 22px
+  background: rgba(13, 13, 13, 0.0361);
+}
+
+// 生成中 / 识别中：沿用原来的整条提示，不再套设计稿的胶囊
+.input-bar__voice-pill--status {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+}
+
+// 键盘段：设计稿 326:1335;85:192（48×36，#F3F3F3，r18）
+.input-bar__voice-keyboard {
+  display: flex;
+  width: 96rpx;
+  height: 72rpx;
+  flex: 0 0 96rpx;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  border-radius: 36rpx;
+  background: #f3f3f3;
+}
+
+.input-bar__voice-keyboard--disabled {
+  opacity: 0.45;
+}
+
+// 语音段：设计稿 326:1335;85:197（48×36，#FFFFFF，r18）
+.input-bar__voice-hold {
+  display: flex;
+  width: 96rpx;
+  height: 72rpx;
+  flex: 0 0 96rpx;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 36rpx;
+  background: #ffffff;
   touch-action: none; /* 桌面/触屏长按时禁用滚动/缩放，pointer 事件不被默认手势劫持 */
   -webkit-user-select: none;
   user-select: none;
 }
 
-.input-bar__voice-pill--disabled {
-  opacity: 0.6;
-  pointer-events: none;
+// 段内图标：设计稿 20px 画布（声纹 18.33×16.67、键盘 18.33×15）
+.chat-input .input-bar__voice-keyboard image,
+.chat-input .input-bar__voice-hold image {
+  width: 40rpx;
+  height: 40rpx;
 }
 
-.input-bar__voice-pill--no-plus {
-  padding-left: 92rpx; // 76rpx 右侧按钮 + 16rpx gap，文案相对整条输入栏居中
+.input-bar__voice-pill .input-bar__voice-wave {
+  width: 40rpx;
+  height: 40rpx;
 }
 
 .input-bar__voice-hint {
@@ -1442,9 +1586,17 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
-// 加号图标自带灰底圆，直接铺满按钮，不再叠 CSS 背景
+// 加号：设计稿 326:1335;85:188 Frame 74 —— 40×40 点击区，图标自带 44 圆底
 .input-bar__plus {
+  width: 80rpx;
+  height: 80rpx;
+  flex: 0 0 80rpx;
   background: transparent;
+}
+
+.chat-input .input-bar__plus image {
+  width: 88rpx;
+  height: 88rpx;
 }
 
 // 语音/键盘是纯图标，底色由 CSS 给，留出内边距
@@ -1474,7 +1626,8 @@ onBeforeUnmount(() => {
 }
 
 .input-bar__mode:active,
-.input-bar__voice-pill:active,
+.input-bar__voice-keyboard:active,
+.input-bar__voice-hold:active,
 .input-bar__plus:active,
 .input-bar__send:active,
 .input-bar__stop:active {
@@ -1508,10 +1661,25 @@ onBeforeUnmount(() => {
   flex-direction: column;
   box-sizing: border-box;
   padding-top: 16rpx;
-  // 原底部提示占位（padding-top 8rpx + 行高 30rpx + 下边距 24rpx = 62rpx）已取消，
-  // 提示移到每条 AI 回复底部，这段留白并进 dock，保持输入栏高度与位置不变
-  padding-bottom: calc(constant(safe-area-inset-bottom) + 62rpx);
-  padding-bottom: calc(env(safe-area-inset-bottom) + 62rpx);
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+// 输入栏下方提示（Figma: 41116:6071）：内容由AI生成，请核实重要信息
+.chat-input__footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 8rpx;
+}
+
+.chat-input__footer-text {
+  width: 100%;
+  margin-bottom: 12px;
+  color: #bababa;
+  font-size: 24rpx; // 12px
+  line-height: 30rpx;
+  text-align: center;
 }
 
 // 透明层，只负责接住「点空白收键盘」，铺满全屏。
@@ -1534,6 +1702,82 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 0 240rpx 16rpx;
   box-sizing: border-box;
+}
+
+/* ==========================================================================
+   文本态输入栏（设计稿：灰色胶囊 + 右侧切换）
+   - 无文字：胶囊右侧是深色声波（切到语音）
+   - 有文字：胶囊右侧是黑圆上箭头（发送）
+   只在 .input-bar--plain 下生效，生成中 / 语音态维持原样。
+   换算：1px = 2rpx。胶囊高 44、加号 44（与首次一致）、切换图标 20（同语音态键盘图标）、
+   发送黑圆 35、左右内边距 16。
+   ========================================================================== */
+.input-bar.input-bar--plain {
+  position: relative;
+  gap: 16rpx; // 8px
+  min-height: 112rpx; // 视觉 44px，外层仍留 56px 触达高度
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 加号：与首次的加号同尺寸（44px 圆底由 icon-plus.svg 自带） */
+.chat-input .input-bar--plain .input-bar__plus {
+  width: 88rpx;
+  height: 88rpx;
+  flex: 0 0 88rpx;
+}
+
+.chat-input .input-bar--plain .input-bar__plus image {
+  width: 88rpx;
+  height: 88rpx;
+}
+
+/* 灰色胶囊本体：#F3F3F3，高 44，r22，左内边距 16，右侧给切换钮留位 */
+.chat-input .input-bar--plain .input-bar__text-field {
+  min-height: 88rpx;
+  padding: 0 116rpx 0 32rpx;
+  border-radius: 44rpx;
+  background: #f3f3f3;
+  box-sizing: border-box;
+}
+
+.chat-input .input-bar--plain .input-bar__textarea {
+  font-size: 28rpx; // 14px，与首次输入文字一致
+  line-height: 40rpx;
+  color: #0d0d0d;
+}
+
+.chat-input .input-bar--plain .input-bar__placeholder {
+  font-size: 28rpx;
+  color: #8e8e8e;
+}
+
+/* 右侧切换钮：贴在胶囊内右侧，无底色（图标自带造型） */
+.chat-input .input-bar--plain .input-bar__mode,
+.chat-input .input-bar--plain .input-bar__send {
+  position: absolute;
+  top: 50%;
+  right: 32rpx; // 16px，与胶囊右内边距对齐
+  width: 70rpx; // 35px
+  height: 70rpx;
+  flex: 0 0 70rpx;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  transform: translateY(-50%);
+}
+
+/* 切换图标：与语音态胶囊里的键盘图标同尺寸（20px） */
+.chat-input .input-bar--plain .input-bar__mode image {
+  width: 40rpx; // 20px
+  height: 40rpx;
+}
+
+.chat-input .input-bar--plain .input-bar__send image {
+  width: 70rpx; // 35px，与按钮同大
+  height: 70rpx;
 }
 
 /* 附件来源弹窗样式随组件走：src/components/ai-attachment-picker/index.vue */

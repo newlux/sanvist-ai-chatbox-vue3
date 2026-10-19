@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="375" height="118" viewBox="0 0 375 118">
+  <!-- Ardot 326:1313 / 326:1336 Frame 45：375×118，波浪蒙版 + 竖向渐变 -->
+  <defs>
+    <!-- 326:1337 蒙版矢量：LAYER_BLUR 40（SVG stdDeviation = 40 / 2） -->
+    <filter id="chatBottomWaveBlur" filterUnits="userSpaceOnUse" x="-100" y="-100" width="700" height="400" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="20" />
+    </filter>
+    <!-- 326:1338 Rectangle 106：375×59 渐变，渐变轴长 113.398，顶部全透明 -->
+    <linearGradient id="chatBottomWaveGradient" gradientUnits="userSpaceOnUse" x1="0" y1="59" x2="0" y2="172.398">
+      <stop offset="0" stop-color="#EFEFEE" stop-opacity="0" />
+      <stop offset="1" stop-color="#0F7EEE" />
+    </linearGradient>
+    <mask id="chatBottomWaveMask" maskUnits="userSpaceOnUse" x="-120" y="-40" width="640" height="300">
+      <g transform="translate(-38 77)">
+        <g filter="url(#chatBottomWaveBlur)">
+          <path fill="#FFFFFF" d="M1.684 43.6668C8.0057 -3.8714 2.8779 9.1237 60.5603 6.1643C118.2427 3.2048 104.1544 1.0651 143.3184 0.2196C182.4824 -0.626 189.7462 1.3183 231.9132 0.2613C274.0802 -0.7956 287.783 6.2089 323.3184 6.2089C358.8538 6.2089 359.4829 10.6739 384.8832 6.1642C410.2835 1.6546 429.044 -7.162 441.3062 15.8796C453.5684 38.9211 447.4969 120 447.4969 120L8.8757 118.7563C8.8757 118.7563 -4.6378 91.205 1.684 43.6668Z" />
+        </g>
+      </g>
+    </mask>
+  </defs>
+  <rect x="0" y="59" width="375" height="59" fill="url(#chatBottomWaveGradient)" mask="url(#chatBottomWaveMask)" />
+</svg>
