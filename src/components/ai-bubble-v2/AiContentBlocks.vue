@@ -82,6 +82,10 @@ function onAskSlotOpen(payload) {
   emit("ask-slot-open", payload);
 }
 
+function onAssistantNavigationOpen(payload) {
+  emit("assistant-navigation-open", payload);
+}
+
 function onGuideStepOpen(payload) {
   emit("guide-step-open", payload);
 }
@@ -116,6 +120,7 @@ function onGanttOpen(payload) {
         :loading="loading"
         @suggestion-tap="onSuggestionTap"
         @ask-slot-open="onAskSlotOpen"
+        @assistant-navigation-open="onAssistantNavigationOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"

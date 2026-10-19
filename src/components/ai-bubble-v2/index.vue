@@ -63,6 +63,7 @@ const emit = defineEmits([
   "select-toggle",
   "longpress-copy",
   "assistant-callback-open",
+  "assistant-navigation-open",
   "guide-check-step-select",
   "gantt-open",
 ]);
@@ -282,6 +283,11 @@ function onAskSlotOpen(payload) {
   emit("ask-slot-open", payload);
 }
 
+/** 跳转确认块（维修助手）：块只在 auto_open 时抛一次，继续上抛给页面开弹框 */
+function onAssistantNavigationOpen(payload) {
+  emit("assistant-navigation-open", payload);
+}
+
 function onGuideStepOpen(payload) {
   emit("guide-step-open", payload);
 }
@@ -495,6 +501,7 @@ function onNegativeFeedback() {
           :loading="props.loading"
           @suggestion-tap="onSuggestionTap"
           @ask-slot-open="onAskSlotOpen"
+          @assistant-navigation-open="onAssistantNavigationOpen"
           @guide-step-open="onGuideStepOpen"
           @guide-suggestion-open="onGuideSuggestionOpen"
           @guide-check-step-select="onGuideCheckStepSelect"

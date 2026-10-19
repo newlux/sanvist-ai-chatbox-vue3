@@ -112,6 +112,7 @@ const emit = defineEmits([
   "quick-prompt",
   "suggestion-tap",
   "ask-slot-open",
+  "assistant-navigation-open",
   "guide-step-open",
   "guide-suggestion-open",
   "guide-check-step-select",
@@ -463,6 +464,11 @@ function onSuggestionTap(suggestion, messageIndex: number) {
 
 function onAskSlotOpen(payload, messageIndex: number) {
   emit("ask-slot-open", payload, messageIndex);
+}
+
+/** 跳转确认块（维修助手）：只透传 payload，由页面决定是否开弹框 */
+function onAssistantNavigationOpen(payload) {
+  emit("assistant-navigation-open", payload);
 }
 
 /** 点调度视图入口卡：整包数据交给页面（存数据 + 跳横屏调度视图） */
@@ -846,6 +852,7 @@ watch(
               :asr-pending="!!msg.asrPending"
               @suggestion-tap="onSuggestionTap($event, index)"
               @ask-slot-open="onAskSlotOpen($event, index)"
+              @assistant-navigation-open="onAssistantNavigationOpen"
               @guide-step-open="onGuideStepOpen"
               @guide-suggestion-open="onGuideSuggestionOpen"
               @guide-check-step-select="onGuideCheckStepSelect"

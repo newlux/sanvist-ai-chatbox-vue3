@@ -246,6 +246,14 @@ export function applyEventToBlocks(
         receivedContent: true,
       };
     }
+    case "assistant_navigation": {
+      // 跳转确认（维修助手）：一条回复只保留一个确认块，重复下发时覆盖同一块
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, "assistant-navigation-0", "assistant-navigation", event.data, true),
+        receivedContent: true,
+      };
+    }
     case "image": {
       const imageIndex = blocks.filter(block => block.type === "image").length;
       const items = Array.isArray(event.data?.items) ? event.data.items : [];
