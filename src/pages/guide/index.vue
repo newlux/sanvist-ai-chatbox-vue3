@@ -829,6 +829,9 @@ $color-white: #ffffff;
   background: #fafafa;
   overflow: hidden;
   position: relative;
+  /* 形成层叠上下文：机型背景图（AiChatBackdrop）是 z-index: -1，
+     不隔离时负层会被本元素的 #fafafa 底色盖住，选了机型也看不到图 */
+  isolation: isolate;
 }
 
 // 头部要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
