@@ -675,11 +675,6 @@ onBeforeUnmount(() => {
           <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
         </view>
       </view>
-
-      <!-- 输入单元下提示（Figma: 41116:6071）。跟着输入栏一起上移，键盘弹起时同样要看得见 -->
-      <view class="chat-input__footer">
-        <text class="chat-input__footer-text"> 内容由AI生成，请核实重要信息 </text>
-      </view>
     </view>
 
     <!-- 附件来源弹窗：拍照 / 从相册选择 / 选择文件；步骤卡复用同一个组件 -->
@@ -1513,8 +1508,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
   box-sizing: border-box;
   padding-top: 16rpx;
-  padding-bottom: constant(safe-area-inset-bottom);
-  padding-bottom: env(safe-area-inset-bottom);
+  // 原底部提示占位（padding-top 8rpx + 行高 30rpx + 下边距 24rpx = 62rpx）已取消，
+  // 提示移到每条 AI 回复底部，这段留白并进 dock，保持输入栏高度与位置不变
+  padding-bottom: calc(constant(safe-area-inset-bottom) + 62rpx);
+  padding-bottom: calc(env(safe-area-inset-bottom) + 62rpx);
 }
 
 // 透明层，只负责接住「点空白收键盘」，铺满全屏。
@@ -1531,22 +1528,6 @@ onBeforeUnmount(() => {
   bottom: 0;
   left: 0;
   background: transparent;
-}
-
-.chat-input__footer {
-  padding-top: 8rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.chat-input__footer-text {
-  width: 100%;
-  font-size: 24rpx; // 12px
-  line-height: 30rpx;
-  color: #bababa;
-  text-align: center;
-  margin-bottom: 12px;
 }
 
 .chat-input__home-indicator-wrap {

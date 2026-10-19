@@ -506,6 +506,10 @@ function onNegativeFeedback() {
             {{ t("ai-busy-retry-later") }}
           </text>
         </view>
+        <!-- 底部安全提示：从首页输入栏下方移到这里，每条 AI 回复各一份，位于操作栏上方 -->
+        <text v-if="props.showActions && !props.loading" class="ai-bubble-v2__disclaimer">
+          内容由AI生成，请核实重要信息
+        </text>
         <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
           <view
             v-if="props.ttsEnabled"
@@ -947,6 +951,16 @@ function onNegativeFeedback() {
   margin-top: 32rpx;
   padding-top: 28rpx;
   border-top: 2rpx solid #f0f0f2;
+}
+/* 底部安全提示：沿用首页输入栏下方那句的灰字规格（24rpx / #bababa），
+   位置在操作栏上方，与回复正文左对齐 */
+.ai-bubble-v2__disclaimer {
+  display: block;
+  margin-top: 32rpx;
+  color: #bababa;
+  font-size: 24rpx;
+  line-height: 34rpx;
+  text-align: left;
 }
 /* 空回答兜底提示：外观对齐回答正文卡（灰底圆角 + 正文字号） */
 .ai-bubble-v2__busy-hint {
