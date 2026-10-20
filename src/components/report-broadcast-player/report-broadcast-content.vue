@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import type { ThinkStep } from "@/utils/ai-stream";
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
 import iconVoicePause from "@/assets/img/report-broadcast/pause-control.png";
 import iconVoicePlay from "@/assets/img/report-broadcast/play-control.png";
+import qaLoadingGlow from "@/assets/img/report-broadcast/qa-loading-glow.png";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 
@@ -20,6 +22,10 @@ const props = defineProps<{
   progress: number;
   /** 按住说话后的识别中状态：与回答结果一起占用字幕区，播报文字隐藏。 */
   qaLoading?: boolean;
+  /** 本轮问答的执行步骤：与首页「深度思考」同一份流式解析结果。 */
+  qaSteps?: ThinkStep[];
+  /** 识别中的过程说明：直接展示接口下发的当前执行文案。 */
+  qaSubtitle?: string;
   /** 问答返回的结果文本，渲染在字幕区内。 */
   qaAnswer?: string;
   /** 按住说话录音中：先隐藏播报文字，等识别态接管字幕区。 */
@@ -79,6 +85,21 @@ const showTranscriptSkeleton = computed(
 );
 /** 按住说话的识别/问答态：字幕区让位给「正在理解」与回答结果。 */
 const qaVisible = computed(() => Boolean(props.qaLoading || props.qaAnswer));
+/**
+ * 识别中标题下方的文字：全部来自 chat-messages 流——
+ * 先放后端下发的当前过程文案，再补上 think 步骤里的执行说明（同文去重）。
+ */
+const qaTextLines = computed(() => {
+  const lines: string[] = [];
+  const push = (text: unknown) => {
+    const value = String(text || "").trim();
+    if (!value || lines.includes(value)) return;
+    lines.push(value);
+  };
+  push(props.qaSubtitle);
+  (props.qaSteps || []).forEach(step => push(step?.message));
+  return lines;
+});
 const transcriptItems = computed(() => {
   const items = props.transcriptSegments.map(segment => ({
     key: `segment-${segment.seq}`,
@@ -287,12 +308,24 @@ function onProgressTouchEnd() {
       </scroll-view>
       <!-- 按住说话：识别中/回答结果直接占用字幕区，头像与播放控制保持不动 -->
       <view v-if="!showTranscriptSkeleton && qaLoading" class="report-broadcast-content__qa-loading">
-        <text class="report-broadcast-content__qa-title">
-          正在理解你的内容
-        </text>
-        <text class="report-broadcast-content__qa-subtitle">
-          我会结合当前听播内容直接回答
-        </text>
+        <!-- 呼吸灯背景：直接用设计图光斑素材，随识别节奏缓慢明暗起伏 -->
+        <image
+          class="report-broadcast-content__qa-loading-glow"
+          :src="qaLoadingGlow"
+          mode="aspectFit"
+        />
+        <view class="report-broadcast-content__qa-loading-copy">
+          <text class="report-broadcast-content__qa-title">
+            正在理解你的内容
+          </text>
+          <text
+            v-for="line in qaTextLines"
+            :key="line"
+            class="report-broadcast-content__qa-line"
+          >
+            {{ line }}
+          </text>
+        </view>
       </view>
       <scroll-view
         v-else-if="!showTranscriptSkeleton && qaAnswer"
@@ -504,25 +537,68 @@ function onProgressTouchEnd() {
   font-weight: 700;
   line-height: 50rpx;
 }
-/* —— 按住说话的识别/问答态：占用字幕区 —— */
+/* —— 按住说话的识别/问答态：占用字幕区，文案与呼吸灯光晕整体居中 —— */
 .report-broadcast-content__qa-loading {
+  position: relative;
   display: flex;
   width: 100%;
   height: 100%;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8rpx;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+/* 呼吸灯背景：设计图光斑素材（透明底），居中铺在文案后方，只做明暗与缩放呼吸 */
+.report-broadcast-content__qa-loading-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 720rpx;
+  height: 720rpx;
+  pointer-events: none;
+  animation: report-qa-breath 3.6s ease-in-out infinite;
+}
+@keyframes report-qa-breath {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: translate(-50%, -50%) scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+}
+/* 标题固定在中线：绝对定位后，下方文字出现/消失都不会带动标题位移
+   （top 减去标题行高的一半，让标题本身垂直居中于容器） */
+.report-broadcast-content__qa-loading-copy {
+  position: absolute;
+  z-index: 1;
+  top: calc(50% - 27rpx);
+  right: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18rpx;
+  padding: 0 24rpx;
+  box-sizing: border-box;
 }
 .report-broadcast-content__qa-title {
   color: #1a1a1a;
-  font-size: 36rpx;
-  font-weight: 400;
+  font-size: 38rpx;
+  font-weight: 500;
+  line-height: 54rpx;
+  text-align: center;
 }
-.report-broadcast-content__qa-subtitle {
-  color: #999;
-  font-size: 26rpx;
+.report-broadcast-content__qa-line {
+  display: block;
+  color: #a8a8a8;
+  font-size: 28rpx;
   font-weight: 400;
+  line-height: 40rpx;
+  text-align: center;
+  word-break: break-word;
 }
 .report-broadcast-content__qa-scroll {
   width: 100%;
