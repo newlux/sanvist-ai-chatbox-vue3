@@ -4,6 +4,7 @@ import type {
   PlayListenBroadcastParams,
 } from "@/api/listen-broadcast/types";
 import type { ReportPlaybackRate } from "@/config/report-playback-rate";
+import type { ThinkStep } from "@/utils/ai-stream";
 import { computed, onMounted, ref, watch } from "vue";
 import { getListenBroadcastHistory, getListenBroadcastLikeStatus, toggleListenBroadcastLike } from "@/api/listen-broadcast";
 import { useListenBroadcastPlayer } from "@/hooks/useListenBroadcastPlayer";
@@ -18,6 +19,10 @@ const props = defineProps<{
   portrait: string;
   dockOffset: string;
   qaLoading: boolean;
+  /** 本轮问答的执行步骤：识别中态在标题下方逐步展示。 */
+  qaSteps?: ThinkStep[];
+  /** 识别中的过程说明：接口下发的当前执行文案（如「目标 Dify 工作流已开始。」）。 */
+  qaSubtitle?: string;
   qaAnswer: string;
   /** 按住说话录音中：字幕区先隐藏播报文字，等识别态接管。 */
   voiceRecording?: boolean;
@@ -214,6 +219,8 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       :like-loading="likeLoading"
       :progress="playbackProgress"
       :qa-loading="qaLoading"
+      :qa-steps="qaSteps"
+      :qa-subtitle="qaSubtitle"
       :qa-answer="qaAnswer"
       :voice-recording="voiceRecording"
       @play-pause="togglePlayback"
