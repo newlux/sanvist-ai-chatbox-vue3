@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import type { ThinkStep } from "@/utils/ai-stream";
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import iconVoicePause from "@/assets/img/report-broadcast/pause-control.png";
-import iconVoicePlay from "@/assets/img/report-broadcast/play-control.png";
-import qaLoadingGlow from "@/assets/img/report-broadcast/qa-loading-glow.png";
+import thinkingGlow from "@/assets/img/report-broadcast/thinking-glow.png";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 
@@ -18,9 +16,7 @@ const props = defineProps<{
   progress: number;
   /** 按住说话后的识别中状态：与回答结果一起占用字幕区，播报文字隐藏。 */
   qaLoading?: boolean;
-  /** 本轮问答的执行步骤：与首页「深度思考」同一份流式解析结果。 */
-  qaSteps?: ThinkStep[];
-  /** 识别中的过程说明：直接展示接口下发的当前执行文案。 */
+  /** 思考中的过程小标题：接口 chat-messages 的 subtitle 事件下发（如「目标 Dify 工作流已开始。」）。 */
   qaSubtitle?: string;
   /** 问答返回的结果文本，渲染在字幕区内。 */
   qaAnswer?: string;
@@ -304,22 +300,19 @@ function onProgressTouchEnd() {
       </scroll-view>
       <!-- 按住说话：识别中/回答结果直接占用字幕区，头像与播放控制保持不动 -->
       <view v-if="!showTranscriptSkeleton && qaLoading" class="report-broadcast-content__qa-loading">
-        <!-- 呼吸灯背景：直接用设计图光斑素材，随识别节奏缓慢明暗起伏 -->
+        <!-- 思考态背景：设计稿光斑，缓慢明暗起伏做呼吸灯 -->
         <image
           class="report-broadcast-content__qa-loading-glow"
-          :src="qaLoadingGlow"
-          mode="aspectFit"
+          :src="thinkingGlow"
+          mode="aspectFill"
         />
         <view class="report-broadcast-content__qa-loading-copy">
           <text class="report-broadcast-content__qa-title">
             正在理解你的内容
           </text>
-          <text
-            v-for="line in qaTextLines"
-            :key="line"
-            class="report-broadcast-content__qa-line"
-          >
-            {{ line }}
+          <!-- 标题位置固定：小标题始终占位，有文案才显示，不推动标题 -->
+          <text class="report-broadcast-content__qa-subtitle">
+            {{ qaSubtitle || "" }}
           </text>
         </view>
       </view>
@@ -411,7 +404,7 @@ function onProgressTouchEnd() {
   left: 303.714rpx;
   width: 362.571rpx;
   height: 450rpx;
-  background: rgb(255 216 216 / 40%);
+  // background: rgb(255 216 216 / 40%);
 }
 /* —— 头像下方进度条 ——
    容器 80rpx（上 48 留白让开头像底部的播放按钮，其底缘伸入 stage 下方 24rpx），
@@ -523,44 +516,25 @@ function onProgressTouchEnd() {
   height: 100%;
   align-items: center;
   justify-content: center;
-  box-sizing: border-box;
   overflow: hidden;
 }
-/* 呼吸灯背景：设计图光斑素材（透明底），居中铺在文案后方，只做明暗与缩放呼吸 */
+/* 思考态背景：设计稿光斑铺满字幕区，明暗配合轻微缩放做呼吸灯 */
 .report-broadcast-content__qa-loading-glow {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 720rpx;
-  height: 720rpx;
-  pointer-events: none;
-  animation: report-qa-breath 3.6s ease-in-out infinite;
-}
-@keyframes report-qa-breath {
-  0%,
-  100% {
-    opacity: 0.5;
-    transform: translate(-50%, -50%) scale(0.94);
-  }
-  50% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1.05);
-  }
-}
-/* 标题固定在中线：绝对定位后，下方文字出现/消失都不会带动标题位移
-   （top 减去标题行高的一半，让标题本身垂直居中于容器） */
-.report-broadcast-content__qa-loading-copy {
-  position: absolute;
-  z-index: 1;
-  top: calc(50% - 27rpx);
-  right: 0;
+  z-index: 0;
+  top: 0;
   left: 0;
+  width: 100%;
+  height: 100%;
+  animation: qa-loading-breathe 3.6s ease-in-out infinite;
+}
+.report-broadcast-content__qa-loading-copy {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 18rpx;
-  padding: 0 24rpx;
-  box-sizing: border-box;
+  gap: 8rpx;
 }
 .report-broadcast-content__qa-title {
   color: #1a1a1a;
@@ -569,25 +543,49 @@ function onProgressTouchEnd() {
   line-height: 54rpx;
   text-align: center;
 }
-.report-broadcast-content__qa-line {
-  display: block;
-  color: #a8a8a8;
-  font-size: 28rpx;
+/* 小标题无论有没有接口文案都占住这一行，标题位置保持不变 */
+.report-broadcast-content__qa-subtitle {
+  min-height: 36rpx;
+  color: #999;
+  font-size: 26rpx;
   font-weight: 400;
-  line-height: 40rpx;
-  text-align: center;
-  word-break: break-word;
+  line-height: 36rpx;
 }
+@keyframes qa-loading-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+/* 答案卡片：白底圆角卡，高度随内容自适应，超长时在卡片内滚动 */
 .report-broadcast-content__qa-scroll {
+  flex: 0 1 auto;
   width: 100%;
-  height: 100%;
-  padding-bottom: 48rpx;
+  max-height: calc(100% - 48rpx);
+  margin-bottom: 48rpx;
+  padding: 36rpx 36rpx 40rpx;
+  border: 1px solid #f0f1f3;
+  border-radius: 24rpx;
   box-sizing: border-box;
+  background: #fff;
+  box-shadow: 0 6rpx 20rpx rgb(21 27 38 / 4%);
 }
-/* 正文排版交给 MarkdownRenderer，这里只负责留白 */
+/* 正文排版交给 MarkdownRenderer，这里只补齐卡片内的字号与行距 */
 .report-broadcast-content__qa-answer {
   display: block;
   width: 100%;
+}
+.report-broadcast-content__qa-answer :deep(p) {
+  margin-bottom: 14rpx !important;
+  color: #2f323c !important;
+  font-size: 30rpx !important;
+  line-height: 46rpx !important;
 }
 .report-broadcast-content__top-fade {
   position: absolute;
