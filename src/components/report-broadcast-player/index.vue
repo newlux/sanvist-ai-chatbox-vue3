@@ -70,7 +70,7 @@ let finishedNotified = false;
 
 const isQaVisible = computed(() => props.qaLoading || Boolean(props.qaAnswer));
 const statusText = computed(() => {
-  if (props.qaLoading) return "识别中";
+  if (props.qaLoading) return "思考中";
   if (props.qaAnswer) return "Sani 说..";
   if (paused.value) return "已暂停";
   if (loading.value) return "准备中";
