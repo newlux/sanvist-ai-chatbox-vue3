@@ -4,8 +4,6 @@ import { computed } from "vue";
 import activeLightningIcon from "@/assets/img/report-broadcast/insight-lightning-active.svg";
 import defaultLightningIcon from "@/assets/img/report-broadcast/insight-lightning-default.svg";
 import operatorNextIcon from "@/assets/img/report-broadcast/insight-operator-next.svg";
-import iconVoicePause from "@/assets/img/report-broadcast/pause-control.png";
-import iconVoicePlay from "@/assets/img/report-broadcast/play-control.png";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
 import { useSafeArea } from "@/hooks/useSafeArea";
 
@@ -102,13 +100,38 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
           </text>
         </view>
       </view>
-      <!-- 复用播报页头像正下方的播放/暂停控件：收起态点击即从头重播 -->
+      <!-- 设计稿 309:3319：头像右下角的重播角标，22px 白底圆 + 1px 描边 + 渐变描边图标 -->
       <view class="report-insight__replay" @tap="emit('replay')">
-        <image
-          class="report-insight__replay-icon"
-          :src="props.playing ? iconVoicePlay : iconVoicePause"
-          mode="aspectFit"
-        />
+        <svg class="report-insight__replay-icon" viewBox="0 0 22 22" aria-hidden="true">
+          <defs>
+            <linearGradient
+              id="report-insight-replay-gradient"
+              x1="0"
+              y1="0"
+              x2="22"
+              y2="0"
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0%" stop-color="#3D21CD" />
+              <stop offset="48.72%" stop-color="#1999FE" />
+              <stop offset="76%" stop-color="#C067FA" />
+              <stop offset="100%" stop-color="#FD90C4" />
+            </linearGradient>
+          </defs>
+          <!-- 播放中显示暂停双条，收起态显示播放三角（与设计稿一致） -->
+          <g v-if="props.playing" fill="url(#report-insight-replay-gradient)">
+            <rect x="7.4" y="6.2" width="2.8" height="9.6" rx="1.4" />
+            <rect x="11.8" y="6.2" width="2.8" height="9.6" rx="1.4" />
+          </g>
+          <polygon
+            v-else
+            points="8.2,6.2 15.4,11 8.2,15.8"
+            fill="none"
+            stroke="url(#report-insight-replay-gradient)"
+            stroke-width="1.3"
+            stroke-linejoin="round"
+          />
+        </svg>
       </view>
     </view>
 
@@ -327,7 +350,8 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   height: 48rpx;
 }
 
-/* 设计稿 2582:862、2582:798、2582:867、2582:786：头像与结论 */
+/* 设计稿 309:3243（头像）、309:3288/309:3179（两行标题）、309:3303（语音胶囊）：
+   头像 70px@(32,115)，左边距 32px（64rpx），与右侧文字间距 7px（14rpx） */
 .report-insight__summary {
   position: relative;
   z-index: 2;
@@ -352,86 +376,101 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   animation: report-insight-portrait-morph 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
+/* 设计稿头像照片 74.14×74.14 铺满并裁切 70×70 圆形容器：
+   这里用 100% 撑满 + aspectFill，避免旧值（138×135.43）造成的边缘留白 */
 .report-insight__portrait-image {
-  width: 138rpx;
-  height: 135.434768rpx;
+  width: 100%;
+  height: 100%;
   border-radius: 50%;
   animation: report-insight-portrait-image-radius 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
+/* 设计稿 309:3178：头像顶 115、标题顶 115（与头像齐平，不再向下让 5px） */
 .report-insight__summary-copy {
   display: flex;
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  gap: 12rpx;
-  padding-top: 10rpx;
+  gap: 10rpx;
+  padding-top: 0;
   box-sizing: border-box;
   animation: report-insight-fade-in 0.3s ease-out 0.16s both;
 }
 
+/* 设计稿 309:3288 / 309:3179：文本盒 35px×2、行距 30px，
+   盒高取 130rpx（65px）让语音胶囊顶落在 185px（第二行盒底 180 + 5） */
 .report-insight__headlines {
   display: flex;
-  height: 116rpx;
-  flex: 0 0 116rpx;
+  height: 130rpx;
+  flex: 0 0 130rpx;
   flex-direction: column;
 }
 
+/* 设计稿：24px（48rpx）/ Medium(500) / 行距 30px（60rpx） */
 .report-insight__headline {
   display: block;
-  height: 58rpx;
+  height: 60rpx;
   font-size: 48rpx;
-  font-weight: 400;
-  line-height: 58rpx;
+  font-weight: 500;
+  line-height: 60rpx;
 }
 
+/* 设计稿色值：首行 #131010，次行 #0D0D0D */
 .report-insight__headline--first {
-  color: #130F0F;
+  color: #131010;
 }
 
 .report-insight__headline--second {
-  color: #1A1A1A;
+  color: #0D0D0D;
 }
 
+/* 设计稿 309:3303：hug 宽、高 19px（38rpx）、圆角 5px（10rpx）、#1166D6 @10%、
+   内边距 上2 右7 下2 左7、文字 11px（22rpx）#0D0D0D */
 .report-insight__voice-tip {
   display: flex;
-  width: 402rpx;
-  height: 34rpx;
-  flex: 0 0 34rpx;
+  width: auto;
+  height: 38rpx;
+  flex: 0 0 38rpx;
+  align-self: flex-start;
   align-items: center;
   padding: 4rpx 14rpx;
   border-radius: 10rpx;
   box-sizing: border-box;
-  background: #FFE6E4;
-  color: #C8201E;
+  background: rgba(17, 102, 214, 0.1);
+  color: #0D0D0D;
   font-size: 22rpx;
   font-weight: 400;
-  line-height: 26rpx;
+  line-height: 30rpx;
   white-space: nowrap;
 }
 
-/* 设计稿 6361:1：收起态头像正下方的重播按钮，直接复用播报页那一对 PNG 图标，
-   因此这里只负责落位与时序。图标盒 48rpx 居中于 64rpx 命中区，
-   圆心落在 (134rpx, 174rpx) = 头像圆心 x / 头像底边 y
-   （含 summary 的 padding 34rpx 64rpx 换算）。设计稿上该按钮无投影。
+/* 设计稿 309:3319：头像右下角的重播角标 22px（44rpx），
+   圆心 (135rpx, 173rpx) = 头像 (64,34)~(204,174) 右下侧，
+   白底圆 + 1px（2rpx）#E4E4E4 描边 + 0 1 11 rgba(0,0,0,10%) 投影。
    淡入延迟到头像缩小收尾，否则会被 3.357 倍的大头像压住。 */
 .report-insight__replay {
   position: absolute;
   z-index: 1;
-  top: 142rpx;
-  left: 102rpx;
+  top: 151rpx;
+  left: 113rpx;
   display: flex;
-  width: 64rpx;
-  height: 64rpx;
+  width: 44rpx;
+  height: 44rpx;
   align-items: center;
   justify-content: center;
+  border: 2rpx solid #E4E4E4;
   border-radius: 50%;
+  box-sizing: border-box;
+  background: #FFFFFF;
+  box-shadow: 0 2rpx 22rpx rgba(0, 0, 0, 0.1);
   animation: report-insight-fade-in 0.22s ease-out 0.4s both;
 }
 
+/* 图标画在 22 视盒里（1 单位 = 1px），尺寸取描边内的 40rpx 内容区，
+   三角实际约 7px 宽，与设计稿 7.7px 的描边区域一致 */
 .report-insight__replay-icon {
-  width: 48rpx;
-  height: 48rpx;
+  width: 40rpx;
+  height: 40rpx;
 }
 
 /* 设计稿 2582:848、2582:779、2582:854：311px 宽异常条目 */
@@ -499,11 +538,13 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   }
 }
 
+/* 设计稿 309:3313 / 309:3296 / 309:3305：条目宽 311px（622rpx），
+   条目间距取设计稿稳定值 30px（60rpx） */
 .report-insight__list {
   display: flex;
   width: 622rpx;
   flex-direction: column;
-  gap: 36rpx;
+  gap: 60rpx;
   margin: 0 auto;
   padding-bottom: 40rpx;
 }
@@ -527,16 +568,17 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   gap: 32rpx;
 }
 
+/* 骨架屏与真实条目同高（158rpx），切换时不跳动 */
 .report-insight__skeleton-item {
   display: flex;
-  height: 146rpx;
+  height: 158rpx;
   flex-direction: column;
-  gap: 20rpx;
+  gap: 10rpx;
 }
 
 .report-insight__skeleton-head {
   display: flex;
-  height: 36rpx;
+  height: 46rpx;
   align-items: center;
   justify-content: space-between;
 }
@@ -569,33 +611,37 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   width: 68%;
 }
 
+/* 设计稿普通条目：标题 23 + 间距 5 + 描述 51 = 79px（158rpx） */
 .report-insight__item {
   display: flex;
-  height: 146rpx;
-  flex: 0 0 146rpx;
+  height: 158rpx;
+  flex: 0 0 158rpx;
   flex-direction: column;
-  gap: 20rpx;
+  gap: 10rpx;
 }
 
+/* 设计稿带负责人条目：标题 23 + 1 + 状态 22 + 6 + 描述 34 = 86px（172rpx） */
 .report-insight__item--urgent {
-  height: 174rpx;
-  flex-basis: 174rpx;
-  gap: 14rpx;
+  height: 172rpx;
+  flex-basis: 172rpx;
+  gap: 2rpx;
 }
 
+/* 设计稿：标题行高 23px（46rpx），右侧图标与标题顶对齐 */
 .report-insight__item-head {
   display: flex;
-  height: 36rpx;
-  flex: 0 0 36rpx;
+  height: 46rpx;
+  flex: 0 0 46rpx;
   align-items: flex-start;
   justify-content: space-between;
 }
 
+/* 设计稿：16px（32rpx）/ Medium(500) / 行高 23px（46rpx）/ #0D0D0D */
 .report-insight__item-title {
-  color: #000000;
-  font-size: 30rpx;
-  font-weight: 400;
-  line-height: 36rpx;
+  color: #0D0D0D;
+  font-size: 32rpx;
+  font-weight: 500;
+  line-height: 46rpx;
 }
 
 .report-insight__lightning {
@@ -636,44 +682,49 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   height: 36rpx;
 }
 
+/* 设计稿：状态行 22px（44rpx）与描述间距 6px（12rpx） */
 .report-insight__urgent-body {
   display: flex;
   height: 124rpx;
   flex: 0 0 124rpx;
   flex-direction: column;
-  gap: 20rpx;
+  gap: 12rpx;
 }
 
+/* 设计稿：12px（24rpx）/ 行高 22px（44rpx）/ #E02E2A */
 .report-insight__urgent-text {
   display: block;
   height: 44rpx;
   flex: 0 0 44rpx;
-  color: #B52222;
+  color: #E02E2A;
   font-size: 24rpx;
   font-weight: 400;
   line-height: 44rpx;
 }
 
+/* 设计稿：12px（24rpx）/ 行高 17px（34rpx）/ #8E8E8E */
 .report-insight__description {
   display: -webkit-box;
   overflow: hidden;
-  color: #999999;
+  color: #8E8E8E;
   font-size: 24rpx;
   font-weight: 400;
-  line-height: 30rpx;
+  line-height: 34rpx;
   -webkit-box-orient: vertical;
 }
 
+/* 带负责人条目描述 34px（68rpx）= 2 行 */
 .report-insight__item--urgent .report-insight__description {
-  height: 60rpx;
-  flex: 0 0 60rpx;
+  height: 68rpx;
+  flex: 0 0 68rpx;
   line-clamp: 2;
   -webkit-line-clamp: 2;
 }
 
+/* 普通条目描述 51px（102rpx）= 3 行 */
 .report-insight__item:not(.report-insight__item--urgent) .report-insight__description {
-  height: 90rpx;
-  flex: 0 0 90rpx;
+  height: 102rpx;
+  flex: 0 0 102rpx;
   line-clamp: 3;
   -webkit-line-clamp: 3;
 }

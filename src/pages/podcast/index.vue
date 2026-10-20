@@ -1272,7 +1272,15 @@ onBeforeUnmount(() => {
 /* 键盘弹起时输入栏要抬到播报层之上：播报层 z-index 为 2 且是不透明白底 */
 :deep(.chat-input) {
   z-index: 3;
-  background: #ffffff;
+  /* 底部氛围：底部浅蓝向上淡出到白（设计稿渐变色），仅听播页使用。
+     起色用不透明白，避免播报字幕从输入栏上方透出来 */
+  background: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    #ffffff 32%,
+    #e6efff 76%,
+    #d7e5ff 100%
+  );
 }
 
 /* —— 折叠屏适配 (小米 Mix Fold 18) ——
