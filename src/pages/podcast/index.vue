@@ -1293,10 +1293,5 @@ onBeforeUnmount(() => {
     transform: scale(0.5);
     transform-origin: center top;
   }
-  /* 折叠屏下 transcript 本身只有 280rpx 可视区，feedback-mask 再用 #fff 罩底会
-     把最后一段字幕完全遮住。这里只对外层蒙版去背景，里面的反馈按钮位置不动。 */
-  :deep(.report-broadcast-content__feedback-mask) {
-    background: transparent;
-  }
 }
 </style>
