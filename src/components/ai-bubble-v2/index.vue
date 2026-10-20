@@ -233,7 +233,15 @@ const suggestionBlocks = computed(() =>
 );
 
 /** 只有独立卡片、没有正文时，气泡不再画白卡外壳（操作栏仍保留），避免留一个空框 */
-const isBareBody = computed(() => !isUser.value && !contentBlocks.value.length && !props.content);
+const isBareBody = computed(() =>
+  !isUser.value
+  && !contentBlocks.value.length
+  && !props.content
+  // 生成中的思考过程（过程状态行 / 过程副标题 / 等待条）要留在气泡卡片里，
+  // 否则还没吐出正文时卡片外壳被去掉，灰色的思考文案会裸露在卡片外。
+  && !((props.loading || props.interrupted)
+    && (Boolean(props.processStatus) || Boolean(props.processSubtitle?.trim()) || Boolean(props.waitingText))),
+);
 
 /**
  * 作业指导的步骤卡回答：思考结束、步骤卡出现后气泡正文（含空的答复与操作栏）不再展示。
