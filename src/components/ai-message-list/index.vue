@@ -113,6 +113,7 @@ const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
   "assistant-navigation-open",
+  "assistant-callback-open",
   "guide-step-open",
   "guide-suggestion-open",
   "guide-check-step-select",
@@ -836,8 +837,12 @@ watch(
               :tts-enabled="!!msg.ttsEnabled"
               :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
               :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
-              :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted"
+              :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted && !msg.assistantCallbackTitle"
               :waiting-text="msg.waitingText"
+              :assistant-callback-title="msg.assistantCallbackTitle"
+              :assistant-callback-status="msg.assistantCallbackStatus || ''"
+              :assistant-callback-details="msg.assistantCallbackDetails || []"
+              :assistant-callback-conversation-id="msg.assistantCallbackConversationId || ''"
               :attachments="msg.attachments || []"
               :interrupted="!!msg.interrupted"
               :duration-ms="msg.durationMs"
@@ -853,6 +858,7 @@ watch(
               @suggestion-tap="onSuggestionTap($event, index)"
               @ask-slot-open="onAskSlotOpen($event, index)"
               @assistant-navigation-open="onAssistantNavigationOpen"
+              @assistant-callback-open="emit('assistant-callback-open', $event)"
               @guide-step-open="onGuideStepOpen"
               @guide-suggestion-open="onGuideSuggestionOpen"
               @guide-check-step-select="onGuideCheckStepSelect"
