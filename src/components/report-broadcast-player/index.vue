@@ -6,9 +6,8 @@ import type {
 import type { ReportPlaybackRate } from "@/config/report-playback-rate";
 import type { ThinkStep } from "@/utils/ai-stream";
 import { computed, onMounted, ref, watch } from "vue";
-import { getListenBroadcastHistory, getListenBroadcastLikeStatus, toggleListenBroadcastLike } from "@/api/listen-broadcast";
+import { getListenBroadcastHistory } from "@/api/listen-broadcast";
 import { useListenBroadcastPlayer } from "@/hooks/useListenBroadcastPlayer";
-import { createLogger } from "@/utils/logger";
 import ReportBroadcastContent from "./report-broadcast-content.vue";
 import ReportBroadcastHeader from "./report-broadcast-header.vue";
 import ReportBroadcastHistory from "./report-broadcast-history.vue";
@@ -57,15 +56,12 @@ const {
   transcriptSegments,
   error,
 } = useListenBroadcastPlayer();
-const logger = createLogger("report-broadcast-player");
 const showHistory = ref(false);
 const showRatePanel = ref(false);
 const historyLoading = ref(false);
 const historyItems = ref<ListenBroadcastHistoryItem[]>([]);
 const activeHistoryBizDate = ref("");
 const currentBizDate = ref("");
-const liked = ref(false);
-const likeLoading = ref(false);
 let finishedNotified = false;
 
 const isQaVisible = computed(() => props.qaLoading || Boolean(props.qaAnswer));
@@ -109,39 +105,6 @@ async function openHistory() {
   }
 }
 
-async function loadLikeStatus(bizDate: string) {
-  if (!bizDate) {
-    liked.value = false;
-    return;
-  }
-  try {
-    const result = await getListenBroadcastLikeStatus({ bizDate, module: null });
-    if (currentBizDate.value === bizDate) liked.value = Boolean(result?.liked);
-  } catch (error) {
-    if (currentBizDate.value === bizDate) liked.value = false;
-    logger.warn("failed to load listen broadcast like status", error);
-  }
-}
-
-async function onToggleLike() {
-  const bizDate = currentBizDate.value;
-  if (!bizDate) return;
-  // 纯前端切换：点赞态完全由本地翻转驱动，接口返回值不参与 UI 决策，
-  // 因此可无限次反复点亮 / 熄灭，不受后端 toggle 语义（是否支持取消）影响。
-  liked.value = !liked.value;
-  // 接口调用照旧保留（保持与后端数据同步）；同一时刻只保留一个在途请求，
-  // 快速连点时不叠加请求，避免影响原本的接口调用节奏。
-  if (likeLoading.value) return;
-  likeLoading.value = true;
-  try {
-    await toggleListenBroadcastLike({ bizDate, module: null });
-  } catch (error) {
-    logger.error("failed to toggle listen broadcast like", error);
-  } finally {
-    likeLoading.value = false;
-  }
-}
-
 function openRatePanel() {
   showHistory.value = false;
   showRatePanel.value = true;
@@ -156,7 +119,6 @@ function playHistory(item: ListenBroadcastHistoryItem) {
   activeHistoryBizDate.value = item.bizDate;
   currentBizDate.value = item.bizDate;
   showHistory.value = false;
-  void loadLikeStatus(item.bizDate);
   play({ ...props.params, bizDate: item.bizDate });
 }
 
@@ -184,7 +146,6 @@ function exitReport() {
 
 onMounted(() => {
   currentBizDate.value = props.params.bizDate || "";
-  void loadLikeStatus(currentBizDate.value);
   play(props.params);
 });
 defineExpose({ pause, resume, restart: play, togglePlayback, stop });
@@ -215,8 +176,6 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       :current-seq="currentSeq"
       :next-text="nextText"
       :transcript-segments="transcriptSegments"
-      :liked="liked"
-      :like-loading="likeLoading"
       :progress="playbackProgress"
       :qa-loading="qaLoading"
       :qa-steps="qaSteps"
@@ -224,7 +183,6 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       :qa-answer="qaAnswer"
       :voice-recording="voiceRecording"
       @play-pause="togglePlayback"
-      @like="onToggleLike"
       @seek="seekToSegment"
     />
     <ReportBroadcastHistory
