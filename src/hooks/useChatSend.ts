@@ -49,6 +49,11 @@ export function useChatSend(scope?: string, handlers?: {
    * ended: true 收尾一次。页面用它实现「文字开始渲染就起听播」的流式 TTS。
    */
   onAiAnswerDelta?: (info: { aiMsgId: string; delta: string; ended: boolean }) => void;
+  /**
+   * 过程小标题变化时回调（/v1/chat-messages 的 subtitle 事件，如「目标 Dify 工作流已开始。」）。
+   * 页面用于在自定义思考态里展示接口下发的进度文案；流结束时回调 null。
+   */
+  onProcessSubtitle?: (subtitle: string | null) => void;
   /** 页面注入的额外 Dify inputs（如作业指导页的机型选择），每次发送时现取 */
   getExtraInputs?: () => Record<string, unknown>;
   /** 听播问答的异常列表输入。 */
@@ -269,6 +274,9 @@ export function useChatSend(scope?: string, handlers?: {
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
           applySnapshot(aiMsgId, userMsgId, snapshot, preserveProcessStatus);
+
+          // 过程小标题：接口 subtitle 事件（如「目标 Dify 工作流已开始。」），听播思考态直接展示它。
+          if (snapshot.processSubtitle !== undefined) handlers?.onProcessSubtitle?.(snapshot.processSubtitle);
 
           // 听播问答：与首页共用同一条流式接口（/proxy/v1/chat-messages + streaming），
           // 这里只聚合答案正文，流结束后按汇报交互协议解析后交给播报页（自己的 TTS 出口）。

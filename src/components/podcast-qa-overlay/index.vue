@@ -17,6 +17,8 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   /** 识别中态：与答案态互斥。 */
   loading: { type: Boolean, default: false },
+  /** 思考中的过程小标题：接口 chat-messages 的 subtitle 事件下发（如「目标 Dify 工作流已开始。」）。 */
+  qaSubtitle: { type: String, default: "" },
   /** 答案正文（已 `stripMarkdownTables` 后的 Markdown 文本）。 */
   answer: { type: String, default: "" },
   /** AiChatInput 双向绑定的输入文本。 */
