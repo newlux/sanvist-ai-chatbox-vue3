@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import type { ThinkStep } from "@/utils/ai-stream";
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
-import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
 import iconVoicePause from "@/assets/img/report-broadcast/pause-control.png";
 import iconVoicePlay from "@/assets/img/report-broadcast/play-control.png";
 import qaLoadingGlow from "@/assets/img/report-broadcast/qa-loading-glow.png";
@@ -16,8 +14,6 @@ const props = defineProps<{
   currentSeq: number | null;
   nextText: string;
   transcriptSegments: Array<{ seq: number; text: string }>;
-  liked: boolean;
-  likeLoading: boolean;
   /** 归一化播报进度（0~1），由播放器周期估算。 */
   progress: number;
   /** 按住说话后的识别中状态：与回答结果一起占用字幕区，播报文字隐藏。 */
@@ -32,7 +28,7 @@ const props = defineProps<{
   voiceRecording?: boolean;
 }>();
 
-const emit = defineEmits<{ "play-pause": []; like: []; seek: [seq: number] }>();
+const emit = defineEmits<{ "play-pause": []; seek: [seq: number] }>();
 const instance = getCurrentInstance();
 const transcriptScrollTop = ref(0);
 /**
@@ -343,24 +339,6 @@ function onProgressTouchEnd() {
         v-if="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
         class="report-broadcast-content__bottom-fade"
       />
-      <view
-        v-if="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
-        class="report-broadcast-content__feedback-mask"
-      >
-        <view
-          class="report-broadcast-content__feedback-button"
-          :class="{
-            'report-broadcast-content__feedback-button--liked': liked,
-          }"
-          @tap.stop="emit('like')"
-        >
-          <image
-            class="report-broadcast-content__feedback-icon"
-            :src="liked ? feedbackGoodFilledIcon : feedbackGoodIcon"
-            mode="aspectFit"
-          />
-        </view>
-      </view>
     </view>
   </view>
 </template>
@@ -653,36 +631,6 @@ function onProgressTouchEnd() {
     rgb(255 255 255 / 86%) 58%,
     #fff 100%
   );
-}
-.report-broadcast-content__feedback-mask {
-  position: absolute;
-  z-index: 2;
-  right: 0;
-  bottom: 48rpx;
-  left: 0;
-  display: flex;
-  height: 112rpx;
-  align-items: center;
-  justify-content: flex-end;
-  padding-right: 68rpx;
-  box-sizing: border-box;
-  background: #fff;
-}
-.report-broadcast-content__feedback-button {
-  display: flex;
-  width: 72rpx;
-  height: 72rpx;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  transition: transform 0.16s ease, opacity 0.16s ease;
-}
-.report-broadcast-content__feedback-button:active {
-  transform: scale(0.9);
-}
-.report-broadcast-content__feedback-icon {
-  width: 48rpx;
-  height: 48rpx;
 }
 .report-broadcast-content__play-btn {
   display: flex;

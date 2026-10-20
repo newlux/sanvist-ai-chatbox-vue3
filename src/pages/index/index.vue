@@ -304,8 +304,8 @@ function startRepairSummaryCallback() {
         await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: "维修助手-快速问答" });
         return;
       }
-      // 故障诊断仅在状态为 Completed 时结束轮询并回流。
-      if (data.status === "Completed") {
+      // 故障诊断：状态为 Completed，或回流已带回 repairConversationId 时结束轮询并回流。
+      if (data.status === "Completed" || summary.repairConversationId) {
         clearRepairSummaryPolling();
         applySummary();
         await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: "维修助手-快速问答" });
