@@ -11,6 +11,7 @@ import type {
 import type { ListenBroadcastStyle, PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
 import type { ReportVoiceOption } from "@/config/report-voices";
 import type { ReportInsightItem } from "@/hooks/useReportInsights";
+import type { ThinkStep } from "@/utils/ai-stream";
 import { onHide, onLoad, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
@@ -106,6 +107,32 @@ const broadcastDockOffset = computed(() =>
 const quickNavStyle = computed(() => ({ bottom: `calc(${composerDockOffset.value} + 4px)` }));
 const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
+/** 本轮在途的 AI 消息：识别中的过程说明与执行步骤都从这条消息里读。 */
+const reportQaActiveMessage = computed(() => {
+  const activeId = String(chatStore.activeMessageId || "");
+  if (!activeId) return null;
+  return chatStore.messages.find(item => String(item.id || "") === activeId) ?? null;
+});
+/**
+ * 识别中的过程说明：直接取 chat-messages 流里 status / subtitle 事件下发的文案
+ * （如「目标 Dify 工作流已开始。」）；拿不到过程文案时退回当前节点标题。
+ */
+const reportQaSubtitle = computed(() => {
+  const message = reportQaActiveMessage.value;
+  const subtitle = String(message?.processSubtitle || "").trim();
+  if (subtitle) return subtitle;
+  const status = message?.processStatus;
+  return status?.phase === "thinking" ? String(status.title || "").trim() : "";
+});
+/**
+ * 识别中的执行步骤：直接取本轮在途 AI 消息里已解析好的 think 步骤，
+ * 与首页「深度思考」共用同一份流式数据，后端逐步下发时这里同步追加。
+ */
+const reportQaSteps = computed<ThinkStep[]>(() => {
+  const thinkBlock = reportQaActiveMessage.value?.blocks?.find(block => block.type === "think");
+  const steps = thinkBlock?.payload?.steps;
+  return Array.isArray(steps) ? (steps as ThinkStep[]) : [];
+});
 /** 按住说话录音中：字幕区先隐藏播报文字，识别态/回答结果随后接管。 */
 const voiceRecording = ref(false);
 /** 本轮问答的追问卡（首页同款「弹出确认」）：整组题目按顺序入队。 */
@@ -940,6 +967,8 @@ onBeforeUnmount(() => {
         :portrait="reportBroadcastPortrait"
         :dock-offset="broadcastDockOffset"
         :qa-loading="reportQaLoading"
+        :qa-steps="reportQaSteps"
+        :qa-subtitle="reportQaSubtitle"
         :qa-answer="reportQaAnswer"
         :voice-recording="voiceRecording"
         :can-minimize="canMinimize"
