@@ -42,7 +42,7 @@ import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, us
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
-import { consumePendingRepairCallback, stashPendingRepairCallback } from "@/utils/repair-callback";
+import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
 import { stashPendingScheduleView } from "@/utils/schedule-view";
@@ -215,6 +215,14 @@ function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
   assistantNavigationVisible.value = true;
 }
 
+/** 点维修助手回流卡：跳维修助手详情；已生成的回流结果看过就不再重复拉取。 */
+function onAssistantCallbackOpen(conversationId: string) {
+  const id = String(conversationId || "").trim();
+  if (!id) return;
+  clearPendingRepairCallback();
+  void navigateToScene(`/pages/repair/index?conversationId=${encodeURIComponent(id)}`);
+}
+
 /**
  * 点调度视图入口卡（AI 下发的 gantt 积木）：整包数据先落到本地存储，
  * 再开横屏调度视图页；页面 onLoad 取走渲染（rows / bars，含接口还没排时间的任务）。
@@ -272,7 +280,8 @@ function startRepairSummaryCallback() {
     messageId: null,
     waitingText: "维修助手-快速问答",
     assistantCallbackTitle: "维修助手-快速问答",
-    processStatus: { phase: "thinking", title: "故障诊断中..." },
+    // 状态文案由气泡统一补「...」，这里只写标题本体，避免卡片上出现重复省略号
+    processStatus: { phase: "thinking", title: "故障诊断中" },
   });
   chatStore.scrollToBottom(true);
 
@@ -280,15 +289,26 @@ function startRepairSummaryCallback() {
     repairSummaryPollingAttempts += 1;
     try {
       const data = await getConversationSummary(task);
+      const summaryPayload = JSON.stringify(data);
+      const summary = parseRepairCallbackSummary(summaryPayload);
+      // 结果就绪：先把卡片标题/副标题/明细/会话 ID 补到消息上，再走回流接口。
+      const applySummary = () => chatStore.patchMessageById(aiMsgId, {
+        assistantCallbackTitle: summary.title,
+        assistantCallbackStatus: summary.statusText,
+        assistantCallbackDetails: summary.details,
+        assistantCallbackConversationId: summary.repairConversationId,
+      });
       // 快速问答没有状态字段，首次获取结果后直接回流，不进入轮询。
       if (!data.status) {
-        await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
+        applySummary();
+        await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: "维修助手-快速问答" });
         return;
       }
       // 故障诊断仅在状态为 Completed 时结束轮询并回流。
       if (data.status === "Completed") {
         clearRepairSummaryPolling();
-        await sendAssistantCallback(JSON.stringify(data), { aiMsgId, waitingText: "维修助手-快速问答" });
+        applySummary();
+        await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: "维修助手-快速问答" });
         return;
       }
     }
@@ -838,6 +858,7 @@ onBeforeUnmount(() => {
         @suggestion-tap="sendQuickPrompt"
         @ask-slot-open="onAskSlotOpen"
         @assistant-navigation-open="onAssistantNavigationOpen"
+        @assistant-callback-open="onAssistantCallbackOpen"
         @gantt-open="onGanttOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
