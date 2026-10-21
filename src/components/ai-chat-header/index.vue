@@ -7,6 +7,7 @@ import minimizeIcon from "@/assets/img/min_icon.png";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { setLocale } from "@/i18n";
+import { useChatStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { getSessionSceneLabel, isPodcastSession } from "@/utils/session-scene";
 
@@ -43,6 +44,25 @@ const emit = defineEmits([
   "update:sessions",
   "share-select-all",
 ]);
+
+/**
+ * 头部只区分「思考中 / 回答中」两态（Ardot 722:69 浅色思考中 / 722:489 浅色回答中）：
+ * - 最后一条 AI 消息还没有 answer 正文 → 思考中：图标放大 + 渐变环自转，文案「正在思考中..」
+ * - 一旦出现 answer 正文 → 回答中：图标回落到原尺寸，文案「正在回答中..」
+ * 不传 scope，沿 provide 链取页面自己的那份 store（首页 / 智能体页各自独立）。
+ */
+const chatStore = useChatStore();
+const answering = computed(() => {
+  if (!props.generating) return false;
+  const list = chatStore.messages;
+  const message = list[list.length - 1];
+  if (!message || message.role !== "ai") return false;
+  return (message.blocks || []).some(
+    block => block.type === "answer" && String(block.payload?.content || "").trim().length > 0,
+  );
+});
+const thinking = computed(() => props.generating && !answering.value);
+
 const logger = createLogger("chat-header");
 const { t, locale } = useI18n();
 const { safeTopPx } = useSafeArea();
@@ -357,7 +377,7 @@ onBeforeUnmount(() => {
       <!-- 状态栏占位：动态读取真实机型状态栏高度 -->
       <view class="chat-header__statusbar" :style="statusbarStyle" />
 
-      <!-- 头部（Figma: 50px, padding 13/16） -->
+      <!-- 头部（Figma: 50px, padding 13/16）；灵动岛是浮层，不参与这一行的布局 -->
       <view class="chat-header__bar">
         <template v-if="!shareMode">
           <view v-if="props.backOnly" class="chat-header__icon-btn" @tap="onBackTap">
@@ -378,23 +398,40 @@ onBeforeUnmount(() => {
             </view>
           </view>
 
-          <view
-            class="chat-header__title-wrap"
-            :class="{ 'chat-header__title-wrap--generating': props.generating }"
-          >
-            <view v-if="props.generating" class="chat-header__generating-border">
-              <view class="chat-header__generating-border-inner" />
+          <!-- 顶部中间「灵动岛」+ 下方状态胶囊
+               Ardot 722:2498（浅色-等待中）：圆形 722:328 / 胶囊 722:326
+               Ardot 722:69（浅色思考中）/ 722:489（浅色回答中）：渐变描边 722:339 / 胶囊 722:336 -->
+          <view class="chat-header__island-wrap">
+            <view
+              class="chat-header__island"
+              :class="{
+                'chat-header__island--active': props.generating,
+                'chat-header__island--thinking': thinking,
+              }"
+            >
+              <!-- 思考中 / 回答中：渐变描边环，紫→蓝→紫→粉→透明，绕圈旋转 -->
+              <view v-if="props.generating" class="chat-header__island-ring" />
+              <!-- 圆形玻璃底盘单独一层：底盘负责圆形轮廓，模糊只作用在这一层 -->
+              <view class="chat-header__island-glass" />
+              <image
+                class="chat-header__island-logo"
+                src="@/assets/img/header-island-logo.png"
+                mode="aspectFit"
+              />
             </view>
-            <!-- 设计稿 326:1374 / 85:3217 状态胶囊：22×22 品牌图标 + 14px 文案，间距 6px；
-                 等待中与「正在回答」共用同一枚品牌图标 -->
-            <image
-              class="chat-header__title-logo"
-              src="@/assets/img/header-status-logo.png"
-              mode="aspectFit"
-            />
-            <text class="chat-header__title">
-              {{ props.generating ? t("chat-status-generating") : t("chat-status-waiting") }}
-            </text>
+            <view
+              class="chat-header__status-pill"
+              :class="{ 'chat-header__status-pill--active': props.generating }"
+            >
+              <view v-if="props.generating" class="chat-header__status-pill-border" />
+              <text class="chat-header__status-text">
+                SANI
+              </text>
+              <!-- 出字前「正在思考中..」，出字后「正在回答中..」（722:69 / 722:489 文案） -->
+              <text v-if="props.generating" class="chat-header__status-text">
+                {{ answering ? t("chat-status-generating") : t("chat-status-thinking") }}
+              </text>
+            </view>
           </view>
 
           <view v-if="canMinimize" class="chat-header__icon-btn" @tap="onMinimize">
@@ -709,8 +746,14 @@ onBeforeUnmount(() => {
   position: relative;
   flex: 0 0 auto;
   z-index: 10;
-  background: #fafafa;
-  box-shadow: 0 8rpx 24rpx rgba(26, 26, 26, 0.06);
+  // 顶部由实色自上而下渐隐到全透明：内容滚到头部下方时柔和淡出，不再是硬边切断
+  background: linear-gradient(
+    180deg,
+    #fafafa 0%,
+    rgba(250, 250, 250, 0.92) 45%,
+    rgba(250, 250, 250, 0) 100%
+  );
+  // box-shadow: 0 8rpx 24rpx rgba(26, 26, 26, 0.06);
 }
 
 :deep(.uni-popup) {
@@ -739,6 +782,7 @@ onBeforeUnmount(() => {
 }
 
 .chat-header__bar {
+  position: relative; // 灵动岛以这一行为定位基准做浮动
   height: 100rpx; // 50px
   display: flex;
   align-items: center;
@@ -766,34 +810,160 @@ onBeforeUnmount(() => {
   flex: 0 0 48rpx;
 }
 
-// 状态胶囊：设计稿 326:1374（hug×36，r18，白 90%，内边距 12，间距 6）
-.chat-header__title-wrap {
+/* ===== 顶部中间「灵动岛」：Ardot 722:2498（等待中）/ 722:489（回答中）→ Group 133 =====
+   圆形 92×92：透明填充（设计稿是白 40%，按需求改为透明）+ 背景模糊 2
+     · 等待中：1px #FFFFFF 描边（Ellipse 55）
+     · 回答中：渐变描边环（722:339）+ 整体放大 10% + 环自转
+   Logo 72×72：圆内偏移 左 10 / 上 6，投影 0 3 9 rgba(0,0,0,.14)
+
+   浮动定位：绝对定位浮在状态栏下沿，向下悬在内容之上，
+   不占布局、不撑高头部，也不改变两侧按钮的位置（pointer-events: none 不拦截点击） */
+.chat-header__island-wrap {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 12rpx; // 6px
-  height: 72rpx; // 36px
-  padding: 0 24rpx; // 12px
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: 36rpx; // 18px
-  backdrop-filter: blur(32rpx);
-  -webkit-backdrop-filter: blur(32rpx);
-  box-shadow: 0 4rpx 16rpx rgba(13, 13, 13, 0.09); // 0 2px 8px rgba(13,13,13,.09)
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
-/* ===== 正在回答：Ardot 85:3217 Working Capsule（1px = 2rpx）=====
-   容器 h36 / r18 / 白 90% / 左右内边距 14 / 子项间距 6 / 背景模糊 16 /
-   投影 0 2 8 rgba(0,0,0,.08) / clipsContent；宽度 hug，不设 min-width */
-.chat-header__title-wrap--generating {
+.chat-header__island {
   position: relative;
-  height: 72rpx; // 36px
-  gap: 12rpx; // 6px
-  padding: 0 28rpx; // 14px
+  width: 184rpx; // 92px
+  height: 184rpx;
+  box-sizing: border-box;
+  border: 1px solid #ffffff;
+  border-radius: 50%;
+  overflow: hidden; // 圆形轮廓由底盘裁死：内层一律按圆裁切，任何内核都不会画成方块
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04); // 0 2 8 rgba(0,0,0,.04)
+  // 独立合成层：避免 backdrop-filter 在部分内核把圆角裁剪丢掉（表现为方形图标）
+  transform: translateZ(0);
+  // 缩放过渡做柔：480ms + 两端平滑的缓动曲线，变大/变小都不是硬切
+  transition:
+    transform 480ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 360ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 思考中 / 回答中（Ardot 722:69 / 722:489 → 722:339）：白色描边让位给渐变描边
+   （722:339 里 #EFEFEF 那条描边 visible=false，渐变描边 visible=true） */
+.chat-header__island--active {
+  border-color: transparent;
+}
+
+/* 只有「思考中」放大；一旦出字（回答中）就回落到原始 92×92 */
+.chat-header__island--thinking {
+  transform: translateZ(0) scale(1.1);
+}
+
+/* 思考中 / 回答中的渐变描边环：722:339.strokes[1]
+   #3D21CD → #1999FE → #C067FA → #FD90C4 → rgba(253,144,196,0)
+   与胶囊描边同一套 mask 挖空法，只保留 3rpx 的环。
+   动效是「追着转」而不是整圈铺满：色带只占一段圆弧（约 55% 周长），
+   其余角度透明，整环自转时看起来就是一段彩色光沿圆周追赶 */
+.chat-header__island-ring {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 3rpx; // 1.5px 环宽
+  border-radius: 50%;
+  /* 兜底：不支持 conic-gradient 的内核仍能看到整圈线性渐变描边 */
+  background-image: linear-gradient(
+    126deg,
+    #3d21cd 0%,
+    #1999fe 27.52%,
+    #c067fa 48.32%,
+    #fd90c4 67.37%,
+    rgba(253, 144, 196, 0) 100%
+  );
+  /* 追光：40deg 起色 → 240deg 收尾透明，中间 160deg 留白形成「缺口」 */
+  background-image: conic-gradient(
+    from 0deg,
+    rgba(61, 33, 205, 0) 0deg,
+    #3d21cd 40deg,
+    #1999fe 110deg,
+    #c067fa 160deg,
+    #fd90c4 200deg,
+    rgba(253, 144, 196, 0) 240deg,
+    rgba(253, 144, 196, 0) 360deg
+  );
+  /* 先写标准属性、再用 -webkit- 兜底：老 WebView 只认前缀版本 */
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  animation: island-ring-spin 2s linear infinite;
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* 环是正圆，整体旋转只让这段色带绕圈追赶，不会改变轮廓 */
+@keyframes island-ring-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 圆形底盘：背景改成完全透明（不留任何不透明白色，避免被内核画成白色方块），
+   只保留背景模糊与 1px 白描边；用 mask 再兜一层圆角裁剪 */
+.chat-header__island-glass {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 50%;
+  background: transparent;
+  backdrop-filter: blur(4rpx); // BACKGROUND_BLUR 2
+  -webkit-backdrop-filter: blur(4rpx);
+  mask-image: radial-gradient(circle closest-side, #000 99%, transparent 100%);
+  -webkit-mask-image: -webkit-radial-gradient(circle closest-side, #000 99%, transparent 100%);
+}
+
+.chat-header__island-logo {
+  position: absolute;
+  z-index: 1;
+  top: 12rpx; // 6px
+  left: 20rpx; // 10px
+  width: 144rpx; // 72px
+  height: 144rpx;
+  // 图片本身是透明背景 PNG（220×220，74% 像素 alpha=0），这里再显式声明一次透明底，
+  // 防止 image 组件/内核给它补上默认白底而露出方形
+  background-color: transparent;
   border: 0;
-  border-radius: 36rpx; // 18px
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.08); // 0 2px 8px rgba(0,0,0,.08)
-  overflow: hidden; // clipsContent: true
+  // 阴影必须跟随图案轮廓：box-shadow 会沿图片的方形盒子铺开，看起来就是一个「方图标」
+  filter: drop-shadow(0 6rpx 18rpx rgba(0, 0, 0, 0.14)); // 0 3 9 rgba(0,0,0,.14)
+}
+
+/* ===== 岛屿下方的状态胶囊 =====
+   等待中 722:326：h32 / r20 / 白 / 内边距 6·20 / 文案 "SANI" 14px Medium
+   回答中 722:336：hug / r20 / 白 / 内边距 10·13 / 文案 "SANI / 正在回答中.."
+   胶囊与圆形底部重叠 6px（722:2498 里胶囊 y=138，圆形 y=52~144） */
+.chat-header__status-pill {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-top: -12rpx; // 与圆形底部重叠 6px
+  padding: 12rpx 40rpx; // 6 / 20
+  border-radius: 40rpx; // 20px
+  background: #ffffff;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04); // 0 2 8 rgba(0,0,0,.04)
+}
+
+.chat-header__status-pill--active {
+  padding: 20rpx 26rpx; // 10 / 13
+  overflow: hidden; // clipsContent: true（描边环不溢出圆角）
 }
 
 /**
@@ -807,7 +977,7 @@ onBeforeUnmount(() => {
  * 背景宽度取 2 倍，色带整体左移一个图宽即可无缝循环；
  * 静止帧（t=0 / 关闭动效时）与设计稿色标位置完全一致。
  */
-.chat-header__generating-border {
+.chat-header__status-pill-border {
   position: absolute;
   z-index: 0;
   top: 0;
@@ -815,7 +985,7 @@ onBeforeUnmount(() => {
   bottom: 0;
   left: 0;
   padding: 3rpx; // 1.5px 描边宽度
-  border-radius: 36rpx;
+  border-radius: 40rpx; // 跟随胶囊 20px
   background-image: linear-gradient(
     135deg,
     #9197ea 0%,
@@ -849,25 +1019,17 @@ onBeforeUnmount(() => {
 
 /* 系统偏好减少动效时停在设计稿的静态渐变 */
 @media (prefers-reduced-motion: reduce) {
-  .chat-header__generating-border {
+  .chat-header__status-pill-border,
+  .chat-header__island-ring {
     animation: none;
   }
 }
 
-/* 图标与文字压在描边环之上 */
-.chat-header__title-wrap--generating > *:not(.chat-header__generating-border) {
+// 胶囊文案：设计稿 722:327 / 722:337（Source Han Sans CN Medium 14px / #0D0D0D / 行盒 20px）
+.chat-header__status-text {
   position: relative;
-  z-index: 1;
-}
-
-// 品牌图标：设计稿 326:1376 / 85:3218（22×22），等待中与正在回答共用
-.chat-header__title-logo {
-  width: 44rpx; // 22px
-  height: 44rpx;
-  flex: 0 0 44rpx;
-}
-
-.chat-header__title {
+  z-index: 1; // 压在流光描边之上
+  color: #0d0d0d;
   font-family:
     "Source Han Sans CN",
     "PingFang SC",
@@ -875,17 +1037,10 @@ onBeforeUnmount(() => {
     "Microsoft YaHei",
     sans-serif;
   font-size: 28rpx; // 14px
-  font-weight: 400;
-  color: #0d0d0d;
+  font-weight: 500; // Medium
   line-height: 40rpx; // 20px
   letter-spacing: 0;
-}
-
-// 等待中：设计稿 326:1377（14px Regular / #0D0D0D / 行高 20px），不影响生成中状态
-.chat-header__title-wrap:not(.chat-header__title-wrap--generating) .chat-header__title {
-  font-weight: 400;
-  color: #0d0d0d;
-  line-height: 40rpx;
+  text-align: center;
 }
 
 @keyframes header-generating {
