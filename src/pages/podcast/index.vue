@@ -41,7 +41,7 @@ import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useUserStore } from "@/stores";
 import { stripMarkdownTables } from "@/utils/ai-stream";
-import { getCurrentListenReportDate, markListenReportListened } from "@/utils/listen-report";
+import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { backFromScene, isSceneWindowRoot, navigateToScene } from "@/utils/scene-navigation";
@@ -422,7 +422,37 @@ function playAnswerTts(answer: string) {
   }
 }
 
+/**
+ * 还原进页流程：先进偏好选择（选助手 → 选汇报内容），确认后才进播报页。
+ */
+function startReportVoiceSelection() {
+  preferenceEntry.value = false;
+  reportBroadcastParams.value = null;
+  reportBroadcastPortrait.value = "";
+  // 偏好选择器优先于「正在加载偏好」骨架屏：两者都打开时先看选择器
+  preferenceLoading.value = false;
+  showReportVoiceSelector.value = true;
+}
+
 function restoreReportBroadcast() {
+  // 游客首次收听必须重新选择；已收听状态允许直接复用上次配置。
+  if (userStore.isVisitor === true && !isListenReportListened(reportBizDate.value)) {
+    startReportVoiceSelection();
+    return;
+  }
+  // 本机没存过音色 / 风格（含汇报模块）→ 同样先进偏好选择，不替用户拿默认值决定
+  const savedVoice = loadReportVoice();
+  const savedStyle = loadReportStyle();
+  if (!savedVoice || !savedStyle || !savedStyle.moduleCodes.length) {
+    startReportVoiceSelection();
+    return;
+  }
+  showReportVoiceSelector.value = false;
+  loadPreferenceBroadcastParams();
+}
+
+/** 已选过偏好时进页：拉服务端偏好命中就按偏好起播，否则退回本机记忆 / 默认配置 */
+function loadPreferenceBroadcastParams() {
   // 进页先拉服务端偏好：
   //   - 偏好按「风格」分条返回：每条风格独立带音色 / 模块 / 时间
   //   - 先确定「当前活跃的 styleCode」：用户本机上次选过的 → 没有才退而求其次取数组首条
