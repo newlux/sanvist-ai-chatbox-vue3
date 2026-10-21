@@ -197,5 +197,11 @@
   "input-placeholder": "请输入内容",
   "slot-complete-selection": "请完成当前选择",
   "podcast-quick-nav-alerts": "消异常",
-  "podcast-quick-nav-ask": "回问问"
+  "podcast-quick-nav-ask": "回问问",
+  "qrcode-title": "二维码",
+  "qrcode-tip": "请使用手机扫码查看",
+  "qrcode-empty": "暂无二维码内容",
+  "qrcode-failed": "二维码生成失败",
+  "qrcode-copy": "复制内容",
+  "qrcode-copied": "已复制"
 }

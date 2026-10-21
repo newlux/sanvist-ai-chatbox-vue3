@@ -767,6 +767,8 @@ export function createDifyEventNormalizer() {
     // 标准事件顺序可能为 message_end -> workflow_finished，因此不能在收到 message_end 时立即结束消费。
     if (event === "workflow_paused" || event === "workflow_finished") {
       const workflow = asRecord(data.data) || {};
+      // 部分工作流只在 workflow_finished 里给最终答案（正文流里没有），带上它供占位回答判定使用
+      const outputsAnswer = String((asRecord(workflow.outputs) || {}).answer || "");
       const status = String(workflow.status || "");
       const elapsedSeconds = Number(workflow.elapsed_time);
       const durationMs = Number.isFinite(elapsedSeconds)
@@ -792,6 +794,7 @@ export function createDifyEventNormalizer() {
             reason: status === "failed" ? "exception" : "normal",
             duration_ms: durationMs,
             message,
+            outputs_answer: outputsAnswer || undefined,
           },
         };
       }

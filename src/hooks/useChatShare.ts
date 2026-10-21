@@ -103,7 +103,8 @@ export function useChatShare(posterEl: Ref<unknown>, scope?: string) {
       const msg = list[i] || {};
       if (msg.role !== "user") continue;
       const next = list[i + 1];
-      const aiIndex = next && next.role === "ai" ? i + 1 : -1;
+      // 二维码占位这类 hidden 的 AI 消息不参与分享（它本来就没有正文），只分享用户这一问
+      const aiIndex = next && next.role === "ai" && !next.hidden ? i + 1 : -1;
       const interrupted = Boolean(aiIndex >= 0 && list[aiIndex]?.interrupted);
       const indexes = [i].concat(aiIndex >= 0 ? [aiIndex] : []);
       rounds.push({

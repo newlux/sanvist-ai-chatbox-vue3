@@ -56,6 +56,8 @@ export interface UiChatMessage {
   rawSseText?: string;
   attachments?: ChatMessageAttachment[];
   noAnswerGroup?: boolean;
+  /** 二维码占位回答：已跳转二维码页，消息列表不再渲染这条 AI 消息 */
+  hidden?: boolean;
   /** 语音已松手、ASR 尚未返回：用户气泡展示「识别中...」 */
   asrPending?: boolean;
   /** 维修助手回流产生的 QA 卡片标题。 */
