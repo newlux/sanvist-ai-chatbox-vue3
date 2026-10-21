@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import type { GuideStepSelectEvent } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
 import { computed, nextTick, ref } from "vue";
+import { useI18n } from "vue-i18n";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
-import iconRadioOff from "@/assets/img/icon-action-radio-off.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconShare from "@/assets/img/icon-action-share.svg";
 import iconArrowNext from "@/assets/img/icon-arrow-red.svg";
@@ -16,9 +17,7 @@ import iconRepair from "@/assets/img/icon-repair-dark.svg";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { toInlineImageUrl } from "@/utils/image-preview";
-import type { GuideStepSelectEvent } from "@/api/chat/types";
 import AiContentBlocks from "./AiContentBlocks.vue";
-import { useI18n } from "vue-i18n";
 
 defineOptions({ name: "AiBubbleV2" });
 
@@ -597,10 +596,7 @@ function onNegativeFeedback() {
             {{ t("ai-busy-retry-later") }}
           </text>
         </view>
-        <!-- 底部安全提示：从首页输入栏下方移到这里，每条 AI 回复各一份，位于操作栏上方 -->
-        <text v-if="props.showActions && !props.loading" class="ai-bubble-v2__disclaimer">
-          内容由AI生成，请核实重要信息
-        </text>
+        <!-- 底部安全提示已还原到输入栏下方（ai-chat-input），此处不再重复 -->
         <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
           <view
             v-if="props.ttsEnabled"
@@ -608,12 +604,16 @@ function onNegativeFeedback() {
             @tap.stop="onTtsTap"
           >
             <view v-if="props.ttsLoading" class="ai-bubble-v2__tts-spinner" />
-            <image
-              v-else
-              :src="props.ttsPlaying ? iconRadioOff : iconRadioOn"
-              mode="aspectFit"
-              class="ai-bubble-v2__action-icon"
-            />
+            <!-- 播放中：蓝色声波条依次起伏，动画从左往右推进 -->
+            <view v-else-if="props.ttsPlaying" class="ai-bubble-v2__tts-wave">
+              <view
+                v-for="index in 4"
+                :key="index"
+                class="ai-bubble-v2__tts-wave-bar"
+                :class="`ai-bubble-v2__tts-wave-bar--${index}`"
+              />
+            </view>
+            <image v-else :src="iconRadioOn" mode="aspectFit" class="ai-bubble-v2__action-icon" />
           </view>
           <view class="ai-bubble-v2__action-btn" @tap.stop="onCopyTap">
             <image :src="iconCopy" mode="aspectFit" class="ai-bubble-v2__action-icon" />
@@ -1143,16 +1143,6 @@ function onNegativeFeedback() {
   padding-top: 28rpx;
   border-top: 2rpx solid #f0f0f2;
 }
-/* 底部安全提示：沿用首页输入栏下方那句的灰字规格（24rpx / #bababa），
-   位置在操作栏上方，与回复正文左对齐 */
-.ai-bubble-v2__disclaimer {
-  display: block;
-  margin-top: 32rpx;
-  color: #bababa;
-  font-size: 24rpx;
-  line-height: 34rpx;
-  text-align: left;
-}
 /* 空回答兜底提示：外观对齐回答正文卡（灰底圆角 + 正文字号） */
 .ai-bubble-v2__busy-hint {
   box-sizing: border-box;
@@ -1187,6 +1177,35 @@ function onNegativeFeedback() {
   border-radius: 50%;
   animation: ai-bubble-tts-spin 0.8s linear infinite;
 }
+/* 播放中的语音图标：蓝色声波，四根条错峰起伏，视觉上从左往右推进 */
+.ai-bubble-v2__tts-wave {
+  display: flex;
+  width: 32rpx;
+  height: 32rpx;
+  align-items: center;
+  justify-content: center;
+  gap: 4rpx;
+}
+.ai-bubble-v2__tts-wave-bar {
+  width: 4rpx;
+  height: 24rpx;
+  border-radius: 4rpx;
+  background: #1a6dff;
+  transform-origin: center center;
+  animation: ai-bubble-tts-wave 0.9s ease-in-out infinite;
+}
+.ai-bubble-v2__tts-wave-bar--1 {
+  animation-delay: 0s;
+}
+.ai-bubble-v2__tts-wave-bar--2 {
+  animation-delay: 0.12s;
+}
+.ai-bubble-v2__tts-wave-bar--3 {
+  animation-delay: 0.24s;
+}
+.ai-bubble-v2__tts-wave-bar--4 {
+  animation-delay: 0.36s;
+}
 .ai-bubble-v2__duration {
   margin-left: 8rpx;
 }
@@ -1194,6 +1213,20 @@ function onNegativeFeedback() {
 @keyframes ai-bubble-tts-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* 声波条：只有高度在起伏，宽度不变；错峰延迟让它看起来像从左往右推过去 */
+@keyframes ai-bubble-tts-wave {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+    opacity: 0.6;
+  }
+
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
   }
 }
 
