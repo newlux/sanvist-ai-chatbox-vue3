@@ -48,8 +48,13 @@ const { t, locale } = useI18n();
 const { safeTopPx } = useSafeArea();
 /** 设计稿 309:3088：抽屉顶部的「中 / EN」切换，复用全局 i18n locale（默认 zh_CN） */
 const isEnglishLocale = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));
+/** 只切换本组件可见的文案语言，不改宿主语言、不落存储、不触发其他业务逻辑 */
+function onSelectLanguage(target: "zh_CN" | "en_US") {
+  if (String(locale.value) === target) return;
+  void setLocale(target);
+}
 function onToggleLanguage() {
-  void setLocale(isEnglishLocale.value ? "zh_CN" : "en_US");
+  onSelectLanguage(isEnglishLocale.value ? "zh_CN" : "en_US");
 }
 /** PC 端内嵌时头部露出「最小化」，替换原来的「回到首页」图标 */
 const { canMinimize, onMinimize } = useIframeMinimize();
@@ -101,16 +106,16 @@ function startOfDay(date: Date | number) {
 }
 
 function resolveSessionGroup(time: number, todayStart: number) {
-  if (!time) return { key: "unknown", title: "更早", order: 900 };
+  if (!time) return { key: "unknown", title: "", labelKey: "history-group-earlier", order: 900 };
   const dayDiff = Math.floor((todayStart - startOfDay(new Date(time))) / 86400000);
-  if (dayDiff <= 0) return { key: "today", title: "今天", order: 0 };
-  if (dayDiff === 1) return { key: "yesterday", title: "昨天", order: 1 };
-  if (dayDiff < 7) return { key: "week", title: "7 天内", order: 2 };
-  if (dayDiff < 30) return { key: "month", title: "30 天内", order: 3 };
+  if (dayDiff <= 0) return { key: "today", title: "", labelKey: "history-group-today", order: 0 };
+  if (dayDiff === 1) return { key: "yesterday", title: "", labelKey: "history-group-yesterday", order: 1 };
+  if (dayDiff < 7) return { key: "week", title: "", labelKey: "history-group-week", order: 2 };
+  if (dayDiff < 30) return { key: "month", title: "", labelKey: "history-group-month", order: 3 };
   const date = new Date(time);
   const label = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
   // 月份分组按时间倒序排在固定分组之后
-  return { key: `m-${label}`, title: label, order: 1000 - (date.getFullYear() * 12 + date.getMonth()) };
+  return { key: `m-${label}`, title: label, labelKey: "", order: 1000 - (date.getFullYear() * 12 + date.getMonth()) };
 }
 
 const groupedSessionList = computed(() => {
@@ -119,7 +124,13 @@ const groupedSessionList = computed(() => {
   filteredSessionList.value.forEach((session) => {
     const group = resolveSessionGroup(readSessionTime(session), todayStart);
     if (!groups.has(group.key)) {
-      groups.set(group.key, { key: group.key, title: group.title, order: group.order, sessions: [] });
+      // 分组标题只做展示层翻译，标题文案不参与筛选 / 排序逻辑
+      groups.set(group.key, {
+        key: group.key,
+        title: group.labelKey ? t(group.labelKey) : group.title,
+        order: group.order,
+        sessions: [],
+      });
     }
     groups.get(group.key).sessions.push(session);
   });
@@ -386,7 +397,7 @@ onBeforeUnmount(() => {
               mode="aspectFit"
             />
             <text class="chat-header__title">
-              {{ props.generating ? '正在生成回答' : '等待中..' }}
+              {{ props.generating ? t("chat-status-generating") : t("chat-status-waiting") }}
             </text>
           </view>
 
@@ -437,13 +448,13 @@ onBeforeUnmount(() => {
               mode="aspectFit"
             />
             <text class="chat-header__check-all-text">
-              选中所有
+              {{ t("share-select-all") }}
             </text>
           </view>
 
           <view class="chat-header__share-title-wrap">
             <text class="chat-header__share-title">
-              选中 {{ shareSelectedRoundCount }} 轮对话
+              {{ t("share-selected-rounds", { count: shareSelectedRoundCount }) }}
             </text>
           </view>
         </template>
@@ -473,7 +484,7 @@ onBeforeUnmount(() => {
               <input
                 v-model="historySearchKeyword"
                 class="history-drawer__search-input"
-                placeholder="搜索历史记录"
+                :placeholder="t('history-search-placeholder')"
                 :maxlength="80"
               >
             </view>
@@ -482,10 +493,18 @@ onBeforeUnmount(() => {
                 class="history-drawer__lang-thumb"
                 :class="{ 'history-drawer__lang-thumb--en': isEnglishLocale }"
               />
-              <text class="history-drawer__lang-text" :class="{ 'history-drawer__lang-text--on': !isEnglishLocale }">
+              <text
+                class="history-drawer__lang-text"
+                :class="{ 'history-drawer__lang-text--on': !isEnglishLocale }"
+                @tap.stop="onSelectLanguage('zh_CN')"
+              >
                 中
               </text>
-              <text class="history-drawer__lang-text" :class="{ 'history-drawer__lang-text--on': isEnglishLocale }">
+              <text
+                class="history-drawer__lang-text"
+                :class="{ 'history-drawer__lang-text--on': isEnglishLocale }"
+                @tap.stop="onSelectLanguage('en_US')"
+              >
                 EN
               </text>
             </view>
@@ -498,13 +517,13 @@ onBeforeUnmount(() => {
                 class="history-drawer__new-conversation-item-icon"
               />
               <text class="history-drawer__new-conversation-item-label">
-                新建对话
+                {{ t("history-new-conversation") }}
               </text>
             </view>
           </view>
           <view class="history-drawer__session-history">
             <text class="history-drawer__session-history-label">
-              历史对话
+              {{ t("history-title") }}
             </text>
           </view>
           <z-paging
@@ -518,14 +537,14 @@ onBeforeUnmount(() => {
             :refresher-enabled="false"
             :loading-more-enabled="true"
             :show-loading-more-no-more-view="false"
-            empty-view-text="暂无历史会话"
+            :empty-view-text="t('history-empty-session')"
             @query="onSessionQuery"
             @scroll="onSessionListScroll"
           >
-            <view v-if="historyLoading" class="history-drawer__loading" aria-label="正在加载历史记录">
+            <view v-if="historyLoading" class="history-drawer__loading" :aria-label="t('history-loading')">
               <view class="history-drawer__loading-spinner" />
               <text class="history-drawer__loading-text">
-                正在加载
+                {{ t("history-loading") }}
               </text>
             </view>
             <view v-else class="history-drawer__list">
@@ -569,7 +588,7 @@ onBeforeUnmount(() => {
                     }"
                   >
                     <text class="history-drawer_item-label">
-                      {{ session.name || "新对话" }}
+                      {{ session.name || t("history-untitled") }}
                     </text>
                     <text class="history-drawer_item-tag">
                       {{ getSessionSceneLabel(session) }}
@@ -596,7 +615,7 @@ onBeforeUnmount(() => {
             <template #empty>
               <view class="history-drawer__empty">
                 <text class="history-drawer__empty-text">
-                  暂无历史对话
+                  {{ t("history-empty") }}
                 </text>
               </view>
             </template>
@@ -613,7 +632,7 @@ onBeforeUnmount(() => {
               @tap="deleteSelected"
             >
               <text class="history-drawer__multi-btn-text history-drawer__multi-btn-text--danger">
-                删除 {{ selectedIds.length }} 项
+                {{ t("history-delete-count", { count: selectedIds.length }) }}
               </text>
             </view>
           </view>
@@ -628,7 +647,7 @@ onBeforeUnmount(() => {
                 />
               </view>
               <text class="history-action-menu__text history-action-menu__text--danger">
-                删除
+                {{ t("history-delete") }}
               </text>
             </view>
             <view class="history-action-menu__item" @tap="renameOne">
@@ -640,7 +659,7 @@ onBeforeUnmount(() => {
                 />
               </view>
               <text class="history-action-menu__text">
-                修改标题
+                {{ t("history-rename") }}
               </text>
             </view>
             <view class="history-action-menu__item" @tap="enterMultiSelect">
@@ -652,7 +671,7 @@ onBeforeUnmount(() => {
                 />
               </view>
               <text class="history-action-menu__text">
-                批量删除
+                {{ t("history-batch-delete") }}
               </text>
             </view>
           </view>
@@ -663,10 +682,10 @@ onBeforeUnmount(() => {
       <view v-if="deleteConfirmVisible" class="history-delete-confirm" @tap.stop="cancelDeleteConfirm">
         <view class="history-delete-confirm__card" @tap.stop>
           <text class="history-delete-confirm__title">
-            删除内容
+            {{ t("history-delete-confirm-title") }}
           </text>
           <text class="history-delete-confirm__desc">
-            删除后内容将无法恢复，确认删除内容？
+            {{ t("history-delete-confirm-desc") }}
           </text>
           <view class="history-delete-confirm__actions">
             <view
@@ -674,12 +693,12 @@ onBeforeUnmount(() => {
               @tap.stop="cancelDeleteConfirm"
             >
               <text class="history-delete-confirm__btn-text history-delete-confirm__btn-text--ghost">
-                取消
+                {{ t("cancel") }}
               </text>
             </view>
             <view class="history-delete-confirm__btn" @tap.stop="confirmDelete">
               <text class="history-delete-confirm__btn-text">
-                确认
+                {{ t("confirm") }}
               </text>
             </view>
           </view>
@@ -1221,11 +1240,14 @@ onBeforeUnmount(() => {
   z-index: 1;
   width: 66rpx;
   flex: 0 0 66rpx;
+  /* 上下补内边距把命中区域撑满轨道（40 + 12×2 = 64rpx），文字视觉位置不变 */
+  padding: 12rpx 0;
   color: #8E8E8E;
   font-size: 28rpx;
   font-weight: 500;
   line-height: 40rpx;
   text-align: center;
+  box-sizing: border-box;
   transition: color 0.2s ease;
 }
 .history-drawer__lang-text--on {
