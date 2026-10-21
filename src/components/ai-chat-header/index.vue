@@ -6,6 +6,7 @@ import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useSafeArea } from "@/hooks/useSafeArea";
+import { setLocale } from "@/i18n";
 import { createLogger } from "@/utils/logger";
 import { getSessionSceneLabel, isPodcastSession } from "@/utils/session-scene";
 
@@ -43,8 +44,13 @@ const emit = defineEmits([
   "share-select-all",
 ]);
 const logger = createLogger("chat-header");
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const { safeTopPx } = useSafeArea();
+/** 设计稿 309:3088：抽屉顶部的「中 / EN」切换，复用全局 i18n locale（默认 zh_CN） */
+const isEnglishLocale = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));
+function onToggleLanguage() {
+  void setLocale(isEnglishLocale.value ? "zh_CN" : "en_US");
+}
 /** PC 端内嵌时头部露出「最小化」，替换原来的「回到首页」图标 */
 const { canMinimize, onMinimize } = useIframeMinimize();
 const historyPopup = ref();
@@ -55,6 +61,10 @@ const showActionMenu = ref(false);
 const actionSession = ref(null);
 const editingMode = ref(false);
 const selectedIds = ref([]);
+/** 设计稿 309:3165：删除 / 批量删除的二次确认弹窗状态（target 为单条，ids 为批量快照） */
+const deleteConfirmVisible = ref(false);
+const deleteConfirmTarget = ref<SessionItem | null>(null);
+const deleteConfirmIds = ref<Array<string | number>>([]);
 const actionMenuTop = ref(220);
 const renamingId = ref("");
 const renameValue = ref("");
@@ -251,10 +261,33 @@ function onSessionTap(session: SessionItem) {
 function isSelected(id: string | number) {
   return selectedIds.value.includes(id);
 }
+/** 设计稿 309:3165：先弹确认框，确认后再执行原有的删除 emit */
+function openDeleteConfirm(session: SessionItem | null, ids: Array<string | number> = []) {
+  deleteConfirmTarget.value = session;
+  deleteConfirmIds.value = ids;
+  deleteConfirmVisible.value = true;
+}
+function cancelDeleteConfirm() {
+  deleteConfirmVisible.value = false;
+  deleteConfirmTarget.value = null;
+  deleteConfirmIds.value = [];
+}
+function confirmDelete() {
+  const session = deleteConfirmTarget.value;
+  const ids = [...deleteConfirmIds.value];
+  cancelDeleteConfirm();
+  if (session && getSessionKey(session)) {
+    emit("session-delete", session);
+    return;
+  }
+  if (!ids.length) return;
+  emit("session-delete-batch", ids);
+  cancelMultiSelect();
+}
 function deleteOne() {
   const session = actionSession.value;
   closeActionMenu();
-  if (session && getSessionKey(session)) emit("session-delete", session);
+  if (session && getSessionKey(session)) openDeleteConfirm(session);
 }
 function renameOne() {
   const session = actionSession.value;
@@ -294,7 +327,10 @@ function cancelMultiSelect() {
   selectedIds.value = [];
 }
 function deleteSelected() {
-  if (selectedIds.value.length) emit("session-delete-batch", [...selectedIds.value]);
+  if (selectedIds.value.length) {
+    openDeleteConfirm(null, [...selectedIds.value]);
+    return;
+  }
   cancelMultiSelect();
 }
 
@@ -430,14 +466,29 @@ onBeforeUnmount(() => {
           :style="historyDrawerStyle"
           @tap="onDrawerTap"
         >
-          <view class="history-drawer__search">
-            <image src="@/assets/img/icon-history-search.svg" mode="aspectFit" class="history-drawer__search-icon" />
-            <input
-              v-model="historySearchKeyword"
-              class="history-drawer__search-input"
-              placeholder="搜索历史记录"
-              :maxlength="80"
-            >
+          <!-- 设计稿 309:3058 + 309:3088：搜索框与语言切换并排（203 + 17 + 66 = 286） -->
+          <view class="history-drawer__toolbar">
+            <view class="history-drawer__search">
+              <image src="@/assets/img/icon-history-search.svg" mode="aspectFit" class="history-drawer__search-icon" />
+              <input
+                v-model="historySearchKeyword"
+                class="history-drawer__search-input"
+                placeholder="搜索历史记录"
+                :maxlength="80"
+              >
+            </view>
+            <view class="history-drawer__lang" @tap.stop="onToggleLanguage">
+              <view
+                class="history-drawer__lang-thumb"
+                :class="{ 'history-drawer__lang-thumb--en': isEnglishLocale }"
+              />
+              <text class="history-drawer__lang-text" :class="{ 'history-drawer__lang-text--on': !isEnglishLocale }">
+                中
+              </text>
+              <text class="history-drawer__lang-text" :class="{ 'history-drawer__lang-text--on': isEnglishLocale }">
+                EN
+              </text>
+            </view>
           </view>
           <view class="history-drawer__new-conversation">
             <view class="history-drawer__new-conversation-item" @tap.stop="onNewConversationTap">
@@ -525,9 +576,10 @@ onBeforeUnmount(() => {
                     </text>
                   </view>
                   <view v-if="editingMode" class="history-drawer__check">
+                    <!-- 批量删除勾选框：历史列表内用 #0D0D0D 黑底，避免与分享态红色图标互相影响 -->
                     <image
                       v-if="isSelected(getSessionKey(session))"
-                      src="@/assets/img/icon-checked.svg"
+                      src="@/assets/img/icon-checked-dark.svg"
                       alt=""
                       class="history-drawer__check-img"
                     />
@@ -606,6 +658,33 @@ onBeforeUnmount(() => {
           </view>
         </view>
       </uni-popup>
+
+      <!-- 设计稿 309:3165 弹窗确认：历史会话删除 / 批量删除的二次确认 -->
+      <view v-if="deleteConfirmVisible" class="history-delete-confirm" @tap.stop="cancelDeleteConfirm">
+        <view class="history-delete-confirm__card" @tap.stop>
+          <text class="history-delete-confirm__title">
+            删除内容
+          </text>
+          <text class="history-delete-confirm__desc">
+            删除后内容将无法恢复，确认删除内容？
+          </text>
+          <view class="history-delete-confirm__actions">
+            <view
+              class="history-delete-confirm__btn history-delete-confirm__btn--ghost"
+              @tap.stop="cancelDeleteConfirm"
+            >
+              <text class="history-delete-confirm__btn-text history-delete-confirm__btn-text--ghost">
+                取消
+              </text>
+            </view>
+            <view class="history-delete-confirm__btn" @tap.stop="confirmDelete">
+              <text class="history-delete-confirm__btn-text">
+                确认
+              </text>
+            </view>
+          </view>
+        </view>
+      </view>
     </view>
   </view>
 </template>
@@ -952,13 +1031,10 @@ onBeforeUnmount(() => {
   gap: 8rpx;
 }
 
-// 分组标题滚动到顶时吸住，盖住下方划过的会话
+// 设计稿 309:3052 的列表是连续条目、不带「今天 / 昨天」这类日期分组标题，
+// 这里只隐藏标题节点，分组数据与排序逻辑保持不变
 .history-drawer__group-title {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 8rpx 0 8rpx;
-  background: #ffffff;
+  display: none;
 }
 
 .history-drawer__group-title-text {
@@ -1018,7 +1094,9 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+/* 历史列表每条只保留标题，不再展示「任务 / 指导 / 问答」这类场景标签 */
 .history-drawer_item-tag {
+  display: none;
   flex-shrink: 0;
   height: 36rpx;
   margin-left: 16rpx;
@@ -1090,17 +1168,68 @@ onBeforeUnmount(() => {
   font-size: 24rpx;
   color: #bbc0c9;
 }
-.history-drawer__search {
-  height: 88rpx;
-  margin-bottom: 32rpx;
-  padding: 0 24rpx;
+/* 设计稿 309:3058 / 309:3088：搜索框 203px（406rpx）+ 间距 17px（34rpx）+ 语言切换 66px（132rpx） */
+.history-drawer__toolbar {
   display: flex;
   align-items: center;
+  gap: 34rpx;
+  margin-bottom: 32rpx;
+}
+/* 设计稿 309:3059：203×44 / 圆角 10px（20rpx）/ 描边 1px（2rpx）#E0E0E0 / 内边距 12px（24rpx） */
+.history-drawer__search {
+  display: flex;
+  width: 406rpx;
+  flex: 0 0 406rpx;
+  height: 88rpx;
+  align-items: center;
   gap: 6rpx;
-  box-sizing: border-box;
+  padding: 0 24rpx;
   border: 2rpx solid #e0e0e0;
   border-radius: 20rpx;
+  box-sizing: border-box;
   background: #ffffff;
+}
+/* 设计稿 309:3088：轨道 66×32（132×64rpx）/ 圆角 18px（36rpx）/ 底 #F3F3F3 */
+.history-drawer__lang {
+  position: relative;
+  display: flex;
+  width: 132rpx;
+  height: 64rpx;
+  flex: 0 0 132rpx;
+  align-items: center;
+  border-radius: 36rpx;
+  background: #F3F3F3;
+}
+/* 设计稿 309:3092：白圆 28×28（56×56rpx），距轨道左 4px（8rpx）、上 2px（4rpx） */
+.history-drawer__lang-thumb {
+  position: absolute;
+  z-index: 0;
+  top: 4rpx;
+  left: 8rpx;
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  background: #FFFFFF;
+  transition: transform 0.2s ease;
+}
+.history-drawer__lang-thumb--en {
+  transform: translateX(60rpx);
+}
+/* 设计稿 309:3090 / 309:3091：14px（28rpx）/ Medium(500)，选中 #0D0D0D、未选中 #8E8E8E */
+.history-drawer__lang-text {
+  position: relative;
+  z-index: 1;
+  width: 66rpx;
+  flex: 0 0 66rpx;
+  color: #8E8E8E;
+  font-size: 28rpx;
+  font-weight: 500;
+  line-height: 40rpx;
+  text-align: center;
+  transition: color 0.2s ease;
+}
+.history-drawer__lang-text--on {
+  color: #0D0D0D;
 }
 .history-drawer__search-icon {
   width: 36rpx;
@@ -1122,7 +1251,7 @@ onBeforeUnmount(() => {
 .history-drawer__new-conversation {
   padding: 0;
 }
-.history-drawer--batch-delete .history-drawer__search,
+.history-drawer--batch-delete .history-drawer__toolbar,
 .history-drawer--batch-delete .history-drawer__new-conversation {
   display: none;
 }
@@ -1176,8 +1305,8 @@ onBeforeUnmount(() => {
 }
 
 .history-drawer__check--on {
-  border-color: #f12832;
-  background: #f12832;
+  border-color: #0D0D0D;
+  background: #0D0D0D;
 }
 
 .history-drawer__check-mark {
@@ -1253,5 +1382,86 @@ onBeforeUnmount(() => {
   height: 32rpx;
   flex: 0 0 32rpx;
   object-fit: contain;
+}
+
+/* ===== 设计稿 309:3165 弹窗确认：历史会话删除 / 批量删除二次确认 =====
+   遮罩 #0D0D0D @40%；卡片 313×168（626×336rpx）、圆角 14px（28rpx）、无阴影 */
+.history-delete-confirm {
+  position: fixed;
+  z-index: 2000;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 13, 13, 0.4);
+}
+
+/* 卡片内边距：上 29px（58rpx）/ 左右 28px（56rpx）/ 下 21px（42rpx） */
+.history-delete-confirm__card {
+  display: flex;
+  width: 626rpx;
+  flex-direction: column;
+  align-items: center;
+  padding: 58rpx 56rpx 42rpx;
+  border-radius: 28rpx;
+  box-sizing: border-box;
+  background: #FFFFFF;
+}
+
+/* 设计稿 309:3167：16px（32rpx）/ Medium(500) / #0D0D0D */
+.history-delete-confirm__title {
+  color: #0D0D0D;
+  font-size: 32rpx;
+  font-weight: 500;
+  line-height: 46rpx;
+}
+
+/* 设计稿 309:3172：标题底到说明 8px（16rpx）；14px（28rpx）/ Regular / #8F8F8F */
+.history-delete-confirm__desc {
+  padding-top: 16rpx;
+  color: #8F8F8F;
+  font-size: 28rpx;
+  font-weight: 400;
+  line-height: 40rpx;
+  text-align: center;
+}
+
+/* 设计稿：说明底到按钮 19px（38rpx）；两按钮 123×48（246×96rpx），间距 11px（22rpx） */
+.history-delete-confirm__actions {
+  display: flex;
+  width: 100%;
+  padding-top: 38rpx;
+  gap: 22rpx;
+}
+
+/* 设计稿 309:3171：确认按钮底 #0D0D0D，圆角 25px（50rpx） */
+.history-delete-confirm__btn {
+  display: flex;
+  height: 96rpx;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50rpx;
+  background: #0D0D0D;
+}
+
+/* 设计稿 309:3174：取消按钮底 #F3F3F3 */
+.history-delete-confirm__btn--ghost {
+  background: #F3F3F3;
+}
+
+/* 设计稿 309:3170 / 309:3175：16px（32rpx）/ Medium(500)，确认白字、取消黑字 */
+.history-delete-confirm__btn-text {
+  color: #FFFFFF;
+  font-size: 32rpx;
+  font-weight: 500;
+  line-height: 46rpx;
+}
+
+.history-delete-confirm__btn-text--ghost {
+  color: #0D0D0D;
 }
 </style>

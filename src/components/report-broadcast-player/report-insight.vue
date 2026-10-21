@@ -744,7 +744,8 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   box-sizing: border-box;
   background: #FFFFFF;
   box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04);
-  color: #C8201E;
+  /* 「已加急 / 已取消加急 / 已处理」统一用主文字黑 */
+  color: #0D0D0D;
   font-size: 28rpx;
   font-weight: 400;
   line-height: 34rpx;
