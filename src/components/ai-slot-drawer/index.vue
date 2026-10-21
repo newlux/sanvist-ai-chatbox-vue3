@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload } from "@/api/chat/types";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import ArrowNextDisabledIcon from "@/assets/img/slot-drawer-arrow-next-disabled.svg";
 import ArrowNextIcon from "@/assets/img/slot-drawer-arrow-next.svg";
 import ArrowPrevDisabledIcon from "@/assets/img/slot-drawer-arrow-prev-disabled.svg";
@@ -38,7 +39,7 @@ const emit = defineEmits<{
   "height-change": [height: number];
 }>();
 
-const OTHER_INPUT_PLACEHOLDER = "其他输入";
+const { t } = useI18n();
 
 const currentIndex = ref(0);
 /** 选择题的作答：按题目存选中的 value */
@@ -100,7 +101,7 @@ const showOtherInput = computed(() => {
 
 /** 「其他输入」行的占位文案：JSON 给了就用它，否则退回默认「其他输入」 */
 const otherInputPlaceholder = computed(() =>
-  String(currentSlot.value?.other_text || currentSlot.value?.other_placeholder || "").trim() || OTHER_INPUT_PLACEHOLDER);
+  String(currentSlot.value?.other_text || currentSlot.value?.other_placeholder || "").trim() || t("slot-other-input"));
 
 /** 某道题是否已作答：填空题看文本，选择题看选项或「其他输入」 */
 function isSlotAnswered(slot: AskSlotPayload) {
@@ -208,8 +209,8 @@ function onSubmitTap() {
   submit();
 }
 
-const labelText = computed(() => String(currentSlot.value?.description || "").trim() || "请选择");
-const questionText = computed(() => String(currentSlot.value?.title || "").trim() || "请选择要查询的设备");
+const labelText = computed(() => String(currentSlot.value?.description || "").trim() || t("common-select"));
+const questionText = computed(() => String(currentSlot.value?.title || "").trim() || t("slot-device-question"));
 
 let submitTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -244,6 +245,7 @@ function isSelected(option: AskSlotOption) {
  * 它与单个选项在前端互斥——点「全部」只留它，点单个则把「全部」摘掉。
  */
 function isSelectAllOption(option: AskSlotOption) {
+  // 「全部」是后端下发的 option.value，属于数据比对，不能换成词条
   return option.value === "全部" || String(option.action || "") === "select_all";
 }
 
@@ -283,7 +285,7 @@ function selectOption(option: AskSlotOption) {
     return;
   }
   if (current.length >= maxSelect.value) {
-    uni.showToast({ title: `最多选择 ${maxSelect.value} 项`, icon: "none" });
+    uni.showToast({ title: t("slot-max-select", { count: maxSelect.value }), icon: "none" });
     return;
   }
   selections.value = { ...selections.value, [slot.slot_name]: [...current, key] };
@@ -300,15 +302,15 @@ function closeRemarkInput() {
 function validateCurrentSlot() {
   if (!currentSlot.value) return false;
   if (hasInvalidRange.value) {
-    uni.showToast({ title: "当前题目选择范围无效", icon: "none" });
+    uni.showToast({ title: t("slot-invalid-range"), icon: "none" });
     return false;
   }
   if (!isCurrentSelectionValid.value) {
     const message = currentSlot.value?.input_type === "text"
-      ? "请先填写内容"
+      ? t("slot-fill-first")
       : minSelect.value > 0
-        ? `请至少选择 ${minSelect.value} 项`
-        : `最多选择 ${maxSelect.value} 项`;
+        ? t("slot-min-select", { count: minSelect.value })
+        : t("slot-max-select", { count: maxSelect.value });
     uni.showToast({ title: message, icon: "none" });
     return false;
   }
@@ -351,7 +353,7 @@ function submit() {
   const invalidSlot = props.slots.find(slot => !isSlotAnswered(slot));
   if (invalidSlot) {
     currentIndex.value = props.slots.indexOf(invalidSlot);
-    uni.showToast({ title: "请完成当前选择", icon: "none" });
+    uni.showToast({ title: t("slot-complete-selection"), icon: "none" });
     return;
   }
   const selected = props.slots.reduce<AskSlotOption[]>((items, slot) => {
@@ -425,7 +427,7 @@ watch(
           <textarea
             v-model="currentTextAnswer"
             class="slot-drawer__text-input"
-            :placeholder="currentSlot.placeholder || '请输入'"
+            :placeholder="currentSlot.placeholder || t('slot-input-placeholder')"
             placeholder-class="slot-drawer__remark-placeholder"
             :maxlength="200"
             :auto-height="true"
@@ -495,12 +497,12 @@ watch(
         :class="{ 'slot-drawer__submit--disabled': !canSubmitSelection }"
         @tap="onSubmitTap"
       >
-        确认提交
+        {{ t("slot-confirm-submit") }}
       </view>
     </view>
 
     <text class="slot-drawer__hint">
-      内容由AI生成，请核实重要信息
+      {{ t("ai-content-disclaimer") }}
     </text>
   </view>
 </template>

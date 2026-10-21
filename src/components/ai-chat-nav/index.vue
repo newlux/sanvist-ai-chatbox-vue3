@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
 import iconRepair from "@/assets/img/icon-repair.svg";
@@ -9,7 +10,10 @@ import { usePcMode } from "@/hooks/usePcMode";
 /** 快捷入口。mode=page 另开专属页面（url 指向对应场景页） */
 export interface NavItem {
   key: string;
-  title: string;
+  /** 外部传入的固定文案（不随语言切换）；内置入口改用 titleKey */
+  title?: string;
+  /** 内置入口的 i18n key，渲染时按当前语言取文案 */
+  titleKey?: string;
   icon: string;
   subagent?: string;
   mode?: "page" | "inline";
@@ -39,6 +43,8 @@ const props = defineProps({
 
 const emit = defineEmits(["item-click"]);
 
+const { t } = useI18n();
+
 /** swiper 同屏展示的入口数量，与模板 display-multiple-items 保持一致 */
 const VISIBLE_ITEM_COUNT = 3;
 
@@ -50,7 +56,7 @@ const currentIndex = ref(0);
 const DEFAULT_NAV_ITEMS: NavItem[] = [
   {
     key: "vox-core",
-    title: "听汇报",
+    titleKey: "nav-report",
     icon: iconVox,
     subagent: "report",
     mode: "page",
@@ -58,7 +64,7 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
   },
   {
     key: "fix-master-ai",
-    title: "作业指导",
+    titleKey: "nav-guide",
     icon: iconHelp,
     subagent: "guide",
     mode: "page",
@@ -67,7 +73,7 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
   },
   {
     key: "repair-master-ai",
-    title: "维修助手",
+    titleKey: "nav-repair",
     icon: iconRepair,
     subagent: "repair",
     mode: "page",
@@ -75,7 +81,7 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
   },
   {
     key: "ai-form",
-    title: "任务协同",
+    titleKey: "nav-task",
     icon: iconForm,
     subagent: "task",
     mode: "page",
@@ -139,7 +145,7 @@ function onSwiperChange(event: { detail?: { current?: number } }) {
             >
               <image class="ai-chat-nav__icon" :src="item.icon" mode="aspectFit" />
               <text class="ai-chat-nav__title">
-                {{ item.title }}
+                {{ item.titleKey ? t(item.titleKey) : item.title }}
               </text>
             </view>
           </view>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 
@@ -53,6 +54,7 @@ const emit = defineEmits([
   "toggle-quick-list",
 ]);
 
+const { t } = useI18n();
 const headerTopStyle = computed(() => ({ top: `calc(${props.safeTopPx}px + 8rpx)` }));
 </script>
 
@@ -70,7 +72,7 @@ const headerTopStyle = computed(() => ({ top: `calc(${props.safeTopPx}px + 8rpx)
         </text>
       </view>
       <text class="podcast-qa-overlay__title">
-        问答
+        {{ t("qa-overlay-title") }}
       </text>
       <!-- 占位：与返回按钮对称，避免标题偏左 -->
       <view class="podcast-qa-overlay__back podcast-qa-overlay__back--placeholder" aria-hidden="true" />
@@ -86,10 +88,10 @@ const headerTopStyle = computed(() => ({ top: `calc(${props.safeTopPx}px + 8rpx)
       <!-- 识别中态：与播报视图内的「正在理解你的内容」同一套文案与版式 -->
       <view v-if="loading" class="podcast-qa-overlay__loading">
         <text class="podcast-qa-overlay__loading-title">
-          正在理解你的内容
+          {{ t("broadcast-understanding") }}
         </text>
         <text class="podcast-qa-overlay__loading-subtitle">
-          我会结合当前听播内容直接回答
+          {{ t("qa-overlay-tip") }}
         </text>
       </view>
       <!-- 答案态：与首页同款 MarkdownRenderer，去掉表格；正文统一居中 -->

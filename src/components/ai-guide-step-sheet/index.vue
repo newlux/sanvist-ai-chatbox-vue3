@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { GuideStepItem, GuideStepPayload } from "@/api/chat/types";
 import { computed, nextTick, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import AiAttachmentPicker from "@/components/ai-attachment-picker/index.vue";
 import { isNativeAttachmentPickerAvailable, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import closeIcon from "@/assets/img/icon-close.svg";
@@ -57,6 +58,8 @@ const emit = defineEmits<{
   (e: "photo", source: AttachmentSource): void;
 }>();
 
+const { t } = useI18n();
+
 const currentIndex = ref(0);
 /** 末尾输入框：用户自己写的追问 */
 const draftText = ref("");
@@ -69,7 +72,7 @@ const steps = computed<GuideStepItem[]>(() => (Array.isArray(props.payload?.step
 /** 灰色小标签取 data.note，老数据没有 note 时退回 data.title */
 const cardTitle = computed(() => {
   const note = String(props.payload?.note || "").trim();
-  return note || String(props.payload?.title || "").trim() || "操作步骤";
+  return note || String(props.payload?.title || "").trim() || t("guide-step-fallback-title");
 });
 /** 多步骤模式：一张一张推进 */
 const isMultiStep = computed(() => steps.value.length > 1);
@@ -276,7 +279,7 @@ watch(() => [props.visible, currentIndex.value], () => {
     </view>
 
     <text class="guide-step-sheet__hint">
-      内容由AI生成，请核实重要信息
+      {{ t("ai-content-disclaimer") }}
     </text>
 
     <!-- 选附件期间的中间蒙层：等原生 bridge 判断 / 弹来源弹窗最长要 2 秒，

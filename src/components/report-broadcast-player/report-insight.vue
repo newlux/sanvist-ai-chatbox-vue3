@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ReportInsightItem } from "@/hooks/useReportInsights";
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import activeLightningIcon from "@/assets/img/report-broadcast/insight-lightning-active.svg";
 import defaultLightningIcon from "@/assets/img/report-broadcast/insight-lightning-default.svg";
 import operatorNextIcon from "@/assets/img/report-broadcast/insight-operator-next.svg";
@@ -55,6 +56,7 @@ function handleIconTap(item: ReportInsightItem) {
   emit("operator-item-open", item);
 }
 
+const { t } = useI18n();
 const voicePortrait = computed(() => props.portrait);
 const { safeBottomPx, safeTopPx } = useSafeArea();
 const statusbarStyle = computed(() => ({ height: `${safeTopPx.value}px` }));
@@ -88,15 +90,15 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
       <view class="report-insight__summary-copy">
         <view class="report-insight__headlines">
           <text class="report-insight__headline report-insight__headline--first">
-            汇报结束，
+            {{ t("insight-summary-line1") }}
           </text>
           <text class="report-insight__headline report-insight__headline--second">
-            尽快处理异常事项。
+            {{ t("insight-summary-line2") }}
           </text>
         </view>
         <view class="report-insight__voice-tip">
           <text>
-            可以用语音处理所有异常，快来试试吧
+            {{ t("insight-voice-tip") }}
           </text>
         </view>
       </view>
@@ -191,10 +193,10 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
             </text>
           </view>
           <text v-if="props.loadingMore" class="report-insight__load-status">
-            加载中...
+            {{ t("loading") }}
           </text>
           <text v-else-if="!props.hasMore && props.items.length" class="report-insight__load-status">
-            没有更多了
+            {{ t("insight-no-more") }}
           </text>
         </view>
       </scroll-view>

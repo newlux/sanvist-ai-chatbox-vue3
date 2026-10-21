@@ -55,7 +55,7 @@ import { backFromScene, isSceneWindowRoot, navigateToScene } from "@/utils/scene
 defineOptions({ name: "AiPodcastPage" });
 
 const logger = createLogger("podcast-page");
-const { locale } = useI18n();
+const { locale, t } = useI18n();
 
 const chatScope = provideChatScope("podcast");
 const chatStore = useChatStore(chatScope);
@@ -621,10 +621,13 @@ function promptUrgentConfirmation(message?: string) {
   const target = pendingInsightUrgentTarget.value;
   if (!target) return;
   uni.showModal({
-    title: "确认加急",
-    content: message || `确认加急处理${target.title || "该异常"}？`,
-    confirmText: "确认",
-    cancelText: "取消",
+    title: t("podcast-urgent-confirm-title"),
+    // message 来自工作流动作（后端下发），有值时原样展示
+    content: message || t("podcast-urgent-confirm-content", {
+      target: target.title || t("podcast-urgent-confirm-target"),
+    }),
+    confirmText: t("confirm"),
+    cancelText: t("cancel"),
     success(result) {
       void confirmInsightUrgent(Boolean(result.confirm));
     },
@@ -929,7 +932,7 @@ onBeforeUnmount(() => {
     <view v-if="preferenceLoading" class="podcast-page__preference-loading">
       <view class="preference-loading__indicator" />
       <text class="preference-loading__text">
-        正在加载偏好
+        {{ t("podcast-loading-preference") }}
       </text>
     </view>
     <ReportVoiceSelector
@@ -996,13 +999,13 @@ onBeforeUnmount(() => {
         <view class="podcast-page__quick-nav-button" @tap="openInsightFromQuickNav">
           <image class="podcast-page__quick-nav-icon" :src="quickNavExceptionIcon" mode="aspectFit" />
           <text class="podcast-page__quick-nav-text">
-            消异常
+            {{ t("podcast-quick-nav-alerts") }}
           </text>
         </view>
         <view class="podcast-page__quick-nav-button" @tap="closeReportBroadcast">
           <image class="podcast-page__quick-nav-icon" :src="quickNavAskIcon" mode="aspectFit" />
           <text class="podcast-page__quick-nav-text">
-            回问问
+            {{ t("podcast-quick-nav-ask") }}
           </text>
         </view>
       </view>
@@ -1124,17 +1127,26 @@ onBeforeUnmount(() => {
   background: #ffffff;
 }
 
+/* 转圈改用播报页左右声波的同一套渐变（#3D21CD → #1999FE → #C067FA → #FD90C4）：
+   用 padding 留出环宽，再用 mask 挖空中间；外径保持原来的 56rpx（48 + 4×2 边框） */
 .preference-loading__indicator {
-  width: 48rpx;
-  height: 48rpx;
-  border: 4rpx solid #f0e6e6;
-  border-top-color: #c8201e;
+  width: 56rpx;
+  height: 56rpx;
+  padding: 4rpx;
+  box-sizing: border-box;
   border-radius: 50%;
+  background-image: linear-gradient(90deg, #3d21cd 0%, #1999fe 48.72%, #c067fa 76%, #fd90c4 100%);
   animation: podcast-preference-loading-spin 0.9s linear infinite;
+  /* 先写标准属性、再用 -webkit- 兜底：老 WebView 只认前缀版本 */
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
 }
 
+/* 文字色与转圈渐变的起始色保持一致，避免红棕字配紫蓝环 */
 .preference-loading__text {
-  color: #9a5f5d;
+  color: #3d21cd;
   font-size: 26rpx;
   font-weight: 500;
   line-height: 36rpx;

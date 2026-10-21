@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { AssistantNavigationPayload } from "@/api/chat/types";
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import CloseIcon from "@/assets/img/slot-drawer-close.svg";
 
 defineOptions({ name: "AiAssistantNavigationSheet" });
@@ -18,9 +19,11 @@ const emit = defineEmits<{
   (e: "confirm", payload: AssistantNavigationPayload): void;
 }>();
 
-const title = computed(() => String(props.payload?.title || "").trim() || "是否进入维修助手");
-const confirmText = computed(() => String(props.payload?.confirm_text || "").trim() || "确定，进入维修助手");
-const cancelText = computed(() => String(props.payload?.cancel_text || "").trim() || "暂不进入");
+const { t } = useI18n();
+
+const title = computed(() => String(props.payload?.title || "").trim() || t("assistant-nav-title"));
+const confirmText = computed(() => String(props.payload?.confirm_text || "").trim() || t("assistant-nav-confirm"));
+const cancelText = computed(() => String(props.payload?.cancel_text || "").trim() || t("assistant-nav-cancel"));
 
 function close() {
   emit("update:visible", false);
@@ -50,7 +53,7 @@ function confirm() {
       </view>
     </view>
     <text class="assistant-navigation-sheet__hint">
-      内容由AI生成，请核实重要信息
+      {{ t("ai-content-disclaimer") }}
     </text>
   </view>
 </template>
