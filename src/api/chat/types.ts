@@ -366,6 +366,18 @@ export interface MessageEndEvent {
     message?: string | null;
     trace_id?: string;
     timing?: Record<string, number>;
+    /**
+     * 工作流 `outputs.answer`：部分工作流只在 workflow_finished 里给最终答案（正文流里没有）。
+     * 前端据此识别二维码占位回答（"QRCODE"）。
+     */
+    outputs_answer?: string;
+    /**
+     * 工作流 `outputs.answer` 为二维码占位（"QRCODE"）时置 true（也可直接下发二维码内容字符串）：
+     * 该轮回答直接跳转二维码页，不落气泡、不走听播。
+     */
+    qrcode?: boolean | string;
+    /** `qrcode` 为 true 时可选下发的二维码内容（链接 / 口令），缺失时二维码页展示空态 */
+    qrcode_content?: string;
   };
 }
 

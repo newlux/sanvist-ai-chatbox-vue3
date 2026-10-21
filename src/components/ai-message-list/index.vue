@@ -842,7 +842,8 @@ watch(
 
         <view class="chat-box">
           <!-- 对话内容 -->
-          <view v-for="(msg, index) in messages" :key="index">
+          <!-- hidden：二维码占位回答这类「已跳转别处」的消息不进列表，索引仍保持原下标 -->
+          <view v-for="(msg, index) in messages" v-show="!msg.hidden" :key="index">
             <AiBubbleV2
               :role="msg.role"
               :content="msg.content"

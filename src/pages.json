@@ -122,6 +122,18 @@
       }
     },
     {
+      "path": "pages/qrcode/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "",
+        "transparentTitle": "always",
+        "allowsBounceVertical": "NO",
+        "enablePullDownRefresh": false,
+        "disableScroll": true
+      }
+    },
+    {
       "path": "pages/schedule-gantt/index",
       "style": {
         "navigationStyle": "custom",

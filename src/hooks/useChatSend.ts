@@ -13,6 +13,7 @@ import { buildInitialBlocks, consumeChatStream, parseReportInteraction } from "@
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
 import { createLogger } from "@/utils/logger";
+import { navigateToScene } from "@/utils/scene-navigation";
 
 const logger = createLogger("chat");
 
@@ -25,6 +26,60 @@ function isAbortError(error: unknown) {
   const name = err.name || "";
   const message = String(err.message || "").toLowerCase();
   return name === "AbortError" || message.includes("aborted") || message.includes("abort");
+}
+
+/** 工作流用这个占位文本表示「这一轮要给用户看二维码」，不是给人看的回答 */
+const QRCODE_ANSWER_PLACEHOLDER = "QRCODE";
+/** 占位文本的前缀：流式期间答案还没长全（"Q"、"QR"…），前缀期先按住不播 */
+const QRCODE_PLACEHOLDER_PREFIX = /^q(?:r(?:c(?:o(?:de?)?)?)?)?$/i;
+/** 二维码页路由（pages/qrcode/index） */
+const QRCODE_PAGE_ROUTE = "/pages/qrcode/index";
+
+interface QrcodeMetadata {
+  qrcode?: boolean | string;
+  qrcode_content?: string;
+  outputs_answer?: string;
+  status?: string;
+}
+
+/** 整段回答就是占位文本 "QRCODE" */
+function isQrcodePlaceholder(text: string) {
+  return text.trim().toLowerCase() === QRCODE_ANSWER_PLACEHOLDER.toLowerCase();
+}
+
+/** 还可能是占位文本的前缀（流式期间），此时先不要播出去 */
+function isQrcodePlaceholderPrefix(text: string) {
+  return QRCODE_PLACEHOLDER_PREFIX.test(text.trim());
+}
+
+/**
+ * 判定这一轮是不是二维码占位回答。
+ *
+ * 网关目前不单独下发标记：Dify 工作流把 `outputs.answer` 置成占位文本 "QRCODE"
+ * （workflow_finished → 转成 message_end），所以主要按答案正文判定；
+ * 后续网关若在 message_end.metadata 下发 `qrcode`（true 或内容字符串）/ `qrcode_content`，优先用它。
+ */
+function resolveQrcodeTurn(
+  blocks: ReturnType<typeof buildInitialBlocks>,
+  metadata?: QrcodeMetadata,
+  ended = false,
+) {
+  const flag = metadata?.qrcode;
+  const content = (typeof flag === "string" ? flag : String(metadata?.qrcode_content ?? "")).trim();
+  // 答案正文优先；工作流只在 workflow_finished.outputs.answer 给答案时用它兜底
+  const answerText = collectAnswerText(blocks).trim() || String(metadata?.outputs_answer ?? "").trim();
+  // 失败 / 中断轮的正文不带占位语义，只有正常结束才跳转
+  const stopped = metadata?.status === "stopped" || metadata?.status === "failed";
+  const isPlaceholder = ended && !stopped && isQrcodePlaceholder(answerText);
+  return { matched: Boolean(flag) || isPlaceholder, content };
+}
+
+/** 把快照里的 answer 块拼成整段回答文本 */
+function collectAnswerText(blocks: ReturnType<typeof buildInitialBlocks>) {
+  return blocks
+    .filter(block => block.type === "answer")
+    .map(block => String(block.payload?.content || ""))
+    .join("");
 }
 
 export function useChatSend(scope?: string, handlers?: {
@@ -49,6 +104,11 @@ export function useChatSend(scope?: string, handlers?: {
    * ended: true 收尾一次。页面用它实现「文字开始渲染就起听播」的流式 TTS。
    */
   onAiAnswerDelta?: (info: { aiMsgId: string; delta: string; ended: boolean }) => void;
+  /**
+   * 二维码占位回答（message_end.metadata.qrcode）：这一轮已经直接开二维码页，
+   * 页面需要自定义跳转 / 埋点时接管这个回调，不传则内置 uni.navigateTo 打开二维码页。
+   */
+  onQrcodeAnswer?: (info: { aiMsgId: string; content: string }) => void;
   /**
    * 过程小标题变化时回调（/v1/chat-messages 的 subtitle 事件，如「目标 Dify 工作流已开始。」）。
    * 页面用于在自定义思考态里展示接口下发的进度文案；流结束时回调 null。
@@ -145,6 +205,7 @@ export function useChatSend(scope?: string, handlers?: {
       ended?: boolean;
     },
     preserveProcessStatus = false,
+    skipComplete = false,
   ) {
     const index = chatStore.findMessageIndex(aiMsgId);
     if (index < 0) return;
@@ -182,7 +243,8 @@ export function useChatSend(scope?: string, handlers?: {
 
     // 仅在「真正答完一轮」时通知一次：避免中间 snapshot 重入；status=stopped 视作被打断，不算完成。
     if (
-      snapshot.ended
+      !skipComplete
+      && snapshot.ended
       && snapshot.metadata?.status !== "stopped"
       && (snapshot.conversationId ?? aiMessage.sessionId)
       && (snapshot.messageId ?? aiMessage.messageId)
@@ -256,6 +318,8 @@ export function useChatSend(scope?: string, handlers?: {
     let answerDeltaEnded = false;
     /** PODCAST：聚合流式答案正文，流结束后按汇报交互协议派发。 */
     let podcastAnswer = "";
+    /** 二维码占位回答已经开过二维码页：避免同一轮重复跳转，也用来跳过听播出口。 */
+    let qrcodeHandled = false;
 
     /** 把答案增量通知给页面（首块即触发，不等 message_end / workflow_finished）。 */
     function notifyAnswerDelta(delta: string, ended: boolean) {
@@ -267,13 +331,46 @@ export function useChatSend(scope?: string, handlers?: {
       handlers.onAiAnswerDelta({ aiMsgId, delta, ended });
     }
 
+    /**
+     * 二维码占位回答的收尾：这条 AI 消息不落气泡（hidden），直接打开二维码页。
+     * 跳转与其它页面保持一致走 navigateToScene（mPaaS 下开新场景窗口，Web 下退化为 navigateTo）。
+     * 内容来自 metadata（qrcode 字符串 / qrcode_content），占位文本本身不算内容。
+     */
+    function openQrcodePage(content: string) {
+      if (qrcodeHandled) return;
+      qrcodeHandled = true;
+      logger.debug("qrcode placeholder answer detected", { aiMsgId, content });
+      chatStore.patchMessageById(aiMsgId, {
+        hidden: true,
+        loading: false,
+        content: "",
+        blocks: buildInitialBlocks(),
+        ttsEnabled: false,
+        ttsPlaying: false,
+        processStatus: { phase: "succeeded" },
+      });
+      if (handlers?.onQrcodeAnswer) {
+        handlers.onQrcodeAnswer({ aiMsgId, content });
+        return;
+      }
+      const url = content ? `${QRCODE_PAGE_ROUTE}?content=${encodeURIComponent(content)}` : QRCODE_PAGE_ROUTE;
+      void navigateToScene(url).catch(error => logger.error("failed to open qrcode page", error));
+    }
+
     try {
       await consumeChatStream({
         source: stream(createChatRequest(content, files, extraInputs), { idleTimeoutMs: 60_000 }),
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
-          applySnapshot(aiMsgId, userMsgId, snapshot, preserveProcessStatus);
+          // 二维码占位回答：这一轮既不出气泡也不进听播，直接跳二维码页。
+          // 网关不单独下发标记，靠「整段回答 == QRCODE」判定（workflow_finished 的答案正文）。
+          const qrcodeTurn = resolveQrcodeTurn(snapshot.blocks, snapshot.metadata, snapshot.ended);
+          applySnapshot(aiMsgId, userMsgId, snapshot, preserveProcessStatus, qrcodeTurn.matched);
+          if (qrcodeTurn.matched) {
+            openQrcodePage(qrcodeTurn.content);
+            return;
+          }
 
           // 过程小标题：接口 subtitle 事件（如「目标 Dify 工作流已开始。」），听播思考态直接展示它。
           if (snapshot.processSubtitle !== undefined) handlers?.onProcessSubtitle?.(snapshot.processSubtitle);
@@ -281,21 +378,18 @@ export function useChatSend(scope?: string, handlers?: {
           // 听播问答：与首页共用同一条流式接口（/proxy/v1/chat-messages + streaming），
           // 这里只聚合答案正文，流结束后按汇报交互协议解析后交给播报页（自己的 TTS 出口）。
           if (usesReportAnswerOutlet) {
-            podcastAnswer = snapshot.blocks
-              .filter(block => block.type === "answer")
-              .map(block => String(block.payload?.content || ""))
-              .join("");
+            podcastAnswer = collectAnswerText(snapshot.blocks);
           }
           // 普通问答：答案文字边流边播。每收到新的一块 answer 文本就增量通知页面，
           // 页面在第一块文字渲染出来的瞬间就可以起听播，后续文字持续续播。
           // 聚合全部 answer 块（而非只取第一块）：answer 中途穿插了别的块时，
           // 只取第一块会让后半段文字永远收不到增量、听播漏播。
           else if (handlers?.onAiAnswerDelta) {
-            const answerContent = snapshot.blocks
-              .filter(block => block.type === "answer")
-              .map(block => String(block.payload?.content || ""))
-              .join("");
-            if (answerContent.length > lastSeenAnswerLength) {
+            const answerContent = collectAnswerText(snapshot.blocks);
+            // "QRCODE" 是给前端看的占位，不是给人听的：文本还是占位前缀时按住不播，
+            // 一旦长成正常答案（含已压住的开头）再一次性补播，避免把字母一个个念出来。
+            const placeholderPrefix = isQrcodePlaceholderPrefix(answerContent);
+            if (!placeholderPrefix && answerContent.length > lastSeenAnswerLength) {
               notifyAnswerDelta(answerContent.slice(lastSeenAnswerLength), false);
               lastSeenAnswerLength = answerContent.length;
             }
@@ -305,7 +399,7 @@ export function useChatSend(scope?: string, handlers?: {
       });
       // 听播问答：流正常收尾后把答案交给播报页，出口与原来的阻塞链路保持一致；
       // 已被新一轮请求 / 停止操作取代时不派发，避免过期答案串到播报页。
-      if (usesReportAnswerOutlet && requestSeq === chatStore.activeRequestSeq) {
+      if (usesReportAnswerOutlet && requestSeq === chatStore.activeRequestSeq && !qrcodeHandled) {
         applyPodcastAnswer(aiMsgId, podcastAnswer);
       }
     } catch (error) {
@@ -323,7 +417,7 @@ export function useChatSend(scope?: string, handlers?: {
       }
     } finally {
       // 流异常 / 被取消时也补一次 ended 收尾，避免页面的流式听播会话一直挂着 loading 态。
-      if (lastSeenAnswerLength > 0) notifyAnswerDelta("", true);
+      if (lastSeenAnswerLength > 0 && !qrcodeHandled) notifyAnswerDelta("", true);
       // 本轮听播问答收尾（含异常 / 取消）：播报页据此关掉「正在理解」或退回异常列表。
       if (usesReportAnswerOutlet && requestSeq === chatStore.activeRequestSeq) {
         handlers?.onReportBlockingComplete?.();

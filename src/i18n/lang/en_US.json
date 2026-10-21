@@ -197,5 +197,11 @@
   "input-placeholder": "Enter your message",
   "slot-complete-selection": "Please complete the current selection",
   "podcast-quick-nav-alerts": "Alerts",
-  "podcast-quick-nav-ask": "Ask"
+  "podcast-quick-nav-ask": "Ask",
+  "qrcode-title": "QR code",
+  "qrcode-tip": "Scan with your phone to view",
+  "qrcode-empty": "No QR content",
+  "qrcode-failed": "Failed to generate the QR code",
+  "qrcode-copy": "Copy content",
+  "qrcode-copied": "Copied"
 }
