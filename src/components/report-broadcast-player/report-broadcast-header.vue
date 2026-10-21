@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import headerStatusLogo from "@/assets/img/header-status-logo.png";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import menuHistoryIcon from "@/assets/img/report-broadcast/feedback-history.svg";
 import menuPreferenceIcon from "@/assets/img/report-broadcast/icon-fav-setting.svg";
@@ -12,6 +13,8 @@ const props = defineProps<{
   status: string;
   qaVisible: boolean;
   active: boolean;
+  /** 是否展示品牌图标（播放中 / 已暂停 / 播报失败）；动效只跟 active 走 */
+  withIcon?: boolean;
   /** iframe 内嵌（from=sanvist_pc）时，右侧额外露出「最小化」 */
   canMinimize?: boolean;
 }>();
@@ -24,6 +27,9 @@ const emit = defineEmits<{
   "open-preference": [];
   "open-rate": [];
 }>();
+
+/** 播放中 / 已暂停 / 播报失败都带品牌图标，保证胶囊形态一致；流光只给播放中 */
+const showStatusLogo = computed(() => props.active || Boolean(props.withIcon));
 
 const menuVisible = ref(false);
 const { t } = useI18n();
@@ -72,11 +78,19 @@ function onItemTouchEnd() {
     <view class="report-broadcast-header__close" @tap="qaVisible ? onClose() : emit('exit-report')">
       <image class="report-broadcast-header__icon" :src="closeIcon" mode="aspectFit" />
     </view>
-    <view class="report-broadcast-header__status">
+    <view
+      class="report-broadcast-header__status"
+      :class="{ 'report-broadcast-header__status--with-icon': showStatusLogo }"
+    >
+      <!-- 播放中：与首页「正在回答」同款流光描边；已暂停只留图标，不出动效 -->
+      <view v-if="active" class="report-broadcast-header__status-border" />
+      <image
+        v-if="showStatusLogo"
+        class="report-broadcast-header__status-logo"
+        :src="headerStatusLogo"
+        mode="aspectFit"
+      />
       <text>{{ status }}</text>
-      <text v-if="active" class="report-broadcast-header__status-dots">
-        <text>.</text><text>.</text><text>.</text>
-      </text>
     </view>
     <view class="report-broadcast-header__actions">
       <view v-if="props.canMinimize" class="report-broadcast-header__minimize" @tap="emit('minimize')">
@@ -206,29 +220,76 @@ function onItemTouchEnd() {
   box-shadow: 0 4rpx 16rpx rgb(237 26 26 / 9%);
   backdrop-filter: blur(32rpx);
 }
-.report-broadcast-header__status-dots {
-  display: inline-flex;
-  margin-left: 2rpx;
-}
-.report-broadcast-header__status-dots text {
-  display: inline-block;
-  animation: report-broadcast-status-dot 1.2s infinite ease-in-out;
-}
-.report-broadcast-header__status-dots text:nth-child(2) {
-  animation-delay: 0.16s;
-}
-.report-broadcast-header__status-dots text:nth-child(3) {
-  animation-delay: 0.32s;
+/*
+ * 播放中胶囊：与首页「正在回答」同一套视觉
+ * - 品牌图标 22×22 + 6px 间距，宽度改为 hug（原固定 158rpx）
+ * - 流光描边：1.5px 线性渐变环，背景取 2 倍宽度并向左位移一个周期，首尾同色无缝循环
+ */
+.report-broadcast-header__status--with-icon {
+  position: relative;
+  box-sizing: border-box;
+  width: auto;
+  gap: 12rpx;
+  padding: 0 28rpx;
+  overflow: hidden;
+  box-shadow: 0 4rpx 16rpx rgb(0 0 0 / 8%);
 }
 
-@keyframes report-broadcast-status-dot {
-  0%, 60%, 100% {
-    opacity: 0.25;
-    transform: translateY(0);
+.report-broadcast-header__status-border {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 3rpx; // 1.5px 描边宽度
+  border-radius: 36rpx;
+  background-image: linear-gradient(
+    135deg,
+    #9197ea 0%,
+    #4392e4 16.515%,
+    #e3f1ff 24.42%,
+    #f8fbff 50%,
+    #e3f1ff 75.58%,
+    #4392e4 83.485%,
+    #9197ea 100%
+  );
+  background-size: 200% 100%;
+  animation: report-broadcast-capsule-flow 4s linear infinite;
+  will-change: background-position;
+  /* 先写标准属性、再用 -webkit- 兜底：老 WebView 只认前缀版本 */
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  pointer-events: none;
+}
+
+/* 图标与文字压在描边环之上 */
+.report-broadcast-header__status--with-icon > *:not(.report-broadcast-header__status-border) {
+  position: relative;
+  z-index: 1;
+}
+
+.report-broadcast-header__status-logo {
+  width: 44rpx;
+  height: 44rpx;
+  flex: 0 0 44rpx;
+}
+
+@keyframes report-broadcast-capsule-flow {
+  from {
+    background-position: 0% 50%;
   }
-  30% {
-    opacity: 1;
-    transform: translateY(-3rpx);
+  to {
+    background-position: 200% 50%;
+  }
+}
+
+/* 系统偏好减少动效时停在设计稿的静态渐变 */
+@media (prefers-reduced-motion: reduce) {
+  .report-broadcast-header__status-border {
+    animation: none;
   }
 }
 </style>

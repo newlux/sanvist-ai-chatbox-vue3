@@ -164,6 +164,7 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       :status="statusText"
       :qa-visible="isQaVisible"
       :active="playing"
+      :with-icon="playing || paused || error"
       :can-minimize="props.canMinimize"
       @dismiss-qa="emit('dismiss-qa')"
       @exit-report="exitReport"

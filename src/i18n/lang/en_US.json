@@ -64,7 +64,7 @@
   "attachment-only-query": "Please take a look at the attachment I sent",
   "upload-result-missing-url": "Upload result is missing the file URL",
   "upload-failed": "File upload failed",
-  "chat-status-generating": "Generating answer",
+  "chat-status-generating": "Answering",
   "chat-status-waiting": "Waiting...",
   "share-select-all": "Select all",
   "share-selected-rounds": "{count} rounds selected",

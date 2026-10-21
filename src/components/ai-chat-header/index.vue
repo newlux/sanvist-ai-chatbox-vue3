@@ -385,13 +385,9 @@ onBeforeUnmount(() => {
             <view v-if="props.generating" class="chat-header__generating-border">
               <view class="chat-header__generating-border-inner" />
             </view>
-            <view v-if="props.generating" class="chat-header__generating-mark">
-              <view />
-              <view />
-            </view>
-            <!-- 设计稿 326:1374 状态胶囊：22×22 品牌图标 + 14px 文案，间距 6px -->
+            <!-- 设计稿 326:1374 / 85:3217 状态胶囊：22×22 品牌图标 + 14px 文案，间距 6px；
+                 等待中与「正在回答」共用同一枚品牌图标 -->
             <image
-              v-if="!props.generating"
               class="chat-header__title-logo"
               src="@/assets/img/header-status-logo.png"
               mode="aspectFit"
@@ -865,15 +861,6 @@ onBeforeUnmount(() => {
 }
 
 // 品牌图标：设计稿 326:1376 / 85:3218（22×22），等待中与正在回答共用
-.chat-header__title-logo {
-  width: 44rpx; // 22px
-  height: 44rpx;
-  flex: 0 0 44rpx;
-}
-
-.chat-header__generating-mark view:nth-child(2) { animation-delay: .16s; }
-
-// 品牌图标：设计稿 326:1376（22×22）
 .chat-header__title-logo {
   width: 44rpx; // 22px
   height: 44rpx;
