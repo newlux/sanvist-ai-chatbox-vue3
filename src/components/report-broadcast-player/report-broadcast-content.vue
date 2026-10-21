@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ThinkStep } from "@/utils/ai-stream";
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
@@ -26,6 +27,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ "play-pause": []; seek: [seq: number] }>();
+const { t } = useI18n();
 const instance = getCurrentInstance();
 const transcriptScrollTop = ref(0);
 /**
@@ -363,7 +365,7 @@ function onProgressTouchEnd() {
         />
         <view class="report-broadcast-content__qa-loading-copy">
           <text class="report-broadcast-content__qa-title">
-            正在理解你的内容
+            {{ t("broadcast-understanding") }}
           </text>
           <!-- 标题位置固定：小标题始终占位，有文案才显示，不推动标题 -->
           <text class="report-broadcast-content__qa-subtitle">

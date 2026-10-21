@@ -2,6 +2,7 @@
 import type { ListenBroadcastStyle } from "@/api/listen-broadcast/types";
 import type { ReportVoiceOption } from "@/config/report-voices";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import headerStatusLogo from "@/assets/img/header-status-logo.png";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import arrowLeftIcon from "@/assets/img/nav-arrow-left.svg";
@@ -19,6 +20,8 @@ const emit = defineEmits<{
   confirm: [voice: ReportVoiceOption, style: ListenBroadcastStyle, moduleCodes: string[]];
   close: [];
 }>();
+
+const { t } = useI18n();
 
 /** PC 端内嵌时顶栏右侧露出「最小化」，替换原来的空占位 */
 const { canMinimize, onMinimize } = useIframeMinimize();
@@ -207,7 +210,7 @@ function closeSelector() {
               mode="aspectFit"
             />
             <text class="report-voice-selector__working-text">
-              等你选..
+              {{ t("report-waiting-select") }}
             </text>
           </view>
         </view>
@@ -219,7 +222,7 @@ function closeSelector() {
 
       <!-- ③ 页面标题(309:2113) -->
       <text class="report-voice-selector__title">
-        快来选择你的汇报助手吧
+        {{ t("report-voice-title") }}
       </text>
 
       <!-- ④ 主视觉区(309:2101)：人物 + 左右声波(309:2117 / 309:2155) -->
@@ -302,12 +305,12 @@ function closeSelector() {
         />
       </view>
       <text v-else class="report-voice-selector__hint">
-        可滑动切换
+        {{ t("report-voice-swipe-hint") }}
       </text>
 
       <!-- ⑪ CTA 按钮(309:2076) -->
       <view class="report-voice-selector__button" @tap="confirmVoice">
-        <text>下一步</text>
+        <text>{{ t("report-voice-next") }}</text>
       </view>
     </template>
   </view>

@@ -3,6 +3,7 @@ import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { UiChatMessage } from "@/stores/chat-types";
 import moment from "moment";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import iconWaveForm from "@/assets/img/icon-waveform.svg";
 import { guideStepCardDomId } from "@/utils/guide-content";
 import { isListenReportListened } from "@/utils/listen-report";
@@ -130,20 +131,33 @@ const emit = defineEmits([
   "content-grow",
 ]);
 
-const FALLBACK_OVERVIEW = {
-  userName: "杜老板",
-  greetingSuffix: "，你好。",
-  summary: "7月28日至8月3日设备作业126小时，较前期增加12%，先看整体变化吧！",
-};
+const { t } = useI18n();
 
+/** 经营概览卡片的兜底文案走词库；接口有姓名/摘要时用接口文案（摘要是后端生成的自然语言，无词条可映射） */
 const overview = computed(() => {
   const data = props.awakening;
-  const userName = data?.userName || FALLBACK_OVERVIEW.userName;
-  const summary = data?.content || FALLBACK_OVERVIEW.summary;
-  return { userName, greetingSuffix: FALLBACK_OVERVIEW.greetingSuffix, summary };
+  return {
+    userName: data?.userName || t("overview-fallback-user-name"),
+    greetingSuffix: t("overview-greeting-suffix"),
+    summary: data?.content || t("overview-fallback-summary"),
+  };
 });
 
-const listenBroadcastTitle = computed(() => props.listenBroadcast?.title?.trim() || "");
+/**
+ * 早报标题由后端按中文下发（目前只有「经营概览」一种），
+ * 这里做标题 → 词条映射：命中已知标题按当前语言展示，未命中的标题保持后端原文。
+ */
+const REPORT_TITLE_KEY_MAP: Record<string, string> = {
+  "经营概览": "overview-report-title",
+  "经营概览早报": "overview-report-title-morning",
+};
+
+const listenBroadcastTitle = computed(() => {
+  const raw = props.listenBroadcast?.title?.trim() || "";
+  if (!raw) return "";
+  const titleKey = REPORT_TITLE_KEY_MAP[raw];
+  return titleKey ? t(titleKey) : raw;
+});
 const listenBroadcastDate = computed(() => {
   const bizDate = props.listenBroadcast?.bizDate;
   const date = moment(bizDate, "YYYY-MM-DD", true);
@@ -798,7 +812,7 @@ watch(
                   {{ listenBroadcastTitle }}
                 </text>
                 <text class="business-overview__report-date">
-                  （{{ listenBroadcastDate }} 早报）
+                  {{ t("overview-morning-report", { date: listenBroadcastDate }) }}
                 </text>
               </view>
               <view
@@ -806,13 +820,13 @@ watch(
                 :class="{ 'business-overview__listen--listened': listenedReport }"
                 @tap="onListenReport"
               >
-                {{ listenedReport ? '已收听' : '去收听' }}
+                {{ listenedReport ? t("overview-listened") : t("overview-listen") }}
               </view>
             </view>
 
             <view v-if="showQuickList" class="business-overview__questions">
               <text class="business-overview__questions-title">
-                你还可以这么问
+                {{ t("overview-more-questions") }}
               </text>
               <view
                 v-for="(prompt, index) in quickPrompts"
@@ -1104,16 +1118,21 @@ watch(
 }
 
 // 设计稿 326:1347（16px / Bold / #0D0D0D）
+// 标题与日期同一行：标题可压缩省略（英文标题更长），日期保持完整体积
 .business-overview__report-title {
+  min-width: 0;
+  overflow: hidden;
   color: #0d0d0d;
   font-size: 32rpx; // 16px
   font-weight: 700;
   line-height: 46rpx; // 23px
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 // 设计稿 326:1348（14px / #5E5E5E）
 .business-overview__report-date {
+  flex-shrink: 0;
   color: #5e5e5e;
   font-size: 28rpx; // 14px
   line-height: 40rpx; // 20px

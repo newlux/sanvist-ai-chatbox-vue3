@@ -6,6 +6,7 @@ import type {
 import type { ReportPlaybackRate } from "@/config/report-playback-rate";
 import type { ThinkStep } from "@/utils/ai-stream";
 import { computed, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { getListenBroadcastHistory } from "@/api/listen-broadcast";
 import { useListenBroadcastPlayer } from "@/hooks/useListenBroadcastPlayer";
 import ReportBroadcastContent from "./report-broadcast-content.vue";
@@ -64,15 +65,17 @@ const activeHistoryBizDate = ref("");
 const currentBizDate = ref("");
 let finishedNotified = false;
 
+const { t } = useI18n();
+
 const isQaVisible = computed(() => props.qaLoading || Boolean(props.qaAnswer));
 const statusText = computed(() => {
-  if (props.qaLoading) return "思考中";
-  if (props.qaAnswer) return "Sani 说..";
-  if (paused.value) return "已暂停";
-  if (loading.value) return "准备中";
-  if (playing.value) return "播报中";
-  if (error.value) return "播报失败";
-  return "播报完成";
+  if (props.qaLoading) return t("broadcast-status-thinking");
+  if (props.qaAnswer) return t("broadcast-status-answering");
+  if (paused.value) return t("broadcast-status-paused");
+  if (loading.value) return t("broadcast-status-preparing");
+  if (playing.value) return t("broadcast-status-playing");
+  if (error.value) return t("broadcast-status-failed");
+  return t("broadcast-status-finished");
 });
 
 // 播放态同步给宿主页：洞察收起态的重播按钮沿用这里同一套播放/暂停图标映射。

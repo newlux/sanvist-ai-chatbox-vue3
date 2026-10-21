@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { GuideSuggestionPayload } from "@/api/chat/types";
 import { computed, nextTick, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import closeIcon from "@/assets/img/icon-close.svg";
 
 /**
@@ -38,12 +39,14 @@ const emit = defineEmits<{
   (e: "height-change", value: number): void;
 }>();
 
+const { t } = useI18n();
+
 /** 末尾输入框：用户自己写的入口 */
 const draftText = ref("");
 
 const options = computed(() => (Array.isArray(props.payload?.options) ? props.payload.options : []));
 /** 灰色小标签取 note，老数据没有时用默认文案 */
-const cardLabel = computed(() => String(props.payload?.note || "").trim() || "请选择");
+const cardLabel = computed(() => String(props.payload?.note || "").trim() || t("common-select"));
 const question = computed(() => String(props.payload?.question || "").trim());
 /** 末尾输入框的 placeholder */
 const otherText = computed(() => String(props.payload?.other_text || "").trim());
@@ -159,7 +162,7 @@ watch(() => props.visible, () => {
     </view>
 
     <text class="guide-suggestion-sheet__hint">
-      内容由AI生成，请核实重要信息
+      {{ t("ai-content-disclaimer") }}
     </text>
   </view>
 </template>

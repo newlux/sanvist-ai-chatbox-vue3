@@ -1,35 +1,35 @@
 import type { VisitorRole } from "@/stores/modules/user";
 
-/** 老板视角：关注车队整体状态、进度、能耗。 */
+/** 老板视角：关注车队整体状态、进度、能耗。存 i18n key，展示前由页面按当前语言翻译 */
 export const OWNER_QUICK_PROMPTS = [
-  "今天一共多少台车在线？",
-  "今天哪些设备没上线？",
-  "今天有几台设备已经出工？",
-  "这个月项目整体进度怎么样？",
-  "这周项目设备总工时多少？",
-  "这个月哪台车干得最多？",
-  "项目设备最近有没有低活跃的",
-  "哪几台车连续几天没干活了",
-  "这个工地设备运行情况能看下吗",
-  "这月哪台泵车耗油最多",
-  "这个月设备一共加了多少油、充了多少电",
-  "哪台车单位油耗最高",
-  "队里有没有单位能耗异常高的车",
-  "油耗比上月涨了，是干活多还是单位能耗变高",
-  "队里哪台车油量快见底了",
-  "这个月设备整体干了多少活",
+  "quick-prompt-owner-online-today",
+  "quick-prompt-owner-offline-today",
+  "quick-prompt-owner-working-today",
+  "quick-prompt-owner-month-progress",
+  "quick-prompt-owner-week-hours",
+  "quick-prompt-owner-month-top-device",
+  "quick-prompt-owner-low-activity",
+  "quick-prompt-owner-idle-days",
+  "quick-prompt-owner-site-status",
+  "quick-prompt-owner-month-fuel-top",
+  "quick-prompt-owner-month-fuel-energy",
+  "quick-prompt-owner-unit-fuel-top",
+  "quick-prompt-owner-energy-abnormal",
+  "quick-prompt-owner-fuel-up-reason",
+  "quick-prompt-owner-low-fuel",
+  "quick-prompt-owner-month-total-work",
 ];
 
-/** 操作手视角：关注自己这台设备的状态、位置、油耗。 */
+/** 操作手视角：关注自己这台设备的状态、位置、油耗。存 i18n key，展示前由页面按当前语言翻译 */
 export const OPERATOR_QUICK_PROMPTS = [
-  "我的设备现在状态怎么样",
-  "我上周干了多少活",
-  "我的设备现在在什么位置",
-  "我的设备还剩多少油？",
-  "我的设备上周干了多少活",
-  "最近7天的设备工作情况",
-  "我的设备昨天耗了多少油",
-  "最近7天我的设备是不是越来越费油",
+  "quick-prompt-operator-status",
+  "quick-prompt-operator-last-week-work",
+  "quick-prompt-operator-location",
+  "quick-prompt-operator-fuel-left",
+  "quick-prompt-operator-device-last-week",
+  "quick-prompt-operator-recent-7-days",
+  "quick-prompt-operator-yesterday-fuel",
+  "quick-prompt-operator-fuel-trend",
 ];
 
 const QUICK_PROMPT_COUNT = 2;

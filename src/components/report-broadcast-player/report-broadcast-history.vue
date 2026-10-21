@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { ListenBroadcastHistoryItem } from "@/api/listen-broadcast/types";
+import { useI18n } from "vue-i18n";
 import closeIcon from "@/assets/img/voice-assistant/voice-close.svg";
 import { useSafeArea } from "@/hooks/useSafeArea";
 
 defineProps<{ loading: boolean; items: ListenBroadcastHistoryItem[]; activeBizDate: string }>();
 const emit = defineEmits<{ close: []; select: [item: ListenBroadcastHistoryItem] }>();
 const { safeBottomPx } = useSafeArea();
+const { t } = useI18n();
 </script>
 
 <template>
@@ -16,7 +18,7 @@ const { safeBottomPx } = useSafeArea();
     >
       <view class="report-broadcast-history__header">
         <text class="report-broadcast-history__title">
-          历史播放列表
+          {{ t("broadcast-history-title") }}
         </text>
         <image
           class="report-broadcast-history__close"
@@ -27,19 +29,19 @@ const { safeBottomPx } = useSafeArea();
       </view>
       <view class="report-broadcast-history__tabs">
         <view class="report-broadcast-history__tab report-broadcast-history__tab--active">
-          <text>日报</text>
+          <text>{{ t("broadcast-history-tab-daily") }}</text>
         </view>
         <view class="report-broadcast-history__tab">
-          <text>周报</text>
+          <text>{{ t("broadcast-history-tab-weekly") }}</text>
         </view>
         <view class="report-broadcast-history__tab">
-          <text>月报</text>
+          <text>{{ t("broadcast-history-tab-monthly") }}</text>
         </view>
       </view><scroll-view class="report-broadcast-history__list" scroll-y>
         <view v-if="loading" class="report-broadcast-history__empty">
-          加载中...
+          {{ t("loading") }}
         </view><view v-else-if="!items.length" class="report-broadcast-history__empty">
-          暂无日报
+          {{ t("broadcast-history-empty") }}
         </view>
         <view
           v-for="(item, index) in items"
@@ -54,7 +56,7 @@ const { safeBottomPx } = useSafeArea();
           @tap="emit('select', item)"
         >
           <view class="report-broadcast-history__title-row">
-            <text>{{ item.title || "经营概览早报" }}</text><text v-if="index === 0" class="report-broadcast-history__new">
+            <text>{{ item.title || t("overview-report-title-morning") }}</text><text v-if="index === 0" class="report-broadcast-history__new">
               NEW
             </text>
           </view><text class="report-broadcast-history__date">

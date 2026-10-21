@@ -15,9 +15,10 @@
  * 白色背景不可见；现在用内容驱动高度，摘要变长按钮自动下移让位）。
  * 组件只做展示 + 事件回传：关闭、点击遮罩、加急处理。
  */
+import type { ReportInsightItem } from "@/hooks/useReportInsights";
+import { useI18n } from "vue-i18n";
 import bellIcon from "@/assets/img/report-broadcast/insight-detail-bell.svg";
 import closeIcon from "@/assets/img/report-broadcast/insight-detail-close.svg";
-import type { ReportInsightItem } from "@/hooks/useReportInsights";
 
 defineProps<{
   /** 弹窗当前展示的异常条目；为 null 时整层不渲染。 */
@@ -30,6 +31,8 @@ const emit = defineEmits<{
   /** 「加急处理」按钮：父组件决定走加急 toggle 还是跳转任务页等。 */
   urgent: [item: ReportInsightItem];
 }>();
+
+const { t } = useI18n();
 
 function onUrgentTap(item: ReportInsightItem) {
   emit("urgent", item);
@@ -57,7 +60,7 @@ function onUrgentTap(item: ReportInsightItem) {
         hover-class="insight-detail__close--active"
         hover-stay-time="80"
         role="button"
-        aria-label="关闭"
+        :aria-label="t('close')"
         @tap="emit('close')"
       >
         <image class="insight-detail__close-icon" :src="closeIcon" mode="aspectFit" />
@@ -83,7 +86,7 @@ function onUrgentTap(item: ReportInsightItem) {
         与头部的 36rpx 间距（设计稿 84-28-38=18px，扣掉行高 17px 后净空约 36rpx）
       -->
       <text class="insight-detail__section-label">
-        事件详情
+        {{ t("insight-detail-section") }}
       </text>
 
       <!--
@@ -98,7 +101,7 @@ function onUrgentTap(item: ReportInsightItem) {
         -->
         <view class="insight-detail__row">
           <text class="insight-detail__row-text">
-            异常类型：{{ item.eventCategory }}-{{ item.eventType }}
+            {{ t("insight-detail-type", { value: `${item.eventCategory}-${item.eventType}` }) }}
           </text>
         </view>
 
@@ -108,7 +111,7 @@ function onUrgentTap(item: ReportInsightItem) {
         -->
         <view class="insight-detail__row">
           <text class="insight-detail__row-text">
-            发生时间：{{ item.eventTime }}
+            {{ t("insight-detail-time", { value: item.eventTime }) }}
           </text>
         </view>
 
@@ -122,7 +125,7 @@ function onUrgentTap(item: ReportInsightItem) {
         -->
         <view class="insight-detail__row insight-detail__row--summary">
           <text class="insight-detail__row-text insight-detail__row-prefix">
-            事件摘要：
+            {{ t("insight-detail-summary") }}
           </text>
           <text class="insight-detail__row-text">
             {{ item.description }}
@@ -144,11 +147,11 @@ function onUrgentTap(item: ReportInsightItem) {
         hover-class="insight-detail__action--active"
         hover-stay-time="80"
         role="button"
-        aria-label="加急处理"
+        :aria-label="t('insight-detail-urgent')"
         @tap="onUrgentTap(item)"
       >
         <text class="insight-detail__action-text">
-         {{ item.isUrgent ? '取消加急' : '加急处理' }} 
+          {{ item.isUrgent ? t("insight-detail-urgent-cancel") : t("insight-detail-urgent") }}
         </text>
       </view>
     </view>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ListenBroadcastConfig, ListenBroadcastStyle } from "@/api/listen-broadcast/types";
 import { computed, onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { getListenBroadcastConfig, saveListenBroadcastPreference } from "@/api/listen-broadcast";
 import headerStatusLogo from "@/assets/img/header-status-logo.png";
 import minimizeIcon from "@/assets/img/min_icon.png";
@@ -26,6 +27,7 @@ const emit = defineEmits<{
 }>();
 
 const logger = createLogger("report-style-selector");
+const { t } = useI18n();
 const { saveReportStyle, loadReportStyle } = useReportStyle();
 /** PC 端内嵌时顶栏右侧露出「最小化」，替换原来的等宽占位 */
 const { canMinimize, onMinimize } = useIframeMinimize();
@@ -36,7 +38,8 @@ const styleIndex = ref(0);
 const checkedIds = ref<string[]>([]);
 const reportTime = ref("08:00");
 const reportTimePickerOpen = ref(false);
-const selectionHint = ref("");
+/** 校验提示存词条 key，模板再翻译：切语言后提示也能跟着变 */
+const selectionHintKey = ref("");
 
 const styles = computed(() => config.value?.styles || []);
 const modules = computed(() => config.value?.modules || []);
@@ -57,7 +60,7 @@ function resetChecked() {
 
 function toggleModule(code: string) {
   if (loading.value || submitting.value || !modules.value.some(item => item.code === code)) return;
-  selectionHint.value = "";
+  selectionHintKey.value = "";
   if (checkedIds.value.includes(code)) {
     checkedIds.value = checkedIds.value.filter(item => item !== code);
   }
@@ -95,14 +98,14 @@ async function confirmStyle() {
   const style = currentStyle.value;
   if (!style || submitting.value) return;
   if (!props.voiceCode) {
-    selectionHint.value = "音色信息缺失，请返回重新选择";
+    selectionHintKey.value = "report-style-hint-no-voice";
     return;
   }
   if (!checkedIds.value.length) {
-    selectionHint.value = "请至少选择一项汇报内容";
+    selectionHintKey.value = "report-style-hint-empty";
     return;
   }
-  selectionHint.value = "";
+  selectionHintKey.value = "";
   submitting.value = true;
   try {
     await saveListenBroadcastPreference({
@@ -115,7 +118,7 @@ async function confirmStyle() {
     emit("confirm", style, checkedIds.value);
   } catch (error) {
     logger.error("failed to save listen broadcast preference", error);
-    selectionHint.value = "保存失败，请稍后重试";
+    selectionHintKey.value = "report-style-hint-save-failed";
   } finally {
     submitting.value = false;
   }
@@ -160,7 +163,7 @@ onMounted(() => {
             mode="aspectFit"
           />
           <text class="report-style-selector__working-text">
-            等你选..
+            {{ t("report-waiting-select") }}
           </text>
         </view>
       </view>
@@ -172,7 +175,7 @@ onMounted(() => {
 
     <!-- ③ 页面标题(309:2204) -->
     <text class="report-style-selector__title">
-      请选择汇报内容
+      {{ t("report-style-title") }}
     </text>
 
     <!-- ④ 汇报时间行(309:2224 / 309:2259 / 309:2283) -->
@@ -186,7 +189,7 @@ onMounted(() => {
     >
       <view class="report-style-selector__time-row" @tap="onReportTimePickerTap">
         <text class="report-style-selector__time-text">
-          汇报时间：
+          {{ t("report-style-time-label") }}
         </text>
         <text class="report-style-selector__time-text">
           {{ reportTime }}
@@ -221,7 +224,7 @@ onMounted(() => {
         </template>
         <template v-else>
           <text class="report-style-selector__style-label">
-            讲话风格
+            {{ t("report-style-label") }}
           </text>
           <text class="report-style-selector__style-name">
             {{ currentStyle?.name || "" }}
@@ -252,7 +255,7 @@ onMounted(() => {
 
     <!-- ⑥ 权限说明(940:154) -->
     <text class="report-style-selector__permission-hint">
-      你的权限可以看到以下数据
+      {{ t("report-style-permission-hint") }}
     </text>
 
     <!-- ⑦ 权限数据胶囊(1004:28/29/42, 1024:21)：扇形排布 -->
@@ -289,15 +292,15 @@ onMounted(() => {
     </view>
 
     <!-- ⑧ CTA 按钮(940:132) -->
-    <text v-if="selectionHint" class="report-style-selector__selection-hint">
-      {{ selectionHint }}
+    <text v-if="selectionHintKey" class="report-style-selector__selection-hint">
+      {{ t(selectionHintKey) }}
     </text>
     <view
       class="report-style-selector__button"
       :class="{ 'report-style-selector__button--disabled': !canConfirm }"
       @tap="canConfirm && confirmStyle()"
     >
-      <text>{{ loading ? "加载中" : submitting ? "保存中" : "开始收听" }}</text>
+      <text>{{ loading ? t("report-style-loading") : submitting ? t("report-style-saving") : t("report-style-start") }}</text>
     </view>
   </view>
 </template>

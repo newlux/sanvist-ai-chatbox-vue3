@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import menuHistoryIcon from "@/assets/img/report-broadcast/feedback-history.svg";
 import menuPreferenceIcon from "@/assets/img/report-broadcast/icon-fav-setting.svg";
@@ -25,12 +26,13 @@ const emit = defineEmits<{
 }>();
 
 const menuVisible = ref(false);
+const { t } = useI18n();
 
 /** 展开菜单三项：图标均取自设计稿，行为沿用宿主页已有事件。 */
 const menuItems = [
-  { key: "history", label: "历史记录", icon: menuHistoryIcon },
-  { key: "preference", label: "偏好设置", icon: menuPreferenceIcon },
-  { key: "rate", label: "播放倍速", icon: menuRateIcon },
+  { key: "history", labelKey: "broadcast-menu-history", icon: menuHistoryIcon },
+  { key: "preference", labelKey: "broadcast-menu-preference", icon: menuPreferenceIcon },
+  { key: "rate", labelKey: "broadcast-menu-rate", icon: menuRateIcon },
 ] as const;
 
 function onClose() {
@@ -105,7 +107,7 @@ function onItemTouchEnd() {
         >
           <image class="report-broadcast-header__menu-icon" :src="item.icon" mode="aspectFit" />
           <text class="report-broadcast-header__menu-label">
-            {{ item.label }}
+            {{ t(item.labelKey) }}
           </text>
         </view>
       </view>

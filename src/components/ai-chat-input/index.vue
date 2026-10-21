@@ -405,7 +405,7 @@ onBeforeUnmount(() => {
               class="voice-panel__tips"
               :class="{ 'voice-panel__tips--cancelling': voice.cancelling }"
             >
-              松手发送  上滑取消
+              {{ t("input-voice-tip") }}
             </text>
 
             <!-- 11101:698 Frame（46×46 @ 164,698）：麦克风触达区，水平居中 -->
@@ -442,10 +442,10 @@ onBeforeUnmount(() => {
               :class="{ 'voice-listening__header--cancelling': voice.cancelling }"
             >
               <text class="voice-listening__title">
-                {{ voice.cancelling ? "松开取消语音" : "Sani正在听，请说话" }}
+                {{ voice.cancelling ? t("input-voice-cancel-voice") : t("input-voice-listening") }}
               </text>
               <text class="voice-listening__hint">
-                {{ voice.cancelling ? "松开手指取消识别" : "说完松手" }}
+                {{ voice.cancelling ? t("input-voice-cancel-recognize") : t("input-voice-release-send") }}
               </text>
             </view>
 
@@ -514,18 +514,18 @@ onBeforeUnmount(() => {
           <view
             v-if="voice.isRecognizing"
             class="voice-confirm__recognizing"
-            aria-label="语音识别中"
+            :aria-label="t('input-voice-recognizing-aria')"
           >
             <view class="voice-confirm__spinner" />
-            <text class="voice-confirm__recognizing-text"> 语音识别中... </text>
+            <text class="voice-confirm__recognizing-text">{{ t("input-voice-recognizing") }}</text>
           </view>
           <view
             v-else-if="voice.restartRecording"
             class="voice-confirm__recognizing"
-            aria-label="正在录音"
+            :aria-label="t('input-voice-recording-aria')"
           >
             <text class="voice-confirm__recognizing-text">
-              {{ voice.cancelling ? "松开取消" : "正在录音，松开识别" }}
+              {{ voice.cancelling ? t("input-voice-cancel") : t("input-voice-recording") }}
             </text>
           </view>
         </view>
@@ -630,7 +630,7 @@ onBeforeUnmount(() => {
         >
           <template v-if="isLoading || voice.isRecognizing">
             <text class="input-bar__voice-hint">
-              {{ isLoading ? "回答生成中..." : "识别中..." }}
+              {{ isLoading ? t("input-generating") : t("input-recognizing") }}
             </text>
           </template>
           <template v-else>
@@ -675,7 +675,7 @@ onBeforeUnmount(() => {
             class="input-bar__textarea"
             :value="draft"
             :style="{ height: textTextareaHeight }"
-            placeholder="请输入内容"
+            :placeholder="t('input-placeholder')"
             :disabled="isLoading"
             :auto-height="false"
             :adjust-position="false"
@@ -734,7 +734,7 @@ onBeforeUnmount(() => {
       <!-- 输入单元下提示（Figma: 41116:6071）。跟着输入栏一起上移，键盘弹起时同样要看得见 -->
       <view class="chat-input__footer">
         <text class="chat-input__footer-text">
-          内容由AI生成，请核实重要信息
+          {{ t("ai-content-disclaimer") }}
         </text>
       </view>
     </view>
