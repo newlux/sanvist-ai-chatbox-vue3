@@ -45,8 +45,10 @@ function onStartChat() {
   font-family: "PingFang SC", sans-serif;
 }
 
+/* 游客欢迎页换成 Ardot 306:2777 的全白主题（含顶部 safe-area 区域也必须是白底） */
 .welcome--visitor {
-  background-image: url("@/assets/img/icon-bg-visitor.jpeg");
+  background: #fafafa;
+  color: #0d0d0d;
 }
 
 .welcome:not(.welcome--visitor) {

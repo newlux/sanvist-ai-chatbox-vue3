@@ -13,7 +13,7 @@ const props = defineProps<{
   status: string;
   qaVisible: boolean;
   active: boolean;
-  /** 是否展示品牌图标（播放中 / 已暂停 / 播报失败）；动效只跟 active 走 */
+  /** 是否展示品牌图标（播放中 / 已暂停 / 准备中 / 播报失败）；动效只跟 active 走 */
   withIcon?: boolean;
   /** iframe 内嵌（from=sanvist_pc）时，右侧额外露出「最小化」 */
   canMinimize?: boolean;
@@ -28,7 +28,7 @@ const emit = defineEmits<{
   "open-rate": [];
 }>();
 
-/** 播放中 / 已暂停 / 播报失败都带品牌图标，保证胶囊形态一致；流光只给播放中 */
+/** 播放中 / 已暂停 / 准备中 / 播报失败都带品牌图标，保证胶囊形态一致；流光只给播放中 */
 const showStatusLogo = computed(() => props.active || Boolean(props.withIcon));
 
 const menuVisible = ref(false);
