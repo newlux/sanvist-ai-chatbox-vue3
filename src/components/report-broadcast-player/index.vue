@@ -160,11 +160,12 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
     :class="{ 'report-broadcast-player--overlay': showHistory || showRatePanel }"
     :style="{ height: `calc(100% - ${dockOffset})` }"
   >
+    <!-- 准备中（loading）也带品牌图标，与「已暂停」形态一致；流光只跟 active=playing 走，准备中无动效 -->
     <ReportBroadcastHeader
       :status="statusText"
       :qa-visible="isQaVisible"
       :active="playing"
-      :with-icon="playing || paused || error"
+      :with-icon="playing || paused || error || loading"
       :can-minimize="props.canMinimize"
       @dismiss-qa="emit('dismiss-qa')"
       @exit-report="exitReport"
