@@ -7,7 +7,7 @@ export function getRoleOptions() {
   return request.get<RoleOptionsData>("/user/role-options").json();
 }
 
-/** 机型下拉选项（作业指导页机型选项卡数据源） */
+/** 机型列表（「选择体验的设备」页数据源） */
 export function getDeviceModels() {
   return request.get<DeviceModelsData>("/user/device-models").json();
 }

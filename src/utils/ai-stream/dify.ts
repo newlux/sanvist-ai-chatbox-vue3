@@ -404,7 +404,8 @@ function unwrapComponent(value: Record<string, unknown>) {
   if (scene === "guide") return { kind: "guide" as const, payload: value };
   // 作业协同的 table / echarts / slot 与 ai问问 是同一套协议（含 data.format=markdown 的表格），
   // 一起走交互组件解析：parseAskBlock 认不出的类型（如 voice）仍会被丢弃，不会漏到正文里。
-  if (scene === "ask" || scene === "task") return { kind: "ask" as const, payload: value };
+  // test 是任务协同当前下发的 scene，与早期的 task 同构。
+  if (scene === "ask" || scene === "task" || scene === "test") return { kind: "ask" as const, payload: value };
   if (!scene) {
     return value.event || value.dify_event
       ? { kind: "sanvist" as const, payload: value }

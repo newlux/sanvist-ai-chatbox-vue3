@@ -1,6 +1,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, toRefs } from "vue";
 import { useI18n } from "vue-i18n";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
+import { isAsrServiceFailure } from "@/utils/asr-error";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
@@ -365,6 +366,11 @@ export function useVoiceInput(options: VoiceInputOptions) {
   }
 
   function toastVoiceError(error: unknown, fallback: string) {
+    // ASR 服务侧失败（后端 500「系统繁忙」）对用户没意义，统一按「没识别到内容」提示重试
+    if (isAsrServiceFailure(error)) {
+      uni.showToast({ title: t("asr-no-content-retry"), icon: "none" });
+      return;
+    }
     const raw = error instanceof Error
       ? error.message
       : (error && typeof error === "object"

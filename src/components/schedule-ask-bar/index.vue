@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
-import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
+import { isAsrServiceFailure } from "@/utils/asr-error";
 import { createLogger } from "@/utils/logger";
+import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
 /**
@@ -18,7 +19,8 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
  *
  * 右侧是同一个按钮位：空态 = 灰色麦克风（按住说话）、语音态 = 红色麦克风、有内容 = 发送按钮。
  *
- * 另外稿子 6694:101 是胶囊右侧那颗独立的键盘图标（17.1×10、`#6B6B6B`），
+ * 另外稿子 6694:98 / 6694:109 是胶囊右侧那颗独立的键盘按钮：34×34 白底圆形 +
+ * `#C8201E` 描边 + 阴影（`0 3px 5px -1px rgba(0,0,0,.086)`），内部 20×20 键盘图形（`#6B6B6B`）；
  * 按需求做「输入框显隐开关」：点它收起 / 展开输入胶囊。
  *
  * 语音识别沿用项目既有链路（VoiceRecorder + /speech/asr/*），识别结果直接落到输入框里，
@@ -64,10 +66,16 @@ const waveDots = [0.8, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.05, 0.02];
  * 键盘避让只作用在**输入胶囊**上：输入框显隐会开 / 收软键盘，
  * 若把整条（含键盘按钮）一起平移，键盘按钮的位置就会跟着跳；
  * 按钮固定在原处不动，抬升的只有胶囊。
+ *
+ * 收起 / 展开用 scale 0 → 1 的缩放（配合 opacity）：布局占位仍是 240×38，
+ * 所以键盘按钮不会跟着跳；transform 只能走内联样式（键盘避让的位移也在这里），
+ * CSS 里的 transform 会被它覆盖，缩放才会写在这一处。
  */
-const pillStyle = computed(() => (
-  keyboardHeight.value > 0 ? { transform: `translateX(${-keyboardHeight.value}px)` } : {}
-));
+const pillStyle = computed(() => {
+  const shift = keyboardHeight.value > 0 ? -keyboardHeight.value : 0;
+  const scale = visible.value ? 1 : 0;
+  return { transform: `translateX(${shift}px) scale(${scale})` };
+});
 
 let recorder: RecorderLike | null = null;
 /** 录音器是否真的开始录了（权限申请/启动都可能是异步的） */
@@ -94,6 +102,8 @@ function withTimeout<T>(promise: Promise<T>) {
 }
 
 function errorText(error: unknown, fallback: string) {
+  // ASR 服务侧失败统一提示，不把后端原始 message（code=500 系统繁忙）弹给用户
+  if (isAsrServiceFailure(error)) return t("asr-no-content-retry");
   const raw = error instanceof Error
     ? error.message
     : (error && typeof error === "object"
@@ -117,16 +127,25 @@ function onSubmit() {
 }
 
 const inputRef = ref<{ focus?: () => void } | null>(null);
+/** 展开动画跑完再聚焦：软键盘一弹出就会触发键盘避让位移，会把 0 → 1 的缩放打断 */
+let focusTimer: ReturnType<typeof setTimeout> | null = null;
 
 function toggleVisible() {
   visible.value = !visible.value;
   uni.hideKeyboard();
+  if (focusTimer) {
+    clearTimeout(focusTimer);
+    focusTimer = null;
+  }
   if (!visible.value) {
     draft.value = "";
     return;
   }
-  // 展开后直接聚焦：点键盘图标就是要打字
-  nextTick(() => inputRef.value?.focus?.());
+  // 展开后聚焦（点键盘图标就是要打字），等过渡结束再弹键盘
+  focusTimer = setTimeout(() => {
+    focusTimer = null;
+    inputRef.value?.focus?.();
+  }, 220);
 }
 
 /* ---------------- 语音输入（按住说话 → 松手识别 → 文本落到输入框） ---------------- */
@@ -254,6 +273,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   unbindWindowEnd();
   if (keyboardWatcher) uni.offKeyboardHeightChange?.(keyboardWatcher);
+  if (focusTimer) {
+    clearTimeout(focusTimer);
+    focusTimer = null;
+  }
   jobSeq += 1;
   recorder?.cancel?.();
 });
@@ -357,13 +380,16 @@ onBeforeUnmount(() => {
   background: #ffffff;
   box-shadow: 0 3px 5px -1px rgba(0, 0, 0, 0.086);
   pointer-events: auto;
-  /* 键盘避让的平移只作用在胶囊上（键盘按钮不跟着动） */
-  transition: transform 0.16s ease-out;
+  /* 显隐：从键盘按钮那一侧（右缘）缩放展开，位移与缩放都写在内联 transform 上 */
+  transform-origin: right center;
+  transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+  will-change: transform, opacity;
 }
 
-/* 收起态：只隐藏、不移除（保留 240×38 占位），键盘按钮位置因此保持不变 */
+/* 收起态：只隐藏、不移除（保留 240×38 占位），键盘按钮位置因此保持不变。
+   不加 visibility，否则 opacity / scale 的过渡会被瞬间截断 */
 .schedule-ask__pill--hidden {
-  visibility: hidden;
+  opacity: 0;
   pointer-events: none;
 }
 
@@ -457,14 +483,20 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 键盘图标：17.1×10 图形，外面给 28×28 触达区（稿子 6694:101） */
+/* 键盘按钮（稿子 6694:98 / 6694:109）：34×34 圆形，白底 + #C8201E 描边 + 阴影 0 3px 5px -1px rgba(0,0,0,.086)；
+   内部 20×20 键盘图形（#6B6B6B），控制输入框显隐 */
 .schedule-ask__keyboard {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 28px;
-  width: 28px;
-  height: 28px;
+  flex: 0 0 34px;
+  box-sizing: border-box;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #c8201e;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 3px 5px -1px rgba(0, 0, 0, 0.086);
   pointer-events: auto;
 
   image {

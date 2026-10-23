@@ -68,8 +68,8 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     icon: iconHelp,
     subagent: "guide",
     mode: "page",
-    // 先进讲解模式选择页（新老手），选完由该页 redirect 到作业指导
-    url: "/pages/users/index",
+    // 先选体验的设备（独立页），再进讲解模式选择页（新老手），最后进作业指导
+    url: "/pages/device-select/index",
   },
   {
     key: "repair-master-ai",
