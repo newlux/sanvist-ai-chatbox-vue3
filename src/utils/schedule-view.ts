@@ -19,8 +19,8 @@ export function stashPendingScheduleView(payload: GanttViewPayload | Record<stri
     uni.setStorageSync(PENDING_SCHEDULE_VIEW_KEY, JSON.stringify(payload || {}));
   }
   catch (error) {
-    // 存储不可用时仍然放行跳转，页内会退回 mock 数据渲染
-    logger.warn("调度视图数据写入失败，页面将退回 mock", error);
+    // 存储不可用时仍然放行跳转，页内没有数据就渲染空视图
+    logger.warn("调度视图数据写入失败，页面将渲染空视图", error);
   }
 }
 

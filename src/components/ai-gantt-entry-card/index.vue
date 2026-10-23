@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 /**
  * 甘特图入口卡 —— 设计稿 4708:743 里的「任务协同-当天任务甘特图」卡片（节点 4750:17 / 4750:28）。
  *
@@ -7,27 +8,34 @@
  *      → 左侧 16px 双人小图标（设计稿切图 icon-gantt-contacts.png）
  *      → 标题 28rpx Medium #000000
  *      → 右侧箭头（红色描边 #E01313）
- *      → 三行键值：标签 22rpx #999999 左对齐，值 24rpx #000000 右对齐（状态 / 设备数 / 任务数）
+ *      → 键值行动态填充：标签 22rpx #999999 左对齐，值 24rpx #000000 右对齐
+ *        （状态 / 设备数 / 任务数，哪项没有数据就整行不显示，全空时键值区不渲染）
  *
  * 只负责展示与点击上报，跳转由页面处理（emit `tap`）。
  */
 
 defineOptions({ name: "AiGanttEntryCard" });
 
-defineProps({
+const props = defineProps({
   /** 卡片标题 */
   title: { type: String, default: "任务协同-当天任务甘特图" },
-  /** 状态值 */
-  status: { type: String, default: "已下发" },
-  /** 设备数描述 */
-  devices: { type: String, default: "搅拌车 4 台｜泵车 1 台" },
-  /** 任务数描述 */
-  taskCount: { type: String, default: "15 个" },
+  /** 状态值：空则「状态」行不显示 */
+  status: { type: String, default: "" },
+  /** 设备数描述：空则「设备数」行不显示 */
+  devices: { type: String, default: "" },
+  /** 任务数描述：空则「任务数」行不显示 */
+  taskCount: { type: String, default: "" },
 });
 
 const emit = defineEmits<{
   tap: [];
 }>();
+
+/** 各键值行去空白后判断有无数据，没有就整行不显示 */
+const statusText = computed(() => props.status.trim());
+const devicesText = computed(() => props.devices.trim());
+const taskCountText = computed(() => props.taskCount.trim());
+const hasRows = computed(() => Boolean(statusText.value || devicesText.value || taskCountText.value));
 </script>
 
 <template>
@@ -45,29 +53,29 @@ const emit = defineEmits<{
       <view class="gantt-entry__chevron" />
     </view>
 
-    <view class="gantt-entry__rows">
-      <view class="gantt-entry__row">
+    <view v-if="hasRows" class="gantt-entry__rows">
+      <view v-if="statusText" class="gantt-entry__row">
         <text class="gantt-entry__label">
           状态
         </text>
         <text class="gantt-entry__value">
-          {{ status }}
+          {{ statusText }}
         </text>
       </view>
-      <view class="gantt-entry__row">
+      <view v-if="devicesText" class="gantt-entry__row">
         <text class="gantt-entry__label">
           设备数
         </text>
         <text class="gantt-entry__value">
-          {{ devices }}
+          {{ devicesText }}
         </text>
       </view>
-      <view class="gantt-entry__row">
+      <view v-if="taskCountText" class="gantt-entry__row">
         <text class="gantt-entry__label">
           任务数
         </text>
         <text class="gantt-entry__value">
-          {{ taskCount }}
+          {{ taskCountText }}
         </text>
       </view>
     </view>
@@ -85,6 +93,7 @@ const emit = defineEmits<{
   border: 1px solid #efefef;
   border-radius: 32rpx;
   background: #ffffff;
+  margin-bottom: 1.25rem;
 }
 
 .gantt-entry:active {

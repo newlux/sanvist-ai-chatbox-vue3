@@ -51,11 +51,15 @@ export interface UiChatMessage {
   /** 新生成消息实时播放，历史加载消息播放整段语音。 */
   ttsPlaybackMode?: "realtime" | "history";
   ttsLoading?: boolean;
-  /** 语音播放中（整段 /chat/tts 或流式 /speech/tts/stream，二者互斥） */
+  /** 语音播放中（整段 /chat/tts 或流式 /speech/tts/stream/Users/liuyy/Library/Application Support/LarkShell-ka-sasysa542/sdk_storage/5daf88797dd462895dc04bb11feb6a2e/resources/images/img_v3_0216n_77be5a3f-71c4-4ff8-a529-30231a5852bg.jpg，二者互斥） */
   ttsPlaying?: boolean;
   rawSseText?: string;
   attachments?: ChatMessageAttachment[];
   noAnswerGroup?: boolean;
+  /** 二维码占位回答：已跳转二维码页，消息列表不再渲染这条 AI 消息 */
+  hidden?: boolean;
+  /** 只展示卡片、不挂回答操作栏（任务协同的初始化卡片消息） */
+  hideActions?: boolean;
   /** 语音已松手、ASR 尚未返回：用户气泡展示「识别中...」 */
   asrPending?: boolean;
   /** 维修助手回流产生的 QA 卡片标题。 */

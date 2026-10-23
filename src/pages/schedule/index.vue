@@ -1,11 +1,16 @@
 <script setup lang="ts">
+import type { GanttViewRow } from "@/api/chat/types";
+import type { SchedulePinchEvent } from "@/hooks/useScheduleGestures";
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { useLandscape } from "@/hooks/useLandscape";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
+import { consumePendingScheduleView } from "@/utils/schedule-view";
 import { backFromScene } from "@/utils/scene-navigation";
 
 /**
@@ -15,9 +20,15 @@ import { backFromScene } from "@/utils/scene-navigation";
  * 版面：横屏 812×375（每小时 56px，时间轴以 08:00–21:00 为基准、按数据向外扩到整点）
  * - 顶部栏：标题「调度视图·重排草案」+ 日期 + 图例（原计划 / 新计划 / 已取消）
  *   +「查看全部任务」+ 返回对话按钮；
+ *   勾选 = 显示全部任务；不勾 = 只显示**有变动**的任务（新增 / 取消 / 时段调整），
+ *   旧新时段一致（未变动）的任务与没有对照的单条任务都收起；
  * - 左侧资源列（140px）：每行「旧 / 新」标签 + 类别 + 资源名 + 车号|班次；
+ *   单条任务（没有旧 / 新对照）不打标签、只渲染一条；
  * - 右侧排程区：时间轴 + 竖向网格 + 任务条（按起止时间定位），可横向滚动；
  * - 底部「任务置换」提示条（7229:449）：点任务条后按该趟的「旧 / 新」两条生成文案，可关闭。
+ *
+ * 双指缩放：与甘特页同一套（useScheduleGestures 接管两指手势），按两指间距比例改「每小时像素宽」
+ * （28–168px，基准 56px），捏合中心的时刻保持不动；刻度、任务条、新旧连线、箭头跟着实时重排。
  *
  * 横屏方式与 pages/schedule-gantt 一致：`useLandscape()` 默认把页面整体旋转 90° 模拟横屏
  * （设备竖屏持握、不申请全屏权限），离开页面自动还原；需要真锁方向时传 `{ lock: true }`。
@@ -32,25 +43,64 @@ defineOptions({ name: "SchedulePage" });
 /** 进入页面自动横屏（默认旋转模拟），离开时还原 */
 const { rotated, exitLandscape } = useLandscape();
 
-/** 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志 */
-useScheduleGestures({ gridId: "schedule-grid", onRowsOffset: () => measureRowTops() });
+/**
+ * 顶部状态栏空白：调原生 landscapeFullscreen 转屏成功后，webview 铺满横屏、
+ * 状态栏压在页面顶边，顶栏要给状态栏让出这段高度；
+ * CSS 旋转模拟（rotated）时状态栏在设备的物理顶边（对应页面左侧），不需要留。
+ */
+const { safeTopPx } = useSafeArea();
+const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
 
-/** 时间轴：每小时 56px；稿子基准范围 08:00–21:00（设计稿刻度 6832:608…6832:644） */
-const HOUR_WIDTH = 56;
+/**
+ * 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志。
+ * 双指捏合也走这里（原生 pinch 在旋转页面同样失效），缩的是时间轴每小时像素宽。
+ */
+useScheduleGestures({
+  gridId: "schedule-grid",
+  isRotated: () => rotated.value,
+  onPinch: onTimelinePinch,
+  onRowsOffset: () => measureRowTops(),
+});
+
+/** 时间轴：每小时像素宽基准 56px（稿子 1x，双指捏合在 28–168 之间缩放）；基准范围 08:00–21:00 */
+const DEFAULT_HOUR_WIDTH = 56;
+const HOUR_WIDTH_MIN = 28;
+const HOUR_WIDTH_MAX = 168;
+/** 当前每小时像素宽（双指缩放会改它，刻度 / 任务条 / 连线 / 网格线都跟着走） */
+const hourWidth = ref(DEFAULT_HOUR_WIDTH);
 const DESIGN_DAY_START_MIN = 8 * 60;
 const DESIGN_DAY_END_MIN = 21 * 60;
 /** 时间轴实际范围（分钟）：以稿子基准为底线，数据越界时由下面的 expandDayRange() 向外扩到整点 */
 let DAY_START_MIN = DESIGN_DAY_START_MIN;
 let DAY_END_MIN = DESIGN_DAY_END_MIN;
-const hourLabels = computed(() => {
-  const labels: string[] = [];
-  for (let hour = DAY_START_MIN / 60; hour <= DAY_END_MIN / 60; hour += 1) {
-    labels.push(`${String(hour).padStart(2, "0")}:00`);
+/* ---------- 刻度间隔随缩放自适应 ----------
+   相邻刻度保证至少隔开 TICK_MIN_GAP px：缩到 40px/小时以下用 2 小时一格，
+   1x（56px/小时）左右是 1 小时一格，放到 80px/小时以上变成半小时一格。 */
+const TICK_MIN_GAP = 40;
+const TICK_STEPS = [30, 60, 120];
+
+/** 当前刻度间隔（分钟）：取第一个「够宽」的候选 */
+const tickStepMin = computed(() => (
+  TICK_STEPS.find(step => (step / 60) * hourWidth.value >= TICK_MIN_GAP) ?? TICK_STEPS[TICK_STEPS.length - 1]
+));
+
+/** 刻度：left 为相对排程区左边的像素位置（含 7px 文案内缩），label 过 24 点按 24 小时回绕 */
+const ticks = computed(() => {
+  const step = tickStepMin.value;
+  const list: Array<{ min: number, label: string, left: number }> = [];
+  for (let min = DAY_START_MIN; min <= DAY_END_MIN; min += step) {
+    const hour = Math.floor((min % 1440) / 60);
+    const minute = min % 60;
+    list.push({
+      min,
+      label: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+      left: ((min - DAY_START_MIN) / 60) * hourWidth.value + 7,
+    });
   }
-  return labels;
+  return list;
 });
-/** 排程区总宽 = 小时数 × 每小时宽 */
-const timelineWidth = computed(() => ((DAY_END_MIN - DAY_START_MIN) / 60) * HOUR_WIDTH);
+/** 排程区总宽 = 小时数 × 每小时宽（缩放后自动变宽 / 变窄） */
+const timelineWidth = computed(() => ((DAY_END_MIN - DAY_START_MIN) / 60) * hourWidth.value);
 
 /**
  * 任务条样式态：
@@ -95,192 +145,104 @@ interface ScheduleRow {
   separator?: boolean;
 }
 
-function timeToMin(text: string) {
-  const [hour, minute] = text.split(":").map(Number);
-  return hour * 60 + (minute || 0);
+/** 任务条按起止时间定位：每小时 hourWidth px（1x 时 08:00-13:00 → x=0, w=280） */
+function barStyle(bar: ScheduleBar) {
+  const left = ((bar.startMin - DAY_START_MIN) / 60) * hourWidth.value;
+  const width = Math.max(((bar.endMin - bar.startMin) / 60) * hourWidth.value, hourWidth.value / 2);
+  return { left: `${left}px`, width: `${width}px` };
 }
 
-/** 任务条按起止时间定位：设计稿每小时 56px（如 08:00-13:00 → x=0, w=280） */
-function barStyle(bar: ScheduleBar) {
-  const left = ((bar.startMin - DAY_START_MIN) / 60) * HOUR_WIDTH;
-  const width = Math.max(((bar.endMin - bar.startMin) / 60) * HOUR_WIDTH, HOUR_WIDTH / 2);
-  return { left: `${left}px`, width: `${width}px` };
+/* ------------------------------------------------------------------
+ * AI 下发的重排数据（COMPONENT scene=task / type=gantt，viewType=replan → data）
+ * ------------------------------------------------------------------ */
+/**
+ * 气泡入口卡点进来时写下的整包 data，打开本页取走（取完即清）；
+ * 没有数据（比如兜底跳转进来、或接口没下发 rows）就渲染空视图。
+ */
+const viewPayload = consumePendingScheduleView();
+
+/** 接口 state → 重排三态：new = 新计划；canceled / cancelled = 已取消；其余（planned / running / done / overdue…）按原计划 */
+function stateFromState(state: unknown): BarState {
+  const key = String(state || "").trim().toLowerCase();
+  if (key === "new") return "new";
+  if (key === "canceled" || key === "cancelled") return "canceled";
+  return "planned";
+}
+
+/** 接口还没排时间的条：每条按 2 小时一节依次排开（避免 null 参与定位算出 NaN，任务条甩出画面） */
+const UNSCHEDULED_SLOT_MIN = 2 * 60;
+
+/** 分钟数 →「HH:MM」（条内时间文案的兜底） */
+function hhmm(minutes: number) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+/**
+ * 行标签「旧 / 新」：接口给了 tag 就用（兼容 new / old）；没给时按整行任务条推导，
+ * 整行都是新计划算「新」、整行都不是新计划算「旧」；新旧混杂或空行留空（没有新旧对照）。
+ */
+function tagFromRow(row: GanttViewRow, states: BarState[]): "旧" | "新" | undefined {
+  const raw = String(row.tag || "").trim().toLowerCase();
+  if (raw === "新" || raw === "new") return "新";
+  if (raw === "旧" || raw === "old" || raw === "planned") return "旧";
+  if (states.length === 0) return undefined;
+  if (states.every(state => state === "new")) return "新";
+  if (states.every(state => state !== "new")) return "旧";
+  return undefined;
+}
+
+/**
+ * 接口 rows → 页面行模型：
+ * - 任务条按 state 映射成「原计划 / 新计划 / 已取消」三态，linkKey 原样带上（新旧连线用）；
+ * - 起止时间直传；接口没排时间时按数组顺序在轴起点依次排开、条内写「时间待定」；
+ * - 跨天任务（结束按当天分钟数记，23:00 → 次日 02:00 记成 120）补一天再定位。
+ */
+function normalizeViewRows(viewRows: GanttViewRow[]): ScheduleRow[] {
+  return viewRows.map((row, rowIndex) => {
+    let cursor = DESIGN_DAY_START_MIN;
+    const bars: ScheduleBar[] = (Array.isArray(row.bars) ? row.bars : []).map((bar, barIndex) => {
+      // null 不能直接 Number()：会被当成 0，误判成「已排在 00:00」
+      const start = bar.startMin == null ? Number.NaN : Number(bar.startMin);
+      const end = bar.endMin == null ? Number.NaN : Number(bar.endMin);
+      const endMin = Number.isFinite(start) && Number.isFinite(end) && end < start ? end + 24 * 60 : end;
+      const planned = Number.isFinite(start) && Number.isFinite(endMin) && endMin > start;
+      const slotStart = cursor;
+      if (!planned) cursor += UNSCHEDULED_SLOT_MIN;
+      const startMin = planned ? start : slotStart;
+      const barEndMin = planned ? endMin : slotStart + UNSCHEDULED_SLOT_MIN;
+      return {
+        id: String(bar.id || `task-${rowIndex + 1}-${barIndex + 1}`),
+        title: String(bar.title || "").trim(),
+        timeText: String(bar.timeText || "").trim()
+          || (planned ? `${hhmm(startMin)}-${hhmm(barEndMin)}` : "时间待定"),
+        startMin,
+        endMin: barEndMin,
+        state: stateFromState(bar.state),
+        highlight: Boolean(bar.highlight),
+        linkKey: String(bar.linkKey || "").trim() || undefined,
+      };
+    });
+    const tag = tagFromRow(row, bars.map(bar => bar.state));
+    return {
+      id: String(row.id || `resource-${rowIndex + 1}`),
+      tag,
+      category: String(row.category || "").trim() || "—",
+      names: Array.isArray(row.names) ? row.names.map(name => String(name || "")) : [],
+      bars,
+      separator: Boolean(row.separator) || tag === "新",
+    };
+  });
 }
 
 /**
  * 重排排程数据：**每辆车各有「旧 / 新」两行**——同一辆车的旧计划与新计划上下对照。
- * - `row.tag` = 旧 / 新；`row.names` = [车号|司机, 车牌|班次]（同一辆车两行的名字一致）；
- * - `bar.state` = 原计划(planned) / 新计划(new) / 已取消(canceled)；`highlight` = 稿子里的深色实线强调条；
- * - `bar.linkKey` = 同一趟任务的关联键：只连「旧行 ↔ 新行」，同一条泳道内不连；
- *   一侧多条对另一侧一条（拆趟 / 并趟）时两两相连——供料这组的旧排两条（s1 / s2）→ 新排一条（s3）就是多对一；
- * - 同一行内的任务首尾相接、互不重叠（旧 / 新两行是同一辆车的两个版本，本来就互相覆盖）。
- * 接入后端时替换成接口返回即可。
+ * 行来自接口下发的 rows（`tag` 旧 / 新、`names` 车号|司机 + 车牌|班次），
+ * 任务条按 `state` 分原计划 / 新计划 / 已取消、按 `linkKey` 连新旧对照线；
+ * 单条任务（没有新旧对照）不打标签、只渲染一条，判定为未变动。
  */
-const repRows: ScheduleRow[] = [
-  // ── 供料：1号搅拌站 ──
-  {
-    id: "supply-old",
-    tag: "旧",
-    category: "供料",
-    names: ["1号搅拌站", "供料线安排"],
-    bars: [
-      // 强调条（深色实线描边，稿子 7229:339）
-      { id: "s1", title: "1号基站 C20 80立方", timeText: "08:00-13:00", startMin: timeToMin("08:00"), endMin: timeToMin("13:00"), state: "planned", highlight: true, linkKey: "supply-1" },
-      // 已取消：灰字 + 深色实线描边（稿子 7229:302）
-      // 与 s1 同 key：旧排这两条都指向新排的 s3（多对一，画两条跨泳道虚线）
-      { id: "s2", title: "万达基地 C20 90立方", timeText: "13:30-19:00", startMin: timeToMin("13:30"), endMin: timeToMin("19:00"), state: "canceled", highlight: true, linkKey: "supply-1" },
-    ],
-  },
-  {
-    id: "supply-new",
-    tag: "新",
-    category: "供料",
-    names: ["1号搅拌站", "供料线安排"],
-    bars: [
-      { id: "s3", title: "1号基站 C20 80立方", timeText: "09:00-13:00", startMin: timeToMin("09:00"), endMin: timeToMin("13:00"), state: "new", linkKey: "supply-1" },
-      // 与旧排第 2 条同一趟任务（旧排里被取消，新排重新安排到 13:30-18:30）
-      { id: "s4", title: "万达基地 C20 90立方", timeText: "13:30-18:30", startMin: timeToMin("13:30"), endMin: timeToMin("18:30"), state: "new", linkKey: "supply-2" },
-      // 注：s4 的 linkKey（supply-2）旧排里没有对应 → 属「新排新增」，不连线
-    ],
-    separator: true,
-  },
-  // ── 13号车（白班）──
-  {
-    id: "t13-day-old",
-    tag: "旧",
-    category: "运输",
-    names: ["13号车|郑文斌", "湘A-P0078|白班"],
-    bars: [
-      { id: "t1", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("09:40"), endMin: timeToMin("11:10"), state: "planned", linkKey: "t13-day-1" },
-      { id: "t2", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("11:20"), endMin: timeToMin("12:50"), state: "planned", linkKey: "t13-day-2" },
-      { id: "t3", title: "万达基地 C20 …", timeText: "", startMin: timeToMin("13:00"), endMin: timeToMin("14:40"), state: "planned", linkKey: "t13-day-3" },
-      { id: "t4", title: "万达基地 C20 20立方", timeText: "15:0…", startMin: timeToMin("15:00"), endMin: timeToMin("19:10"), state: "planned", linkKey: "t13-day-4" },
-    ],
-  },
-  {
-    id: "t13-day-new",
-    tag: "新",
-    category: "运输",
-    names: ["13号车|郑文斌", "湘A-P0078|白班"],
-    bars: [
-      { id: "t5", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("10:10"), endMin: timeToMin("11:40"), state: "new", linkKey: "t13-day-1" },
-      { id: "t6", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("11:50"), endMin: timeToMin("13:20"), state: "new", linkKey: "t13-day-2" },
-      { id: "t7", title: "万达基地 C20 …", timeText: "", startMin: timeToMin("13:30"), endMin: timeToMin("15:00"), state: "new", linkKey: "t13-day-3" },
-      { id: "t8", title: "万达基地 C20 20立方", timeText: "15:0…", startMin: timeToMin("15:30"), endMin: timeToMin("19:40"), state: "new", linkKey: "t13-day-4" },
-    ],
-    separator: true,
-  },
-  // ── 13号车（晚班）──
-  {
-    id: "t13-night-old",
-    tag: "旧",
-    category: "运输",
-    names: ["13号车|肖鹏", "湘A-P0078|晚班"],
-    bars: [
-      { id: "t9", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("09:40"), endMin: timeToMin("11:10"), state: "planned", linkKey: "t13-night-1" },
-      { id: "t10", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("11:20"), endMin: timeToMin("13:20"), state: "planned", linkKey: "t13-night-2" },
-      { id: "t11", title: "万达基地 C20 20立方", timeText: "13:3…", startMin: timeToMin("13:30"), endMin: timeToMin("18:00"), state: "planned", linkKey: "t13-night-3" },
-    ],
-  },
-  {
-    id: "t13-night-new",
-    tag: "新",
-    category: "运输",
-    names: ["13号车|肖鹏", "湘A-P0078|晚班"],
-    bars: [
-      { id: "t12", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("10:10"), endMin: timeToMin("11:40"), state: "new", linkKey: "t13-night-1" },
-      { id: "t13", title: "万达基地 C20 12立方", timeText: "0…", startMin: timeToMin("11:50"), endMin: timeToMin("13:40"), state: "new", linkKey: "t13-night-2" },
-      { id: "t14", title: "万达基地 C20 20立方", timeText: "14:0…", startMin: timeToMin("14:00"), endMin: timeToMin("18:30"), state: "new", linkKey: "t13-night-3" },
-    ],
-    separator: true,
-  },
-  // ── 12号车 ──
-  {
-    id: "t12-old",
-    tag: "旧",
-    category: "运输",
-    names: ["12号车|何志刚", "湘A-R6557|白班"],
-    bars: [
-      { id: "w1", title: "万达基地 C20 12立方", timeText: "09:40-12:10", startMin: timeToMin("09:40"), endMin: timeToMin("12:10"), state: "planned", linkKey: "t12-1" },
-      { id: "w2", title: "万达基地 C20 …", timeText: "12:50-15:20", startMin: timeToMin("12:50"), endMin: timeToMin("15:20"), state: "planned", linkKey: "t12-2" },
-      { id: "w3", title: "万达基地 C20 20立方", timeText: "15:40-18:10", startMin: timeToMin("15:40"), endMin: timeToMin("18:10"), state: "planned", linkKey: "t12-3" },
-    ],
-  },
-  {
-    id: "t12-new",
-    tag: "新",
-    category: "运输",
-    names: ["12号车|何志刚", "湘A-R6557|白班"],
-    bars: [
-      { id: "w4", title: "万达基地 C20 12立方", timeText: "08:30-11:00", startMin: timeToMin("08:30"), endMin: timeToMin("11:00"), state: "new", linkKey: "t12-1" },
-      { id: "w5", title: "万达基地 C20 …", timeText: "11:30-14:00", startMin: timeToMin("11:30"), endMin: timeToMin("14:00"), state: "new", linkKey: "t12-2" },
-      { id: "w6", title: "万达基地 C20 20立方", timeText: "14:30-17:30", startMin: timeToMin("14:30"), endMin: timeToMin("17:30"), state: "new", linkKey: "t12-3" },
-    ],
-    separator: true,
-  },
-  // ── 10号车 ──
-  {
-    id: "t10-old",
-    tag: "旧",
-    category: "运输",
-    names: ["10号车|黄立新", "湘A-TY678|白班"],
-    bars: [
-      { id: "x1", title: "万达基地 C20 12立方", timeText: "06:30-10:30", startMin: timeToMin("06:30"), endMin: timeToMin("10:30"), state: "planned", linkKey: "t10-1" },
-      { id: "x2", title: "万达基地 C20 20立方", timeText: "15:00-18:00", startMin: timeToMin("15:00"), endMin: timeToMin("18:00"), state: "planned", linkKey: "t10-2" },
-    ],
-  },
-  {
-    id: "t10-new",
-    tag: "新",
-    category: "运输",
-    names: ["10号车|黄立新", "湘A-TY678|白班"],
-    bars: [
-      { id: "x3", title: "万达基地 C20 12立方", timeText: "07:00-11:00", startMin: timeToMin("07:00"), endMin: timeToMin("11:00"), state: "new", linkKey: "t10-1" },
-      { id: "x4", title: "万达基地 C20 20立方", timeText: "15:30-18:30", startMin: timeToMin("15:30"), endMin: timeToMin("18:30"), state: "new", linkKey: "t10-2" },
-    ],
-    separator: true,
-  },
-  // ── 粤A-5667 ──
-  {
-    id: "ya5667-old",
-    tag: "旧",
-    category: "运输",
-    names: ["粤A-5667|何富有"],
-    bars: [
-      // 强调条：白底 + 深色实线描边（稿子 7229:350）
-      { id: "v1", title: "粤A-5667|何富有运输任务", timeText: "05:40", startMin: timeToMin("05:40"), endMin: timeToMin("13:00"), state: "planned", highlight: true, linkKey: "ya5667-1" },
-    ],
-  },
-  {
-    id: "ya5667-new",
-    tag: "新",
-    category: "运输",
-    names: ["粤A-5667|何富有"],
-    bars: [
-      { id: "v2", title: "粤A-5667|何富有运输任务", timeText: "06:00", startMin: timeToMin("06:00"), endMin: timeToMin("14:00"), state: "new", linkKey: "ya5667-1" },
-    ],
-    separator: true,
-  },
-  // ── 泵车PA-12 ──
-  {
-    id: "pump-old",
-    tag: "旧",
-    category: "泵车",
-    names: ["泵车PA-12|赵德海"],
-    bars: [
-      { id: "v3", title: "泵车PA-12|赵德海", timeText: "完成", startMin: timeToMin("08:00"), endMin: timeToMin("15:00"), state: "planned", linkKey: "pump-1" },
-    ],
-  },
-  {
-    id: "pump-new",
-    tag: "新",
-    category: "泵车",
-    names: ["泵车PA-12|赵德海"],
-    bars: [
-      { id: "v4", title: "泵车PA-12|赵德海", timeText: "完成", startMin: timeToMin("08:30"), endMin: timeToMin("15:30"), state: "new", linkKey: "pump-1" },
-    ],
-  },
-];
+const repRows = computed<ScheduleRow[]>(() => normalizeViewRows(
+  Array.isArray(viewPayload?.rows) ? viewPayload.rows : [],
+));
 
 /**
  * 时间轴范围外扩：数据里更早 / 更晚的任务要能看到（如 05:40、06:30 的班次），
@@ -295,11 +257,61 @@ function expandDayRange(list: ScheduleRow[]) {
   });
 }
 
-expandDayRange(repRows);
+expandDayRange(repRows.value);
 
-/** 「查看全部任务」/ 右下角折叠按钮：切换是否展开下半部分行 */
-const expanded = ref(true);
-const rows = computed(() => (expanded.value ? repRows : repRows.slice(0, 4)));
+/** 「查看全部任务」勾选态：true = 全部任务，false = 只看有变动的任务 */
+const showAllTasks = ref(true);
+
+/**
+ * 「有变动」的任务条 id。按同一趟任务（linkKey）的旧 / 新对照**逐条**判定：
+ * - 该 linkKey 只有一侧（新增 / 取消）→ 那一侧每条都算变动；
+ * - 两侧都有：另一侧存在起止完全一致的对照条才算未变动，否则算变动
+ *   （一侧多条对另一侧一条的拆趟 / 并趟也能逐条判对）；
+ * - 没有 linkKey 的单条任务没有对照，视为未变动。
+ * 基于原始 repRows 算（不能基于 rows，否则和下面的过滤互相依赖）。
+ */
+const changedBarIds = computed(() => {
+  const groups = new Map<string, { old: ScheduleBar[]; fresh: ScheduleBar[] }>();
+  repRows.value.forEach((row) => {
+    row.bars.forEach((bar) => {
+      if (!bar.linkKey) return;
+      const group = groups.get(bar.linkKey) || { old: [], fresh: [] };
+      if (isNewPlanBar(row, bar)) group.fresh.push(bar);
+      else group.old.push(bar);
+      groups.set(bar.linkKey, group);
+    });
+  });
+
+  const ids = new Set<string>();
+  groups.forEach((group) => {
+    if (group.old.length === 0 || group.fresh.length === 0) {
+      group.old.forEach(bar => ids.add(bar.id));
+      group.fresh.forEach(bar => ids.add(bar.id));
+      return;
+    }
+    /** 对侧是否存在起止一致的对照条（一致 = 这条没被调整） */
+    const matched = (bar: ScheduleBar, list: ScheduleBar[]) =>
+      list.some(item => item.startMin === bar.startMin && item.endMin === bar.endMin);
+    group.old.forEach((bar) => {
+      if (!matched(bar, group.fresh)) ids.add(bar.id);
+    });
+    group.fresh.forEach((bar) => {
+      if (!matched(bar, group.old)) ids.add(bar.id);
+    });
+  });
+  return ids;
+});
+
+/**
+ * 当前渲染的行：勾选「查看全部任务」给全部；
+ * 未勾选只留有变动的任务条，行里一条不剩就整行收起（行位置 / 箭头 / 连线都跟着这份数据算）。
+ */
+const rows = computed(() => {
+  if (showAllTasks.value) return repRows.value;
+  return repRows.value
+    .map(row => ({ ...row, bars: row.bars.filter(bar => changedBarIds.value.has(bar.id)) }))
+    .filter(row => row.bars.length > 0);
+});
 
 /** 每行高 40px（与右侧 track 一致） */
 const ROW_HEIGHT = 40;
@@ -339,8 +351,8 @@ const LINK_BAR_HEIGHT = 26;
 
 /** 任务条中心点（x 由起止时间算，y 由所在行算） */
 function barCenter(rowIndex: number, bar: ScheduleBar) {
-  const left = ((bar.startMin - DAY_START_MIN) / 60) * HOUR_WIDTH;
-  const width = Math.max(((bar.endMin - bar.startMin) / 60) * HOUR_WIDTH, HOUR_WIDTH / 2);
+  const left = ((bar.startMin - DAY_START_MIN) / 60) * hourWidth.value;
+  const width = Math.max(((bar.endMin - bar.startMin) / 60) * hourWidth.value, hourWidth.value / 2);
   return {
     x: left + width / 2,
     y: LINK_RULER_HEIGHT + rowIndex * LINK_ROW_HEIGHT + LINK_BAR_TOP + LINK_BAR_HEIGHT / 2,
@@ -495,7 +507,13 @@ function closeNotice() {
   activeLinkKey.value = "";
 }
 
-const dateText = "2025-09-26";
+/** 顶部栏日期：有接口给的业务日期就用它，否则取系统当天 */
+function formatDate(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+const dateText = String(viewPayload?.businessDate || "").trim() || formatDate(new Date());
 
 /* ---------- 滚动 ----------
    横屏是用 CSS 把页面旋转 90° 模拟的，手势方向跟着转，所以：
@@ -523,12 +541,34 @@ function applyScroll(left: number) {
 
 function scrollTimeline(direction: -1 | 1) {
   smoothScroll.value = true;
-  applyScroll(currentScrollLeft.value + direction * HOUR_WIDTH * HOURS_PER_STEP);
+  applyScroll(currentScrollLeft.value + direction * hourWidth.value * HOURS_PER_STEP);
 }
 
 function onTimelineScroll(event: { detail?: { scrollLeft?: number } }) {
   // 只记录当前位置，不回写 scroll-left
   currentScrollLeft.value = Number(event?.detail?.scrollLeft || 0);
+}
+
+/**
+ * 双指捏合 → 时间轴缩放（只改「每小时像素宽」，纵向行高不变）。
+ * 捏合中心对应的时刻保持不动：先记下中心的内容坐标 contentX 与可视区偏移 localX，
+ * 缩放后再把 contentX × 比例 − localX 滚回去，视觉上就是「以手指为中心放大」。
+ */
+function onTimelinePinch({ scale, contentX, localX }: SchedulePinchEvent) {
+  const prev = hourWidth.value;
+  const next = Math.min(Math.max(prev * scale, HOUR_WIDTH_MIN), HOUR_WIDTH_MAX);
+  if (next === prev) return;
+  hourWidth.value = next;
+  const ratio = next / prev;
+  // 内容宽随缩放变化：等新宽度生效后再补滚动位置，否则会被旧宽度夹住
+  nextTick(() => {
+    const max = Math.max(0, timelineWidth.value - gridWidth.value);
+    smoothScroll.value = false;
+    applyScroll(Math.min(Math.max(contentX * ratio - localX, 0), max));
+    nextTick(() => {
+      smoothScroll.value = true;
+    });
+  });
 }
 
 /**
@@ -538,7 +578,7 @@ function onTimelineScroll(event: { detail?: { scrollLeft?: number } }) {
 const { rowHints, jumpToRow } = useTimelineEdgeHint({
   rows: () => rows.value,
   dayStartMin: DAY_START_MIN,
-  hourWidth: HOUR_WIDTH,
+  hourWidth: () => hourWidth.value,
   scrollLeft: currentScrollLeft,
   viewportWidth: gridWidth,
   contentWidth: () => timelineWidth.value,
@@ -625,16 +665,18 @@ function onAskSend(text: string) {
   backToChat();
 }
 
-function toggleExpand() {
-  expanded.value = !expanded.value;
+/** 切换「查看全部任务」：勾上给全部，取消只看有变动的 */
+function toggleShowAll() {
+  showAllTasks.value = !showAllTasks.value;
 }
 
 </script>
 
 <template>
   <view class="schedule" :class="['schedule--rep', { 'schedule--rotated': rotated }]">
-    <!-- 顶部栏（稿子 7229:254：标题、日期、图例、查看全部任务、返回对话） -->
-    <view class="schedule__header">
+    <!-- 顶部栏（稿子 7229:254：标题、日期、图例、查看全部任务、返回对话）；
+         原生横屏全屏时顶部留出状态栏高度（见 headerTopStyle） -->
+    <view class="schedule__header" :style="headerTopStyle">
       <view class="schedule__title-group">
         <text class="schedule__title">
           调度视图·重排草案
@@ -655,9 +697,9 @@ function toggleExpand() {
           </view>
         </view>
 
-        <!-- 查看全部任务（7229:416 勾选框 + 7229:417 文案） -->
-        <view class="schedule__toggle-all" @tap="toggleExpand">
-          <view class="schedule__checkbox" :class="{ 'schedule__checkbox--on': expanded }" />
+        <!-- 查看全部任务（7229:416 勾选框 + 7229:417 文案）：勾上给全部，不勾只看有变动的 -->
+        <view class="schedule__toggle-all" @tap="toggleShowAll">
+          <view class="schedule__checkbox" :class="{ 'schedule__checkbox--on': showAllTasks }" />
           <text class="schedule__legend-text">
             查看全部任务
           </text>
@@ -704,10 +746,13 @@ function toggleExpand() {
               {{ name }}
             </text>
           </view>
-          <!-- 旧 / 新 标签：每行一个（30×40 的白底格子），与右侧任务行一一对齐 -->
+          <!-- 旧 / 新 标签：每行一个（30×40 的白底格子），与右侧任务行一一对齐；
+               单条任务没有旧 / 新对照，不打标签（格子也不渲染） -->
           <view class="schedule__side-tags">
             <view v-for="row in group.rows" :key="row.id" class="schedule__side-tag">
-              {{ row.tag }}
+              <text v-if="row.tag">
+                {{ row.tag }}
+              </text>
             </view>
           </view>
         </view>
@@ -715,33 +760,38 @@ function toggleExpand() {
         </view>
       </view>
 
-      <scroll-view
-        id="schedule-grid"
-        class="schedule__grid"
-        scroll-x
-        :show-scrollbar="false"
-        :scroll-left="scrollLeftProp"
-        :scroll-with-animation="smoothScroll"
-        @scroll="onTimelineScroll"
-      >
-        <view class="schedule__grid-inner" :style="{ width: `${timelineWidth}px` }">
-          <!-- 新旧关联：同一趟任务在「旧 / 新」两排之间连一条虚线（数据 linkKey 相同） -->
+      <view id="schedule-grid" class="schedule__grid-wrap">
+        <!-- 时间轴刻度（钉在可视区上沿，不随横向滚动滑出）：
+             标签位置 = 列位置 − 当前滚动量，滚动时刻度条本身不动、标签仍与下方列对齐 -->
+        <view class="schedule__ruler">
+          <!-- 刻度间隔随缩放变（缩小 2 小时 / 放大半小时），位置 = 列位置 − 当前滚动量 -->
+          <text
+            v-for="tick in ticks"
+            :key="tick.min"
+            class="schedule__ruler-label"
+            :style="{ left: `${tick.left - currentScrollLeft}px` }"
+          >
+            {{ tick.label }}
+          </text>
+        </view>
 
-          <!-- 时间轴刻度 -->
-          <view class="schedule__ruler">
-            <text
-              v-for="(label, index) in hourLabels"
-              :key="label"
-              class="schedule__ruler-label"
-              :style="{ left: `${index * HOUR_WIDTH + 7}px` }"
-            >
-              {{ label }}
-            </text>
-          </view>
-
+        <scroll-view
+          class="schedule__grid"
+          scroll-x
+          :show-scrollbar="false"
+          :scroll-left="scrollLeftProp"
+          :scroll-with-animation="smoothScroll"
+          @scroll="onTimelineScroll"
+        >
+          <!-- --hour-width：竖网格线间距跟着双指缩放走 -->
+          <view
+            class="schedule__grid-inner"
+            :style="{ width: `${timelineWidth}px`, '--hour-width': `${hourWidth}px` }"
+          >
           <!-- 内容区：纵向滚动（时间轴刻度固定在上面） -->
           <view class="schedule__rows">
             <view class="schedule__rows-inner">
+          <!-- 新旧关联：同一趟任务在「旧 / 新」两排之间连一条虚线（数据 linkKey 相同） -->
           <view
             v-for="line in linkLines"
             :key="line.key"
@@ -776,8 +826,9 @@ function toggleExpand() {
           </view>
             </view>
           </view>
-        </view>
-      </scroll-view>
+          </view>
+        </scroll-view>
+      </view>
 
       <!-- 每行独立：该行左右还有被挡住的任务时，就在那一行对应侧浮出箭头；点击跳到该行最近的任务（稿子 6832:720） -->
       <view
@@ -1131,7 +1182,19 @@ function toggleExpand() {
   color: #000000;
 }
 
-/* 右侧排程区：横向可滚；底色与表体一致，时间轴尽头之外不露白
+/* 右侧排程区：上沿固定刻度条 + 下面横向可滚的排程区
+   刻度条放在滚动容器外面，横向滚动时它不会被一起带出可视区（标签按滚动量反向偏移） */
+.schedule__grid-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #fbfbfb;
+  /* 手势挂在整块上（含刻度条），从刻度条上起手也能拖动 / 缩放 */
+  touch-action: none;
+}
+
+/* 横向可滚；底色与表体一致，时间轴尽头之外不露白
    touch-action: none —— 真机上不要让浏览器原生接管手势（旋转页面里它常常失效还抢事件），
    滚动统一由 hooks/useScheduleGestures 的 JS 手势和左右按钮驱动 */
 .schedule__grid {
@@ -1151,22 +1214,27 @@ function toggleExpand() {
 
 .schedule__grid-inner {
   position: relative;
-  /* 表体底色 #FBFBFB（稿子 6464:167），每小时一条竖网格线 #F3F3F3（Vector 84…98） */
+  /* 表体底色 #FBFBFB（稿子 6464:167），每小时一条竖网格线 #F3F3F3（Vector 84…98，间距随双指缩放走） */
   background-color: #fbfbfb;
   background-image: repeating-linear-gradient(
     to right,
     #f3f3f3 0,
     #f3f3f3 1px,
     transparent 1px,
-    transparent 56px
+    transparent var(--hour-width, 56px)
   );
-  background-position: 0 45px;
+  /* 刻度条已移出滚动容器，竖网格线从排程区顶部开始画 */
+  background-position: 0 0;
 }
 
+/* 刻度条：固定在排程区上沿（在滚动容器外），滚动时标签溢出部分直接裁掉 */
 .schedule__ruler {
   position: relative;
   flex-shrink: 0;
+  box-sizing: border-box;
   height: 45px;
+  overflow: hidden;
+  background: #fbfbfb;
 }
 
 .schedule__ruler-label {
@@ -1418,9 +1486,10 @@ function toggleExpand() {
   will-change: transform;
 }
 
-/* 右侧排程区：占满高度，内部再分「刻度 / 内容区」 */
+/* 右侧排程区：占满刻度条以下的剩余高度（刻度条在 .schedule__grid-wrap 里另占 45px） */
 .schedule__grid {
-  height: 100%;
+  height: auto;
+  min-height: 0;
 }
 
 .schedule__grid-inner {
