@@ -500,6 +500,55 @@ export interface RecognizeSpeechByBase64Params {
   language?: string;
 }
 
+/**
+ * 唤醒 / 热词校验（语雀 2.2）。
+ * 把一段识别文本连同「模块 + 阶段」发给后端，由热词表判定是不是命中词。
+ */
+export interface WakeValidateParams {
+  /** 业务模块：Hey,SANI 起始页固定 ASK */
+  module: WakeModule;
+  /** 阶段：AWAKEN 起始页 / IDENTITY 身份选择页 / START 身份信息页 */
+  step: WakeStep;
+  /** 语音识别出来的文本 */
+  text: string;
+  /** 兜底话术轮次：按顺序取 fallbackTexts，不传则随机一条 */
+  fallbackRound?: number;
+}
+
+/** 业务模块，与聊天场景（ChatScene）同一套取值 */
+export type WakeModule = "ASK" | "GUIDE" | "TASK" | "PODCAST";
+
+/**
+ * 阶段：
+ * - AWAKEN：起始页唤醒词；
+ * - IDENTITY：身份选择页里长按说的身份；
+ * - START：身份信息页里长按说的「开始体验」
+ */
+export type WakeStep = "AWAKEN" | "IDENTITY" | "START";
+
+/**
+ * 实测返回（module=ASK / step=AWAKEN / text="Hey SANI"）：
+ * `{ matched: true, hitWord: "SANI", hitValue: null, intent: "SELECT" }`
+ * 注意除 matched 外都可能缺省或为 null（例如只命中唤醒词时 hitValue 就是 null），
+ * 取用前一律判空；request 已剥掉外层 `{ code, message, data }`，这里拿到的就是 data。
+ */
+export interface WakeValidateResult {
+  /** 是否命中热词 */
+  matched: boolean;
+  /** 命中的原始热词 */
+  hitWord?: string | null;
+  /** 命中值：身份 → 角色码，唤醒 → START；只命中唤醒词时为 null */
+  hitValue?: string | null;
+  /** SELECT / BACK / NONE 等 */
+  intent?: string | null;
+  /** 导航目标步骤（intent = BACK 时） */
+  targetStep?: string | null;
+  /** 本次播报的兜底话术：传 fallbackRound 按顺序取，不传随机一条 */
+  fallbackText?: string | null;
+  /** 当前阶段完整兜底话术（3 句，按顺序循环） */
+  fallbackTexts?: string[] | null;
+}
+
 export interface UploadChatFileParams {
   filePath: string;
   /**

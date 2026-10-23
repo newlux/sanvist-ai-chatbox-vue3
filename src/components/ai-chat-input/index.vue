@@ -25,6 +25,11 @@ const props = defineProps({
    * 只在首页问答页开启，其它复用本组件的页面保持原样。
    */
   bottomGradient: { type: Boolean, default: false },
+  /**
+   * 语音播报（TTS）进行中：底部换成「请选择你的身份吧」页同一套三色带波纹。
+   * 播报期间常态那条淡蓝波浪让位，避免两种底纹叠在一起。
+   */
+  speaking: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -288,14 +293,41 @@ async function focusTextInput() {
 }
 
 /**
+ * 页面级长按录音入口：首页除灵动岛外的任意位置长按都要能录音，
+ * 手势判定放在页面（要排除灵动岛 / 输入框），这里只把触点转成 useVoiceInput 认识的形状，
+ * 复用同一套状态机 —— 300ms 短按取消、上划取消、松手识别、录音面板视觉都不另写。
+ */
+function startGlobalVoiceHold(clientY: number) {
+  onVoicePillTouchStart({ touches: [{ clientY }], cancelable: false });
+}
+
+function updateGlobalVoiceHold(clientY: number) {
+  updateVoiceGesture({ touches: [{ clientY }] });
+}
+
+async function endGlobalVoiceHold() {
+  await onVoicePillTouchEnd({ cancelable: false });
+}
+
+async function cancelGlobalVoiceHold() {
+  await onVoicePillTouchCancel();
+}
+
+/**
  * 对外接口（页面通过 ref 调用）：
  * - appendAttachments：把「已经上传好」的附件挂进输入栏（步骤卡拍照走这条路，不重复上传）；
- * - focusTextInput：切到文本模式并聚焦输入框。
+ * - focusTextInput：切到文本模式并聚焦输入框；
+ * - startGlobalVoiceHold / updateGlobalVoiceHold / endGlobalVoiceHold / cancelGlobalVoiceHold：
+ *   页面级长按录音（任意位置长按，见 ai-page 的手势绑定）。
  * 注意 appendAttachments 对应 hook 里的 appendUploadedAttachments，两处名字必须一致。
  */
 defineExpose({
   appendAttachments: appendUploadedAttachments,
   focusTextInput,
+  startGlobalVoiceHold,
+  updateGlobalVoiceHold,
+  endGlobalVoiceHold,
+  cancelGlobalVoiceHold,
 });
 
 /** 附件来源弹窗：拍照 / 相册 / 文件 三选一（强制 H5 上传期间为唯一入口） */
@@ -374,23 +406,16 @@ onBeforeUnmount(() => {
         :class="compactVoiceListening ? 'voice-sheet--listening-compact' : 'voice-sheet--listening'"
       >
         <view class="voice-listening" :class="{ 'voice-listening--compact': compactVoiceListening }">
-          <!-- ===== 紧凑态：底部语音面板，严格按 Ardot 11332:1（问答页语音输入中）实现，11101:512 同构 ===== -->
+          <!-- ===== 紧凑态（首页）：只保留底部淡入白 + 水面波纹两层装饰，
+                 与「Hey,SANI」起始页按住时的底部视觉完全一致；
+                 提示行（11101:689）、麦克风盘（11101:698）、粉色柔光（11332:104）都不再展示 ===== -->
           <template v-if="compactVoiceListening">
             <!-- 11332:38 Rectangle 103（373×280 @ (2,532)）：#FAFAFA 渐隐遮罩，页面内容向上淡入白色 -->
             <view class="voice-panel__fade" aria-hidden="true" />
 
-            <!-- 11332:104 Rectangle 104（375×146 @ (-0.5,676)）：顶部起尖、向两侧下滑的粉色柔光 -->
-            <image
-              class="voice-panel__glow"
-              src="@/assets/img/voice-listening-glow.svg"
-              mode="scaleToFill"
-              aria-hidden="true"
-            />
-
             <!-- 11332:91 Frame 45（375×118 @ y694）：底部柔光波浪。
-                 11332:97 Rectangle 106（375×53 渐变色带）被 11332:94 Vector 87（449×100 波形，LAYER_BLUR 18）作 alpha 遮罩裁出软边。
-                 静态基线即设计稿；动效为增强：色带横向无缝流动 + 波形轮廓缓慢起伏。
-                 后层同轮廓、更低透明度、更慢反向流动，叠出液面层次 -->
+                 11332:97 Rectangle 106 的水面色带被 11332:94 Vector 87 波形作 alpha 遮罩裁出软边。
+                 后层同轮廓、更低透明度、更慢反向涨落，叠出液面层次 -->
             <view
               class="voice-panel__wave"
               :class="{ 'voice-panel__wave--paused': voice.cancelling }"
@@ -398,40 +423,6 @@ onBeforeUnmount(() => {
             >
               <view class="voice-panel__wave-band voice-panel__wave-band--back" />
               <view class="voice-panel__wave-band" />
-            </view>
-
-            <!-- 11101:689 提示行：单节点文案，14px Inter Regular #5E5E5E，居中 -->
-            <text
-              class="voice-panel__tips"
-              :class="{ 'voice-panel__tips--cancelling': voice.cancelling }"
-            >
-              {{ t("input-voice-tip") }}
-            </text>
-
-            <!-- 11101:698 Frame（46×46 @ 164,698）：麦克风触达区，水平居中 -->
-            <view
-              class="voice-panel__mic"
-              @touchstart.prevent="onVoiceTouchStart"
-              @touchmove.prevent="updateVoiceGesture"
-              @touchend.prevent="onVoiceTouchEnd"
-              @touchcancel.prevent="onVoiceTouchCancel"
-              @mousedown.prevent="onVoiceTouchStart"
-              @mousemove.prevent="updateVoiceGesture"
-              @mouseup.prevent="onVoiceTouchEnd"
-            >
-              <!-- 11101:713 Ellipse 34 + 11101:706 Mask group（40.25×40.25）：白盘 + 描边 + 投影 -->
-              <view class="voice-panel__disc">
-                <!-- 11101:708 Ellipse 28：盘内粉色光斑（69.88×86.35 @ 28.81,−25.47，旋转 15°，#FFD8D8 60%，blur 5） -->
-                <view class="voice-panel__disc-glow voice-panel__disc-glow--pink" aria-hidden="true" />
-                <!-- 11101:709 Ellipse 29：盘内蓝色光斑（54.35×67.16 @ −14.21,−27.07，旋转 15°，#E5F2FF 60%，blur 5） -->
-                <view class="voice-panel__disc-glow voice-panel__disc-glow--blue" aria-hidden="true" />
-                <!-- 11101:710 Vector 80：盘顶白色高光（23.34×7.78 @ 12.36,3.95，竖向渐变，blur 5） -->
-                <view class="voice-panel__disc-sheen" aria-hidden="true" />
-                <!-- 11101:699 Waveform Icon（27.0588×27.0588）：5 根红色声纹条，#C8201E，全圆头 -->
-                <view class="voice-panel__waveform" aria-hidden="true">
-                  <view v-for="i in 5" :key="`bar-${i}`" class="voice-panel__waveform-bar" />
-                </view>
-              </view>
             </view>
           </template>
 
@@ -580,12 +571,27 @@ onBeforeUnmount(() => {
         </view>
       </view>
     </view>
-    <!-- 底部氛围图形：设计稿 326:1336 Frame 45（375×118），压在输入栏下面 -->
+    <!-- 底部氛围图形：设计稿 326:1336 Frame 45（375×118），压在输入栏下面。
+         语音播报期间让位给下面那条三色带波纹 -->
     <view
-      v-if="bottomGradient && !keyboardOpen && !voiceKeyboardOpen"
+      v-if="bottomGradient && !speaking && !keyboardOpen && !voiceKeyboardOpen"
       class="chat-input__bottom-art"
       aria-hidden="true"
     />
+
+    <!-- 语音播报态底部：与「请选择你的身份吧」页（welcome-visitor__glow-voice）同一套
+         三色带 + 波形遮罩 + 起伏动效，播报一停就消失、常态氛围交给 bottomGradient。
+         不依赖 bottomGradient：听播页只开播报态、不铺常态波浪 -->
+    <view
+      v-if="speaking && !keyboardOpen && !voiceKeyboardOpen"
+      class="chat-input__speaking-art"
+      aria-hidden="true"
+    >
+      <view class="chat-input__speaking-wave">
+        <view class="chat-input__speaking-band chat-input__speaking-band--back" />
+        <view class="chat-input__speaking-band" />
+      </view>
+    </view>
 
     <!-- 始终 fixed 贴底；键盘弹起时用 bottom 抬到键盘上方 -->
     <view v-if="!voiceKeyboardOpen" ref="dockRef" class="chat-input__dock">
@@ -778,6 +784,65 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+/* 语音播报态底部：与「请选择你的身份吧」页（welcome-visitor__glow-voice）同一套视觉 ——
+   11332:91 Frame 45 容器（375×118）、11332:97 Rectangle 106 三色带（#EBB4E9 → #56ABFA → #9795E8），
+   用 voice-listening-wave-blur-mask.svg 波形遮罩裁出软边；
+   动效也照抄那一页：色带镜像周期横向流动 + 遮罩左右摆动，后层更慢且反向 */
+.chat-input__speaking-art {
+  position: absolute;
+  z-index: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 236rpx; // 118px：波形容器高度
+  pointer-events: none;
+}
+
+.chat-input__speaking-wave {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 236rpx;
+}
+
+.chat-input__speaking-band {
+  position: absolute;
+  top: 130rpx; // y759 − y694 = 65px
+  left: 0;
+  width: 750rpx; // 375px
+  height: 106rpx; // 53px
+  background: linear-gradient(
+    90deg,
+    #ebb4e9 0%,
+    #56abfa 24.36%,
+    #9795e8 50%,
+    #56abfa 75.64%, // 后半为镜像，位移一个周期即可无缝循环
+    #ebb4e9 100%
+  );
+  background-size: 1500rpx 100%;
+  -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
+  mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 990rpx 286rpx;
+  mask-size: 990rpx 286rpx;
+  -webkit-mask-position: -121rpx -14rpx;
+  mask-position: -121rpx -14rpx;
+  animation:
+    voice-wave-color-flow 5.6s linear infinite,
+    voice-wave-sway 4.8s ease-in-out infinite alternate;
+  will-change: background-position, mask-position;
+}
+
+.chat-input__speaking-band--back {
+  opacity: 0.4;
+  transform: translateY(8rpx);
+  animation:
+    voice-wave-color-flow 7.6s linear infinite reverse,
+    voice-wave-sway 6s ease-in-out infinite alternate;
+}
+
 .voice-sheet {
   position: relative;
   z-index: 2;
@@ -808,10 +873,11 @@ onBeforeUnmount(() => {
 }
 
 /* ==========================================================================
-   底部语音面板（Ardot 11332:1 问答页语音输入中，11101:512 听播页同构，1px = 2rpx）
+   底部语音面板（首页紧凑态）
    面板范围：设计稿 y532 → y812，高 280px = 560rpx
-   纵向排布：11332:2 提示行(17px @ y647) --24px--> 11332:71 麦克风(46px @ y688)
-   装饰层 11332:38（内容渐隐遮罩）、11332:104（粉色柔光）、11332:91（波浪）绝对定位。
+   现在只保留两层装饰：11332:38（内容渐隐遮罩）+ 11332:91（水面波浪），
+   与「Hey,SANI」起始页按住时的底部视觉一致；
+   11332:2 提示行、11332:71 麦克风盘、11332:104 粉色柔光都不再展示。
    ========================================================================== */
 .voice-sheet--listening-compact {
   position: fixed;
@@ -825,7 +891,7 @@ onBeforeUnmount(() => {
   background: transparent; /* 设计稿无面板容器：底色全透明，只叠柔性形状 */
   box-shadow: none; /* 覆盖基类上抛投影：装饰层直接落在页面上，不是浮层 */
   padding-bottom: 0; /* 覆盖基类 safe-area 内边距：波浪色带应贴到屏幕物理底边 */
-  pointer-events: none; /* 容器只承担视觉层，不挡页面滚动；手势收口在麦克风触达区 */
+  pointer-events: none; /* 容器只承担视觉层，不挡页面滚动；录音手势由页面长按接管 */
 }
 
 /* 复合类提高优先级：基础 .voice-listening 定义在本段之后 */
@@ -834,11 +900,9 @@ onBeforeUnmount(() => {
   display: flex;
   width: 100%;
   height: 100%;
-  padding-top: 230rpx; /* y647 − y532 = 115px：提示行顶 */
   box-sizing: border-box;
   flex-direction: column;
   align-items: center;
-  gap: 48rpx; /* 提示行底(y664) → 麦克风顶(y688)：24px */
 }
 
 /* 11332:38 Rectangle 103：373×280 @ (2,532)，#FAFAFA 自上而下 0 → 80%(21.16%) → 100%(35.86%)，
@@ -858,16 +922,6 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-/* 11332:104 Rectangle 104：375×146 @ (-0.5,676)，顶部起尖的五边形 + 竖向渐变 #FFF1F1 → #FFFFFF(63.25%) */
-.voice-panel__glow {
-  position: absolute;
-  top: 288rpx; /* y676 − y532 = 144px */
-  left: -1rpx; /* x −0.5px */
-  width: 750rpx; /* 375px */
-  height: 292rpx; /* 146px，下沿超出画板，由容器裁切 */
-  pointer-events: none;
-}
-
 /* 11332:91 Frame 45：375×118 @ (0,694)，波浪装饰容器 */
 .voice-panel__wave {
   position: absolute;
@@ -878,27 +932,18 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-/* 11332:97 Rectangle 106：375×53 @ (0,759)，横向渐变（#EBB4E9 → #56ABFA 48.72% → #9795E8）色带，
-   用 11332:94 Vector 87 波形（内建 feGaussianBlur 9 柔边）作 alpha 遮罩裁出软边。
-   动效：静态基线即设计稿三色带；为做到「横向流动不露边、不跳色」，
-   把三色带做成「镜像周期」——0 → 48.72% 是设计稿色带，48.72% → 100% 是它的镜像，
-   首尾同为 #EBB4E9，背景宽取两个窗口宽（1500rpx），位移一个周期即可无缝循环。
-   同时让遮罩左右小幅往复（波形轮廓缓慢起伏，画布两侧各留 ~120rpx 出血，不会露边）。 */
+/* 11332:97 Rectangle 106：375×53 @ (0,759)，录音态的水面。
+   与起始页「按住说话」（welcome-visitor__glow-voice-band）保持完全一致：
+   竖向 #EFEFEE 0% → #0F7EEE 100%，色带没有横向色差，流动改成「色彩上下涨落」（背景高出 60% 来回位移），
+   波形遮罩（11332:94 Vector 87，内建 feGaussianBlur 9 柔边）继续缓慢起伏，两层错速叠出液面层次。 */
 .voice-panel__wave-band {
   position: absolute;
   top: 130rpx; /* y759 − y694 = 65px */
   left: 0;
   width: 750rpx; /* 375px */
   height: 106rpx; /* 53px */
-  background: linear-gradient(
-    90deg,
-    #ebb4e9 0%,
-    #56abfa 24.36%, /* 设计稿 #56ABFA 在色带 48.72% → 半周期 24.36% */
-    #9795e8 50%, /* 设计稿色带末端 #9795E8 → 半周期端点 */
-    #56abfa 75.64%, /* 后半为镜像 */
-    #ebb4e9 100%
-  );
-  background-size: 1500rpx 100%; /* 两个窗口宽，配合镜像渐变实现无缝循环 */
+  background-image: linear-gradient(180deg, #efefee 0%, #0f7eee 100%);
+  background-size: 100% 160%; /* 背景比容器高 60%，上下位移时水色在浅灰与深蓝之间呼吸 */
   -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
   mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
   -webkit-mask-repeat: no-repeat;
@@ -908,23 +953,33 @@ onBeforeUnmount(() => {
   -webkit-mask-position: -121rpx -14rpx; /* 画布原点对齐页面 (−60.5, 752) */
   mask-position: -121rpx -14rpx;
   animation:
-    voice-wave-color-flow 9s linear infinite,
-    voice-wave-sway 7.5s ease-in-out infinite alternate;
+    voice-wave-drift 4.8s ease-in-out infinite alternate,
+    voice-wave-sway 4.8s ease-in-out infinite alternate;
   will-change: background-position, mask-position;
 }
 
-/* 后层波浪：轮廓相同、透明度更低、流动更慢且反向，叠出液面的层次感 */
+/* 后层波浪：轮廓相同、透明度更低、涨落更慢且反向，叠出液面的层次感 */
 .voice-panel__wave-band--back {
   opacity: 0.4;
   transform: translateY(8rpx);
   animation:
-    voice-wave-color-flow 13s linear infinite reverse,
-    voice-wave-sway 9.5s ease-in-out infinite alternate;
+    voice-wave-drift 6s ease-in-out infinite alternate-reverse,
+    voice-wave-sway 6s ease-in-out infinite alternate;
 }
 
 /* 取消态：波浪停止流动（与声纹条暂停逻辑一致） */
 .voice-panel__wave--paused .voice-panel__wave-band {
   animation-play-state: paused;
+}
+
+/* 竖向渐变的涨落：背景比容器高 60%，上下移动时水色在「浅灰」和「深蓝」之间呼吸 */
+@keyframes voice-wave-drift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 100%;
+  }
 }
 
 /* 色带横向流动：位移一个背景周期（1500rpx），首尾同色，循环无缝 */
@@ -954,160 +1009,6 @@ onBeforeUnmount(() => {
   .voice-panel__wave-band {
     animation: none;
     transform: none;
-  }
-}
-
-/* 11101:689：单节点文案，14px Inter Regular #5E5E5E，文本块 120×17 居中 */
-.voice-panel__tips {
-  position: relative;
-  font-family:
-    Inter,
-    "PingFang SC",
-    "Noto Sans SC",
-    "Microsoft YaHei",
-    sans-serif;
-  font-size: 28rpx; /* 14px */
-  font-weight: 400;
-  color: #5e5e5e;
-  line-height: 34rpx; /* 文本框高 17px */
-  text-align: center;
-}
-
-/* 设计稿未定义取消态配色，沿用项目品牌红做手势反馈 */
-.voice-panel__tips--cancelling {
-  color: #c8201e;
-}
-
-/* 11332:71 Frame：46×46 @ (164.5,688)，页面水平居中 */
-.voice-panel__mic {
-  position: relative;
-  display: flex;
-  width: 92rpx; /* 46px */
-  height: 92rpx;
-  align-items: center;
-  justify-content: center;
-  pointer-events: auto; /* 面板容器已整体关闭命中，录音手势只收口在这里 */
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-/* 11101:713 Ellipse 34（外环投影）+ 11101:706 Mask group（40.25×40.25 圆形蒙版） */
-.voice-panel__disc {
-  position: relative;
-  display: flex;
-  width: 80.5rpx; /* 40.25px */
-  height: 80.5rpx;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  box-sizing: border-box;
-  border: 2rpx solid rgb(0 0 0 / 20%); /* 11101:707 Ellipse 35 描边 1px */
-  border-radius: 50%;
-  background: #ffffff; /* 11101:707 Ellipse 35 填充 */
-  box-shadow: 0 2rpx 22rpx rgb(0 0 0 / 10%); /* 11101:713 (0,1) r11 #000 10% */
-}
-
-/* 盘内光斑：设计稿为裁切在圆盘内的柔光椭圆（渲染验证：圆盘外无光晕） */
-.voice-panel__disc-glow {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(5rpx); /* LAYER_BLUR 5px → SVG stdDeviation 2.5 = CSS blur 2.5px */
-}
-
-/* 11101:708 Ellipse 28：69.88×86.35 @ (28.81,-25.47)，旋转 15°，#FFD8D8 60% */
-.voice-panel__disc-glow--pink {
-  top: -50.94rpx;
-  left: 57.62rpx;
-  width: 139.76rpx;
-  height: 172.7rpx;
-  background: rgb(255 216 216 / 60%);
-  transform: rotate(15deg);
-}
-
-/* 11101:709 Ellipse 29：54.35×67.16 @ (-14.21,-27.07)，旋转 15°，#E5F2FF 60% */
-.voice-panel__disc-glow--blue {
-  top: -54.14rpx;
-  left: -28.42rpx;
-  width: 108.7rpx;
-  height: 134.32rpx;
-  background: rgb(229 242 255 / 60%);
-  transform: rotate(15deg);
-}
-
-/* 11101:710 Vector 80：23.34×7.78 @ (12.36,3.95)，竖向渐变白，blur 5 */
-.voice-panel__disc-sheen {
-  position: absolute;
-  top: 7.9rpx;
-  left: 24.72rpx;
-  width: 46.68rpx;
-  height: 15.56rpx;
-  border-radius: 999rpx;
-  background: linear-gradient(180deg, rgb(255 255 255 / 100%) 0%, rgb(255 255 255 / 26.29%) 100%);
-  filter: blur(5rpx); /* LAYER_BLUR 5px → CSS blur 2.5px */
-}
-
-/* 11101:699 Waveform Icon：27.0588×27.0588，条宽/条距 2.7059，左右内边距 1.3529 */
-.voice-panel__waveform {
-  position: relative;
-  display: flex;
-  width: 54.12rpx;
-  height: 54.12rpx;
-  align-items: center;
-  gap: 5.41rpx;
-  padding: 0 2.71rpx;
-  box-sizing: border-box;
-}
-
-.voice-panel__waveform-bar {
-  width: 5.41rpx;
-  border-radius: 2.71rpx; /* 圆角 1.3529px，即半宽全圆头（导出 SVG 实测 rx/ry = 1.3529） */
-  background: #c8201e;
-  /* 横向声波：5 根条围绕自身中心做竖向缩放，错峰延迟形成从左到右的波动 */
-  transform-origin: center center;
-  animation: voice-bar-wave 1.1s ease-in-out infinite;
-  will-change: transform;
-}
-
-/* 取消态：停止声波动画 */
-.voice-panel__tips--cancelling ~ .voice-panel__mic .voice-panel__waveform-bar {
-  animation-play-state: paused;
-}
-
-/* 5 根声纹条高度（设计稿原值，同一中心线） */
-.voice-panel__waveform-bar:nth-child(1) {
-  height: 10.82rpx; /* 5.4118px */
-  animation-delay: 0s;
-}
-
-.voice-panel__waveform-bar:nth-child(2) {
-  height: 27.06rpx; /* 13.5294px */
-  animation-delay: 0.14s;
-}
-
-.voice-panel__waveform-bar:nth-child(3) {
-  height: 43.29rpx; /* 21.6471px */
-  animation-delay: 0.28s;
-}
-
-.voice-panel__waveform-bar:nth-child(4) {
-  height: 21.65rpx; /* 10.8235px */
-  animation-delay: 0.42s;
-}
-
-.voice-panel__waveform-bar:nth-child(5) {
-  height: 5.41rpx; /* 2.7059px */
-  animation-delay: 0.56s;
-}
-
-/* 横向声波关键帧：每根条围绕中心在 0.25~1 之间竖向缩放 */
-@keyframes voice-bar-wave {
-  0%,
-  100% {
-    transform: scaleY(0.25);
-  }
-  50% {
-    transform: scaleY(1);
   }
 }
 

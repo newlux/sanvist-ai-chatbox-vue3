@@ -710,6 +710,7 @@ onUnload(() => {
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
         :compact-voice-listening="true"
+        :speaking="realtimeTts.playing.value"
         @send="sendTaskMessage"
         @stop="stopGenerating"
         @recognize-begin="beginAsrPlaceholder"

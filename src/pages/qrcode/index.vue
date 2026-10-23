@@ -16,9 +16,9 @@ import { backFromScene } from "@/utils/scene-navigation";
  * 视觉：Ardot 865:1325「二维码页面-方案1」375×812。
  *   标题 → 副标题 → 白蓝渐变卡片（彩色二维码 + 说明）→ 登记领礼品提示。
  *
- * 开场：先用一段 4s 的 SANI 三角标动画（720×1280）铺满全屏，播完与页面内容做交叉淡入。
- *   视频结束前 400ms，页面二维码先放大到视频末帧的尺寸并移到同一位置「接住」最后一帧，
- *   随后视频淡出、二维码内容浮上来，衔接处不跳。视频兜底见 INTRO_* 常量。
+ * 开场：先用一段 4s 的 SANI 三角标动画（720×1280）铺满全屏。播完后视频最后一帧的二维码
+ *   朝页面二维码缩小落位（480ms），同一时间页面内容浮上来，终点两码逐像素重合，
+ *   观感是「视频里的二维码变成了页面上的二维码」，不跳不硬切。视频兜底见 INTRO_* 常量。
  *
  * 入口：工作流把 `outputs.answer` 置成 `<QRCODE>文案</QRCODE>`（老写法是纯占位文本 "QRCODE"）时，
  * useChatSend 会跳到本页；文案留在聊天气泡里展示，二维码内容取自路由参数 `content`
@@ -57,34 +57,26 @@ onLoad((options) => {
 const INTRO_UNMOUNT_DELAY_MS = 900;
 /** 自动播放被拦（一直没触发 play / timeupdate）时的兜底：直接进页面，别停在空屏 */
 const INTRO_AUTOPLAY_GUARD_MS = 1600;
-/** 视频结束前多久开始把页面二维码放大去接住最后一帧。
- *   timeupdate 实测 250~500ms 一跳，提前量必须大于「一跳 + 放大动画 240ms」，
- *   否则会在视频快结束时才突然变大；放大过程被视频层完全盖住，早一点没有任何副作用 */
-const QR_CATCH_LEAD_MS = 900;
 /** 开场视频的组件 id（VideoContext 用） */
 const INTRO_VIDEO_ID = "qrcode-intro-video";
 
 /** 视频层是否还在 DOM 里 */
 const showIntro = ref(true);
-/** 视频是否还在播；置 false 即开始淡出 */
+/** 视频是否还在播；置 false 即开始「缩小落位 + 淡出」 */
 const introPlaying = ref(true);
 /** 视频出画后再显示，避免首帧没解码时露出播放器的黑底 */
 const introVideoReady = ref(false);
 /** 二维码内容是否已浮现 */
 const pageVisible = ref(false);
-/** 页面二维码是否已放大到视频末帧码区的尺寸，用来接住视频最后一帧 */
-const qrCaught = ref(false);
 
 let introUnmountTimer: ReturnType<typeof setTimeout> | null = null;
 let introGuardTimer: ReturnType<typeof setTimeout> | null = null;
 let introStarted = false;
 
-/** 视频播完 / 出错 / 自动播放被拦：统一走这里，交叉淡入到二维码页面 */
+/** 视频播完 / 出错 / 自动播放被拦：统一走这里，视频缩小落位的同时页面浮上来 */
 function revealPage() {
   if (!introPlaying.value) return;
   introPlaying.value = false;
-  // 兜底：timeupdate 没赶上时，至少在视频出画的同一帧把二维码放大到位
-  catchIntroQr();
   pageVisible.value = true;
   introStarted = true;
   if (introGuardTimer) {
@@ -101,23 +93,6 @@ function revealPage() {
 function onIntroPlay() {
   introStarted = true;
   introVideoReady.value = true;
-}
-
-/**
- * 把页面二维码放大到视频末帧码区的尺寸（238 / 188 ≈ 1.266）并整体下移 20px。
- * 视频层是不透明的，放大的过程被它盖着看不见；等视频淡出时页面二维码刚好已经是最后一帧的大小，
- * 两者在同一位置交叉淡化，看起来就是视频里的二维码「变成」了页面上的二维码。
- */
-function catchIntroQr() {
-  if (qrCaught.value) return;
-  qrCaught.value = true;
-}
-
-/** 视频快播完时先放大二维码，等视频淡出时它已经是最后一帧的尺寸 */
-function onIntroTimeUpdate(event: unknown) {
-  const detail = (event as { detail?: { currentTime?: number; duration?: number } } | null)?.detail;
-  if (!detail?.duration) return;
-  if (detail.duration - (detail.currentTime ?? 0) <= QR_CATCH_LEAD_MS / 1000) catchIntroQr();
 }
 
 function onIntroEnded() {
@@ -226,7 +201,7 @@ function onBack() {
             <!-- 二维码 865:1337：卡片内距顶 40px，192×192，彩色渐变码点。
                  二维码是本地编码后拼出来的 SVG 字符串，只能走 v-html -->
             <!-- eslint-disable-next-line vue/no-v-text-v-html-on-component -->
-            <view v-if="qrSvg" class="qrcode-card__code" :class="{ 'qrcode-card__code--caught': qrCaught }" v-html="qrSvg" />
+            <view v-if="qrSvg" class="qrcode-card__code" v-html="qrSvg" />
             <view v-else class="qrcode-card__failed">
               <text class="qrcode-card__failed-text">{{ t("qrcode-failed") }}</text>
             </view>
@@ -273,7 +248,6 @@ function onBack() {
         :show-progress="false"
         :enable-progress-gesture="false"
         @play="onIntroPlay"
-        @timeupdate="onIntroTimeUpdate"
         @ended="onIntroEnded"
         @error="onIntroError"
       />
@@ -300,7 +274,9 @@ function onBack() {
   align-items: center;
   opacity: 0;
   transform: translateY(24rpx); // 12px
-  transition: opacity 720ms ease, transform 720ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  // 位移跟视频落位同步（480ms），保证落位那一刻页面二维码已经在最终位置；
+  // 透明度仍然慢一点（720ms），内容是被「揭开」的，不是硬切进来
+  transition: opacity 720ms ease, transform 480ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .qrcode-page__stage--in {
@@ -338,7 +314,9 @@ function onBack() {
   transition-delay: 440ms;
 }
 
-/* 开场视频层：盖在内容层之上，播完淡出后卸载（避免末尾黑帧闪一下） */
+/* 开场视频层：盖在内容层之上，播完「缩小落位 + 淡出」后卸载。
+   淡出（420ms）比缩小（480ms）早收一点：视频是不透明的矩形，缩小后它的边框会盖住
+   正在淡入的页面内容，尽早淡到 0 才不会露出一个方框 */
 .qrcode-page__intro {
   position: absolute;
   inset: 0;
@@ -347,7 +325,7 @@ function onBack() {
   // 与页面同一底色，视频按 cover 铺满；淡出过程里不会透出白/黑的底
   background-image: linear-gradient(180deg, #e6f1ff 0%, #f5f9ff 100%);
   opacity: 1;
-  transition: opacity 720ms ease;
+  transition: opacity 420ms ease;
 }
 
 .qrcode-page__intro--out {
@@ -356,17 +334,28 @@ function onBack() {
 
 /* 视频 720×1280（9:16）铺满竖屏：cover 裁掉左右少量画面，画面始终居中。
    播放器首帧解码前是空的/黑的，所以先不显示，等 play 事件再淡入。
-   收尾时视频只负责淡出，接住它最后一帧的是下面被放大的页面二维码 */
+   收尾时最后一帧的二维码朝页面二维码「落」下去：缩小 + 上移同时进行，终点与页面二维码
+   逐像素重合，页面内容在同一时间浮上来（demo 里就是这个观感）。参数实测于 375×812：
+   - 末帧码区（暗色模块区）238×238，码区中心在视口的 50% / 49.3%
+   - 页面二维码是 240 的 SVG，去掉四周 4 个模块静默区后码区 188×188，中心在 y=380.6
+   所以缩到 188 / 238 ≈ 0.79、再上移 20px */
 .qrcode-page__intro-video {
   display: block;
   width: 100%;
   height: 100%;
   opacity: 0;
-  transition: opacity 240ms ease;
+  // 缩放锚点 = 末帧码区中心，缩放时中心不动，位移量才好算
+  transform: translateY(0) scale(1);
+  transform-origin: 50% 49.3%;
+  transition: opacity 240ms ease, transform 480ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .qrcode-page__intro-video--ready {
   opacity: 1;
+}
+
+.qrcode-page__intro--out .qrcode-page__intro-video {
+  transform: translateY(-40rpx) scale(0.79);
 }
 
 /* 返回热区：设计稿无此元素，尺寸取自原有导航习惯（88rpx 点击区 + 36rpx 图标） */
@@ -449,30 +438,21 @@ function onBack() {
   border-radius: 24rpx; // 12px
   background-image: linear-gradient(180deg, #eff9ff 0%, #ffffff 100%);
   gap: 70rpx; // 二维码底 → 说明文字顶 35px
-  // 视频里的三角标是「缩一下再消失」的，卡片也带同样方向的缩放，衔接处不会像硬切
+  // 视频末帧的二维码是「缩一下落位」的，卡片也带同样方向的缩放；
+  // 时长与视频落位（480ms）对齐，落位那一刻卡片的码刚好也是 240，两个码完全重合
   transform: scale(0.94);
-  transition: transform 820ms cubic-bezier(0.22, 0.61, 0.36, 1) 60ms;
+  transition: transform 480ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .qrcode-page__stage--in .qrcode-card {
   transform: scale(1);
 }
 
-/* 865:1337：原稿 192×192，这里放大到 240×240。
-   视频播完前再放到「接住」尺寸（实测 375×812）：
-   - 视频末帧码区（暗色模块区）238×238，中心在屏幕 y=400.6
-   - 这层 240 的 SVG 去掉四周 4 个模块的静默区后码区只有 188×188，中心在 y=380.6
-   所以尺寸放大 238 / 188 ≈ 1.266、位置下移 20px（40rpx），两者逐像素重合。
-   静默区是透明的，放大后虽然压到说明文字那一行，但不会挡住文字 */
+/* 865:1337：原稿 192×192，这里放大到 240×240（码区 188×188），
+   与视频最后一帧缩到这个尺寸后的落点对齐 */
 .qrcode-card__code {
   width: 480rpx; // 240px
   height: 480rpx;
-  transform: translateY(0) scale(1);
-  transition: transform 240ms ease-out;
-}
-
-.qrcode-card__code--caught {
-  transform: translateY(40rpx) scale(1.266);
 }
 
 /* 编码失败时的兜底，占位与二维码同尺寸，避免卡片高度跳动 */
