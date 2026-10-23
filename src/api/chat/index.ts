@@ -20,11 +20,25 @@ import type {
   TextToSpeechResult,
   UploadChatFileParams,
 } from "./types";
+import { i18n } from "@/i18n";
 import { toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
+import { isAsrServiceFailure } from "@/utils/asr-error";
 import { createLogger } from "@/utils/logger";
 import { request } from "@/utils/request";
 
 const logger = createLogger("chat-api");
+
+/**
+ * ASR 服务侧失败（如 `/speech/asr/upload` 返回 code=500「系统繁忙」）对用户没有意义，
+ * 在 API 层就把报错信息改写成「没有识别到内容，请重试」，上层直接用 error.message 即可，
+ * 不必每个入口各判一次。其它错误（网络、401、录音失败）原样抛出。
+ */
+function rethrowAsrError(error: unknown): never {
+  if (isAsrServiceFailure(error)) {
+    throw new Error(i18n.global.t("asr-no-content-retry"));
+  }
+  throw error;
+}
 
 export { consumeTextToSpeechStream } from "./tts-stream";
 export type { TtsStreamHandle } from "./tts-stream";
@@ -248,7 +262,7 @@ export function recognizeSpeechByUrl(params: RecognizeSpeechByUrlParams) {
   return request.post<SpeechRecognitionResult>("/speech/asr", {
     audioUrl: params.audioUrl,
     ...(params.language ? { language: params.language } : {}),
-  }, jsonOptions).json();
+  }, jsonOptions).json().catch(rethrowAsrError);
 }
 
 /**
@@ -260,7 +274,7 @@ export function recognizeSpeechByBase64(params: RecognizeSpeechByBase64Params) {
     audioBase64: params.audioBase64,
     ...(params.mimeType ? { mimeType: params.mimeType } : {}),
     ...(params.language ? { language: params.language } : {}),
-  }, jsonOptions).json();
+  }, jsonOptions).json().catch(rethrowAsrError);
 }
 
 export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {
@@ -270,5 +284,5 @@ export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {
     name: "file",
     fileType: "audio",
     timeout: params.timeout,
-  }).json();
+  }).json().catch(rethrowAsrError);
 }

@@ -6,6 +6,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
 import { useLandscape } from "@/hooks/useLandscape";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -39,6 +40,14 @@ defineOptions({ name: "ScheduleGanttPage" });
  * 旋转会改变排程区的实际宽度：必须重排一次再量（否则用的是旋转前的竖屏宽度，箭头会判错、跳偏）。
  */
 const { rotated, exitLandscape } = useLandscape(measureLayout);
+
+/**
+ * 顶部状态栏空白：调原生 landscapeFullscreen 转屏成功后，webview 铺满横屏、
+ * 状态栏压在页面顶边，顶栏要给状态栏让出这段高度；
+ * CSS 旋转模拟（rotated）时状态栏在设备的物理顶边（对应页面左侧），不需要留。
+ */
+const { safeTopPx } = useSafeArea();
+const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
 
 /** 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志 */
 useScheduleGestures({ gridId: "schedule-gantt-grid", onRowsOffset: () => measureRowTops() });
@@ -543,7 +552,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 <template>
   <view class="schedule" :class="{ 'schedule--rotated': rotated }">
     <!-- 顶部栏（稿子 6832:15 标题 / 6832:186 日期 / 6832:275 图例 / 10474:18 返回） -->
-    <view class="schedule__header">
+    <view class="schedule__header" :style="headerTopStyle">
       <view class="schedule__title-group">
         <text class="schedule__title">
           调度视图

@@ -22,11 +22,11 @@ export const useUserStore = defineStore("user", () => {
   const username = ref("");
   const userInfo = ref<Record<string, unknown>>({});
   const awakeningPrompt = ref<AwakeningPrompt | null>(null);
-  /** 机型选项卡数据源：进入作业指导页时拉取 */
+  /** 机型列表：由「选择体验的设备」页拉取，对话框设备背景图按 modelKey 在这里反查名称 */
   const deviceModels = ref<DeviceModelOption[]>([]);
   /**
-   * 当前选中的机型（modelKey）：作业指导页的机型卡片选完写这里。
-   * 对话框设备背景图跟着它走，跨页面共用一份，避免各页各自维护。
+   * 当前选中的机型（modelKey）：「选择体验的设备」页选完写这里，
+   * 作业指导页每次对话作为 inputs.device_model 透传，对话框设备背景图也跟着它走。
    */
   const selectedDeviceModelKey = ref("");
   /** 讲解模式（新老手）：进作业指导前在选择页选定，之后每次对话作为 inputs.operator_role 透传 */

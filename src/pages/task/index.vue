@@ -6,19 +6,18 @@ import { useI18n } from "vue-i18n";
 import type { AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideSuggestionPayload } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
-import iconForm from "@/assets/img/icon-form.svg";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
+import GanttBlock from "@/components/ai-bubble-v2/blocks/GanttBlock.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
-import AiGanttEntryCard from "@/components/ai-gantt-entry-card/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
-import AiSceneWelcome from "@/components/ai-scene-welcome/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
+import { TASK_WELCOME_COPY } from "@/config/task-welcome";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
@@ -27,6 +26,7 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { openGanttView } from "@/utils/gantt-view-route";
 import { createLogger } from "@/utils/logger";
 import { backFromScene, navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
@@ -303,14 +303,6 @@ function onTaskQuickPrompt(text: string) {
   sendTaskMessage({ text });
 }
 
-/** 甘特图入口卡开关：暂时屏蔽（schedule-gantt 页代码保留不动），改回 true 即恢复 */
-const SHOW_GANTT_ENTRY_CARD = false;
-
-/** 甘特图入口卡：进入当天任务甘特图（横屏页，页内自行生成 mock 数据） */
-function onGanttEntryTap() {
-  uni.navigateTo({ url: "/pages/schedule-gantt/index" });
-}
-
 /**
  * 点调度视图入口卡（AI 下发的 gantt 积木）：整包数据先落到本地存储，
  * 再开横屏调度视图页；页面 onLoad 取走渲染（rows / bars，含接口还没排时间的任务）。
@@ -345,6 +337,8 @@ function onTtsClick(index: number) {
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
 const showSceneWelcome = computed(() => !messages.value.length && !isSessionSwitching.value);
+/** 待机引导文案（Ardot 350:2151）：问候 + 任务入口卡 +「你还可以这么问」，见 config/task-welcome */
+const taskWelcome = TASK_WELCOME_COPY;
 
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
 
@@ -548,7 +542,6 @@ onUnload(() => {
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
         :share-selected-round-count="shareSelectedRoundCount"
-        back-only
         @back="onBack"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"
@@ -557,15 +550,33 @@ onUnload(() => {
         @session-rename="onSessionRename"
         @share-select-all="onShareSelectAll"
       />
-      <AiSceneWelcome
-        v-if="showSceneWelcome"
-        title="欢迎使用任务协同助手"
-        subtitle="我来帮你输出安排计划方案，下发任务"
-        :icon="iconForm"
-      />
-      <!-- 甘特图入口卡（设计稿 4708:743）：点它进入当天任务甘特图。【暂时屏蔽】由 SHOW_GANTT_ENTRY_CARD 控制 -->
-      <view v-if="SHOW_GANTT_ENTRY_CARD && showSceneWelcome" class="task-scene-welcome-entry">
-        <AiGanttEntryCard @tap="onGanttEntryTap" />
+      <!-- 待机引导（Ardot 350:2151）：问候 + 任务入口卡 +「你还可以这么问」问题列表 -->
+      <view v-if="showSceneWelcome" class="task-welcome">
+        <text class="task-welcome__title">
+          {{ taskWelcome.title }}
+        </text>
+        <text class="task-welcome__desc">
+          {{ taskWelcome.content }}
+        </text>
+        <!-- 任务入口卡（AiGanttEntryCard）：点击按 payload.viewType 分流，见 utils/gantt-view-route -->
+        <view class="task-welcome__entry">
+          <GanttBlock :payload="taskWelcome.ganttEntry" @open="openGanttView" />
+        </view>
+        <text class="task-welcome__label">
+          你还可以这么问
+        </text>
+        <view class="task-welcome__list">
+          <view
+            v-for="question in taskWelcome.questions"
+            :key="question"
+            class="task-welcome__row"
+            @tap="onTaskQuickPrompt(question)"
+          >
+            <text class="task-welcome__question">
+              {{ question }}
+            </text>
+          </view>
+        </view>
       </view>
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
@@ -769,13 +780,75 @@ $color-bg-voice: #f5f5f5;
 $color-border-light: #efefef;
 $color-white: #ffffff;
 
-/* 甘特图入口卡（设计稿 4708:743）：与欢迎卡同宽（左右 40rpx），卡间距 26rpx。
-   层叠同 .scene-welcome：压在输入栏的层叠上下文（z-index: 1）之下，
-   附件来源弹窗的蒙层才能挡住这张卡（弹窗挂在输入栏里，遮罩层级只在输入栏内部生效）。 */
-.task-scene-welcome-entry {
+/* ===== 待机引导（Ardot 350:2151）=====
+   画板 375×812：标题 y=74 / 说明 123 / 入口卡 180 /「你还可以这么问」331 / 问题列表 356，
+   状态栏 54 + 头部 50 之后是 74（148rpx），左右留白 20（40rpx）。 */
+.task-welcome {
   position: relative;
-  z-index: 0;
-  margin: 26rpx 40rpx 0;
+  z-index: 1;
+  padding: 148rpx 40rpx 0;
+}
+
+.task-welcome__title {
+  display: block;
+  color: #0d0d0d;
+  font-family: "PingFang SC";
+  font-size: 56rpx; // 28
+  font-weight: 700;
+  line-height: 82rpx; // 41
+}
+
+.task-welcome__desc {
+  display: block;
+  margin-top: 16rpx; // 8
+  color: #0d0d0d;
+  font-family: "PingFang SC";
+  font-size: 28rpx; // 14
+  font-weight: 400;
+  line-height: 44rpx; // 22
+}
+
+/* 任务入口卡（AiGanttEntryCard）：间距沿用设计稿里异常摘要卡那一档（13） */
+.task-welcome__entry {
+  margin-top: 26rpx; // 13
+}
+
+.task-welcome__label {
+  display: block;
+  margin-top: 54rpx; // 27
+  color: #8e8e8e;
+  font-family: "PingFang SC";
+  font-size: 30rpx; // 15
+  font-weight: 500;
+  line-height: 46rpx; // 23
+}
+
+/* 问题列表：行内 16 上下内边距（行高 52），行间 1px #EFEFEF，末行下描边 #E8E8E8 */
+.task-welcome__list {
+  margin-top: 4rpx; // 2
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.task-welcome__row {
+  padding: 32rpx 0; // 16
+  border-top: 1px solid #efefef;
+
+  &:first-child {
+    border-top: 0;
+  }
+
+  &:active {
+    opacity: 0.6;
+  }
+}
+
+.task-welcome__question {
+  display: block;
+  color: #0d0d0d;
+  font-family: "PingFang SC";
+  font-size: 28rpx; // 14
+  font-weight: 400;
+  line-height: 40rpx; // 20
 }
 
 .ai-page {
