@@ -679,7 +679,64 @@ export async function pauseNativeAudio() {
   await callNative("microphonePause");
 }
 
+/** 宿主设备信息（getPhoneInfo 回参），字段由宿主注入，可能缺失 */
+export interface NativePhoneInfo {
+  success?: boolean;
+  /** 品牌，如 samsung */
+  brand?: string;
+  /** 厂商，如 samsung */
+  manufacturer?: string;
+  /** 机型，如 SM-S918B */
+  model?: string;
+  /** 设备代号，如 dm3q */
+  device?: string;
+  /** 产品名，如 dm3qxxx */
+  product?: string;
+  /** 系统版本，如 14 */
+  systemVersion?: string;
+  /** Android SDK 版本，如 34 */
+  sdkInt?: number | string;
+  /** 宿主后续可能加字段，原样保留 */
+  [key: string]: unknown;
+}
+
+/**
+ * 读取设备信息（getPhoneInfo）。
+ *
+ * 宿主约定出参：
+ * `{ success: true, brand, manufacturer, model, device, product, systemVersion, sdkInt }`
+ *
+ * 只在 mPaaS 容器内有值：Web 调试或宿主没实现这个 JSAPI 时返回 null，
+ * 调用方按「拿不到设备信息」处理，不要卡住页面。
+ */
+export async function getPhoneInfo(): Promise<NativePhoneInfo | null> {
+  try {
+    const result = await callNative<NativePhoneInfo>("getPhoneInfo", {}, { timeoutMs: 5000, silentTimeout: true });
+    if (result?.success === false || String(result?.success) === "false") {
+      logger.warn("[mpaas] getPhoneInfo 返回失败", result);
+      return null;
+    }
+    logger.info("[mpaas] getPhoneInfo", result);
+    return result;
+  }
+  catch (error) {
+    logger.warn("[mpaas] getPhoneInfo 不可用", error);
+    return null;
+  }
+}
+
 /** 设置 webview 标题栏文案 */
 export function setNativeTitle(title: string) {
   callNativeSilently("setTitle", { title });
+}
+
+/**
+ * 原生横屏全屏：入参 `{ enable: true }` 进入横屏全屏，`{ enable: false }` 退出（恢复竖屏）。
+ *
+ * 调度视图（甘特 / 预排 / 重排）优先用它切方向：原生转屏后 innerWidth > innerHeight，
+ * useLandscape 里的 CSS 旋转会自动让位（rotated=false），页面按真实横屏尺寸铺开。
+ * 宿主没实现这个 JSAPI 时静默失败，页面里的 CSS 旋转兜底仍然有效。
+ */
+export function setLandscapeFullscreen(enable: boolean) {
+  callNativeSilently("landscapeFullscreen", { enable });
 }

@@ -3,8 +3,9 @@ import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import type { AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideSuggestionPayload } from "@/api/chat/types";
+import type { AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideSuggestionPayload, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
+import type { AiBlock } from "@/utils/ai-stream";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import iconForm from "@/assets/img/icon-form.svg";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
@@ -13,6 +14,7 @@ import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiGanttEntryCard from "@/components/ai-gantt-entry-card/index.vue";
+import GanttBlock from "@/components/ai-bubble-v2/blocks/GanttBlock.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
@@ -27,10 +29,10 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { openGanttView } from "@/utils/gantt-navigation";
 import { createLogger } from "@/utils/logger";
-import { backFromScene, navigateToScene } from "@/utils/scene-navigation";
+import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
-import { stashPendingScheduleView } from "@/utils/schedule-view";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
 /**
@@ -38,8 +40,9 @@ import { consumePendingHistorySession, getSessionId, navigateToSessionScene, pee
  *
  * 与首页 / 听汇报的区别：
  * - 独立会话域 "task"，不与首页主会话互相污染；
- * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=TASK；
- * - 每次进入起一轮干净会话（与作业指导一致），返回再进时重新开一轮。
+ * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=TEST；
+ * - 每次进入起一轮干净会话（与作业指导一致），返回再进时重新开一轮；
+ * - 初始化静默问一句「今天任务有哪些」，只把回复里的卡片铺进对话区（问题与回复文本都不展示）。
  */
 defineOptions({ name: "AiTaskPage" });
 
@@ -90,14 +93,67 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
-  // 任务协同下发的场景标识：TASK（早期下发过 TEST，历史会话仍按任务协同归类，见 utils/session-scene）
-  scene: "TASK",
+const { sendMessage, sendSilentMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+  // 任务协同下发的场景标识：TEST（早期下发过 TASK，两者在历史会话里都按任务协同归类，见 utils/session-scene）
+  scene: "TEST",
 });
 
-/** 页面统一发送入口：直接走真实接口 */
+/** 页面统一发送入口：直接走真实接口（首次提问前先续上初始化那一轮的会话） */
 function sendTaskMessage(payload?: Parameters<typeof sendMessage>[0]) {
+  applyPendingInitSession();
   void sendMessage(payload);
+}
+
+/** 进入页面自动问的初始化问题 */
+const INITIAL_CARD_QUERY = "今天任务有哪些";
+/**
+ * 初始化那一轮在服务端建的会话 id：先暂存，等用户真正提问时再写回 store 续上。
+ * 初始化请求本身不改会话态（不写 aiSessionId、不刷新会话列表、不重建消息列表），
+ * 页面就停在原地等卡片，不会像发了一轮对话那样跳走。
+ */
+const pendingInitSessionId = ref<Identifier | null>(null);
+/**
+ * 消息列表的 key：只在真正切会话（打开历史 / 新对话）时递增。
+ * 初始化拉卡片、首轮建立会话都不再重建列表，页面不会闪一下或像跳了一页。
+ */
+const chatListKey = ref(0);
+
+/** 初次真正提问前把初始化会话续上，避免多出一个空会话 */
+function applyPendingInitSession() {
+  if (!pendingInitSessionId.value) return;
+  if (!chatStore.aiSessionId) chatStore.aiSessionId = pendingInitSessionId.value;
+  pendingInitSessionId.value = null;
+}
+
+/** 初始化下发的 gantt 入口卡（只留 card 数据，页面按欢迎态自己渲染，不进消息列表） */
+const initialGanttPayload = ref<GanttViewPayload | null>(null);
+/** 上次初始化请求的时间：onShow 与 onLoad 挨着触发，用它隔开，避免首次进入重复请求 */
+let initialCardsRequestedAt = 0;
+
+/**
+ * 初始化卡片：静默调一次对话接口，只取回复里的 gantt 入口卡（card 数据）。
+ *
+ * 其它数据（回答正文 / 思考过程 / 表格 / 追问 / 建议等）一律丢弃：
+ * 不写 messages、不碰 showQuickPrompts、不触发滚动，页面结构与 showSceneWelcome 都不变，
+ * 卡片只是欢迎态里多铺一张入口卡。
+ */
+function applyInitialCards(blocks: AiBlock[] = []) {
+  const gantt = (blocks || []).find(block => block?.type === "gantt");
+  if (!gantt) return;
+  initialGanttPayload.value = (gantt.payload || {}) as GanttViewPayload;
+}
+
+async function loadInitialCards() {
+  initialCardsRequestedAt = Date.now();
+  await sendSilentMessage({
+    text: INITIAL_CARD_QUERY,
+    // 后台拉卡片：不改会话态，页面停在原处等数据
+    keepSession: true,
+    onSessionId: (conversationId) => {
+      pendingInitSessionId.value = conversationId;
+    },
+    onBlocks: blocks => applyInitialCards(blocks),
+  });
 }
 
 /**
@@ -107,7 +163,13 @@ function sendTaskMessage(payload?: Parameters<typeof sendMessage>[0]) {
  */
 function startPendingScheduleAsk() {
   const text = consumePendingScheduleAsk();
-  if (text) sendTaskMessage({ text });
+  if (text) {
+    sendTaskMessage({ text });
+    return;
+  }
+  // 没有待发问题：回到本页仍停在欢迎态就重拉一次入口卡（不缓存、不复用旧数据）。
+  // 与 onLoad 的请求隔开 800ms：首次进入 onShow 紧跟 onLoad，不该重复请求。
+  if (showSceneWelcome.value && Date.now() - initialCardsRequestedAt > 800) void loadInitialCards();
 }
 const {
   iconCopyImage,
@@ -213,6 +275,8 @@ function onAskSlotDrawerHeightChange(height: number) {
 function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
   closeAskSlotDrawer();
   askSlotQueue.value = [];
+  // 追问卡作答也是用户真正提问：先续上初始化那一轮的会话
+  applyPendingInitSession();
   sendAskSlotSelection(payload);
 }
 
@@ -306,18 +370,19 @@ function onTaskQuickPrompt(text: string) {
 /** 甘特图入口卡开关：暂时屏蔽（schedule-gantt 页代码保留不动），改回 true 即恢复 */
 const SHOW_GANTT_ENTRY_CARD = false;
 
-/** 甘特图入口卡：进入当天任务甘特图（横屏页，页内自行生成 mock 数据） */
+/** 甘特图入口卡：进入当天任务甘特图（横屏页，只渲染 AI 下发的 rows，没有数据即空视图） */
 function onGanttEntryTap() {
   uni.navigateTo({ url: "/pages/schedule-gantt/index" });
 }
 
 /**
- * 点调度视图入口卡（AI 下发的 gantt 积木）：整包数据先落到本地存储，
- * 再开横屏调度视图页；页面 onLoad 取走渲染（rows / bars，含接口还没排时间的任务）。
+ * 点甘特入口卡（AI 下发的 gantt 积木）：按 viewType 分流（见 utils/gantt-navigation）。
+ * - personal → 竖屏个人任务详情页（pages/task-detail），明细挂在整包的 payload 字段里；
+ * - schedule / pre / replan → 各自横屏视图；
+ * 数据一律先落本地存储、再由目标页 onLoad 取走（目标页可能是独立场景窗口）。
  */
 function onGanttOpen(payload: GanttViewPayload) {
-  stashPendingScheduleView(payload);
-  void navigateToScene("/pages/schedule-gantt/index");
+  openGanttView(payload);
 }
 /** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
 function onTtsClick(index: number) {
@@ -366,14 +431,20 @@ watch(shareSheetVisible, async (visible) => {
 
 function startNewConversation() {
   // 已经是一轮空白会话就别再重置了，重复点击给个明确反馈
-  if (!chatStore.messages.length && !chatStore.aiSessionId) {
+  if (!chatStore.messages.length && !chatStore.aiSessionId && !pendingInitSessionId.value) {
     uni.showToast({ title: t("already-new-conversation"), icon: "none" });
     return;
   }
   // 正在生成时切走：先掐掉在途请求，否则回包会继续往新会话里写
   cancelActiveStream();
+  pendingInitSessionId.value = null;
+  // 新对话不复用上一轮的入口卡，等新数据回来再铺
+  initialGanttPayload.value = null;
   chatStore.resetConversation();
+  chatListKey.value += 1;
   nextTick(() => chatStore.scrollToBottom(true));
+  // 新对话同样是「打开就铺卡片」：重新静默拉一次
+  void loadInitialCards();
 }
 
 function onBack() {
@@ -395,6 +466,10 @@ function toggleQuickList(show: boolean) {
 async function openLocalHistory(id: string | number, force = false) {
   if (!force && String(chatStore.aiSessionId) === String(id) && chatStore.messages.length) return;
   cancelActiveStream();
+  // 切到历史会话：初始化那轮暂存的会话不再续用，欢迎态的入口卡也不再显示
+  pendingInitSessionId.value = null;
+  initialGanttPayload.value = null;
+  chatListKey.value += 1;
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
   chatStore.messages = [];
@@ -505,10 +580,12 @@ onLoad((options) => {
     void openLocalHistory(consumePendingHistorySession("TASK") || sessionId, true);
     return;
   }
-  // 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 TASK。
+  // 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 TEST。
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
+  // 初始化静默问一句「今天任务有哪些」，只把回复里的 gantt 入口卡铺进对话区（不缓存、每次重新请求）
+  void loadInitialCards();
 });
 
 onMounted(() => {
@@ -520,8 +597,12 @@ onShow(() => {
   syncWindowHeight();
   const sessionId = consumePendingHistorySession("TASK");
   // 有心跳转的会话就先切过去，再补发甘特图里问的问题，避免问错会话
-  if (sessionId) void openLocalHistory(sessionId, true).then(startPendingScheduleAsk);
-  else startPendingScheduleAsk();
+  if (sessionId) {
+    void openLocalHistory(sessionId, true).then(startPendingScheduleAsk);
+    return;
+  }
+  // 从调度视图等页面回到本页：补发甘特图里问的问题；没有就刷新一次入口卡
+  startPendingScheduleAsk();
 });
 
 onUnload(() => {
@@ -563,12 +644,17 @@ onUnload(() => {
         subtitle="我来帮你输出安排计划方案，下发任务"
         :icon="iconForm"
       />
-      <!-- 甘特图入口卡（设计稿 4708:743）：点它进入当天任务甘特图。【暂时屏蔽】由 SHOW_GANTT_ENTRY_CARD 控制 -->
+      <!-- 初始化下发的 gantt 入口卡（设计稿 4708:743）：只渲染 card 数据，不写进消息列表，
+           showSceneWelcome 与页面结构都不因这次请求变化；点它进当天任务甘特图 -->
+      <view v-if="showSceneWelcome && initialGanttPayload" class="task-scene-welcome-entry">
+        <GanttBlock :payload="initialGanttPayload" @open="onGanttOpen" />
+      </view>
+      <!-- 静态入口卡（mock）：【暂时屏蔽】由 SHOW_GANTT_ENTRY_CARD 控制 -->
       <view v-if="SHOW_GANTT_ENTRY_CARD && showSceneWelcome" class="task-scene-welcome-entry">
         <AiGanttEntryCard @tap="onGanttEntryTap" />
       </view>
       <AiMessageList
-        :key="aiSessionId || 'new-conversation'"
+        :key="chatListKey"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
@@ -796,6 +882,9 @@ $color-white: #ffffff;
   background: #fafafa;
   overflow: hidden;
   position: relative;
+  /* 形成层叠上下文：机型背景图（AiChatBackdrop）是 z-index: -1，
+     不隔离时负层会被本元素的 #fafafa 底色盖住，选了机型也看不到图 */
+  isolation: isolate;
 }
 
 // 头部要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，

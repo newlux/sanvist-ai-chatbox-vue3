@@ -650,13 +650,8 @@ function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
  * 调度视图入口卡（gantt 积木）：与核对卡一样独立于回答气泡——
  * 气泡里不渲染（见 ai-bubble-v2 的 STANDALONE_BLOCK_TYPES），这里在气泡下方单独成卡，
  * 版式沿用欢迎态那张入口卡（左右 20px、与气泡卡间距 13px，见 pages/task 的 .task-scene-welcome-entry）。
- *
- * 【暂时屏蔽】卡片渲染入口统一由 SHOW_GANTT_BLOCK 控制，改回 true 即恢复。
  */
-const SHOW_GANTT_BLOCK = false;
-
 function ganttBlocks(message: UiChatMessage) {
-  if (!SHOW_GANTT_BLOCK) return [];
   return (message?.blocks || []).filter(block => block?.type === "gantt");
 }
 
@@ -837,7 +832,7 @@ watch(
               :tts-enabled="!!msg.ttsEnabled"
               :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
               :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
-              :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted && !msg.assistantCallbackTitle"
+              :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted && !msg.assistantCallbackTitle && !msg.hideActions"
               :waiting-text="msg.waitingText"
               :assistant-callback-title="msg.assistantCallbackTitle"
               :assistant-callback-status="msg.assistantCallbackStatus || ''"

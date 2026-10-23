@@ -1,13 +1,18 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
 import { createLogger } from "@/utils/logger";
+import { setLandscapeFullscreen } from "@/utils/platform/mpaas";
 
 const logger = createLogger("landscape");
 
 /**
  * 进入页面自动横屏，离开时还原。
  *
- * 默认走 **CSS 旋转模拟**（推荐，各端一致）：
+ * 方向切换优先交给宿主原生：进入时调 `landscapeFullscreen({ enable: true })`，退出时
+ * `{ enable: false }`（见 utils/platform/mpaas）。原生转屏成功后可视区本身就是横的，
+ * 下面的 CSS 旋转会自动让位（rotated=false），页面按真实横屏尺寸铺开。
+ *
+ * 宿主没实现该 JSAPI 时降级为 **CSS 旋转模拟**（各端一致）：
  * 把 body 整体旋转 90°、按「宽=100vh、高=100vw」铺开 —— 设备保持竖屏持握，视觉上就是横屏。
  * 不需要全屏权限、不弹全屏、iOS Safari / 各种 WebView 都稳；代价是手势方向跟着转
  * （屏幕上左右 ↔ 内容里上下），所以页面最好能在横屏内一屏放下，否则滚动方向会反直觉。
@@ -115,6 +120,9 @@ export function useLandscape(onReflow?: () => void, options: { lock?: boolean } 
   }
 
   async function enterLandscape() {
+    console.log("enterLandscape");
+    // 先让宿主把屏幕转过去（原生横屏全屏）；宿主没实现时这一步静默失败，下面照旧走旋转兜底
+    setLandscapeFullscreen(true);
     await lockOrientation();
     refreshRotateState();
     applyBodyRotation(rotated.value);
@@ -128,6 +136,9 @@ export function useLandscape(onReflow?: () => void, options: { lock?: boolean } 
   }
 
   function exitLandscape() {
+    // 退出横屏：通知宿主恢复竖屏（离开调度视图 / 点返回 / 页面卸载都会走到这里）
+    setLandscapeFullscreen(false);
+
     if (typeof window !== "undefined") {
       window.removeEventListener("resize", onViewportChange);
       window.removeEventListener("orientationchange", onViewportChange);

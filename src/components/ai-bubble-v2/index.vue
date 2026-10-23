@@ -290,6 +290,7 @@ const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusT
 const hasProcessContent = computed(() => Boolean(contentBlocks.value.length || props.content));
 const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(props.processSubtitle?.trim()));
 
+ 
 /** 维修助手回流卡：轮询中显示「故障诊断中…」，回流完成后展示摘要详情。 */
 const showAssistantCallbackResult = computed(
   () => Boolean(props.assistantCallbackTitle) && !props.loading && !props.interrupted,

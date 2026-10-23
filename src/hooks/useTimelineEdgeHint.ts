@@ -42,8 +42,8 @@ export interface TimelineEdgeHintOptions {
   rows: () => ReadonlyArray<{ bars: ReadonlyArray<EdgeHintBar> }>;
   /** 时间轴最左刻度对应的分钟数 */
   dayStartMin: number;
-  /** 每小时像素宽 */
-  hourWidth: number;
+  /** 每小时像素宽（固定值；支持双指缩放的页面传 getter，判定跟着实时变） */
+  hourWidth: number | (() => number);
   /** 当前滚动位置（px） */
   scrollLeft: Ref<number>;
   /** 时间轴可视宽度（px） */
@@ -59,11 +59,14 @@ export interface TimelineEdgeHintOptions {
 export function useTimelineEdgeHint(options: TimelineEdgeHintOptions) {
   const margin = options.margin ?? 8;
 
+  /** 当前每小时像素宽（getter 形式时在 computed 里读，缩放后自动重算箭头） */
+  const hourWidth = () => (typeof options.hourWidth === "function" ? options.hourWidth() : options.hourWidth);
+
   function range(bar: EdgeHintBar) {
-    const x1 = ((bar.startMin - options.dayStartMin) / 60) * options.hourWidth;
+    const x1 = ((bar.startMin - options.dayStartMin) / 60) * hourWidth();
     const width = Math.max(
-      ((bar.endMin - bar.startMin) / 60) * options.hourWidth,
-      options.hourWidth / 2,
+      ((bar.endMin - bar.startMin) / 60) * hourWidth(),
+      hourWidth() / 2,
     );
     return { x1, x2: x1 + width };
   }
