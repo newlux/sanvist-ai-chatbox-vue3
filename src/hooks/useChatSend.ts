@@ -17,7 +17,7 @@ import { navigateToScene } from "@/utils/scene-navigation";
 
 const logger = createLogger("chat");
 
-/** TASK 是任务协同的场景标识（TEST 是早期标识，历史会话仍按任务协同归类，见 utils/session-scene） */
+/** TEST 是任务协同当前下发的场景标识（TASK 是早期标识，历史会话仍按任务协同归类，见 utils/session-scene） */
 type ChatScene = "ASK" | "GUIDE" | "TASK" | "TEST" | "PODCAST";
 
 function isAbortError(error: unknown) {
@@ -607,6 +607,62 @@ export function useChatSend(scope?: string, handlers?: {
     await sendAiFlow(options);
   }
 
+  /**
+   * 静默发送一轮对话：**不往消息列表写任何消息、不动任何 UI 状态**
+   * （不置 isLoading / activeMessageId、不滚动、不清草稿），只把流式快照里的 blocks 回调给页面。
+   *
+   * 作业协同页用它拉初始化卡片数据：页面初始化时问「今天任务有哪些」，
+   * 只取回答里的卡片（gantt / 表格 / 追问等），用户消息与 AI 回答文本都不展示。
+   *
+   * 会话延续：默认把拿到的 conversationId 写回 store（这一轮已经在服务端建了会话，
+   * 后续用户提问要续在同一个会话里，避免多出一个空会话）。
+   * keepSession=true 时不写回：初始化取卡片时用，页面停在原地等卡片，
+   * 会话 id 通过 onSessionId 交给页面暂存，等用户真正提问时再续上。
+   */
+  async function sendSilentMessage(options: {
+    text: string;
+    /** 每次快照回调（gantt 等 blocks 随流逐步到达，最后一次即最全） */
+    onBlocks?: (blocks: ReturnType<typeof buildInitialBlocks>, ended: boolean) => void;
+    /** 额外 Dify inputs（与普通发送的 getExtraInputs 口径一致） */
+    extraInputs?: Record<string, unknown>;
+    /**
+     * 为 true 时不改 store 里的会话 id、不刷新会话列表：
+     * 初始化请求按「后台拉数据」处理，页面不会因为多了个会话而重建 / 跳到会话态。
+     */
+    keepSession?: boolean;
+    /** keepSession=true 时把本轮会话 id 抛给页面暂存（每次快照都会回调，覆盖即可） */
+    onSessionId?: (conversationId: Identifier | null) => void;
+  }) {
+    const query = String(options.text || "").trim();
+    if (!query) return;
+
+    const requestSeq = chatStore.nextRequestSeq();
+    const hadSessionId = Boolean(chatStore.aiSessionId);
+    try {
+      await consumeChatStream({
+        source: stream(createChatRequest(query, [], options.extraInputs ?? {}), { idleTimeoutMs: 60_000 }),
+        isStale: () => requestSeq !== chatStore.activeRequestSeq,
+        onSnapshot: (snapshot) => {
+          if (snapshot.conversationId) {
+            if (options.keepSession) options.onSessionId?.(snapshot.conversationId);
+            else chatStore.aiSessionId = snapshot.conversationId;
+          }
+          options.onBlocks?.(snapshot.blocks, Boolean(snapshot.ended));
+        },
+      });
+    } catch (error) {
+      if (!isAbortError(error)) logger.error("silent chat request failed", error);
+    } finally {
+      // 新会话（会话列表里原本没有这条）拿回来后才需要刷新，和普通发送一致。
+      // keepSession 不改 store，这一轮对会话列表不可见，也就不刷新。
+      if (!options.keepSession && !hadSessionId && chatStore.aiSessionId) {
+        sessionStore
+          .loadSessions()
+          .catch(error => logger.error("failed to refresh AI sessions", error));
+      }
+    }
+  }
+
   async function sendAssistantCallback(content: string, options: {
     aiMsgId?: string;
     waitingText?: string;
@@ -712,6 +768,7 @@ export function useChatSend(scope?: string, handlers?: {
 
   return {
     sendMessage,
+    sendSilentMessage,
     sendQuickPrompt,
     sendAskSlotSelection,
     sendAssistantCallback,
