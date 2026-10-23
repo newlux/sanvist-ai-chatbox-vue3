@@ -473,6 +473,8 @@ function resetIntro() {
   // 唤醒校验相关也一并复位，回到「起始态 • 未唤醒」的观感
   isChecking.value = false;
   isFinishing.value = false;
+  // 作废在途的详情标题口播
+  detailSpeakSeq += 1;
   clearWakeMissed();
 }
 
@@ -604,9 +606,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs = ASR_TIMEOUT_MS) {
  */
 function startRecording() {
   const seq = ++recordSeq;
-  // 校验接口按阶段区分：起始页说唤醒词（AWAKEN）、身份选择页说身份（IDENTITY）、
+  // 校验接口按阶段区分：起始页说唤醒词（HEY）、身份选择页说身份（IDENTITY）、
   // 身份信息页说「开始体验」（START）
-  const step: WakeStep = isRoleDetail.value ? "START" : isChoosing.value ? "IDENTITY" : "AWAKEN";
+  const step: WakeStep = isRoleDetail.value ? "START" : isChoosing.value ? "IDENTITY" : "HEY";
   const start = (async () => {
     const granted = await ensureNativePermission("record_audio");
     if (seq !== recordSeq) return null;
@@ -801,10 +803,63 @@ async function stopRecordingAndRecognize() {
 
 /**
  * 命中判定：matched = true 且 intent 不是 BACK。
- * BACK 表示「返回上一步」这类导航意图，不算命中（不推进流程，按未命中反馈）。
+ * BACK 是「返回上一步」的导航意图，由 handleWakeBack 单独处理（不按命中推进流程）。
  */
 function isWakeHit(result?: WakeValidateResult | null) {
   return !!result?.matched && String(result.intent || "").trim().toUpperCase() !== "BACK";
+}
+
+/**
+ * 语音回退（matched = true 且 intent = BACK），按 targetStep 决定退到哪一屏：
+ * - 身份信息页：IDENTITY → 「请选择你的身份吧」，HEY → 起始页；
+ * - 身份选择页：HEY → 起始页。
+ * 其它 targetStep 不做处理（留在当前页，也不闪「未命中」的红）。
+ */
+function handleWakeBack(targetStep: string) {
+  logger.info("visitor wake back", {
+    targetStep,
+    isRoleDetail: isRoleDetail.value,
+    isChoosing: isChoosing.value,
+  });
+  // 松手后的校验态收掉，底部交给常态 / 播报判定
+  isChecking.value = false;
+  if (isRoleDetail.value) {
+    if (targetStep === "IDENTITY") backToChoosing();
+    else if (targetStep === "HEY") resetIntro();
+    return;
+  }
+  if (isChoosing.value && targetStep === "HEY") resetIntro();
+}
+
+/**
+ * 回退到「请选择你的身份吧」：详情层收起、身份气泡淡入回来，
+ * 再按首次进入选择态同一套节奏把引导语念一遍。
+ */
+function backToChoosing() {
+  if (!isRoleDetail.value) return;
+  introTts.stop();
+  disarmVoiceRetry();
+  // 在途的详情标题口播一律作废，别退回来还在念上一屏
+  detailSpeakSeq += 1;
+  if (detailSpeakTimer) {
+    clearTimeout(detailSpeakTimer);
+    detailSpeakTimer = null;
+  }
+  if (detailEnterTimer) {
+    clearTimeout(detailEnterTimer);
+    detailEnterTimer = null;
+  }
+  isRoleDetail.value = false;
+  detailVisible.value = false;
+  chooseOut.value = false;
+  selectedBubbleKey.value = "";
+  if (choiceSpeakTimer) clearTimeout(choiceSpeakTimer);
+  choiceSpeakTimer = setTimeout(() => {
+    choiceSpeakTimer = null;
+    if (!isChoosing.value || isRoleDetail.value) return;
+    introTts.speak(identityTitle.value);
+    armVoiceRetry(identityTitle.value);
+  }, CHOICE_SPEAK_DELAY_MS);
 }
 
 /**
@@ -853,11 +908,12 @@ async function startExperience(role: VisitorRole) {
 /**
  * 唤醒 / 热词校验（语雀 2.2）：长按录音识别出的文本，按「模块 ASK + 当前阶段」
  * POST 到 /speech/wake/validate，后端比对热词表后回 matched / hitValue / intent 等。
- * - 阶段 AWAKEN：起始页说的唤醒词；
+ * - 阶段 HEY：起始页说的唤醒词；
  * - 阶段 IDENTITY：身份选择页里长按说的身份；
  * - 阶段 START：身份信息页里长按说的「开始体验」。
  * 命中（matched = true 且 intent 不是 BACK）：起始页进欢迎流程、身份选择页按 data.hitValue
  * 拉 IDENTITY_DETAIL 并进入身份信息页、身份信息页按 role-select 页「开始体验」进首页；
+ * 回退（matched = true 且 intent = BACK）：按 data.targetStep 退回上一屏（见 handleWakeBack）；
  * 否则底部渐变切红。
  */
 async function validateWakeText(seq: number, text: string, step: WakeStep) {
@@ -879,6 +935,11 @@ async function validateWakeText(seq: number, text: string, step: WakeStep) {
       fallbackText: result?.fallbackText,
       fallbackTexts: result?.fallbackTexts,
     });
+    // 命中回退：matched = true 且 intent = BACK，按 targetStep 退回上一屏
+    if (result?.matched && String(result.intent || "").trim().toUpperCase() === "BACK") {
+      handleWakeBack(String(result.targetStep || "").trim().toUpperCase());
+      return;
+    }
     if (!isWakeHit(result)) {
       enterWakeMissed();
       return;

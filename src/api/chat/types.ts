@@ -514,7 +514,7 @@ export interface RecognizeSpeechByBase64Params {
 export interface WakeValidateParams {
   /** 业务模块：Hey,SANI 起始页固定 ASK */
   module: WakeModule;
-  /** 阶段：AWAKEN 起始页 / IDENTITY 身份选择页 / START 身份信息页 */
+  /** 阶段：HEY 起始页 / IDENTITY 身份选择页 / START 身份信息页 */
   step: WakeStep;
   /** 语音识别出来的文本 */
   text: string;
@@ -527,11 +527,11 @@ export type WakeModule = "ASK" | "GUIDE" | "TASK" | "PODCAST";
 
 /**
  * 阶段：
- * - AWAKEN：起始页唤醒词；
+ * - HEY：起始页唤醒词；
  * - IDENTITY：身份选择页里长按说的身份；
  * - START：身份信息页里长按说的「开始体验」
  */
-export type WakeStep = "AWAKEN" | "IDENTITY" | "START";
+export type WakeStep = "HEY" | "IDENTITY" | "START";
 
 /**
  * 实测返回（module=ASK / step=AWAKEN / text="Hey SANI"）：
