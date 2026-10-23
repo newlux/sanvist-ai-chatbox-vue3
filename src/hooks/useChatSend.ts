@@ -28,8 +28,11 @@ function isAbortError(error: unknown) {
   return name === "AbortError" || message.includes("aborted") || message.includes("abort");
 }
 
-/** 工作流用这个占位文本表示「这一轮要给用户看二维码」，不是给人看的回答 */
+/** 老写法：整段回答就是这个占位文本 "QRCODE"，不是给人看的回答 */
 const QRCODE_ANSWER_PLACEHOLDER = "QRCODE";
+/** 新写法：<QRCODE>正文</QRCODE>。标签用来判定，尖括号里的正文是给用户看的气泡文案 */
+const QRCODE_TAG_OPEN = "<QRCODE>";
+const QRCODE_TAG_CLOSE = "</QRCODE>";
 /** 占位文本的前缀：流式期间答案还没长全（"Q"、"QR"…），前缀期先按住不播 */
 const QRCODE_PLACEHOLDER_PREFIX = /^q(?:r(?:c(?:o(?:de?)?)?)?)?$/i;
 /** 二维码页路由（pages/qrcode/index） */
@@ -53,11 +56,33 @@ function isQrcodePlaceholderPrefix(text: string) {
 }
 
 /**
- * 判定这一轮是不是二维码占位回答。
+ * 解析 <QRCODE>正文</QRCODE>。
  *
- * 网关目前不单独下发标记：Dify 工作流把 `outputs.answer` 置成占位文本 "QRCODE"
- * （workflow_finished → 转成 message_end），所以主要按答案正文判定；
- * 后续网关若在 message_end.metadata 下发 `qrcode`（true 或内容字符串）/ `qrcode_content`，优先用它。
+ * 流式期间正文是边到边解析的：开标签还没收完（"<"、"<QR"…）按空正文算，
+ * 闭合标签还没到就先把已有的正文拿出来。不是这种写法返回 null（含老写法的纯 "QRCODE"）。
+ */
+function parseQrcodeTaggedAnswer(text: string) {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  const open = QRCODE_TAG_OPEN.toLowerCase();
+  if (raw.length < open.length && open.startsWith(lower)) return { text: "", closed: false };
+  if (!lower.startsWith(open)) return null;
+  const body = raw.slice(open.length);
+  const closeIndex = body.toLowerCase().indexOf(QRCODE_TAG_CLOSE.toLowerCase());
+  return {
+    text: (closeIndex >= 0 ? body.slice(0, closeIndex) : body).trim(),
+    closed: closeIndex >= 0,
+  };
+}
+
+/**
+ * 判定这一轮是不是二维码回答，并取出「气泡文案」与「二维码编码内容」。
+ *
+ * 两种写法都认：
+ *  - 老写法：`outputs.answer` 整段就是占位文本 "QRCODE"（没有给人看的文案，气泡不显示）
+ *  - 新写法：`<QRCODE>正文</QRCODE>`，标签用来判定，尖括号里的正文进气泡
+ * 二维码的编码内容只认 metadata（`qrcode` 字符串 / `qrcode_content`），标签正文只是文案。
  */
 function resolveQrcodeTurn(
   blocks: ReturnType<typeof buildInitialBlocks>,
@@ -70,8 +95,22 @@ function resolveQrcodeTurn(
   const answerText = collectAnswerText(blocks).trim() || String(metadata?.outputs_answer ?? "").trim();
   // 失败 / 中断轮的正文不带占位语义，只有正常结束才跳转
   const stopped = metadata?.status === "stopped" || metadata?.status === "failed";
+  const tagged = parseQrcodeTaggedAnswer(answerText);
   const isPlaceholder = ended && !stopped && isQrcodePlaceholder(answerText);
-  return { matched: Boolean(flag) || isPlaceholder, content };
+  // 标签写法：等闭合标签到齐（或整轮结束）再跳，流式早期不跳，免得气泡还没拿到正文就开页
+  const isTagged = Boolean(tagged) && !stopped && (Boolean(tagged?.closed) || ended);
+  // metadata 下发标记的老路子：已经出现正文（或整轮结束）再跳，避免正文还在路上就把气泡收掉；
+  // 一旦认出是标签写法就改走上面的分支，不受标记提前触发
+  const isFlagged = Boolean(flag) && !tagged && (Boolean(answerText) || ended);
+  return {
+    matched: isTagged || isPlaceholder || isFlagged,
+    /** 尖括号里的正文：气泡显示它 */
+    text: tagged?.text ?? "",
+    /** 是不是标签写法（流式早期也算）：这一轮不进听播，气泡也要摘掉标签 */
+    tagged: Boolean(tagged),
+    /** 二维码的编码内容：只来自 metadata，没有就由二维码页回落到默认下载地址 */
+    content,
+  };
 }
 
 /** 把快照里的 answer 块拼成整段回答文本 */
@@ -80,6 +119,20 @@ function collectAnswerText(blocks: ReturnType<typeof buildInitialBlocks>) {
     .filter(block => block.type === "answer")
     .map(block => String(block.payload?.content || ""))
     .join("");
+}
+
+/**
+ * 把气泡里的答案正文换成标签正文。
+ * <QRCODE> 这种标签源码不能落到气泡里，正文统一放在第一段 answer 上，其余 answer 清空。
+ */
+function withQrcodeAnswerText(blocks: ReturnType<typeof buildInitialBlocks>, text: string) {
+  let placed = false;
+  return blocks.map((block) => {
+    if (block.type !== "answer") return block;
+    const content = placed ? "" : text;
+    placed = true;
+    return { ...block, payload: { ...block.payload, content } };
+  });
 }
 
 export function useChatSend(scope?: string, handlers?: {
@@ -332,28 +385,44 @@ export function useChatSend(scope?: string, handlers?: {
     }
 
     /**
-     * 二维码占位回答的收尾：这条 AI 消息不落气泡（hidden），直接打开二维码页。
+     * 二维码回答的收尾：打开二维码页。
      * 跳转与其它页面保持一致走 navigateToScene（mPaaS 下开新场景窗口，Web 下退化为 navigateTo）。
-     * 内容来自 metadata（qrcode 字符串 / qrcode_content），占位文本本身不算内容。
+     * 二维码的编码内容来自 metadata（qrcode 字符串 / qrcode_content）；
+     * 新写法 <QRCODE>正文</QRCODE> 的正文留在气泡里正常展示，老写法的纯占位 "QRCODE" 不出气泡。
      */
-    function openQrcodePage(content: string) {
+    function openQrcodePage(turn: { content: string; text: string }) {
       if (qrcodeHandled) return;
       qrcodeHandled = true;
-      logger.debug("qrcode placeholder answer detected", { aiMsgId, content });
-      chatStore.patchMessageById(aiMsgId, {
-        hidden: true,
-        loading: false,
-        content: "",
-        blocks: buildInitialBlocks(),
-        ttsEnabled: false,
-        ttsPlaying: false,
-        processStatus: { phase: "succeeded" },
-      });
+      logger.debug("qrcode answer detected", { aiMsgId, content: turn.content, text: turn.text });
+      if (turn.text) {
+        // 标签里带了给人看的文案：这条 AI 卡片要显示，只收掉加载态与听播
+        chatStore.patchMessageById(aiMsgId, {
+          hidden: false,
+          loading: false,
+          ttsEnabled: false,
+          ttsPlaying: false,
+          processStatus: { phase: "succeeded" },
+        });
+      }
+      else {
+        // 老写法：整段回答只有占位文本 "QRCODE"，这一轮不出气泡
+        chatStore.patchMessageById(aiMsgId, {
+          hidden: true,
+          loading: false,
+          content: "",
+          blocks: buildInitialBlocks(),
+          ttsEnabled: false,
+          ttsPlaying: false,
+          processStatus: { phase: "succeeded" },
+        });
+      }
       if (handlers?.onQrcodeAnswer) {
-        handlers.onQrcodeAnswer({ aiMsgId, content });
+        handlers.onQrcodeAnswer({ aiMsgId, content: turn.content });
         return;
       }
-      const url = content ? `${QRCODE_PAGE_ROUTE}?content=${encodeURIComponent(content)}` : QRCODE_PAGE_ROUTE;
+      const url = turn.content
+        ? `${QRCODE_PAGE_ROUTE}?content=${encodeURIComponent(turn.content)}`
+        : QRCODE_PAGE_ROUTE;
       void navigateToScene(url).catch(error => logger.error("failed to open qrcode page", error));
     }
 
@@ -363,12 +432,16 @@ export function useChatSend(scope?: string, handlers?: {
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
-          // 二维码占位回答：这一轮既不出气泡也不进听播，直接跳二维码页。
-          // 网关不单独下发标记，靠「整段回答 == QRCODE」判定（workflow_finished 的答案正文）。
+          // 二维码回答：老写法「整段 == QRCODE」不出气泡直接跳；新写法 <QRCODE>正文</QRCODE>
+          // 保留气泡并展示尖括号里的正文，两种写法都会跳到二维码页。
           const qrcodeTurn = resolveQrcodeTurn(snapshot.blocks, snapshot.metadata, snapshot.ended);
-          applySnapshot(aiMsgId, userMsgId, snapshot, preserveProcessStatus, qrcodeTurn.matched);
+          // 标签源码不落到气泡里：先把 answer 正文换成标签正文再写入消息
+          const displaySnapshot = qrcodeTurn.tagged
+            ? { ...snapshot, blocks: withQrcodeAnswerText(snapshot.blocks, qrcodeTurn.text) }
+            : snapshot;
+          applySnapshot(aiMsgId, userMsgId, displaySnapshot, preserveProcessStatus, qrcodeTurn.matched);
           if (qrcodeTurn.matched) {
-            openQrcodePage(qrcodeTurn.content);
+            openQrcodePage(qrcodeTurn);
             return;
           }
 
@@ -388,7 +461,8 @@ export function useChatSend(scope?: string, handlers?: {
             const answerContent = collectAnswerText(snapshot.blocks);
             // "QRCODE" 是给前端看的占位，不是给人听的：文本还是占位前缀时按住不播，
             // 一旦长成正常答案（含已压住的开头）再一次性补播，避免把字母一个个念出来。
-            const placeholderPrefix = isQrcodePlaceholderPrefix(answerContent);
+            // <QRCODE>…</QRCODE> 这一轮同样不进听播（要跳二维码页），整段按住。
+            const placeholderPrefix = qrcodeTurn.tagged || isQrcodePlaceholderPrefix(answerContent);
             if (!placeholderPrefix && answerContent.length > lastSeenAnswerLength) {
               notifyAnswerDelta(answerContent.slice(lastSeenAnswerLength), false);
               lastSeenAnswerLength = answerContent.length;
