@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-
-import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
+import type { GanttViewRow } from "@/api/chat/types";
 import type { TaskDetailPanelPayload, TaskDetailPanelStatus } from "@/components/ai-task-detail-panel/types";
+import type { SchedulePinchEvent } from "@/hooks/useScheduleGestures";
+
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
 import { useLandscape } from "@/hooks/useLandscape";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
-import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 import { backFromScene } from "@/utils/scene-navigation";
+import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
+import { consumePendingScheduleView } from "@/utils/schedule-view";
 
 /**
  * 横屏调度视图·预排草案（稿子 6464:150）——每个资源一行，行内平铺当班任务。
@@ -19,6 +23,12 @@ import { backFromScene } from "@/utils/scene-navigation";
  *   + 返回对话按钮；
  * - 左侧资源列（140px，6464:279）：第一行「类别 + 名称」，第二行车号|班次；
  * - 右侧排程区：时间轴 + 竖向网格（#F3F3F3）+ 任务条（按起止时间定位），可横向滚动。
+ *
+ * 不画「当前时间虚线」：产品规范里只有全量调度视图（pages/schedule-gantt，viewType=schedule）
+ * 显示这条线；本页只用 NOW_MIN 推任务状态，不渲染时间线。
+ *
+ * 双指缩放：与甘特页同一套（useScheduleGestures 接管两指手势），按两指间距比例改「每小时像素宽」
+ * （28–168px，基准 56px），捏合中心的时刻保持不动；刻度、任务条、竖网格线、箭头跟着实时重排。
  *
  * 横屏方式与 pages/schedule-gantt 一致：`useLandscape()` 默认把页面整体旋转 90° 模拟横屏
  * （设备竖屏持握、不申请全屏权限），离开页面自动还原；需要真锁方向时传 `{ lock: true }`。
@@ -39,25 +49,52 @@ useScheduleGestures({ gridId: "schedule-pre-grid", onRowsOffset: () => measureRo
 const detailVisible = ref(false);
 const detail = ref<TaskDetailPanelPayload | null>(null);
 
-/** 稿子里的红色时间标记是 12:45，用当前时刻判断任务状态（mock 用；接后端时用接口给的 status） */
-const NOW_MIN = 12 * 60 + 45;
+/** 状态推导基准：取系统当前时间（分钟数），任务条配色 / 详情里的「执行中 / 已完成」按它判断 */
+function currentMinutes() {
+  const date = new Date();
+  return date.getHours() * 60 + date.getMinutes();
+}
+const NOW_MIN = currentMinutes();
 
-/** 时间轴：每小时 56px；稿子基准范围 08:00–21:00（与稿子刻度一致） */
-const HOUR_WIDTH = 56;
+/** 时间轴：每小时像素宽基准 56px（稿子 1x，双指捏合在 28–168 之间缩放）；基准范围 08:00–21:00 */
+const DEFAULT_HOUR_WIDTH = 56;
+const HOUR_WIDTH_MIN = 28;
+const HOUR_WIDTH_MAX = 168;
+/** 当前每小时像素宽（双指缩放会改它，刻度 / 任务条 / 网格线都跟着走） */
+const hourWidth = ref(DEFAULT_HOUR_WIDTH);
 const DESIGN_DAY_START_MIN = 8 * 60;
 const DESIGN_DAY_END_MIN = 21 * 60;
 /** 时间轴实际范围（分钟）：以稿子基准为底线，数据越界时由下面的 expandDayRange() 向外扩到整点 */
 let DAY_START_MIN = DESIGN_DAY_START_MIN;
 let DAY_END_MIN = DESIGN_DAY_END_MIN;
-const hourLabels = computed(() => {
-  const labels: string[] = [];
-  for (let hour = DAY_START_MIN / 60; hour <= DAY_END_MIN / 60; hour += 1) {
-    labels.push(`${String(hour).padStart(2, "0")}:00`);
+/* ---------- 刻度间隔随缩放自适应 ----------
+   相邻刻度保证至少隔开 TICK_MIN_GAP px：缩到 40px/小时以下用 2 小时一格，
+   1x（56px/小时）左右是 1 小时一格，放到 80px/小时以上变成半小时一格。 */
+const TICK_MIN_GAP = 40;
+const TICK_STEPS = [30, 60, 120];
+
+/** 当前刻度间隔（分钟）：取第一个「够宽」的候选 */
+const tickStepMin = computed(() => (
+  TICK_STEPS.find(step => (step / 60) * hourWidth.value >= TICK_MIN_GAP) ?? TICK_STEPS[TICK_STEPS.length - 1]
+));
+
+/** 刻度：left 为相对排程区左边的像素位置（含 7px 文案内缩），label 过 24 点按 24 小时回绕 */
+const ticks = computed(() => {
+  const step = tickStepMin.value;
+  const list: Array<{ min: number, label: string, left: number }> = [];
+  for (let min = DAY_START_MIN; min <= DAY_END_MIN; min += step) {
+    const hour = Math.floor((min % 1440) / 60);
+    const minute = min % 60;
+    list.push({
+      min,
+      label: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+      left: ((min - DAY_START_MIN) / 60) * hourWidth.value + 7,
+    });
   }
-  return labels;
+  return list;
 });
-/** 排程区总宽 = 小时数 × 每小时宽 */
-const timelineWidth = computed(() => ((DAY_END_MIN - DAY_START_MIN) / 60) * HOUR_WIDTH);
+/** 排程区总宽 = 小时数 × 每小时宽（缩放后自动变宽 / 变窄） */
+const timelineWidth = computed(() => ((DAY_END_MIN - DAY_START_MIN) / 60) * hourWidth.value);
 
 /* ---------- 时间轴横向滚动 ----------
    横屏是用 CSS 把页面旋转 90° 模拟的，手势方向跟着转（屏幕上左右 ↔ 内容里上下），
@@ -86,12 +123,34 @@ function applyScroll(left: number) {
 
 function scrollTimeline(direction: -1 | 1) {
   smoothScroll.value = true;
-  applyScroll(currentScrollLeft.value + direction * HOUR_WIDTH * HOURS_PER_STEP);
+  applyScroll(currentScrollLeft.value + direction * hourWidth.value * HOURS_PER_STEP);
 }
 
 function onTimelineScroll(event: { detail?: { scrollLeft?: number } }) {
   // 只记录当前位置，不回写 scroll-left
   currentScrollLeft.value = Number(event?.detail?.scrollLeft || 0);
+}
+
+/**
+ * 双指捏合 → 时间轴缩放（只改「每小时像素宽」，纵向行高不变）。
+ * 捏合中心对应的时刻保持不动：先记下中心的内容坐标 contentX 与可视区偏移 localX，
+ * 缩放后再把 contentX × 比例 − localX 滚回去，视觉上就是「以手指为中心放大」。
+ */
+function onTimelinePinch({ scale, contentX, localX }: SchedulePinchEvent) {
+  const prev = hourWidth.value;
+  const next = Math.min(Math.max(prev * scale, HOUR_WIDTH_MIN), HOUR_WIDTH_MAX);
+  if (next === prev) return;
+  hourWidth.value = next;
+  const ratio = next / prev;
+  // 内容宽随缩放变化：等新宽度生效后再补滚动位置，否则会被旧宽度夹住
+  nextTick(() => {
+    const max = Math.max(0, timelineWidth.value - gridWidth.value);
+    smoothScroll.value = false;
+    applyScroll(Math.min(Math.max(contentX * ratio - localX, 0), max));
+    nextTick(() => {
+      smoothScroll.value = true;
+    });
+  });
 }
 
 function measureGrid() {
@@ -144,11 +203,6 @@ onBeforeUnmount(() => {
   // #endif
 });
 
-// 「收起 / 展开全部」会改变行数，行位置需要重新量
-watch(() => rows.value.length, () => {
-  nextTick(measureRowTops);
-});
-
 /** 预排只有一种任务条样式；highlight 对应稿子里那条红描边的强调条 */
 type BarState = "pre";
 
@@ -179,84 +233,65 @@ interface ScheduleRow {
   bars: ScheduleBar[];
 }
 
-function timeToMin(text: string) {
-  const [hour, minute] = text.split(":").map(Number);
-  return hour * 60 + (minute || 0);
-}
-
-/** 任务条按起止时间定位：每小时 56px（如 08:00-13:00 → x=0, w=280） */
+/** 任务条按起止时间定位：每小时 hourWidth px（1x 时 08:00-13:00 → x=0, w=280） */
 function barStyle(bar: ScheduleBar) {
-  const left = ((bar.startMin - DAY_START_MIN) / 60) * HOUR_WIDTH;
-  const width = Math.max(((bar.endMin - bar.startMin) / 60) * HOUR_WIDTH, HOUR_WIDTH / 2);
+  const left = ((bar.startMin - DAY_START_MIN) / 60) * hourWidth.value;
+  const width = Math.max(((bar.endMin - bar.startMin) / 60) * hourWidth.value, hourWidth.value / 2);
   return { left: `${left}px`, width: `${width}px` };
 }
 
+/* ------------------------------------------------------------------
+ * AI 下发的预排数据（COMPONENT scene=task / type=gantt，viewType=pre → data）
+ * ------------------------------------------------------------------ */
 /**
- * 预排数据：每个资源一行，行内平铺当班任务；同一辆车的任务首尾相接、互不重叠。
- * 以甘特页（pages/schedule-gantt）的 mock 为模版（同样是 6 个资源 / 15 条任务）。
- * 接入后端时替换成接口返回即可。
+ * 气泡入口卡点进来时写下的整包 data，打开本页取走（取完即清）；
+ * 没有数据（比如兜底跳转进来、或接口没下发 rows）就渲染空视图。
  */
-const preRows: ScheduleRow[] = [
-  {
-    id: "pre-supply",
-    category: "供料",
-    names: ["1号搅拌站", "供料线安排"],
-    bars: [
-      { id: "p1", title: "万达基地 C20 80立方", timeText: "08:00-13:00", startMin: timeToMin("08:00"), endMin: timeToMin("13:00"), state: "pre" },
-      { id: "p2", title: "1号搅拌站 C20 90立方", timeText: "13:30-19:00", startMin: timeToMin("13:30"), endMin: timeToMin("19:00"), state: "pre" },
-    ],
-  },
-  {
-    id: "pre-pump",
-    category: "泵车",
-    names: ["47米臂架泵", "湘A-P0078|李海"],
-    bars: [
-      { id: "p3", title: "1号基站 C20 80立方", timeText: "08:00-13:00", startMin: timeToMin("08:00"), endMin: timeToMin("13:00"), state: "pre" },
-      { id: "p4", title: "万达基地 C20 20立方", timeText: "13:30-18:00", startMin: timeToMin("13:30"), endMin: timeToMin("18:00"), state: "pre" },
-    ],
-  },
-  {
-    id: "pre-t13-day",
-    category: "运输",
-    names: ["13号车|郑文斌", "湘A-P0078|白班"],
-    bars: [
-      // 稿子里这条是红描边的强调条（6464:358）
-      { id: "p5", title: "万达基地 C20 12立方", timeText: "08:30-11:00", startMin: timeToMin("08:30"), endMin: timeToMin("11:00"), state: "pre", highlight: true },
-      { id: "p6", title: "万达基地 C20 …", timeText: "13:00-14:40", startMin: timeToMin("13:00"), endMin: timeToMin("14:40"), state: "pre" },
-      { id: "p7", title: "万达基地 C20 20立方", timeText: "15:00-18:00", startMin: timeToMin("15:00"), endMin: timeToMin("18:00"), state: "pre" },
-    ],
-  },
-  {
-    id: "pre-t13-night",
-    category: "运输",
-    names: ["13号车|肖鹏", "湘A-P0078|晚班"],
-    bars: [
-      { id: "p8", title: "万达基地 C20 12立方", timeText: "08:30-11:00", startMin: timeToMin("08:30"), endMin: timeToMin("11:00"), state: "pre" },
-      { id: "p9", title: "万达基地 C20 …", timeText: "13:30-16:00", startMin: timeToMin("13:30"), endMin: timeToMin("16:00"), state: "pre" },
-      { id: "p10", title: "万达基地 C20 20立方", timeText: "16:30-19:30", startMin: timeToMin("16:30"), endMin: timeToMin("19:30"), state: "pre" },
-    ],
-  },
-  {
-    id: "pre-t12",
-    category: "运输",
-    names: ["12号车|何志刚", "湘A-R6557|白班"],
-    bars: [
-      // 这条用于演示「逾期未开始」的详情（稿子样本 4）：计划开始时间已过但未收到开始记录
-      { id: "p11", title: "万达基地 C20 12立方", timeText: "09:40-12:10", startMin: timeToMin("09:40"), endMin: timeToMin("12:10"), state: "pre", noStartRecord: true },
-      { id: "p12", title: "万达基地 C20 …", timeText: "12:50-15:20", startMin: timeToMin("12:50"), endMin: timeToMin("15:20"), state: "pre" },
-      { id: "p13", title: "万达基地 C20 20立方", timeText: "15:40-18:10", startMin: timeToMin("15:40"), endMin: timeToMin("18:10"), state: "pre" },
-    ],
-  },
-  {
-    id: "pre-t10",
-    category: "运输",
-    names: ["10号车|黄立新", "湘A-TY678|白班"],
-    bars: [
-      { id: "p14", title: "万达基地 C20 12立方", timeText: "06:30-10:30", startMin: timeToMin("06:30"), endMin: timeToMin("10:30"), state: "pre" },
-      { id: "p15", title: "万达基地 C20 20立方", timeText: "15:00-18:00", startMin: timeToMin("15:00"), endMin: timeToMin("18:00"), state: "pre" },
-    ],
-  },
-];
+const viewPayload = consumePendingScheduleView();
+
+/** 接口还没排时间的条：每条按 2 小时一节依次排开 */
+const UNSCHEDULED_SLOT_MIN = 2 * 60;
+
+/**
+ * 接口 rows → 页面行模型。
+ * - 预排只有一种任务条样式（`state` 一律 "pre"），接口的 state 不参与配色；
+ * - 起止时间直传；**接口没排时间（startMin / endMin 为 null）**时按数组顺序在轴起点依次排开、
+ *   条内时间写「时间待定」——否则按 null 定位会算出 NaN，任务条直接跑出画面。
+ */
+function normalizeViewRows(viewRows: GanttViewRow[]): ScheduleRow[] {
+  return viewRows.map((row, rowIndex) => {
+    let cursor = DAY_START_MIN;
+    return {
+      id: String(row.id || `resource-${rowIndex + 1}`),
+      category: String(row.category || "").trim() || "—",
+      names: Array.isArray(row.names) ? row.names.map(name => String(name || "")) : [],
+      bars: (Array.isArray(row.bars) ? row.bars : []).map((bar, barIndex) => {
+        // null 不能直接 Number()：会被当成 0，误判成「已排在 00:00」
+        const start = bar.startMin == null ? Number.NaN : Number(bar.startMin);
+        const end = bar.endMin == null ? Number.NaN : Number(bar.endMin);
+        const planned = Number.isFinite(start) && Number.isFinite(end) && end > start;
+        const startMin = planned ? start : cursor;
+        const endMin = planned ? end : cursor + UNSCHEDULED_SLOT_MIN;
+        if (!planned) cursor = endMin;
+        return {
+          id: String(bar.id || `${row.id || rowIndex}-${barIndex + 1}`),
+          title: String(bar.title || ""),
+          timeText: String(bar.timeText || "").trim()
+            || (planned ? `${minutesToTime(startMin)}-${minutesToTime(endMin)}` : "时间待定"),
+          startMin,
+          endMin,
+          state: "pre" as BarState,
+          noStartRecord: Boolean(bar.noStartRecord),
+        };
+      }),
+    };
+  });
+}
+
+/** 页面行数据只来自接口下发的 rows：没有数据就是空视图（不再用本地模拟数据兜底） */
+const allRows = computed<ScheduleRow[]>(() => (
+  Array.isArray(viewPayload?.rows) ? normalizeViewRows(viewPayload.rows) : []
+));
 
 /**
  * 时间轴范围外扩：数据里更早 / 更晚的任务要能看到（如 06:30 的班次），
@@ -271,7 +306,7 @@ function expandDayRange(list: ScheduleRow[]) {
   });
 }
 
-expandDayRange(preRows);
+expandDayRange(allRows.value);
 
 /**
  * 每一行左右两侧还有被挡住的任务时，就在那一行的对应侧浮出箭头（稿子 6832:720）；
@@ -281,7 +316,7 @@ expandDayRange(preRows);
 const { rowHints, jumpToRow } = useTimelineEdgeHint({
   rows: () => rows.value,
   dayStartMin: DAY_START_MIN,
-  hourWidth: HOUR_WIDTH,
+  hourWidth: () => hourWidth.value,
   scrollLeft: currentScrollLeft,
   viewportWidth: gridWidth,
   contentWidth: () => timelineWidth.value,
@@ -293,12 +328,24 @@ const { rowHints, jumpToRow } = useTimelineEdgeHint({
 
 /** 收起/展开全部（稿子 6464:246 的 34×34 圆形图标按钮）：只显示前 4 个资源 */
 const expanded = ref(true);
-const rows = computed(() => (expanded.value ? preRows : preRows.slice(0, 4)));
+const rows = computed(() => (expanded.value ? allRows.value : allRows.value.slice(0, 4)));
 function toggleExpand() {
   expanded.value = !expanded.value;
 }
 
-const dateText = "2025-09-26";
+// 「收起 / 展开全部」会改变行数，行位置需要重新量。
+// 必须写在 rows 之后：watch 会立刻执行一次 getter 收集依赖，提前引用会踩 const 的 TDZ。
+watch(() => rows.value.length, () => {
+  nextTick(measureRowTops);
+});
+
+/** 顶部栏日期：有接口给的业务日期就用它，否则取系统当天 */
+function formatDate(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+const dateText = String(viewPayload?.businessDate || "").trim() || formatDate(new Date());
 
 /**
  * 左上角按钮：返回对话页面。
@@ -351,7 +398,7 @@ const WORK_TYPE: Record<string, string> = {
 };
 
 /**
- * 按当前时刻判断任务状态（mock 用；接后端时直接用接口给的 status）。
+ * 按当前时刻判断任务状态（接口没给 status 时用它兜底）。
  * 「计划开始时间已过 + 未收到开始记录」按逾期未开始处理（稿子样本 4）。
  */
 function statusOf(bar: ScheduleBar): TaskDetailPanelStatus {
@@ -393,7 +440,7 @@ const legend = [
 
 /**
  * 点击任务条：按稿子 6832:292 + 6832:283 四态样本组装右侧详情面板的数据。
- * 站点 / 规格 / 方量 / 上一程 / 下一程都从 mock 的任务条里推，接后端时换成接口字段即可；
+ * 站点 / 规格 / 方量 / 上一程 / 下一程都从接口下发的任务条里推；
  * 「当前进度」与「逾期警告」按任务状态动态给。
  */
 function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
@@ -445,8 +492,9 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 
 <template>
   <view class="schedule" :class="{ 'schedule--rotated': rotated }">
-    <!-- 顶部栏（稿子 6464:150：标题 6464:277 / 日期 6464:278 / 收起全部 6464:246 / 返回 10474:18） -->
-    <view class="schedule__header">
+    <!-- 顶部栏（稿子 6464:150：标题 6464:277 / 日期 6464:278 / 收起全部 6464:246 / 返回 10474:18）；
+         原生横屏全屏时顶部留出状态栏高度（见 headerTopStyle） -->
+    <view class="schedule__header" :style="headerTopStyle">
       <view class="schedule__title-group">
         <text class="schedule__title">
           调度视图·预排草案
@@ -511,28 +559,34 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
         </view>
       </view>
 
-      <scroll-view
-        id="schedule-pre-grid"
-        class="schedule__grid"
-        scroll-x
-        :show-scrollbar="false"
-        :scroll-left="scrollLeftProp"
-        :scroll-with-animation="smoothScroll"
-        @scroll="onTimelineScroll"
-      >
-        <view class="schedule__grid-inner" :style="{ width: `${timelineWidth}px` }">
-          <!-- 时间轴刻度 -->
-          <view class="schedule__ruler">
-            <text
-              v-for="(label, index) in hourLabels"
-              :key="label"
-              class="schedule__ruler-label"
-              :style="{ left: `${index * HOUR_WIDTH + 7}px` }"
-            >
-              {{ label }}
-            </text>
-          </view>
+      <view id="schedule-pre-grid" class="schedule__grid-wrap">
+        <!-- 时间轴刻度（钉在可视区上沿，不随横向滚动滑出）：
+             标签位置 = 列位置 − 当前滚动量，滚动时刻度条本身不动、标签仍与下方列对齐 -->
+        <view class="schedule__ruler">
+          <!-- 刻度间隔随缩放变（缩小 2 小时 / 放大半小时），位置 = 列位置 − 当前滚动量 -->
+          <text
+            v-for="tick in ticks"
+            :key="tick.min"
+            class="schedule__ruler-label"
+            :style="{ left: `${tick.left - currentScrollLeft}px` }"
+          >
+            {{ tick.label }}
+          </text>
+        </view>
 
+        <scroll-view
+          class="schedule__grid"
+          scroll-x
+          :show-scrollbar="false"
+          :scroll-left="scrollLeftProp"
+          :scroll-with-animation="smoothScroll"
+          @scroll="onTimelineScroll"
+        >
+          <!-- --hour-width：竖网格线间距跟着双指缩放走 -->
+          <view
+            class="schedule__grid-inner"
+            :style="{ width: `${timelineWidth}px`, '--hour-width': `${hourWidth}px` }"
+          >
           <!-- 内容区：纵向滚动（时间轴刻度固定在上面） -->
           <view class="schedule__rows">
             <view class="schedule__rows-inner">
@@ -557,8 +611,9 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
           </view>
             </view>
           </view>
-        </view>
-      </scroll-view>
+          </view>
+        </scroll-view>
+      </view>
 
       <!-- 每行独立：该行左右还有被挡住的任务时，就在那一行对应侧浮出箭头；点击跳到该行最近的任务（稿子 6832:720） -->
       <view
@@ -869,7 +924,19 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   color: #000000;
 }
 
-/* 右侧排程区：横向可滚；底色与表体一致，时间轴尽头之外不露白
+/* 右侧排程区：上沿固定刻度条 + 下面横向可滚的排程区
+   刻度条放在滚动容器外面，横向滚动时它不会被一起带出可视区（标签按滚动量反向偏移） */
+.schedule__grid-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #fbfbfb;
+  /* 手势挂在整块上（含刻度条），从刻度条上起手也能拖动 / 缩放 */
+  touch-action: none;
+}
+
+/* 横向可滚；底色与表体一致，时间轴尽头之外不露白
    touch-action: none —— 真机上不要让浏览器原生接管手势（旋转页面里它常常失效还抢事件），
    滚动统一由 hooks/useScheduleGestures 的 JS 手势和左右按钮驱动 */
 .schedule__grid {
@@ -889,22 +956,27 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 
 .schedule__grid-inner {
   position: relative;
-  /* 表体底色 #FBFBFB（6464:167），每小时一条竖网格线 #F3F3F3 */
+  /* 表体底色 #FBFBFB（6464:167），每小时一条竖网格线 #F3F3F3（间距随双指缩放走） */
   background-color: #fbfbfb;
   background-image: repeating-linear-gradient(
     to right,
     #f3f3f3 0,
     #f3f3f3 1px,
     transparent 1px,
-    transparent 56px
+    transparent var(--hour-width, 56px)
   );
-  background-position: 0 45px;
+  /* 刻度条已移出滚动容器，竖网格线从排程区顶部开始画 */
+  background-position: 0 0;
 }
 
+/* 刻度条：固定在排程区上沿（在滚动容器外），滚动时标签溢出部分直接裁掉 */
 .schedule__ruler {
   position: relative;
   flex-shrink: 0;
+  box-sizing: border-box;
   height: 45px;
+  overflow: hidden;
+  background: #fbfbfb;
 }
 
 .schedule__ruler-label {
@@ -1057,9 +1129,10 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   will-change: transform;
 }
 
-/* 右侧排程区：占满高度，内部再分「刻度 / 内容区」 */
+/* 右侧排程区：占满刻度条以下的剩余高度（刻度条在 .schedule__grid-wrap 里另占 45px） */
 .schedule__grid {
-  height: 100%;
+  height: auto;
+  min-height: 0;
 }
 
 .schedule__grid-inner {

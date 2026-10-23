@@ -3,7 +3,6 @@ import type {
   AskSlotPayload,
   AskSlotSubmitPayload,
   AssistantNavigationPayload,
-  GanttViewPayload,
   GuideStepItem,
   GuideStepPayload,
   GuideStepSelectEvent,
@@ -44,8 +43,6 @@ import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
 import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
-import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
-import { stashPendingScheduleView } from "@/utils/schedule-view";
 import { navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 
@@ -227,15 +224,6 @@ function onAssistantCallbackOpen(conversationId: string) {
   void navigateToScene(`/pages/repair/index?conversationId=${encodeURIComponent(id)}`);
 }
 
-/**
- * 点调度视图入口卡（AI 下发的 gantt 积木）：整包数据先落到本地存储，
- * 再开横屏调度视图页；页面 onLoad 取走渲染（rows / bars，含接口还没排时间的任务）。
- */
-function onGanttOpen(payload: GanttViewPayload) {
-  stashPendingScheduleView(payload);
-  void navigateToScene("/pages/schedule-gantt/index");
-}
-
 function onAssistantNavigationConfirm(payload: AssistantNavigationPayload) {
   if (payload.target !== "maintenance_assistant") return;
   stashPendingRepairNavigationContext({
@@ -256,15 +244,6 @@ function clearRepairSummaryPolling() {
   if (!repairSummaryPollingTimer) return;
   clearTimeout(repairSummaryPollingTimer);
   repairSummaryPollingTimer = null;
-}
-
-/**
- * 甘特图右下角输入条发来的问题：回到本页后取出来直接发送（发完即清）。
- * 两条返回路径（navigateBack / 关掉场景窗口）都会走 onShow，所以在这里消费。
- */
-function startPendingScheduleAsk() {
-  const text = consumePendingScheduleAsk();
-  if (text) sendQuickPrompt(text);
 }
 
 function startRepairSummaryCallback() {
@@ -891,7 +870,6 @@ onShow(() => {
   chatStore.refreshQuickPrompts();
   refreshListenReportState();
   startRepairSummaryCallback();
-  startPendingScheduleAsk();
 });
 // 离开页面时停止自动听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
 // useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
@@ -981,7 +959,6 @@ onBeforeUnmount(() => {
         @ask-slot-open="onAskSlotOpen"
         @assistant-navigation-open="onAssistantNavigationOpen"
         @assistant-callback-open="onAssistantCallbackOpen"
-        @gantt-open="onGanttOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"

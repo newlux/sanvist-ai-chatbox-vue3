@@ -53,6 +53,7 @@
   "file-select-unsupported": "File selection is not supported here",
   "no-audio-recorded": "No audio recorded",
   "no-speech-recognized": "No speech recognized",
+  "asr-no-content-retry": "No speech detected, please try again",
   "speech-recognize-timeout": "Speech recognition timed out",
   "record-start-failed": "Failed to start recording",
   "record-failed": "Recording failed",

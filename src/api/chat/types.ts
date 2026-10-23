@@ -309,10 +309,14 @@ export interface GanttViewCard extends Record<string, unknown> {
   visible?: boolean;
   /** 状态文案（后端直接给，如「已下发」）；缺省时由 stage 推导 */
   status?: string;
+  /** 状态文案兜底（后端个别版本用 snake_case 给中文文案）；status 缺省时优先用它 */
+  status_text?: string;
   /** 设备数（后端直接给）；缺省时按 rows 的类别归并推导 */
   devices?: GanttCardDevice[] | string;
   /** 任务数（后端直接给，如 74）；缺省时按 rows 求和推导 */
   taskCount?: number | string;
+  /** 任务数兜底（后端个别版本用 snake_case）；taskCount 缺省时优先用它 */
+  task_count?: number | string;
 }
 
 /** 调度视图跳转说明（data.entry） */
@@ -339,7 +343,10 @@ export interface GanttViewPayload extends Record<string, unknown> {
   rows?: GanttViewRow[];
   /** 阶段：planning / planned / executing / finished … */
   stage?: string;
+  /** 状态文案（顶层兜底） */
   statusText?: string;
+  /** 状态文案（顶层兜底，后端 snake_case 版本） */
+  status_text?: string;
   /** 业务日期，如 2026-10-13 */
   businessDate?: string;
 }

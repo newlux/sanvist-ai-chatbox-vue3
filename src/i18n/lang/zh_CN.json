@@ -53,6 +53,7 @@
   "file-select-unsupported": "当前环境不支持选择文件",
   "no-audio-recorded": "未录制到音频内容",
   "no-speech-recognized": "未识别到语音内容",
+  "asr-no-content-retry": "没有识别到内容,请重试",
   "speech-recognize-timeout": "语音识别超时",
   "record-start-failed": "录音启动失败",
   "record-failed": "录音失败",
