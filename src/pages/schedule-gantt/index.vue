@@ -9,7 +9,6 @@ import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
 import { useLandscape } from "@/hooks/useLandscape";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import { getPhoneInfo } from "@/utils/platform/mpaas";
