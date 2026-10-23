@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import { useLandscape } from "@/hooks/useLandscape";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
@@ -31,6 +32,14 @@ defineOptions({ name: "SchedulePage" });
 
 /** 进入页面自动横屏（默认旋转模拟），离开时还原 */
 const { rotated, exitLandscape } = useLandscape();
+
+/**
+ * 顶部状态栏空白：调原生 landscapeFullscreen 转屏成功后，webview 铺满横屏、
+ * 状态栏压在页面顶边，顶栏要给状态栏让出这段高度；
+ * CSS 旋转模拟（rotated）时状态栏在设备的物理顶边（对应页面左侧），不需要留。
+ */
+const { safeTopPx } = useSafeArea();
+const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
 
 /** 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志 */
 useScheduleGestures({ gridId: "schedule-grid", onRowsOffset: () => measureRowTops() });
@@ -634,7 +643,7 @@ function toggleExpand() {
 <template>
   <view class="schedule" :class="['schedule--rep', { 'schedule--rotated': rotated }]">
     <!-- 顶部栏（稿子 7229:254：标题、日期、图例、查看全部任务、返回对话） -->
-    <view class="schedule__header">
+    <view class="schedule__header" :style="headerTopStyle">
       <view class="schedule__title-group">
         <text class="schedule__title">
           调度视图·重排草案

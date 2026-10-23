@@ -3,8 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
-import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
+import { isAsrServiceFailure } from "@/utils/asr-error";
 import { createLogger } from "@/utils/logger";
+import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
 /**
@@ -94,6 +95,8 @@ function withTimeout<T>(promise: Promise<T>) {
 }
 
 function errorText(error: unknown, fallback: string) {
+  // ASR 服务侧失败统一提示，不把后端原始 message（code=500 系统繁忙）弹给用户
+  if (isAsrServiceFailure(error)) return t("asr-no-content-retry");
   const raw = error instanceof Error
     ? error.message
     : (error && typeof error === "object"

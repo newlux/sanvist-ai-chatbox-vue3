@@ -112,8 +112,8 @@ $color-avatar-bg: #e4e4e4;
   min-height: 100vh;
   box-sizing: border-box;
   overflow: hidden;
-  /* 标题在页面 1/4 处：状态栏 54px + 153px 间距（设计稿 207px） */
-  padding: calc(env(safe-area-inset-top) + 300rpx) 60rpx 0;
+  /* 标题在页面 1/4 处：状态栏 54px + 153px 间距（设计稿 207px），153px = 306rpx */
+  padding: calc(env(safe-area-inset-top) + 306rpx) 60rpx 0;
   background: #f5f5f5;
 }
 
@@ -141,7 +141,7 @@ $color-avatar-bg: #e4e4e4;
 .glow-red {
   top: 1530rpx;
   left: -150rpx;
-  width: 1376rpx;
+  width: 1374rpx;
   height: 534rpx;
   background: radial-gradient(
     circle at 50% 50%,
@@ -221,13 +221,14 @@ $color-avatar-bg: #e4e4e4;
 
 .mode-card__desc {
   margin-top: 20rpx;
-  white-space: pre-wrap;
   color: $color-text-secondary;
   font-family: "PingFang SC", "Inter", sans-serif;
   font-size: 22rpx;
   font-weight: 400;
   line-height: 30rpx;
-  white-space: nowrap;
+  /* 兜底文案带 \n，设计稿为两行，必须保留换行 */
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .mode-card__tag {

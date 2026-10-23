@@ -5,18 +5,16 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
-import { getDeviceModels, getTodayAwakeningPrompt } from "@/api/user-role";
-import iconHelp from "@/assets/img/icon-help.svg";
+import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
-import AiDeviceModelPicker from "@/components/ai-device-model-picker/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
-import AiSceneWelcome from "@/components/ai-scene-welcome/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
+import { getGuideWelcomeCopy } from "@/config/guide-welcome";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
@@ -51,6 +49,11 @@ const chatStore = useChatStore(chatScope);
  * 回复里没有参考来源时，表现与原来的贴底一致。
  */
 chatStore.setStopAtReplyEnd(true);
+/**
+ * 待机引导文案（Ardot 580:1915）：问候、说明与「你可以这么问」的问题都跟着讲解模式走，
+ * 老司机讲差异、新手分步骤介绍，见 config/guide-welcome。
+ */
+const guideWelcome = computed(() => getGuideWelcomeCopy(userStore.operatorRole?.roleKey));
 const sessionStore = useSessionStore();
 const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
 /** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送 */
@@ -60,12 +63,11 @@ const chatInputRef = ref<{
 } | null>(null);
 const sharePosterWrap = ref<unknown>(null);
 const shareSheetBottomInset = ref("");
-/** 机型选中值（modelKey）：未选择时不下发，选中后每次对话都作为 inputs.device_model 透传 */
-const selectedDeviceModel = ref("");
-/** 选中的机型同步到 store：对话框设备背景图按它出图，跨页面共用一份 */
-watch(selectedDeviceModel, value => userStore.setSelectedDeviceModelKey(value), { immediate: true });
-/** 机型选择卡片：进入页面拉到机型后自动弹起，选完/关闭即收起 */
-const deviceModelSheetVisible = ref(false);
+/**
+ * 机型选中值（modelKey）：在「选择体验的设备」页选好后写进 store，
+ * 本页不再弹卡片，直接读 store；未选择时不下发，选中后每次对话都作为 inputs.device_model 透传。
+ */
+const selectedDeviceModel = computed(() => userStore.selectedDeviceModelKey);
 /** 指导步骤卡片（COMPONENT scene=guide / type=step）：随回答自动弹起，选完即回发下一轮 */
 const guideStepPayload = ref<GuideStepPayload | null>(null);
 const guideStepSheetVisible = ref(false);
@@ -117,7 +119,8 @@ const { sendMessage: sendChatMessage, sendQuickPrompt, beginAsrPlaceholder, disc
   scene: "GUIDE",
   // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
   // 回复里的核对卡仍由 focusStepBlock 在卡片出现 / 翻页时顶到对话区最上方（见 onGuideStepOpen）。
-  // 机型与讲解模式都由用户在页面上选，每次发送时现取，避免切会话后带上旧值
+  // 机型在「选择体验的设备」页、讲解模式在「选择身份」页，各自写进 store，这里每次发送时现取，
+  // 避免切会话或来回进出页面后带上旧值
   getExtraInputs: () => ({
     ...(selectedDeviceModel.value ? { device_model: selectedDeviceModel.value } : {}),
     ...(userStore.operatorRole?.roleKey ? { operator_role: userStore.operatorRole.roleKey } : {}),
@@ -513,21 +516,6 @@ async function loadAwakeningPrompt() {
   }
 }
 
-/**
- * 机型选项：进入本页时初始化拉取，拿到数据后直接把选择卡片弹起来。
- * 失败或没有机型时只记日志，不打断页面。
- */
-async function loadDeviceModels() {
-  try {
-    const data = await getDeviceModels();
-    const models = Array.isArray(data?.models) ? data.models : [];
-    userStore.setDeviceModels(models);
-    deviceModelSheetVisible.value = models.length > 0;
-  } catch (error) {
-    logger.warn("failed to load device models", error);
-  }
-}
-
 async function onScrollTop() {
   if (!chatStore.aiSessionId) return;
   try {
@@ -554,7 +542,6 @@ onLoad((options) => {
 onMounted(() => {
   syncWindowHeight();
   loadAwakeningPrompt();
-  void loadDeviceModels();
 });
 
 onShow(() => {
@@ -593,7 +580,6 @@ onUnload(() => {
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
         :share-selected-round-count="shareSelectedRoundCount"
-        back-only
         @back="onBack"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"
@@ -602,12 +588,30 @@ onUnload(() => {
         @session-rename="onSessionRename"
         @share-select-all="onShareSelectAll"
       />
-      <AiSceneWelcome
-        v-if="showSceneWelcome"
-        title="欢迎使用作业指导助手"
-        subtitle="描述设备现象或操作步骤，我来帮你判断。"
-        :icon="iconHelp"
-      />
+      <!-- 待机引导（Ardot 580:1915）：问候 + 「你可以这么问」问题列表，点一条直接发问 -->
+      <view v-if="showSceneWelcome" class="guide-welcome">
+        <text class="guide-welcome__title">
+          {{ guideWelcome.title }}
+        </text>
+        <text class="guide-welcome__desc">
+          {{ guideWelcome.content }}
+        </text>
+        <text class="guide-welcome__label">
+          你可以这么问
+        </text>
+        <view class="guide-welcome__list">
+          <view
+            v-for="question in guideWelcome.questions"
+            :key="question"
+            class="guide-welcome__row"
+            @tap="sendQuickPrompt(question)"
+          >
+            <text class="guide-welcome__question">
+              {{ question }}
+            </text>
+          </view>
+        </view>
+      </view>
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
         :messages="messages"
@@ -749,6 +753,7 @@ onUnload(() => {
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
+        bottom-gradient
         :compact-voice-listening="true"
         @send="sendMessage"
         @stop="stopGenerating"
@@ -762,13 +767,6 @@ onUnload(() => {
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
         @dock-height-change="setInputDockHeight"
-      />
-
-      <!-- 进入页面自动弹起的机型选择卡片，选完即收起；页面上不保留入口 -->
-      <AiDeviceModelPicker
-        v-model="selectedDeviceModel"
-        v-model:visible="deviceModelSheetVisible"
-        :models="userStore.deviceModels"
       />
 
       <!-- 回答里的指导步骤卡片：选中步骤后自动收起并带上选择回发下一轮 -->
@@ -870,6 +868,73 @@ $color-white: #ffffff;
     rgba(254, 0, 0, 0.1) 0%,
     rgba(254, 0, 0, 0) 100%
   );
+}
+
+/* ===== 待机引导（Ardot 580:1915）=====
+   画板 375×812：标题 y=178 / 说明 232 / 「你可以这么问」317 / 问题列表 351，
+   状态栏 54 + 头部 50 之后是 74（148rpx），左右留白 20（40rpx）。 */
+.guide-welcome {
+  position: relative;
+  z-index: 1;
+  padding: 148rpx 40rpx 0;
+}
+
+.guide-welcome__title {
+  display: block;
+  color: #0d0d0d;
+  font-family: "PingFang SC";
+  font-size: 56rpx; // 28
+  font-weight: 700;
+  line-height: 82rpx; // 41
+}
+
+.guide-welcome__desc {
+  display: block;
+  margin-top: 26rpx; // 13
+  color: #5d5d5d;
+  font-family: "PingFang SC";
+  font-size: 28rpx; // 14
+  font-weight: 400;
+  line-height: 44rpx; // 22
+}
+
+.guide-welcome__label {
+  display: block;
+  margin-top: 82rpx; // 41
+  color: #8f8f8f;
+  font-family: "PingFang SC";
+  font-size: 28rpx; // 14
+  font-weight: 500;
+  line-height: 40rpx; // 20
+}
+
+/* 问题列表：首尾各一道 1px 分隔线，行高 52（上下内边距 16） */
+.guide-welcome__list {
+  margin-top: 28rpx; // 14
+  border-top: 1px solid #f3f3f3;
+  border-bottom: 1px solid #f3f3f3;
+}
+
+.guide-welcome__row {
+  padding: 32rpx 0; // 16
+  border-bottom: 1px solid #f3f3f3;
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  &:active {
+    opacity: 0.6;
+  }
+}
+
+.guide-welcome__question {
+  display: block;
+  color: #0d0d0d;
+  font-family: "PingFang SC";
+  font-size: 28rpx; // 14
+  font-weight: 400;
+  line-height: 40rpx; // 20
 }
 
 .session-loading {

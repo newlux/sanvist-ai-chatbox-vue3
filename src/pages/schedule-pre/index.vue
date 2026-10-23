@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
 import type { TaskDetailPanelPayload, TaskDetailPanelStatus } from "@/components/ai-task-detail-panel/types";
 import { useLandscape } from "@/hooks/useLandscape";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
@@ -31,6 +32,14 @@ defineOptions({ name: "SchedulePrePage" });
 
 /** 进入页面自动横屏（默认旋转模拟），离开时还原 */
 const { rotated, exitLandscape } = useLandscape();
+
+/**
+ * 顶部状态栏空白：调原生 landscapeFullscreen 转屏成功后，webview 铺满横屏、
+ * 状态栏压在页面顶边，顶栏要给状态栏让出这段高度；
+ * CSS 旋转模拟（rotated）时状态栏在设备的物理顶边（对应页面左侧），不需要留。
+ */
+const { safeTopPx } = useSafeArea();
+const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
 
 /** 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志 */
 useScheduleGestures({ gridId: "schedule-pre-grid", onRowsOffset: () => measureRowTops() });
@@ -446,7 +455,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 <template>
   <view class="schedule" :class="{ 'schedule--rotated': rotated }">
     <!-- 顶部栏（稿子 6464:150：标题 6464:277 / 日期 6464:278 / 收起全部 6464:246 / 返回 10474:18） -->
-    <view class="schedule__header">
+    <view class="schedule__header" :style="headerTopStyle">
       <view class="schedule__title-group">
         <text class="schedule__title">
           调度视图·预排草案
