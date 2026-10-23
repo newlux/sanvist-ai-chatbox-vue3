@@ -19,6 +19,8 @@ import type {
   SubmitFeedbackParams,
   TextToSpeechResult,
   UploadChatFileParams,
+  WakeValidateParams,
+  WakeValidateResult,
 } from "./types";
 import { toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
 import { createLogger } from "@/utils/logger";
@@ -271,4 +273,18 @@ export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {
     fileType: "audio",
     timeout: params.timeout,
   }).json();
+}
+
+/**
+ * 唤醒 / 热词校验（语雀 2.2）：把识别文本按「模块 + 阶段」送后端比对热词表。
+ * 返回 matched / hitValue / intent 等，供调用方决定要不要推进流程；
+ * 不传 fallbackRound 时后端随机回一条兜底话术。
+ */
+export function validateWakeWord(params: WakeValidateParams) {
+  return request.post<WakeValidateResult>("/speech/wake/validate", {
+    module: params.module,
+    step: params.step,
+    text: params.text,
+    ...(params.fallbackRound == null ? {} : { fallbackRound: params.fallbackRound }),
+  }, jsonOptions).json();
 }

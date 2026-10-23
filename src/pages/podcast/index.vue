@@ -128,6 +128,13 @@ const reportQaNavigationVisible = ref(false);
 /** 本轮问答是否从异常列表发起：确认或取消后必须回到异常列表。 */
 const reportQaFromInsight = ref(false);
 const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> | null>(null);
+/** 输入栏实例：页面级长按录音走它（与首页问答页同一套手势与状态机） */
+const chatInputRef = ref<{
+  startGlobalVoiceHold?: (clientY: number) => void;
+  updateGlobalVoiceHold?: (clientY: number) => void;
+  endGlobalVoiceHold?: () => void;
+  cancelGlobalVoiceHold?: () => void;
+} | null>(null);
 const showReportVoiceSelector = ref(false);
 /** 是否由播报页「偏好设置」进入配置流程：决定关闭配置页时回播报页还是退出页面。 */
 const preferenceEntry = ref(false);
@@ -893,6 +900,107 @@ function onVoiceStart() {
   pauseReportBroadcast();
 }
 
+/**
+ * 页面级长按录音（与首页问答页同一套）：听播页除播放器/浮层里的按钮、输入框之外，
+ * 任意位置按住 300ms 都能开口说话。手势判定留在页面，录音 / 识别 / 面板视觉
+ * 全部复用输入栏里的 useVoiceInput，不另写一套。
+ */
+const GLOBAL_HOLD_MS = 300;
+/** 按住后移动超过这个距离按「滑动」处理，不长按录音 */
+const GLOBAL_HOLD_MOVE_PX = 12;
+/**
+ * 这些区域自带交互或长按语义，页面不再抢：
+ * 语音按钮（同一套手势）、识别确认面板、输入框、播放器头部按钮、
+ * 历史 / 语速浮层、异常列表、底部快捷导航。
+ */
+const GLOBAL_HOLD_EXCLUDE_SELECTOR = [
+  ".input-bar__voice-hold",
+  ".voice-confirm",
+  "textarea",
+  "input",
+  ".report-broadcast-header",
+  ".report-broadcast-history",
+  ".report-broadcast-rate",
+  ".report-insight",
+  ".podcast-page__quick-nav",
+].join(", ");
+
+/** 这些浮层 / 状态打开时不接管页面手势，避免在弹层上长按误触录音 */
+const globalHoldBlocked = computed(() =>
+  preferenceLoading.value
+  || showReportVoiceSelector.value
+  || reportQaSlotVisible.value
+  || reportQaGuideSuggestionVisible.value
+  || reportQaGuideStepVisible.value
+  || reportQaNavigationVisible.value,
+);
+
+let globalHoldTimer: ReturnType<typeof setTimeout> | null = null;
+let globalHoldStarted = false;
+let globalHoldStartX = 0;
+let globalHoldStartY = 0;
+
+function readHoldPointer(e: any) {
+  const touch = e?.touches?.[0] ?? e?.changedTouches?.[0];
+  return {
+    x: Number(touch?.clientX ?? e?.clientX),
+    y: Number(touch?.clientY ?? e?.clientY),
+  };
+}
+
+function clearGlobalHold() {
+  if (globalHoldTimer) {
+    clearTimeout(globalHoldTimer);
+    globalHoldTimer = null;
+  }
+}
+
+function onChatTouchStart(e: any) {
+  // 触屏环境只认 touch 事件：触摸后浏览器还会补一套 mousedown/mouseup，避免重复计时
+  if (e?.type === "mousedown" && typeof window !== "undefined" && "ontouchstart" in window) return;
+  if (globalHoldStarted || globalHoldBlocked.value) return;
+  // 新的一次按压：清掉可能残留的上一次计时（某些元素 stop 冒泡会漏掉 touchend）
+  clearGlobalHold();
+  const target = e?.target as HTMLElement | null;
+  if (target?.closest?.(GLOBAL_HOLD_EXCLUDE_SELECTOR)) return;
+  const { x, y } = readHoldPointer(e);
+  globalHoldStartX = x;
+  globalHoldStartY = y;
+  globalHoldTimer = setTimeout(() => {
+    globalHoldTimer = null;
+    globalHoldStarted = true;
+    chatInputRef.value?.startGlobalVoiceHold?.(globalHoldStartY);
+  }, GLOBAL_HOLD_MS);
+}
+
+function onChatTouchMove(e: any) {
+  const { x, y } = readHoldPointer(e);
+  if (!globalHoldStarted) {
+    // 还没到 300ms：位移超过阈值按滑动处理，放弃这次长按
+    if (Number.isFinite(x) && Number.isFinite(y)
+      && (Math.abs(x - globalHoldStartX) > GLOBAL_HOLD_MOVE_PX
+        || Math.abs(y - globalHoldStartY) > GLOBAL_HOLD_MOVE_PX)) {
+      clearGlobalHold();
+    }
+    return;
+  }
+  if (Number.isFinite(y)) chatInputRef.value?.updateGlobalVoiceHold?.(y);
+}
+
+function onChatTouchEnd() {
+  clearGlobalHold();
+  if (!globalHoldStarted) return;
+  globalHoldStarted = false;
+  chatInputRef.value?.endGlobalVoiceHold?.();
+}
+
+function onChatTouchCancel() {
+  clearGlobalHold();
+  if (!globalHoldStarted) return;
+  globalHoldStarted = false;
+  chatInputRef.value?.cancelGlobalVoiceHold?.();
+}
+
 function onRecognizeBegin() {
   voiceRecording.value = false;
   enterReportQaLoading();
@@ -942,6 +1050,7 @@ onUnload(() => {
 });
 
 onBeforeUnmount(() => {
+  clearGlobalHold();
   clearInsightLeaveTimer();
   reportAdjustmentActions.dispose();
   disposeInsights();
@@ -970,7 +1079,19 @@ onBeforeUnmount(() => {
       @confirm="confirmReportVoice"
       @close="closeReportVoiceSelector"
     />
-    <view v-else class="podcast-page__chat" :style="chatViewportStyle">
+    <!-- 聊天态：整页接管长按录音（见 onChatTouchStart，按钮 / 输入框 / 浮层除外） -->
+    <view
+      v-else
+      class="podcast-page__chat"
+      :style="chatViewportStyle"
+      @touchstart="onChatTouchStart"
+      @touchmove="onChatTouchMove"
+      @touchend="onChatTouchEnd"
+      @touchcancel="onChatTouchCancel"
+      @mousedown="onChatTouchStart"
+      @mousemove="onChatTouchMove"
+      @mouseup="onChatTouchEnd"
+    >
       <!-- 听汇报专用播放视图：QA 仅替换其内部主体区域，不替换页面根结构。 -->
       <ReportBroadcastPlayer
         v-if="reportBroadcastParams"
@@ -1040,9 +1161,11 @@ onBeforeUnmount(() => {
         </view>
       </view>
       <AiChatInput
+        ref="chatInputRef"
         v-model="inputText"
         :attachment-disabled="true"
         :compact-voice-listening="true"
+        :speaking="broadcastPlaying || answerTtsPlaying"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
@@ -1104,6 +1227,7 @@ onBeforeUnmount(() => {
       :keyboard-height="keyboardHeight"
       :voice-keyboard-height="voiceKeyboardHeight"
       :safe-top-px="safeTopPx"
+      :speaking="broadcastPlaying || answerTtsPlaying"
       @confirm="confirmReportQaOverlay"
       @send="sendPodcastMessage"
       @stop="stopGenerating"

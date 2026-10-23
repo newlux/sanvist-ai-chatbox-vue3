@@ -63,10 +63,14 @@ const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
 chatStore.setStopAtReplyEnd(true);
 const sessionStore = useSessionStore();
 const sharePosterWrap = ref<unknown>(null);
-/** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送 */
+/** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送；页面级长按录音也走它 */
 const chatInputRef = ref<{
   appendAttachments?: (meta: ChatMessageAttachment[]) => void;
   focusTextInput?: () => void;
+  startGlobalVoiceHold?: (clientY: number) => void;
+  updateGlobalVoiceHold?: (clientY: number) => void;
+  endGlobalVoiceHold?: () => void;
+  cancelGlobalVoiceHold?: () => void;
 } | null>(null);
 const navActiveKey = ref("");
 const shareSheetBottomInset = ref("");
@@ -733,6 +737,112 @@ function syncPageStage() {
   }
 }
 
+/**
+ * 页面级长按录音：首页除灵动岛之外，任意位置按住 300ms 都能开口说话。
+ * 手势判定留在页面（要排除灵动岛、输入框、语音按钮自身的手势），
+ * 录音 / 识别 / 面板视觉全部复用输入栏里的 useVoiceInput，不另写一套。
+ */
+const GLOBAL_HOLD_MS = 300;
+/** 按住后移动超过这个距离按「滑动列表」处理，不长按录音 */
+const GLOBAL_HOLD_MOVE_PX = 12;
+/**
+ * 这些区域自带长按行为，页面不再抢：语音按钮（同一套手势）、输入框（系统选择 / 粘贴）、
+ * 用户气泡文本（长按出复制菜单）、历史会话列表（长按重命名）。
+ */
+const GLOBAL_HOLD_EXCLUDE_SELECTOR = [
+  ".input-bar__voice-hold",
+  ".voice-confirm",
+  "textarea",
+  "input",
+  ".ai-bubble-v2__user-content",
+  ".history-drawer",
+].join(", ");
+
+/** 这些浮层打开时不接管页面手势，避免在弹层上长按误触录音 */
+const globalHoldBlocked = computed(() =>
+  shareSheetVisible.value
+  || sharePosterVisible.value
+  || askSlotDrawerVisible.value
+  || guideStepSheetVisible.value
+  || badFeedbackSheetVisible.value,
+);
+
+let globalHoldTimer: ReturnType<typeof setTimeout> | null = null;
+let globalHoldStarted = false;
+let globalHoldStartX = 0;
+let globalHoldStartY = 0;
+
+function readHoldPointer(e: any) {
+  const touch = e?.touches?.[0] ?? e?.changedTouches?.[0];
+  return {
+    x: Number(touch?.clientX ?? e?.clientX),
+    y: Number(touch?.clientY ?? e?.clientY),
+  };
+}
+
+/** 灵动岛本体不接管长按：它在 header 上是独立浮层，按在岛上不该起录音 */
+function isInsideIsland(x: number, y: number) {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || typeof document === "undefined") return false;
+  const island = document.querySelector(".chat-header__island");
+  if (!island) return false;
+  const rect = island.getBoundingClientRect();
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+function clearGlobalHold() {
+  if (globalHoldTimer) {
+    clearTimeout(globalHoldTimer);
+    globalHoldTimer = null;
+  }
+}
+
+function onChatTouchStart(e: any) {
+  // 触屏环境只认 touch 事件：触摸后浏览器还会补一套 mousedown/mouseup，避免重复计时
+  if (e?.type === "mousedown" && typeof window !== "undefined" && "ontouchstart" in window) return;
+  if (pageStage.value !== "chat" || globalHoldStarted || globalHoldBlocked.value) return;
+  // 新的一次按压：清掉可能残留的上一次计时（某些元素 stop 冒泡会漏掉 touchend）
+  clearGlobalHold();
+  const target = e?.target as HTMLElement | null;
+  if (target?.closest?.(GLOBAL_HOLD_EXCLUDE_SELECTOR)) return;
+  const { x, y } = readHoldPointer(e);
+  if (isInsideIsland(x, y)) return;
+  globalHoldStartX = x;
+  globalHoldStartY = y;
+  globalHoldTimer = setTimeout(() => {
+    globalHoldTimer = null;
+    globalHoldStarted = true;
+    chatInputRef.value?.startGlobalVoiceHold?.(globalHoldStartY);
+  }, GLOBAL_HOLD_MS);
+}
+
+function onChatTouchMove(e: any) {
+  const { x, y } = readHoldPointer(e);
+  if (!globalHoldStarted) {
+    // 还没到 300ms：位移超过阈值按滑动处理，放弃这次长按
+    if (Number.isFinite(x) && Number.isFinite(y)
+      && (Math.abs(x - globalHoldStartX) > GLOBAL_HOLD_MOVE_PX
+        || Math.abs(y - globalHoldStartY) > GLOBAL_HOLD_MOVE_PX)) {
+      clearGlobalHold();
+    }
+    return;
+  }
+  if (Number.isFinite(y)) chatInputRef.value?.updateGlobalVoiceHold?.(y);
+}
+
+function onChatTouchEnd() {
+  clearGlobalHold();
+  if (!globalHoldStarted) return;
+  globalHoldStarted = false;
+  chatInputRef.value?.endGlobalVoiceHold?.();
+}
+
+function onChatTouchCancel() {
+  clearGlobalHold();
+  if (!globalHoldStarted) return;
+  globalHoldStarted = false;
+  chatInputRef.value?.cancelGlobalVoiceHold?.();
+}
+
 async function onScrollTop() {
   if (!chatStore.aiSessionId) return;
   try {
@@ -792,6 +902,7 @@ onUnload(() => {
   realtimeTts.stop();
 });
 onBeforeUnmount(() => {
+  clearGlobalHold();
   clearRepairSummaryPolling();
   stopNativeResume();
   uni.$off("listen-report-marked", refreshListenReportState);
@@ -805,8 +916,19 @@ onBeforeUnmount(() => {
     <!-- 欢迎页 -->
     <AiWelcome v-if="pageStage === 'welcome'" @start-chat="goToChat" />
 
-    <!-- 问答页 -->
-    <view v-else class="ai-page__chat" :style="chatViewportStyle">
+    <!-- 问答页：整页接管长按录音（灵动岛 / 输入框 / 语音按钮自身除外） -->
+    <view
+      v-else
+      class="ai-page__chat"
+      :style="chatViewportStyle"
+      @touchstart="onChatTouchStart"
+      @touchmove="onChatTouchMove"
+      @touchend="onChatTouchEnd"
+      @touchcancel="onChatTouchCancel"
+      @mousedown="onChatTouchStart"
+      @mousemove="onChatTouchMove"
+      @mouseup="onChatTouchEnd"
+    >
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
       <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车） -->
@@ -1016,6 +1138,7 @@ onBeforeUnmount(() => {
         :voice-keyboard-height="voiceKeyboardHeight"
         bottom-gradient
         :compact-voice-listening="true"
+        :speaking="realtimeTts.playing.value"
         @send="sendMessage"
         @stop="stopGenerating"
         @voice-start="stopRealtimeTtsOnVoiceStart"
