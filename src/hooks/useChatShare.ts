@@ -79,10 +79,10 @@ export function useChatShare(posterEl: Ref<unknown>, scope?: string) {
   const sharePosterGenerating = ref(false);
 
   const shareSheetOptions = computed(() => [
-    { key: "wechat", label: "微信", icon: iconWechat },
+    { key: "wechat", label: t("share-wechat"), icon: iconWechat },
     { key: "qq", label: "QQ", icon: iconQQ },
-    { key: "share-image", label: "图片分享", icon: iconImage },
-    { key: "copy-link", label: "分享链接", icon: iconLink },
+    { key: "share-image", label: t("share-image"), icon: iconImage },
+    { key: "copy-link", label: t("share-link"), icon: iconLink },
   ]);
 
   function isShareMessageDisabled(index: number) {

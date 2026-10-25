@@ -12,8 +12,10 @@ import { onBeforeUnmount, onMounted } from "vue";
  *   （左列 `.schedule__side-list` 同步平移，两栏保持行对齐），滚动上限由
  *   「内容高度 - 裁剪视口高度」实时算出。
  *
- * 方向映射（页面旋转 90° 后）：屏幕**竖向**滑动 = 时间轴横向滚动；
- * 屏幕**横向**滑动 = 内容区纵向滚动。命中方向后 `preventDefault()`，不和原生滚动叠加。
+ * 方向映射看页面是否处于 CSS 旋转（`isRotated`）：
+ * - 旋转模拟横屏（页面转了 90°）：屏幕**竖向**滑动 = 时间轴横向滚动，屏幕**横向**滑动 = 内容区纵向滚动；
+ * - 宿主原生转屏全屏（页面没转）：屏幕**横向**滑动 = 时间轴横向滚动，屏幕**竖向**滑动 = 内容区纵向滚动。
+ * 命中方向后 `preventDefault()`，不和原生滚动叠加。
  *
  * **双指捏合**：旋转页面里浏览器原生双指缩放同样不生效，这里自己算两指间距的变化比例，
  * 通过 `onPinch` 交给页面缩时间轴（页面把「每小时像素宽」按比例调大 / 调小，捏合中心的时刻保持不动）。
@@ -129,6 +131,8 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
     let startLeft = 0;
     let startTop = 0;
     let axis: "time" | "rows" | null = null;
+    /** 本次手势开始时页面是否处于 CSS 旋转（决定屏幕方向与内容方向的映射） */
+    let startRotated = false;
     /** 上一次的双指间距（0 = 当前不在捏合中） */
     let pinchDistance = 0;
 
@@ -167,11 +171,13 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       startLeft = grid.scrollLeft;
       startTop = rowsOffset;
       axis = null;
+      startRotated = options.isRotated?.() ?? false;
       log("touchstart", {
         x: startX,
         y: startY,
         scrollLeft: startLeft,
         rowsOffset: startTop,
+        rotated: startRotated,
         target: (event.target as HTMLElement | null)?.className,
       });
     };
@@ -204,17 +210,24 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       const dy = touch.clientY - startY;
       if (!axis) {
         if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
-        axis = Math.abs(dy) >= Math.abs(dx) ? "time" : "rows";
-        log("方向判定", { axis, dx, dy });
+        // 旋转 90° 模拟横屏：屏幕方向与内容方向互换（竖滑滚时间轴、横滑滚内容区）；
+        // 宿主原生转屏全屏（未旋转）：屏幕方向与内容方向一致（横滑滚时间轴、竖滑滚内容区）
+        const vertical = Math.abs(dy) >= Math.abs(dx);
+        axis = (startRotated ? vertical : !vertical) ? "time" : "rows";
+        log("方向判定", { axis, dx, dy, rotated: startRotated });
       }
       if (axis === "time") {
         const max = Math.max(0, grid.scrollWidth - grid.clientWidth);
-        const next = Math.min(Math.max(0, startLeft - dy), max);
+        // 旋转时时间轴沿屏幕竖向，未旋转时沿屏幕横向；内容跟手方向都是「减」
+        const delta = startRotated ? dy : dx;
+        const next = Math.min(Math.max(0, startLeft - delta), max);
         grid.scrollLeft = next;
-        if (debug) log("滚时间轴", { dy, from: startLeft, to: next, max });
+        if (debug) log("滚时间轴", { delta, from: startLeft, to: next, max });
       } else {
-        const to = applyRowsOffset(startTop + dx);
-        if (debug) log("滚内容区", { dx, from: startTop, to, max: rowsMax() });
+        // 旋转时内容区沿屏幕横向（+），未旋转时沿屏幕竖向（跟手即取反）
+        const delta = startRotated ? dx : -dy;
+        const to = applyRowsOffset(startTop + delta);
+        if (debug) log("滚内容区", { delta, from: startTop, to, max: rowsMax() });
       }
       // 命中方向后阻止默认行为，避免和浏览器原生滚动叠加（双倍滚动/回弹）
       if (event.cancelable) event.preventDefault();

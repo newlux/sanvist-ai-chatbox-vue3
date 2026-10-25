@@ -512,9 +512,9 @@ export interface RecognizeSpeechByBase64Params {
  * 把一段识别文本连同「模块 + 阶段」发给后端，由热词表判定是不是命中词。
  */
 export interface WakeValidateParams {
-  /** 业务模块：Hey,SANI 起始页固定 ASK */
+  /** 业务模块：Hey,SANI 起始页固定 ASK，作业指导固定 GUIDE */
   module: WakeModule;
-  /** 阶段：HEY 起始页 / IDENTITY 身份选择页 / START 身份信息页 */
+  /** 阶段：当前页面所在的 step（ASK：HEY / IDENTITY / START；GUIDE：见 WakeStep） */
   step: WakeStep;
   /** 语音识别出来的文本 */
   text: string;
@@ -527,11 +527,18 @@ export type WakeModule = "ASK" | "GUIDE" | "TASK" | "PODCAST";
 
 /**
  * 阶段：
- * - HEY：起始页唤醒词；
- * - IDENTITY：身份选择页里长按说的身份；
- * - START：身份信息页里长按说的「开始体验」
+ * - ASK：HEY 起始页唤醒词 / IDENTITY 身份选择页 / START 身份信息页；
+ * - GUIDE：HEY 唤醒页 → INTRO 自我介绍（机型）→ DEVICE 设备 → EXPERIENCE 同设备经验
+ *   → MODEL_EXPERIENCE 当前机型经验。
  */
-export type WakeStep = "HEY" | "IDENTITY" | "START";
+export type WakeStep =
+  | "HEY"
+  | "IDENTITY"
+  | "START"
+  | "INTRO"
+  | "DEVICE"
+  | "EXPERIENCE"
+  | "MODEL_EXPERIENCE";
 
 /**
  * 实测返回（module=ASK / step=AWAKEN / text="Hey SANI"）：
@@ -540,17 +547,23 @@ export type WakeStep = "HEY" | "IDENTITY" | "START";
  * 取用前一律判空；request 已剥掉外层 `{ code, message, data }`，这里拿到的就是 data。
  */
 export interface WakeValidateResult {
+  /** 是否命中（部分网关只回 success，与 matched 同义） */
+  success?: boolean;
   /** 是否命中热词 */
-  matched: boolean;
+  matched?: boolean;
   /** 命中的原始热词 */
   hitWord?: string | null;
-  /** 命中值：身份 → 角色码，唤醒 → START；只命中唤醒词时为 null */
+  /** 命中值：身份 → 角色码，机型 → 型号，经验 → 经验值；只命中唤醒词时为 null */
   hitValue?: string | null;
-  /** SELECT / BACK / NONE 等 */
+  /** SELECT / BACK / RESELECT 等 */
   intent?: string | null;
-  /** 导航目标步骤（intent = BACK 时） */
+  /** 导航目标步骤（intent = BACK 时为回退目标，null/invalid 表示已在 HEY，不能继续回退） */
   targetStep?: string | null;
+  /** 本次处理后（前进 / 回退）的当前 step：前进时直接按它跳下一页 */
+  currentStep?: string | null;
   /** 本次播报的兜底话术：传 fallbackRound 按顺序取，不传随机一条 */
+  defaultHint?: string | null;
+  /** 本次播报的兜底话术（早期字段名，保留兼容） */
   fallbackText?: string | null;
   /** 当前阶段完整兜底话术（3 句，按顺序循环） */
   fallbackTexts?: string[] | null;

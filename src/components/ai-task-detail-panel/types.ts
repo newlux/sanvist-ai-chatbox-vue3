@@ -12,12 +12,13 @@
 /** 任务状态：已完成 / 执行中 / 待执行 / 已取消 / 逾期未开始（稿子四态 + 逾期） */
 export type TaskDetailPanelStatus = "done" | "running" | "pending" | "canceled" | "overdue";
 
-export const TASK_DETAIL_PANEL_STATUS_LABEL: Record<TaskDetailPanelStatus, string> = {
-  done: "已完成",
-  running: "执行中",
-  pending: "待执行",
-  canceled: "已取消",
-  overdue: "逾期未开始",
+/** 状态 → i18n key；文案由组件按当前语言翻译 */
+export const TASK_DETAIL_PANEL_STATUS_KEY: Record<TaskDetailPanelStatus, string> = {
+  done: "task-status-done",
+  running: "task-status-running",
+  pending: "task-status-pending",
+  canceled: "task-status-canceled",
+  overdue: "task-status-overdue",
 };
 
 /** 「逾期未开始」的警告块（样本 4：「计划未开始（逾期 5 分钟）」+ 说明） */

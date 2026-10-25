@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 
-import { TASK_DETAIL_STATUS_LABEL, type TaskDetailPayload } from "./types";
+import { TASK_DETAIL_STATUS_KEY, type TaskDetailPayload } from "./types";
 
 /**
  * 任务详情窗口（计划详情-司机）——设计稿 6832:464，蒙层 6832:322。
@@ -34,7 +35,16 @@ const emit = defineEmits<{
   "update:visible": [visible: boolean];
 }>();
 
+const { t } = useI18n();
+
 const groups = computed(() => props.detail?.groups || []);
+
+/** 任务条状态 → 文案；接口没给或认不出时不渲染（返回空串） */
+function statusText(status?: string) {
+  if (!status) return "";
+  const key = TASK_DETAIL_STATUS_KEY[status as keyof typeof TASK_DETAIL_STATUS_KEY];
+  return key ? t(key) : "";
+}
 
 function close() {
   emit("update:visible", false);
@@ -53,7 +63,7 @@ function close() {
           <view class="task-detail__back-arrow" />
         </view>
         <text class="task-detail__nav-title">
-          详情
+          {{ t("task-detail-title") }}
         </text>
       </view>
 
@@ -101,7 +111,7 @@ function close() {
             </view>
 
             <text class="task-detail__status" :class="{ 'task-detail__status--running': item.status === 'running' }">
-              {{ TASK_DETAIL_STATUS_LABEL[item.status] }}
+              {{ statusText(item.status) }}
             </text>
           </view>
         </view>

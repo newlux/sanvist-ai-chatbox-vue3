@@ -3,7 +3,8 @@ import type { TaskDetailGroup, TaskDetailItem, TaskDetailPayload } from "@/compo
 
 import { onLoad } from "@dcloudio/uni-app";
 import { computed, ref } from "vue";
-import { taskDetailStatusLabel } from "@/components/ai-task-detail-sheet/types";
+import { useI18n } from "vue-i18n";
+import { taskDetailStatusKey } from "@/components/ai-task-detail-sheet/types";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingTaskDetail } from "@/utils/task-detail-view";
@@ -67,14 +68,17 @@ interface NormalizedItem {
 /** 已知状态才加底色修饰类，避免出现没有样式定义的类名 */
 const CARD_STATUS_CLASS = new Set(["done", "running", "pending", "canceled"]);
 
+const { t } = useI18n();
+
 function normalizeItem(item: TaskDetailItem): NormalizedItem {
   const status = trimText(item?.status);
+  const statusKey = taskDetailStatusKey(status);
   return {
     start: trimText(item?.start),
     end: trimText(item?.end),
     name: trimText(item?.name),
     status,
-    statusText: taskDetailStatusLabel(status),
+    statusText: statusKey ? t(statusKey) : "",
     statusClass: CARD_STATUS_CLASS.has(status) ? `td__card--${status}` : "",
   };
 }
@@ -114,7 +118,7 @@ function onBack() {
         <view class="td__back-arrow" />
       </view>
       <text class="td__nav-title">
-        详情
+        {{ t("task-detail-title") }}
       </text>
     </view>
 

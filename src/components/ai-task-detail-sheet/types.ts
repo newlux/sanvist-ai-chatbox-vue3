@@ -10,11 +10,12 @@
 /** 任务条状态：已完成 / 执行中 / 待执行 / 已取消（设计稿四态） */
 export type TaskDetailStatus = "done" | "running" | "pending" | "canceled";
 
-export const TASK_DETAIL_STATUS_LABEL: Record<TaskDetailStatus, string> = {
-  done: "已完成",
-  running: "执行中",
-  pending: "待执行",
-  canceled: "已取消",
+/** 状态 → i18n key；文案由组件按当前语言翻译 */
+export const TASK_DETAIL_STATUS_KEY: Record<TaskDetailStatus, string> = {
+  done: "task-status-done",
+  running: "task-status-running",
+  pending: "task-status-pending",
+  canceled: "task-status-canceled",
 };
 
 export interface TaskDetailItem {
@@ -46,8 +47,8 @@ export interface TaskDetailPayload {
   note?: string;
 }
 
-/** 状态 → 文案；接口没给或给了认不出的值返回空串（调用方据此不渲染） */
-export function taskDetailStatusLabel(status?: string) {
+/** 状态 → i18n key；接口没给或给了认不出的值返回空串（调用方据此不渲染） */
+export function taskDetailStatusKey(status?: string) {
   if (!status) return "";
-  return TASK_DETAIL_STATUS_LABEL[status as TaskDetailStatus] || "";
+  return TASK_DETAIL_STATUS_KEY[status as TaskDetailStatus] || "";
 }
