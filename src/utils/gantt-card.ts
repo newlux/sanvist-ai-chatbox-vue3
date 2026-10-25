@@ -9,6 +9,8 @@ import type { GanttViewPayload, GanttViewRow } from "@/api/chat/types";
  *   → `card.status_text` → 顶层 `statusText` / `status_text` → `stage` 映射；
  * - 设备数：`card.devices`（数组按「类型 N 台」拼、字符串原样）→ 按 rows 的类别归并；
  * - 任务数：`card.taskCount`（兼容 snake_case 的 `task_count`）→ 按 rows 的任务条求和。
+ *
+ * 传 `cardOnly: true` 时不做任何推导，只认 `card` 里后端直接给的字段（初始化对话接口的卡片用）。
  */
 export interface GanttCardText {
   /** 卡片标题 */
@@ -19,6 +21,11 @@ export interface GanttCardText {
   devices: string;
   /** 任务数文案；空 = 不显示该行 */
   taskCount: string;
+}
+
+export interface GanttCardTextOptions {
+  /** 只认 `card` 里的字段，不从 rows / stage 推导 */
+  cardOnly?: boolean;
 }
 
 /** 阶段 → 卡片「状态」文案（接口给新词时按语义就近映射，认不出就原样展示） */
@@ -44,13 +51,38 @@ const CATEGORY_DEVICE: Record<string, string> = {
 
 const DEFAULT_TITLE = "任务协同-当天任务甘特图";
 
-/** 状态：card.status → card.status_text → 顶层 statusText / status_text → stage 映射 */
-function resolveStatus(view: GanttViewPayload) {
+/**
+ * 卡片里是否有能展示的内容（标题 / 状态 / 设备数 / 任务数任一有值，兼容 snake_case）。
+ * 没有就整卡不渲染——只看 `card`，不从 rows / stage 推导。
+ */
+export function hasGanttCard(payload?: GanttViewPayload | null): boolean {
+  const card = payload?.card;
+  if (!card || card.visible === false) return false;
+  const text = (value: unknown) => String(value ?? "").trim();
+  const devices = card.devices;
+  const hasDevices = Array.isArray(devices) ? devices.length > 0 : Boolean(text(devices));
+  return Boolean(
+    text(card.title)
+    || text(card.status)
+    || text(card.status_text)
+    || text(card.taskCount)
+    || text(card.task_count)
+    || hasDevices,
+  );
+}
+
+/** 状态（只认卡片字段）：card.status → card.status_text */
+function resolveCardStatus(view: GanttViewPayload) {
   const cardStatus = String(view.card?.status || "").trim();
   if (cardStatus) return STAGE_LABEL[cardStatus.toLowerCase()] || cardStatus;
 
-  const cardStatusText = String(view.card?.status_text || "").trim();
-  if (cardStatusText) return cardStatusText;
+  return String(view.card?.status_text || "").trim();
+}
+
+/** 状态：card.status → card.status_text → 顶层 statusText / status_text → stage 映射 */
+function resolveStatus(view: GanttViewPayload) {
+  const cardStatus = resolveCardStatus(view);
+  if (cardStatus) return cardStatus;
 
   const payloadStatus = String(view.statusText || view.status_text || "").trim();
   if (payloadStatus) return payloadStatus;
@@ -102,12 +134,16 @@ function resolveTaskCount(view: GanttViewPayload, rows: GanttViewRow[]) {
   return total > 0 ? `${total} 个` : "";
 }
 
-export function resolveGanttCardText(payload?: GanttViewPayload | null): GanttCardText {
+export function resolveGanttCardText(
+  payload?: GanttViewPayload | null,
+  options: GanttCardTextOptions = {},
+): GanttCardText {
   const view: GanttViewPayload = payload || {};
-  const rows = Array.isArray(view.rows) ? view.rows : [];
+  // 只认卡片数据时不给 rows 兜底，设备数 / 任务数推导自然失效
+  const rows = options.cardOnly || !Array.isArray(view.rows) ? [] : view.rows;
   return {
     title: String(view.card?.title || "").trim() || DEFAULT_TITLE,
-    status: resolveStatus(view),
+    status: options.cardOnly ? resolveCardStatus(view) : resolveStatus(view),
     devices: resolveDevices(view, rows),
     taskCount: resolveTaskCount(view, rows),
   };

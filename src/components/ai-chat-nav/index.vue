@@ -69,7 +69,7 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     subagent: "guide",
     mode: "page",
     // 先选体验的设备（独立页），再进讲解模式选择页（新老手），最后进作业指导
-    url: "/pages/device-select/index",
+    url: "/pages/guide-init/index",
   },
   {
     key: "repair-master-ai",
@@ -85,7 +85,7 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     icon: iconForm,
     subagent: "task",
     mode: "page",
-    url: "/pages/task/index",
+    url: "/pages/task-init/index",
   },
 ];
 

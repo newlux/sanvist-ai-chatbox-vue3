@@ -49,6 +49,42 @@
       }
     },
     {
+      "path": "pages/guide-intro/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "",
+        "transparentTitle": "always",
+        "allowsBounceVertical": "NO",
+        "enablePullDownRefresh": false,
+        "disableScroll": true
+      }
+    },
+    {
+      "path": "pages/guide-init/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "",
+        "transparentTitle": "always",
+        "allowsBounceVertical": "NO",
+        "enablePullDownRefresh": false,
+        "disableScroll": true
+      }
+    },
+    {
+      "path": "pages/task-init/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "",
+        "transparentTitle": "always",
+        "allowsBounceVertical": "NO",
+        "enablePullDownRefresh": false,
+        "disableScroll": true
+      }
+    },
+    {
       "path": "pages/device-select/index",
       "style": {
         "navigationStyle": "custom",

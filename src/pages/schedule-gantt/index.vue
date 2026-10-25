@@ -57,8 +57,7 @@ const { rotated, exitLandscape } = useLandscape(measureLayout);
 const { safeTopPx } = useSafeArea();
 const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
 
-/** 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志 */
-useScheduleGestures({ gridId: "schedule-gantt-grid", onRowsOffset: () => measureRowTops() });
+/** 手势接管在 measureRowTops / syncRowTops 之后接线（要读旋转状态与行偏移量） */
 
 /** 任务详情面板（点击任务条从右侧滑出，稿子 6832:292） */
 const detailVisible = ref(false);
@@ -247,10 +246,27 @@ function measureRowTops() {
   // #endif
 }
 
+/** 内容区已平移的纵向偏移（手势滚动时更新；箭头位置要按它扣掉） */
+const rowsOffsetY = ref(0);
+
 /** 箭头 Y = 行布局中心 − 内容区已平移量（手势纵向滚动时箭头跟着行走） */
 function syncRowTops() {
   rowTops.value = layoutRowTops.value.map(top => (top < 0 ? -1 : top - rowsOffsetY.value));
 }
+
+/**
+ * 原生手势在真机不生效（旋转页面里浏览器不接管）：自己接管触摸，见 hooks/useScheduleGestures。
+ * isRotated 决定屏幕方向映射哪一路（CSS 旋转模拟横屏 ≠ 宿主原生转屏全屏）；
+ * 纵向平移量回写 rowsOffsetY，箭头锚点跟着行走。
+ */
+useScheduleGestures({
+  gridId: "schedule-gantt-grid",
+  isRotated: () => rotated.value,
+  onRowsOffset: (offset) => {
+    rowsOffsetY.value = offset;
+    syncRowTops();
+  },
+});
 
 function measureLayout() {
   measureGrid();

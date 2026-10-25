@@ -19,7 +19,7 @@ import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
-import { TASK_WELCOME_COPY } from "@/config/task-welcome";
+import { pickTaskWelcomeQuestions, TASK_WELCOME_COPY } from "@/config/task-welcome";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
@@ -28,6 +28,7 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { hasGanttCard } from "@/utils/gantt-card";
 import { openGanttView } from "@/utils/gantt-navigation";
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -103,8 +104,8 @@ function sendTaskMessage(payload?: Parameters<typeof sendMessage>[0]) {
   void sendMessage(payload);
 }
 
-/** 进入页面自动问的初始化问题 */
-const INITIAL_CARD_QUERY = "今天任务有哪些";
+/** 进入页面自动问的初始化问题（跟随当前语言） */
+const initialCardQuery = computed(() => t("task-initial-query"));
 /**
  * 初始化那一轮在服务端建的会话 id：先暂存，等用户真正提问时再写回 store 续上。
  * 初始化请求本身不改会话态（不写 aiSessionId、不刷新会话列表、不重建消息列表），
@@ -135,17 +136,20 @@ let initialCardsRequestedAt = 0;
  * 其它数据（回答正文 / 思考过程 / 表格 / 追问 / 建议等）一律丢弃：
  * 不写 messages、不碰 showQuickPrompts、不触发滚动，页面结构与 showSceneWelcome 都不变，
  * 卡片只是欢迎态里多铺一张入口卡。
+ *
+ * 只认卡片数据：整包里没有可展示的 card（或 card.visible === false）就置空，欢迎态整卡不渲染。
  */
 function applyInitialCards(blocks: AiBlock[] = []) {
-  const gantt = (blocks || []).find(block => block?.type === "gantt");
-  if (!gantt) return;
-  initialGanttPayload.value = (gantt.payload || {}) as GanttViewPayload;
+  // 取最后一个 gantt 块：快照按流式逐步补齐，越靠后越完整
+  const ganttList = (blocks || []).filter(block => block?.type === "gantt");
+  const payload = ganttList[ganttList.length - 1]?.payload as GanttViewPayload | undefined;
+  initialGanttPayload.value = hasGanttCard(payload) ? (payload as GanttViewPayload) : null;
 }
 
 async function loadInitialCards() {
   initialCardsRequestedAt = Date.now();
   await sendSilentMessage({
-    text: INITIAL_CARD_QUERY,
+    text: initialCardQuery.value,
     // 后台拉卡片：不改会话态，页面停在原处等数据
     keepSession: true,
     onSessionId: (conversationId) => {
@@ -409,8 +413,17 @@ function onTtsClick(index: number) {
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
 const showSceneWelcome = computed(() => !messages.value.length && !isSessionSwitching.value);
-/** 待机引导文案（Ardot 350:2151）：问候 + 任务入口卡 +「你还可以这么问」，见 config/task-welcome */
-const taskWelcome = TASK_WELCOME_COPY;
+/**
+ * 待机引导文案（Ardot 350:2151）：问候 + 任务入口卡 +「你还可以这么问」，见 config/task-welcome。
+ * 入口卡数据来自初始化静默对话（「今天任务有哪些」）回复里的 gantt 卡片，
+ * 见 applyInitialCards；没有卡片数据时 initialGanttPayload 为 null，整卡不渲染。
+ * 建议问题按所选身份（调度员 / 操作手）取 key，再按当前语言翻译。
+ */
+const taskWelcome = computed(() => ({
+  title: t(TASK_WELCOME_COPY.titleKey),
+  content: t(TASK_WELCOME_COPY.contentKey),
+  questions: pickTaskWelcomeQuestions(userStore.visitorRole).map(key => t(key)),
+}));
 
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
 
@@ -509,7 +522,7 @@ async function confirmModal(title: string, content: string) {
 async function onSessionDelete(session: { id?: string | number }) {
   const id = session?.id;
   if (!id) return;
-  if (!await confirmModal("删除此对话？", "删除后，这条对话记录将无法找回。确定删除此对话？")) return;
+  if (!await confirmModal(t("delete-conversation-title"), t("delete-conversation-desc"))) return;
   try {
     await sessionStore.removeSession(id);
     await chatHeader.value?.reloadSessions?.();
@@ -524,7 +537,7 @@ async function onSessionDelete(session: { id?: string | number }) {
 async function onSessionDeleteBatch(ids: Array<string | number>) {
   const uniqueIds = Array.from(new Set((ids || []).map(id => String(id))));
   if (!uniqueIds.length) return;
-  if (!await confirmModal("批量删除选中对话？", "删除后，选中对话记录将无法找回。确定删除选中对话？")) return;
+  if (!await confirmModal(t("delete-conversations-title"), t("delete-conversations-desc"))) return;
   try {
     await sessionStore.removeSessions(uniqueIds);
     await chatHeader.value?.reloadSessions?.();
@@ -602,8 +615,8 @@ onShow(() => {
     void openLocalHistory(sessionId, true).then(startPendingScheduleAsk);
     return;
   }
-  // 从调度视图等页面回到本页：补发甘特图里问的问题；没有就刷新一次入口卡
-  startPendingScheduleAsk();
+  // // 从调度视图等页面回到本页：补发甘特图里问的问题；没有就刷新一次入口卡
+  // startPendingScheduleAsk();
 });
 
 onUnload(() => {
@@ -646,12 +659,16 @@ onUnload(() => {
         <text class="task-welcome__desc">
           {{ taskWelcome.content }}
         </text>
-        <!-- 任务入口卡（AiGanttEntryCard）：点击按 payload.viewType 分流，见 utils/gantt-view-route -->
-        <view class="task-welcome__entry">
-          <GanttBlock :payload="taskWelcome.ganttEntry" @open="openGanttView" />
+        <!-- 任务入口卡（AiGanttEntryCard）：只渲染初始化对话返回的卡片数据，没有就整卡不渲染 -->
+        <view v-if="initialGanttPayload" class="task-welcome__entry">
+          <GanttBlock
+            :payload="initialGanttPayload"
+            card-only
+            @open="openGanttView"
+          />
         </view>
         <text class="task-welcome__label">
-          你还可以这么问
+          {{ t("overview-more-questions") }}
         </text>
         <view class="task-welcome__list">
           <view
@@ -709,7 +726,7 @@ onUnload(() => {
       <view v-if="shareSheetVisible" class="share-sheet-modal">
         <view class="share-sheet" @tap.stop>
           <text class="share-sheet__title">
-            分享到：
+            {{ t("share-to") }}
           </text>
           <view class="share-sheet__options">
             <view
@@ -752,7 +769,7 @@ onUnload(() => {
               <view class="share-poster-modal__loading-content">
                 <view class="session-loading__spinner share-poster-modal__loading-spinner" />
                 <text class="share-poster-modal__loading-text">
-                  图片生成中
+                  {{ t("share-poster-generating") }}
                 </text>
               </view>
             </view>
@@ -775,7 +792,7 @@ onUnload(() => {
                   <image class="share-poster-modal__option-icon-img" :src="iconSaveImage" mode="aspectFit" />
                 </view>
                 <text class="share-poster-modal__option-label">
-                  保存图片
+                  {{ t("share-save-image") }}
                 </text>
               </view>
               <view class="share-poster-modal__option" @tap="onCopySharePoster">
@@ -783,14 +800,14 @@ onUnload(() => {
                   <image class="share-poster-modal__option-icon-img" :src="iconCopyImage" mode="aspectFit" />
                 </view>
                 <text class="share-poster-modal__option-label">
-                  复制图片
+                  {{ t("share-copy-image") }}
                 </text>
               </view>
             </view>
             <view class="share-poster-modal__divider" />
             <view class="share-poster-modal__cancel" @tap="closeSharePosterModal">
               <text class="share-poster-modal__cancel-text">
-                取消
+                {{ t("cancel") }}
               </text>
             </view>
           </view>

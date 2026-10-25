@@ -42,8 +42,15 @@ defineOptions({ name: "SchedulePrePage" });
 /** 进入页面自动横屏（默认旋转模拟），离开时还原 */
 const { rotated, exitLandscape } = useLandscape();
 
-/** 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志 */
-useScheduleGestures({ gridId: "schedule-pre-grid", onRowsOffset: () => measureRowTops() });
+/**
+ * 原生手势在真机不生效（旋转页面里浏览器不接管）：自己接管触摸，见 hooks/useScheduleGestures。
+ * isRotated 决定屏幕方向映射哪一路：CSS 旋转模拟横屏与宿主原生转屏全屏的轴向相反。
+ */
+useScheduleGestures({
+  gridId: "schedule-pre-grid",
+  isRotated: () => rotated.value,
+  onRowsOffset: () => measureRowTops(),
+});
 
 /** 任务详情面板（点击任务条从右侧滑出，稿子 6832:292） */
 const detailVisible = ref(false);

@@ -5,6 +5,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
+import { getRecommendedGuideQuestions } from "@/api/guide";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
@@ -14,7 +15,6 @@ import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
-import { getGuideWelcomeCopy } from "@/config/guide-welcome";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
@@ -50,10 +50,19 @@ const chatStore = useChatStore(chatScope);
  */
 chatStore.setStopAtReplyEnd(true);
 /**
- * 待机引导文案（Ardot 580:1915）：问候、说明与「你可以这么问」的问题都跟着讲解模式走，
- * 老司机讲差异、新手分步骤介绍，见 config/guide-welcome。
+ * 待机引导（Ardot 347:5392）：标题是固定问候语（操作手，你好。），
+ * 其余文案不再写死在前端 JSON，而是用推荐页带过来的 deviceModel / experience / modelExperience 调
+ * GET /recommended-questions/guide，用返回的 greeting 与 questions 动态渲染。
+ * 没有这三个参数（例如从用户中心直接进入）时不展示引导区，只留聊天界面。
  */
-const guideWelcome = computed(() => getGuideWelcomeCopy(userStore.operatorRole?.roleKey));
+/** 待机态取几条推荐问题（与推荐页一致，取一屏够看的量） */
+const GUIDE_WELCOME_QUESTION_COUNT = 3;
+const guideGreeting = ref("");
+const guideQuestions = ref<string[]>([]);
+/** 引导区拉取中：期间不渲染（避免先闪一屏空文案再变成接口文案） */
+const guideWelcomeLoading = ref(false);
+/** 推荐页带过来的上下文：机型 + 两轮经验 */
+const guideRecommendContext = ref({ deviceModel: "", experience: "", modelExperience: "" });
 const sessionStore = useSessionStore();
 const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
 /** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送 */
@@ -372,7 +381,11 @@ function onTtsClick(index: number) {
 }
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
-const showSceneWelcome = computed(() => !messages.value.length && !isSessionSwitching.value);
+/** 有 greeting 或有推荐问题时才渲染引导区（接口没给就走纯聊天界面） */
+const hasGuideWelcome = computed(() => Boolean(guideGreeting.value) || guideQuestions.value.length > 0);
+const showSceneWelcome = computed(() => (
+  !messages.value.length && !isSessionSwitching.value && !guideWelcomeLoading.value && hasGuideWelcome.value
+));
 
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
 
@@ -461,7 +474,7 @@ async function confirmModal(title: string, content: string) {
 async function onSessionDelete(session: { id?: string | number }) {
   const id = session?.id;
   if (!id) return;
-  if (!await confirmModal("删除此对话？", "删除后，这条对话记录将无法找回。确定删除此对话？")) return;
+  if (!await confirmModal(t("delete-conversation-title"), t("delete-conversation-desc"))) return;
   try {
     await sessionStore.removeSession(id);
     await chatHeader.value?.reloadSessions?.();
@@ -476,7 +489,7 @@ async function onSessionDelete(session: { id?: string | number }) {
 async function onSessionDeleteBatch(ids: Array<string | number>) {
   const uniqueIds = Array.from(new Set((ids || []).map(id => String(id))));
   if (!uniqueIds.length) return;
-  if (!await confirmModal("批量删除选中对话？", "删除后，选中对话记录将无法找回。确定删除选中对话？")) return;
+  if (!await confirmModal(t("delete-conversations-title"), t("delete-conversations-desc"))) return;
   try {
     await sessionStore.removeSessions(uniqueIds);
     await chatHeader.value?.reloadSessions?.();
@@ -526,6 +539,74 @@ async function onScrollTop() {
   }
 }
 
+/** query 值解码：uni 一般已解码，H5 直开 URL / 宿主拼参时可能还是编码态，这里兜一次 */
+function decodeQueryValue(value: string) {
+  const text = String(value || "").trim();
+  if (!/%[0-9A-F]{2}/i.test(text)) return text;
+  try {
+    return decodeURIComponent(text).trim();
+  }
+  catch {
+    return text;
+  }
+}
+
+/** 从 onLoad options 或当前 URL 里取一个 query 参数 */
+function readQueryValue(options: Record<string, unknown> | null | undefined, key: string) {
+  const raw = options?.[key];
+  if (raw != null && String(raw).trim()) return decodeQueryValue(String(raw));
+
+  if (typeof location === "undefined") return "";
+  const search = new URLSearchParams(location.search || "");
+  const fromSearch = search.get(key);
+  if (fromSearch) return decodeQueryValue(fromSearch);
+  const hash = String(location.hash || "");
+  const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "";
+  return query ? decodeQueryValue(new URLSearchParams(query).get(key) || "") : "";
+}
+
+/** 推荐页带过来的上下文：机型 + 两轮经验（决定待机态拉哪一套文案） */
+function readGuideRecommendContext(options?: Record<string, unknown> | null) {
+  return {
+    deviceModel: readQueryValue(options, "deviceModel"),
+    experience: readQueryValue(options, "experience"),
+    modelExperience: readQueryValue(options, "modelExperience"),
+  };
+}
+
+/**
+ * 待机态动态文案：GET /recommended-questions/guide（greeting + questions）。
+ * 机型 / 经验缺一个就不发请求，引导区不展示（例如从用户中心直接进来）。
+ */
+async function loadGuideRecommend() {
+  const { deviceModel, experience, modelExperience } = guideRecommendContext.value;
+  if (!deviceModel || !experience) return;
+
+  guideWelcomeLoading.value = true;
+  try {
+    const data = await getRecommendedGuideQuestions({
+      deviceModel,
+      experience,
+      ...(modelExperience ? { modelExperience } : {}),
+      count: GUIDE_WELCOME_QUESTION_COUNT,
+      offset: 0,
+    });
+    guideGreeting.value = String(data?.greeting || "").trim();
+    guideQuestions.value = (Array.isArray(data?.questions) ? data.questions : [])
+      .map(item => String(item || "").trim())
+      .filter(Boolean);
+  }
+  catch (error) {
+    logger.warn("failed to load guide recommended questions", error);
+  }
+  finally {
+    guideWelcomeLoading.value = false;
+  }
+}
+
+/** 推荐页带过来的问题：onLoad 记下来，等 onMounted 把视口同步完再发 */
+let pendingQuestion = "";
+
 onLoad((options) => {
   syncWindowHeight();
   const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("GUIDE");
@@ -537,11 +618,17 @@ onLoad((options) => {
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
+  pendingQuestion = readQueryValue(options, "question");
+  guideRecommendContext.value = readGuideRecommendContext(options);
+  void loadGuideRecommend();
 });
 
 onMounted(() => {
   syncWindowHeight();
   loadAwakeningPrompt();
+  const question = pendingQuestion;
+  pendingQuestion = "";
+  if (question) sendQuickPrompt(question);
 });
 
 onShow(() => {
@@ -588,29 +675,32 @@ onUnload(() => {
         @session-rename="onSessionRename"
         @share-select-all="onShareSelectAll"
       />
-      <!-- 待机引导（Ardot 580:1915）：问候 + 「你可以这么问」问题列表，点一条直接发问 -->
+      <!-- 待机引导（Ardot 347:5392）：标题 + greeting + 推荐问题；
+           greeting / 问题来自 /recommended-questions/guide，标题是固定问候语 -->
       <view v-if="showSceneWelcome" class="guide-welcome">
         <text class="guide-welcome__title">
-          {{ guideWelcome.title }}
+          {{ t("guide-welcome-title") }}
         </text>
-        <text class="guide-welcome__desc">
-          {{ guideWelcome.content }}
+        <text v-if="guideGreeting" class="guide-welcome__greeting">
+          {{ guideGreeting }}
         </text>
-        <text class="guide-welcome__label">
-          你可以这么问
-        </text>
-        <view class="guide-welcome__list">
-          <view
-            v-for="question in guideWelcome.questions"
-            :key="question"
-            class="guide-welcome__row"
-            @tap="sendQuickPrompt(question)"
-          >
-            <text class="guide-welcome__question">
-              {{ question }}
-            </text>
+        <template v-if="guideQuestions.length">
+          <text class="guide-welcome__label">
+            {{ t("guide-welcome-ask-label") }}
+          </text>
+          <view class="guide-welcome__list">
+            <view
+              v-for="question in guideQuestions"
+              :key="question"
+              class="guide-welcome__row"
+              @tap="sendQuickPrompt(question)"
+            >
+              <text class="guide-welcome__question">
+                {{ question }}
+              </text>
+            </view>
           </view>
-        </view>
+        </template>
       </view>
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
@@ -654,7 +744,7 @@ onUnload(() => {
       <view v-if="shareSheetVisible" class="share-sheet-modal">
         <view class="share-sheet" @tap.stop>
           <text class="share-sheet__title">
-            分享到：
+            {{ t("share-to") }}
           </text>
           <view class="share-sheet__options">
             <view
@@ -697,7 +787,7 @@ onUnload(() => {
               <view class="share-poster-modal__loading-content">
                 <view class="session-loading__spinner share-poster-modal__loading-spinner" />
                 <text class="share-poster-modal__loading-text">
-                  图片生成中
+                  {{ t("share-poster-generating") }}
                 </text>
               </view>
             </view>
@@ -720,7 +810,7 @@ onUnload(() => {
                   <image class="share-poster-modal__option-icon-img" :src="iconSaveImage" mode="aspectFit" />
                 </view>
                 <text class="share-poster-modal__option-label">
-                  保存图片
+                  {{ t("share-save-image") }}
                 </text>
               </view>
               <view class="share-poster-modal__option" @tap="onCopySharePoster">
@@ -728,14 +818,14 @@ onUnload(() => {
                   <image class="share-poster-modal__option-icon-img" :src="iconCopyImage" mode="aspectFit" />
                 </view>
                 <text class="share-poster-modal__option-label">
-                  复制图片
+                  {{ t("share-copy-image") }}
                 </text>
               </view>
             </view>
             <view class="share-poster-modal__divider" />
             <view class="share-poster-modal__cancel" @tap="closeSharePosterModal">
               <text class="share-poster-modal__cancel-text">
-                取消
+                {{ t("cancel") }}
               </text>
             </view>
           </view>
@@ -870,8 +960,8 @@ $color-white: #ffffff;
   );
 }
 
-/* ===== 待机引导（Ardot 580:1915）=====
-   画板 375×812：标题 y=178 / 说明 232 / 「你可以这么问」317 / 问题列表 351，
+/* ===== 待机引导（Ardot 347:5392）=====
+   画板 375×812：标题 y=178，往下依次是 greeting（说明）、「你可以这么问」与问题列表；
    状态栏 54 + 头部 50 之后是 74（148rpx），左右留白 20（40rpx）。 */
 .guide-welcome {
   position: relative;
@@ -879,16 +969,19 @@ $color-white: #ffffff;
   padding: 148rpx 40rpx 0;
 }
 
+/* 固定问候语（Ardot 347:5392 Greeting Title）：28px Bold #0D0D0D，行高 41 */
 .guide-welcome__title {
   display: block;
   color: #0d0d0d;
-  font-family: "PingFang SC";
+  font-family: "Source Han Sans CN", "PingFang SC", sans-serif;
   font-size: 56rpx; // 28
   font-weight: 700;
   line-height: 82rpx; // 41
 }
 
-.guide-welcome__desc {
+/* 接口返回的 greeting（Ardot 347:5392 Greeting Sub）：14px Regular #5D5D5D，行高 22；
+   与标题间距 13px —— 设计稿里问候语本身就是说明文案，不再是标题 */
+.guide-welcome__greeting {
   display: block;
   margin-top: 26rpx; // 13
   color: #5d5d5d;
@@ -900,7 +993,7 @@ $color-white: #ffffff;
 
 .guide-welcome__label {
   display: block;
-  margin-top: 82rpx; // 41
+  margin-top: 32rpx; // 16
   color: #8f8f8f;
   font-family: "PingFang SC";
   font-size: 28rpx; // 14

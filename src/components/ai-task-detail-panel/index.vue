@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 
 import {
-  TASK_DETAIL_PANEL_STATUS_LABEL,
+  TASK_DETAIL_PANEL_STATUS_KEY,
   type TaskDetailPanelPayload,
 } from "./types";
 
@@ -27,25 +28,29 @@ const props = defineProps<{
 
 const emit = defineEmits<{ "update:visible": [value: boolean] }>();
 
-const statusLabel = computed(() =>
-  props.detail ? TASK_DETAIL_PANEL_STATUS_LABEL[props.detail.status] : "",
-);
+const { t } = useI18n();
+
+const statusLabel = computed(() => (
+  props.detail ? t(TASK_DETAIL_PANEL_STATUS_KEY[props.detail.status]) : ""
+));
 
 /**
  * 信息卡第二行的标签随状态变化（稿子 6832:292 / 6832:321）：
  * 执行中 →「当前进度：」，待执行 →「准备就绪：」；其余状态按语义补。
+ * 存 i18n key，按当前语言翻译。
  */
-const PROGRESS_LABEL: Record<string, string> = {
-  running: "当前进度：",
-  pending: "准备就绪：",
-  done: "完成情况：",
-  canceled: "取消说明：",
-  overdue: "逾期说明：",
+const PROGRESS_KEY: Record<string, string> = {
+  running: "task-progress-running",
+  pending: "task-progress-pending",
+  done: "task-progress-done",
+  canceled: "task-progress-canceled",
+  overdue: "task-progress-overdue",
 };
 
-const progressLabel = computed(() =>
-  props.detail ? PROGRESS_LABEL[props.detail.status] || "当前进度：" : "当前进度：",
-);
+const progressLabel = computed(() => {
+  const status = props.detail?.status;
+  return t((status && PROGRESS_KEY[status]) || "task-progress-running");
+});
 
 function close() {
   emit("update:visible", false);
@@ -108,7 +113,7 @@ function close() {
       <!-- 时段 / 进度卡（6832:301）；逾期时「当前进度」由警告块替代 -->
       <view class="tdp__info">
         <view class="tdp__row">
-          <text class="tdp__label tdp__label--wide">计划时段：</text>
+          <text class="tdp__label tdp__label--wide">{{ t("task-plan-period") }}</text>
           <text class="tdp__value">
             {{ detail?.planTime }}
           </text>
@@ -124,7 +129,7 @@ function close() {
       </view>
 
       <!-- 现场配合（6832:312 标签 + 6832:313 行，前面可带一个小图标） -->
-      <text class="tdp__section">现场配合</text>
+      <text class="tdp__section">{{ t("task-section-support") }}</text>
       <view class="tdp__support">
         <text v-if="detail?.supportIcon" class="tdp__support-icon">
           {{ detail.supportIcon }}
@@ -135,15 +140,15 @@ function close() {
       </view>
 
       <!-- 前后衔接（6832:293 标签 + 上一程 / 下一程） -->
-      <text class="tdp__section">前后衔接</text>
+      <text class="tdp__section">{{ t("task-section-route") }}</text>
       <view class="tdp__row">
-        <text class="tdp__label">上一程：</text>
+        <text class="tdp__label">{{ t("task-leg-previous") }}</text>
         <text class="tdp__value">
           {{ detail?.previous }}
         </text>
       </view>
       <view class="tdp__row">
-        <text class="tdp__label">下一程：</text>
+        <text class="tdp__label">{{ t("task-leg-next") }}</text>
         <text class="tdp__value">
           {{ detail?.next }}
         </text>

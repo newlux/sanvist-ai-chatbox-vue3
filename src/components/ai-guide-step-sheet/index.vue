@@ -58,7 +58,7 @@ const emit = defineEmits<{
   (e: "photo", source: AttachmentSource): void;
 }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const currentIndex = ref(0);
 /** 末尾输入框：用户自己写的追问 */
@@ -110,7 +110,9 @@ watch(() => props.stepIndex, (index) => {
 
 /** 把步骤标题按「、」拼成下一轮的提问（会话上下文里已有原问题，不再加前缀）。 */
 function buildQuery(list: GuideStepItem[]) {
-  return list.map(step => String(step.title || "").trim()).filter(Boolean).join("、");
+  // 英文用逗号空格分隔，中文保留顿号
+  const separator = String(locale.value || "").toLowerCase().startsWith("en") ? ", " : "、";
+  return list.map(step => String(step.title || "").trim()).filter(Boolean).join(separator);
 }
 
 function submitQuery(query: string) {

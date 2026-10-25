@@ -51,8 +51,15 @@ const { rotated, exitLandscape } = useLandscape();
 const { safeTopPx } = useSafeArea();
 const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
 
-/** 旋转页里原生手势在真机不生效：自己接管触摸（见 hooks/useScheduleGestures），并打开排查日志 */
-useScheduleGestures({ gridId: "schedule-grid", onRowsOffset: () => measureRowTops() });
+/**
+ * 原生手势在真机不生效（旋转页面里浏览器不接管）：自己接管触摸，见 hooks/useScheduleGestures。
+ * isRotated 决定屏幕方向映射哪一路：CSS 旋转模拟横屏与宿主原生转屏全屏的轴向相反。
+ */
+useScheduleGestures({
+  gridId: "schedule-grid",
+  isRotated: () => rotated.value,
+  onRowsOffset: () => measureRowTops(),
+});
 
 /** 时间轴：每小时像素宽基准 56px（稿子 1x，双指捏合在 28–168 之间缩放）；基准范围 08:00–21:00 */
 const DEFAULT_HOUR_WIDTH = 56;
