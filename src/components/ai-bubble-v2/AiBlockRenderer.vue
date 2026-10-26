@@ -86,12 +86,12 @@ function onGanttOpen(payload: GanttViewPayload) {
   emit("gantt-open", payload);
 }
 
-function onGuideStepOpen(payload: GuideStepPayload) {
-  emit("guide-step-open", payload);
+function onGuideStepOpen(payload: GuideStepPayload, auto = false) {
+  emit("guide-step-open", payload, auto);
 }
 
-function onGuideSuggestionOpen(payload: GuideSuggestionPayload) {
-  emit("guide-suggestion-open", payload);
+function onGuideSuggestionOpen(payload: GuideSuggestionPayload, auto = false) {
+  emit("guide-suggestion-open", payload, auto);
 }
 
 /** 点核对卡步骤条某一段：把步数（1 起）+ step_id 继续往上抛，由页面切步骤并打开底部白板 */
