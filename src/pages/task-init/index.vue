@@ -20,8 +20,9 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
  *
  * 实现与「作业指导初始化页」同一套骨架：唤醒帧 → 自我介绍 → 步骤页，步骤的标题 / 提示 / 选项优先取
  * GET /flow/steps?module=TASK，页面只负责按 stepCode 选版式与推进：
- *   入口即 WELCOME（Hey,SANI 招呼帧，说「你好三一」唤醒）→ HEY（自我介绍）
- *   → IDENTITY（选择身份）→ IDENTITY_DETAIL（该角色的身份信息帧）→ 说「开始体验」→ 进任务协同。
+ *   入口即 HEY（自我介绍）→ IDENTITY（选择身份）→ IDENTITY_DETAIL（该角色的身份信息帧）
+ *   → 说「开始体验」→ 进任务协同。
+ *   首帧「你好三一」招呼页（WELCOME）已跳过，代码保留（回退可落到它），只是不作入口。
  *
  * 三个身份各自一帧（标题与所选角色一一对应，见 ROLE_DETAIL_PRESETS）：
  *   - 工地调度员        350:1119「搅拌车晚到，工地后续浇筑安排受到影响」
@@ -162,10 +163,10 @@ const FALLBACK_STEPS = computed<FlowStep[]>(() => [
 const flowSteps = ref<FlowStep[]>([]);
 /**
  * 当前所在的 step：WELCOME / HEY / IDENTITY / IDENTITY_DETAIL / RECOMMEND。
- * 与作业指导初始化页同一套入口：首帧「你好三一」招呼页（WELCOME）说「你好三一」唤醒
- * 后进自我介绍帧（HEY），再到选择身份（IDENTITY）。
+ * 跳过首帧「你好三一」招呼页（WELCOME），入口直接是自我介绍帧（HEY）；
+ * 招呼帧的模板与逻辑保留（回退时还能落到它），只是不再作为入口。
  */
-const activeStep = ref(STEP_WELCOME);
+const activeStep = ref(STEP_HEY);
 /** 当前处于「已选中」反馈态的选项（hValue） */
 const selectedKey = ref("");
 /** 已选答案：stepCode → hValue（IDENTITY 的 hValue 就是 roleCode） */
@@ -286,6 +287,18 @@ const currentLayout = computed(() => layoutOf(currentStep.value?.stepCode || "")
 
 /** 当前版式的槽位表 */
 const currentSlots = computed(() => (currentLayout.value === "bubbles" ? TASK_BUBBLES : TASK_PILL_SLOTS));
+
+/** 选项区底部（rpx）：气泡取「top + size」，胶囊按单行 64rpx 高估 */
+const optionAreaBottom = computed(() => (currentLayout.value === "bubbles"
+  ? Math.max(...TASK_BUBBLES.map(item => item.top + item.size))
+  : Math.max(...TASK_PILL_SLOTS.map(item => item.top)) + 64));
+
+/**
+ * 提示文字与选项区的固定间距（rpx，56px，取设计稿 350:964 最低那颗球底到 hint 顶）。
+ * 不再贴底定位：hint 的 top = 选项区底部 + 这个间距，换版式或英文换行让选项变高时，距离保持不变。
+ */
+const HINT_GAP_RPX = 112;
+const hintTop = computed(() => optionAreaBottom.value + HINT_GAP_RPX);
 
 /**
  * 当前步骤的选项：过滤空文案、按 sortNo 升序，并按槽位数截断。
@@ -986,8 +999,9 @@ onMounted(() => {
   navigating = false;
   voiceInteracted = false;
   void loadFlowSteps();
-  // 首帧是欢迎页：不自动推进，等用户说「你好三一」唤醒（或点屏幕跳过）
+  // 入口就是自我介绍帧：口播没起来（WebView 拦自动播放 / TTS 失败）也要能进下一步
   clearIntroAdvance();
+  introTimer = setTimeout(advanceToFirstStep, INTRO_FALLBACK_MS);
 });
 
 onBeforeUnmount(() => {
@@ -1135,11 +1149,13 @@ onBeforeUnmount(() => {
         </view>
       </view>
 
-      <!-- 底部提示：招呼帧与自我介绍帧按设计稿留白，其余步骤用接口 hint -->
+      <!-- 底部提示：招呼帧与自我介绍帧按设计稿留白，其余步骤用接口 hint；
+           top 跟着选项区底部走（选项高矮变化时间距不变），不再贴底定位 -->
       <text
         v-if="!isWelcomeStep && !isWakeStep && currentHint"
         :key="`hint-${activeStep}`"
         class="gi__hint"
+        :style="{ top: `${hintTop}rpx` }"
       >
         {{ currentHint }}
       </text>
@@ -1685,12 +1701,11 @@ onBeforeUnmount(() => {
 }
 
 /* 底部提示：16px / 23px #8E8E8E 居中。
-   与首页「开始体验」帧同一套定位：设计稿 y=597（812 高）→ 距底 192px = 384rpx，
-   贴底定位不受状态栏高度影响，短屏也不会被推到屏幕外 */
+   定位基准是「选项区底部 + 固定间距」（top 由模板按当前版式算好内联给），
+   不再贴底：贴底时气泡/胶囊、中文/英文换行让选项变高，间距就会跟着变 */
 .gi__hint {
   position: absolute;
   right: 0;
-  bottom: 384rpx;
   left: 0;
   padding: 0 40rpx;
   color: #8e8e8e;

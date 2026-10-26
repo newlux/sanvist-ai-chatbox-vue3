@@ -9,7 +9,8 @@ const props = defineProps({
 });
 
 const emit = defineEmits<{
-  open: [payload: GuideSuggestionPayload];
+  /** auto=true 表示卡片自动弹起，由页面决定延时；手动点击 auto=false */
+  open: [payload: GuideSuggestionPayload, auto: boolean];
 }>();
 
 const options = computed(() => (Array.isArray(props.payload?.options) ? props.payload.options : []));
@@ -20,17 +21,21 @@ const title = computed(() => String(props.payload?.question || "").trim()
 
 const hasOpened = ref(false);
 
-/** 新消息里的追问卡自动弹起；历史消息点一下文本再打开。 */
+/**
+ * 新消息里的追问卡自动弹起；历史消息点一下文本再打开。
+ * 延时不能挂在这里：生成结束时气泡正文会被整体卸载（见 ai-bubble-v2 的 hideBody），
+ * 定时器会跟着组件一起销毁，所以计时统一交给页面层。
+ */
 onMounted(() => {
   if (hasOpened.value || props.payload?.auto_open !== true || !options.value.length) return;
   hasOpened.value = true;
-  emit("open", props.payload);
+  emit("open", props.payload, true);
 });
 
 function open() {
   if (!options.value.length) return;
   hasOpened.value = true;
-  emit("open", props.payload);
+  emit("open", props.payload, false);
 }
 </script>
 

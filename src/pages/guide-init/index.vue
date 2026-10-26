@@ -183,8 +183,12 @@ const FALLBACK_STEPS = computed<FlowStep[]>(() => [
 
 /** 接口返回的步骤；空数组时整页走 FALLBACK_STEPS */
 const flowSteps = ref<FlowStep[]>([]);
-/** 当前所在的 step：WELCOME / HEY / INTRO / DEVICE / EXPERIENCE / MODEL_EXPERIENCE / RECOMMEND */
-const activeStep = ref(STEP_WELCOME);
+/**
+ * 当前所在的 step：WELCOME / HEY / INTRO / DEVICE / EXPERIENCE / MODEL_EXPERIENCE / RECOMMEND。
+ * 跳过首帧「你好三一」招呼页（WELCOME），入口直接是自我介绍帧（HEY）；
+ * 招呼帧的模板与逻辑保留（回退时还能落到它），只是不再作为入口。
+ */
+const activeStep = ref(STEP_HEY);
 /** 当前处于「已选中」反馈态的选项（hValue） */
 const selectedKey = ref("");
 /** 已选答案：stepCode → hValue，结束时按 EXPERIENCE / MODEL_EXPERIENCE 决定讲解模式 */
@@ -929,6 +933,13 @@ async function applySelection(stepCode: string, hitValue: string, label: string)
     userStore.setSelectedDeviceModelKey(hitValue);
   }
 
+  // 同类设备「还没开过」：后面「当前机型经验」那一问没必要再问，直接进作业指导。
+  // modelExperience 不传，作业指导页按第一轮 experience 兜底（见 api/guide/types）。
+  if (code === STEP_EXPERIENCE && normalizeStep(hitValue) === "NOT_EXPERIENCED") {
+    finish();
+    return;
+  }
+
   let next = nextStepAfter(code);
   // 文档：选完设备、填经验标题时带上 roleCode / deviceType / deviceModel 再拉一次，
   // EXPERIENCE / MODEL_EXPERIENCE 的标题（「你以前带过带屏吗」「你开过新款SCC 400-8吗」）才按机型下发。
@@ -1029,8 +1040,9 @@ onMounted(() => {
   voiceInteracted = false;
   void loadFlowSteps();
   void loadOperatorRoles();
-  // 首帧是欢迎页：不自动推进，等用户说「你好三一」唤醒（或点屏幕跳过）
+  // 入口就是自我介绍帧：口播没起来（WebView 拦自动播放 / TTS 失败）也要能进下一步
   clearIntroAdvance();
+  introTimer = setTimeout(advanceToFirstStep, INTRO_FALLBACK_MS);
 });
 
 onBeforeUnmount(() => {

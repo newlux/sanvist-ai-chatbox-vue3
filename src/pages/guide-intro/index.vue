@@ -185,6 +185,12 @@ function onPageTap() {
 /** 第二态：同类设备经验（仅用于推进流程，讲解模式由第四态决定） */
 function onExperienceTap(item: OptionBubble) {
   if (item.ghost || selectedKey.value) return;
+  // 「还没开过」：后面的机型选择 / 当前机型经验都没必要再问，按新手直接进作业指导
+  if (item.key === "never") {
+    selectedKey.value = item.key;
+    finish(OPERATOR_ROLE_KEYS.novice);
+    return;
+  }
   nextStep(3, item.key);
 }
 
