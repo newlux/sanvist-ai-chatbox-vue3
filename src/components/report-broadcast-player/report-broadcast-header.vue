@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import headerStatusLogo from "@/assets/img/header-status-logo.png";
+// 顶部状态胶囊里的三角图标：换成动态 GIF（原 header-status-logo.png 的动画版）
+// 以 22×22 展示，专用小图 96×85 / 150 帧 / 约 430KB，不必拉 300px 的大图
+import headerStatusLogo from "@/assets/img/sani-logo-sm.gif";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import menuHistoryIcon from "@/assets/img/report-broadcast/feedback-history.svg";
 import menuPreferenceIcon from "@/assets/img/report-broadcast/icon-fav-setting.svg";

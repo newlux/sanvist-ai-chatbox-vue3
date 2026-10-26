@@ -413,9 +413,11 @@ onBeforeUnmount(() => {
               <view v-if="props.generating" class="chat-header__island-ring" />
               <!-- 圆形玻璃底盘单独一层：底盘负责圆形轮廓，模糊只作用在这一层 -->
               <view class="chat-header__island-glass" />
+              <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），
+                   只换图源，尺寸 / 裁剪 / 投影 / 状态环等一律不动 -->
               <image
                 class="chat-header__island-logo"
-                src="@/assets/img/header-island-logo.png"
+                src="@/assets/img/sani-logo.gif"
                 mode="aspectFit"
               />
             </view>
@@ -949,7 +951,7 @@ onBeforeUnmount(() => {
   left: 20rpx; // 10px
   width: 144rpx; // 72px
   height: 144rpx;
-  // 图片本身是透明背景 PNG（220×220，74% 像素 alpha=0），这里再显式声明一次透明底，
+  // 图片本身是透明背景 GIF（300×267，内容已裁到图案边界），这里再显式声明一次透明底，
   // 防止 image 组件/内核给它补上默认白底而露出方形
   background-color: transparent;
   border: 0;
