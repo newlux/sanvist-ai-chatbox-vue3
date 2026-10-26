@@ -21,7 +21,7 @@ const SCENE_LABEL: Record<ChatScene, string> = {
 
 /**
  * 历史会话归属哪个场景。
- * 任务协同页现在下发 TEST；早期下发过 TASK，历史数据里两者都按任务协同（TASK）算，
+ * 任务协同页现在下发 TASK；早期下发过 TEST，历史数据里两者都按任务协同（TASK）算，
  * 这样新旧会话在同一张历史列表里都能原地打开、不会互相甩到别的页面。
  */
 export function getSessionScene(session?: { inputs?: Record<string, unknown> } | null): ChatScene {
