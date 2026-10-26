@@ -49,6 +49,10 @@ function onStartChat() {
 .welcome--visitor {
   background: #fafafa;
   color: #0d0d0d;
+  // 底部渐变（.welcome-visitor__glow）必须贴到屏幕物理底边：
+  // 这里不给底部安全区留内边距，否则渐变会停在安全区上方、露出 #fafafa 白带。
+  // 页面内容离底部还有很大余量，不会被系统手势条压到；成员欢迎页仍用上面的默认值
+  padding-bottom: 0;
 }
 
 .welcome:not(.welcome--visitor) {

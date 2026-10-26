@@ -386,7 +386,10 @@ onBeforeUnmount(() => {
 <template>
   <view
     class="chat-input"
-    :class="{ 'chat-input--keyboard-open': keyboardOpen || voiceKeyboardOpen }"
+    :class="{
+      'chat-input--keyboard-open': keyboardOpen || voiceKeyboardOpen,
+      'chat-input--voice-panel-open': compactVoiceListening && inputMode === 'voice' && voicePhase === 'recording',
+    }"
     :style="inputLiftStyle"
   >
     <!-- 键盘弹起时的空白区兜底：点一下收键盘，否则编辑识别结果时没有退出口 -->
@@ -398,7 +401,8 @@ onBeforeUnmount(() => {
       @tap.stop="onMaskTap"
     />
 
-    <!-- 监听态挂到 body，避免父级层叠上下文让导航和浮动按钮露在遮罩上方 -->
+    <!-- 监听态挂到 body：全屏对焦态（listening）要盖住导航与浮动按钮；
+         首页 / 听播的紧凑态（compact）只做底部装饰，层级压在导航与输入栏之下 -->
     <Teleport to="body">
       <view
         v-if="inputMode === 'voice' && voicePhase === 'recording'"
@@ -572,9 +576,9 @@ onBeforeUnmount(() => {
       </view>
     </view>
     <!-- 底部氛围图形：设计稿 326:1336 Frame 45（375×118），压在输入栏下面。
-         语音播报期间让位给下面那条三色带波纹 -->
+         语音播报期间让位给三色带波纹，录音期间让位给录音面板自带的同一张底部波浪 -->
     <view
-      v-if="bottomGradient && !speaking && !keyboardOpen && !voiceKeyboardOpen"
+      v-if="bottomGradient && !speaking && !keyboardOpen && !voiceKeyboardOpen && voicePhase !== 'recording'"
       class="chat-input__bottom-art"
       aria-hidden="true"
     />
@@ -607,11 +611,13 @@ onBeforeUnmount(() => {
       />
 
       <!--
-        底部输入栏：默认语音、键盘文本、发送和生成中状态。
+        底部输入栏：默认语音、键盘文本、发送三种状态。
         文本态空闲（input-bar--plain）走灰色胶囊样式：无文字时右侧是声波（切语音），
-        有文字时右侧是黑圆上箭头（发送）；生成中仍沿用的白色胶囊保持不变。
+        有文字时右侧是黑圆上箭头（发送）。
+        回答生成中整条输入栏（含模式切换的键盘图标、停止图标）整体隐藏，不再显示任何提示。
       -->
       <view
+        v-if="!isLoading"
         class="input-bar"
         :class="{
           'input-bar--text': inputMode === 'text',
@@ -635,8 +641,10 @@ onBeforeUnmount(() => {
           :class="{ 'input-bar__voice-pill--status': isLoading || voice.isRecognizing }"
         >
           <template v-if="isLoading || voice.isRecognizing">
-            <text class="input-bar__voice-hint">
-              {{ isLoading ? t("input-generating") : t("input-recognizing") }}
+            <!-- 生成中不再重复一行「回答生成中...」：状态已由顶部灵动岛胶囊承担，
+                 这里只保留语音识别中的必要反馈 -->
+            <text v-if="voice.isRecognizing" class="input-bar__voice-hint">
+              {{ t("input-recognizing") }}
             </text>
           </template>
           <template v-else>
@@ -768,6 +776,13 @@ onBeforeUnmount(() => {
   }
 }
 
+// 首页紧凑录音态：录音面板（Teleport 到 body、z-index 0）只做底部装饰，
+// 输入栏本身层级就比它高，这里只需要把容器底色去掉，
+// 否则 #fafafa 实色底会把面板的渐变色波浪下半截切掉
+.chat-input--voice-panel-open {
+  background: transparent;
+}
+
 // 底部氛围图形：设计稿 326:1336 Frame 45（375×118）
 // 资源内含 40px 模糊的波浪蒙版 + rgba(239,239,238,0) → #0F7EEE 竖向渐变
 .chat-input__bottom-art {
@@ -881,7 +896,9 @@ onBeforeUnmount(() => {
    ========================================================================== */
 .voice-sheet--listening-compact {
   position: fixed;
-  z-index: 100000;
+  /* 只做底部装饰：层级压在底部导航（z-index 1）与输入栏之下，
+     录音时「听汇报 / 作业指导」等入口照旧可点可见 */
+  z-index: 0;
   right: 0;
   bottom: 0;
   left: 0;

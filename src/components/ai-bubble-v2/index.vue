@@ -718,12 +718,12 @@ function onNegativeFeedback() {
   -webkit-user-select: text;
   user-select: text;
 }
-/* 回答气泡：背景 #EFEFEF */
+/* 回答气泡：白底 #FFFFFF + 1rpx 浅灰描边 */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
   padding: 40rpx;
   border: 1rpx solid #eeeeee;
   border-radius: 32rpx;
-  background: #efefef;
+  background: #ffffff;
   box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
 }
 /* 没有正文只有独立卡片：不画白卡外壳，只留操作栏 */
@@ -840,14 +840,14 @@ function onNegativeFeedback() {
   border-radius: 0;
   box-shadow: none;
 }
-/* 用户消息气泡：白底 + #EFEFEF 描边，文字 #0D0D0D（原为品牌红底白字） */
+/* 用户消息气泡：#EFEFEF 浅灰底、无描边，文字 #0D0D0D（与回答白卡形成对比） */
 .ai-bubble-v2--user .ai-bubble-v2__body {
   flex: 0 1 auto;
   max-width: calc(100% - 64rpx);
   padding: 22rpx 32rpx;
-  border: 1rpx solid #efefef;
+  border: 0;
   border-radius: 28rpx;
-  background: #ffffff;
+  background: #efefef;
 }
 .ai-bubble-v2__body--highlighted {
   background: rgba(248, 49, 94, 0.06);

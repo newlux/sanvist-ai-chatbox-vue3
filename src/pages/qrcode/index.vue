@@ -206,21 +206,20 @@ function onBack() {
               <text class="qrcode-card__failed-text">{{ t("qrcode-failed") }}</text>
             </view>
             <!-- 卡片说明 865:1774：二维码下方 35px，14px / 行高 21px / Regular / #0D0D0D -->
-            <text class="qrcode-card__tip">下载并填写信息，即可体验已开放能力</text>
+            <!-- <text class="qrcode-card__tip">下载并填写信息，即可体验已开放能力</text> -->
           </view>
 
           <!-- 登记领礼品 865:1333 / 865:1335 / 865:1773：卡片下方 30px，徽标在左、两行文案在右 -->
           <view class="qrcode-page__note">
             <!-- 徽标底 865:1334：42×42，圆角 12，1px 白描边，渐变同卡片 -->
-            <view class="qrcode-page__note-badge">
-              <!-- 徽标图标 865:1336：20×17.5 / #0D0D0D -->
+            <!-- <view class="qrcode-page__note-badge">
               <image class="qrcode-page__note-icon" :src="stepIcon" />
-            </view>
+            </view> -->
             <!-- 两行文案 865:1773：14px / 行高 21px / Regular / #5D5D5D，与徽标顶对齐 -->
-            <view class="qrcode-page__note-text">
+            <!-- <view class="qrcode-page__note-text">
               <text class="qrcode-page__note-line">完成信息登记，</text>
               <text class="qrcode-page__note-line">还可向现场工作人员领取一份小礼品。</text>
-            </view>
+            </view> -->
           </view>
         </view>
       </view>
