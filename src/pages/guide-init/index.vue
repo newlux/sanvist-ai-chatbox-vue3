@@ -10,6 +10,7 @@ import { getOperatorRoles } from "@/api/user-role";
 import { OPERATOR_ROLE_KEYS, toOperatorRoleOption } from "@/api/user-role/operator-roles";
 import brandLogo from "@/assets/img/header-island-logo.png";
 import { usePlainTts } from "@/hooks/usePlainTts";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission } from "@/utils/platform/mpaas";
@@ -55,6 +56,12 @@ defineOptions({ name: "AiGuideInitPage" });
 const logger = createLogger("guide-init-page");
 const { t, locale } = useI18n();
 const userStore = useUserStore();
+/**
+ * 顶部状态栏高度：设计稿 375×812（含 54 高状态栏），自我介绍帧标题 y=117（节点 350:1052 /
+ * 722:2492 这一帧里 Main Title 的位置）。本页所有 y 都是扣掉状态栏后的值（126rpx = 63px），
+ * 必须靠这层 padding 把状态栏补回来；不注入时 var(--safe-top-px) 取 0，整页会比设计稿高出一个状态栏。
+ */
+const { safeAreaStyle } = useSafeArea();
 
 /** /flow/steps 的模块名：作业指导 */
 const FLOW_MODULE = "GUIDE";
@@ -528,12 +535,28 @@ function wrapBubbleLabel(label: string) {
   return lines.join("\n");
 }
 
-function bubbleStyle(item: { left: number, top: number, size: number }) {
+/** 中心图标圆心（220rpx 图标 @top 582），气泡 / 胶囊全息翻折的起飞点（rpx） */
+const GUIDE_CORE_X = 375;
+const GUIDE_CORE_Y = 692;
+
+/** 气泡与胶囊的全息入场参数：从中心图标圆心翻折飞回自己的槽位 */
+function holoVars(centerX: number, centerY: number, index: number) {
+  return {
+    "--holo-dx": `${GUIDE_CORE_X - centerX}rpx`,
+    "--holo-dy": `${GUIDE_CORE_Y - centerY}rpx`,
+    "--holo-rx": centerY < GUIDE_CORE_Y ? "85deg" : "-85deg",
+    "--holo-ry": centerX > GUIDE_CORE_X ? "45deg" : "-45deg",
+    "--holo-delay": `${index * 90}ms`,
+  };
+}
+
+function bubbleStyle(item: { left: number, top: number, size: number }, index = 0) {
   return {
     left: `${item.left}rpx`,
     top: `${item.top}rpx`,
     width: `${item.size}rpx`,
     height: `${item.size}rpx`,
+    ...holoVars(item.left + item.size / 2, item.top + item.size / 2, index),
   };
 }
 
@@ -541,7 +564,7 @@ function bubbleStyle(item: { left: number, top: number, size: number }) {
  * 胶囊宽度不写死：中文与设计稿同宽，接口那种长 label / 英文按 max-width 折行，
  * 胶囊变高而不是顶出屏幕；maxWidth 同时受槽位列宽与屏幕右侧约束。
  */
-function pillStyle(item: { left: number, top: number, minWidth: number, maxWidth?: number }) {
+function pillStyle(item: { left: number, top: number, minWidth: number, maxWidth?: number }, index = 0) {
   const available = 750 - item.left - 16;
   const max = Math.min(item.maxWidth ?? available, available);
   return {
@@ -549,6 +572,7 @@ function pillStyle(item: { left: number, top: number, minWidth: number, maxWidth
     top: `${item.top}rpx`,
     minWidth: `${item.minWidth}rpx`,
     maxWidth: `${max}rpx`,
+    ...holoVars(item.left + Math.min(item.minWidth, max) / 2, item.top + 32, index),
   };
 }
 
@@ -1021,6 +1045,7 @@ onBeforeUnmount(() => {
 <template>
   <view
     class="gi"
+    :style="safeAreaStyle"
     :class="{
       'gi--en': isEnglish,
       'gi--welcome': isWelcomeStep,
@@ -1118,7 +1143,7 @@ onBeforeUnmount(() => {
           :key="`${optionValue(item)}-${index}`"
           class="gi__bubble"
           :class="{ 'gi__bubble--selected': selectedKey === optionValue(item) }"
-          :style="{ ...bubbleStyle(BUBBLE_SLOTS[index]), animationDelay: `${index * 90}ms` }"
+          :style="bubbleStyle(BUBBLE_SLOTS[index], index)"
           @tap.stop="onOptionTap(item)"
         >
           <text class="gi__bubble-text">
@@ -1130,9 +1155,8 @@ onBeforeUnmount(() => {
           :key="item.key"
           class="gi__bubble gi__bubble--ghost"
           :style="{
-            ...bubbleStyle(item),
+            ...bubbleStyle(item, index),
             background: `linear-gradient(160deg, ${item.fill[0]} 0%, ${item.fill[1]} 100%)`,
-            animationDelay: `${(index + 1) * 90}ms`,
           }"
         />
       </view>
@@ -1144,7 +1168,7 @@ onBeforeUnmount(() => {
           :key="`${optionValue(item)}-${index}`"
           class="gi__pill"
           :class="{ 'gi__pill--selected': selectedKey === optionValue(item) }"
-          :style="{ ...pillStyle(currentSlots[index]), animationDelay: `${index * 90}ms` }"
+          :style="pillStyle(currentSlots[index], index)"
           @tap.stop="onOptionTap(item)"
         >
           <text class="gi__pill-text">
@@ -1547,8 +1571,9 @@ onBeforeUnmount(() => {
   box-shadow: 0 2rpx 22rpx rgba(0, 0, 0, 0.1), 0 2rpx 196rpx rgba(0, 0, 0, 0.0755);
   color: #0d0d0d;
   text-align: center;
-  animation: gi-pop 560ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
-  will-change: transform, opacity;
+  /* 与首页欢迎态身份球同一套「全息升维翻展」：从中心图标圆心翻折展开 */
+  animation: gi-bubble-holo 1200ms cubic-bezier(0.16, 1, 0.3, 1) var(--holo-delay, 0ms) backwards;
+  will-change: transform, opacity, filter;
 }
 
 /* 球面高光：白色 100% → 26%，模糊 5 */
@@ -1607,47 +1632,59 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 胶囊版式（第三 / 四态）=====
-   设计稿填充是低透明度的紫粉蓝渐变（opacity 0.16）+ 1px 浅蓝描边 + 背景模糊。
+   与首页「开始体验」帧（welcome-visitor__detail-tag）同一套处理：
+   16% 不透明的紫粉蓝渐变填充 + 2px 渐变外描边（::before）+ 背景模糊 29px + 投影，
+   入场同为方案 4「全息升维翻展」，从中心图标圆心翻折飞回槽位。
    宽度不写死：中文与设计稿同宽，英文按 max-width 折行，胶囊变高而不是顶出屏幕 */
 .gi__pill {
   position: absolute;
   display: flex;
   align-items: center;
+  justify-content: center;
   box-sizing: border-box;
-  /* 设计稿内边距 6/18；左右收到 32rpx，给中英文混排留一点余量，避免刚好卡在折行边界 */
-  padding: 12rpx 32rpx;
-  border: 1px solid rgba(204, 226, 252, 0.9);
+  min-height: 64rpx; // 32px
+  padding: 12rpx 36rpx; // 6/18
   border-radius: 76rpx; // 38
-  background:
-    linear-gradient(
-      135deg,
-      rgba(61, 33, 205, 0.16) 0%,
-      rgba(253, 144, 196, 0.16) 24%,
-      rgba(193, 228, 255, 0.16) 42%,
-      rgba(192, 103, 250, 0.14) 64%,
-      rgba(123, 156, 255, 0.14) 80%,
-      rgba(247, 207, 255, 0.16) 100%
-    ),
-    rgba(255, 255, 255, 0.72);
-  box-shadow: 0 2rpx 22rpx rgba(0, 0, 0, 0.1), 0 6rpx 32rpx rgba(0, 159, 235, 0.1272);
-  backdrop-filter: blur(16rpx);
-  animation: gi-pop 560ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
-  will-change: transform, opacity;
+  background-image: linear-gradient(
+    93.66deg,
+    rgba(61, 33, 205, 0.16) 0%,
+    rgba(193, 228, 255, 0.16) 27.8%,
+    rgba(123, 156, 255, 0.16) 50.9%,
+    rgba(192, 103, 250, 0.16) 71.2%,
+    rgba(247, 207, 255, 0.16) 85.8%,
+    rgba(253, 144, 196, 0.16) 100%
+  );
+  box-shadow: 0 2rpx 22rpx rgba(0, 0, 0, 0.1), 0 6rpx 32rpx rgba(0, 159, 235, 0.127);
+  -webkit-backdrop-filter: blur(58rpx); // 29px
+  backdrop-filter: blur(58rpx);
+  animation: gi-bubble-holo 1200ms cubic-bezier(0.16, 1, 0.3, 1) var(--holo-delay, 0ms) backwards;
+  will-change: transform, opacity, filter;
+}
+
+/* 2px 外描边：撑到胶囊外 2px，再用双层遮罩相减只留那一圈渐变 */
+.gi__pill::before {
+  position: absolute;
+  inset: -4rpx; // 2px（OUTSIDE）
+  padding: 4rpx;
+  border-radius: 80rpx; // 38px + 2px
+  background-image: linear-gradient(
+    90deg,
+    rgba(61, 33, 205, 0.26) 0%,
+    rgba(25, 153, 254, 0.26) 48.72%,
+    rgba(192, 103, 250, 0.26) 76%,
+    rgba(253, 144, 196, 0.26) 100%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  content: "";
+  pointer-events: none;
 }
 
 .gi__pill:active,
 .gi__pill--selected {
-  background:
-    linear-gradient(
-      135deg,
-      rgba(61, 33, 205, 0.22) 0%,
-      rgba(253, 144, 196, 0.22) 24%,
-      rgba(193, 228, 255, 0.22) 42%,
-      rgba(192, 103, 250, 0.2) 64%,
-      rgba(123, 156, 255, 0.2) 80%,
-      rgba(247, 207, 255, 0.22) 100%
-    ),
-    rgba(255, 255, 255, 0.82);
+  filter: brightness(1.08);
   transform: scale(0.97);
 }
 
@@ -1656,15 +1693,39 @@ onBeforeUnmount(() => {
   font-size: 28rpx; // 14
   font-weight: 500;
   line-height: 40rpx; // 20
+  text-align: center;
   white-space: pre-line;
   word-break: break-word;
 }
 
-/* 底部提示：16px #8E8E8E 居中，设计稿 y=597 → 1086rpx */
+/* 方案 4「全息升维翻展」：与首页欢迎页身份球 / 开始体验胶囊同一套关键帧 */
+@keyframes gi-bubble-holo {
+  0% {
+    transform: translate(var(--holo-dx, 0), var(--holo-dy, 0)) rotateX(var(--holo-rx, 85deg))
+      rotateY(var(--holo-ry, 45deg)) scale(0);
+    opacity: 0;
+    filter: brightness(2);
+  }
+
+  60% {
+    opacity: 1;
+    filter: brightness(1.2);
+  }
+
+  100% {
+    transform: translate(0, 0) rotateX(0deg) rotateY(0deg) scale(1);
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+/* 底部提示：16px / 23px #8E8E8E 居中。
+   与首页欢迎态的 choose-hint / detail-hint 同一套：设计稿 y=597（812 高）→ 距底 192px = 384rpx，
+   贴底定位不受状态栏高度影响，短屏也不会被推出屏幕；入场淡入上浮、延后 300ms */
 .gi__hint {
   position: absolute;
-  top: 1086rpx;
   right: 0;
+  bottom: 384rpx;
   left: 0;
   padding: 0 40rpx;
   color: #8e8e8e;
@@ -1672,7 +1733,7 @@ onBeforeUnmount(() => {
   font-weight: 500;
   line-height: 46rpx;
   text-align: center;
-  animation: gi-rise 520ms cubic-bezier(0.22, 0.61, 0.36, 1) 160ms both;
+  animation: gi-rise 480ms cubic-bezier(0.22, 0.61, 0.36, 1) 300ms both;
 }
 
 /* ===== 英文版式：同样的位置，字号收一档 =====

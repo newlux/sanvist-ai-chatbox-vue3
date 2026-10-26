@@ -94,8 +94,8 @@ const {
   setVoiceInputFocused,
 } = useChatViewport();
 const { sendMessage, sendSilentMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
-  // 任务协同下发的场景标识：TEST（早期下发过 TASK，两者在历史会话里都按任务协同归类，见 utils/session-scene）
-  scene: "TEST",
+  // 任务协同下发的场景标识：TASK（早期下发过 TEST，两者在历史会话里都按任务协同归类，见 utils/session-scene）
+  scene: "TASK",
 });
 
 /** 页面统一发送入口：直接走真实接口（首次提问前先续上初始化那一轮的会话） */
