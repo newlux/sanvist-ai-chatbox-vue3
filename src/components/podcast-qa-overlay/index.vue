@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
@@ -58,100 +58,6 @@ const emit = defineEmits([
 
 const { t } = useI18n();
 const headerTopStyle = computed(() => ({ top: `calc(${props.safeTopPx}px + 8rpx)` }));
-
-/** 输入栏实例：页面级长按录音走它（与听播页 / 首页同一套手势与状态机） */
-const chatInputRef = ref<{
-  startGlobalVoiceHold?: (clientY: number) => void;
-  updateGlobalVoiceHold?: (clientY: number) => void;
-  endGlobalVoiceHold?: () => void;
-  cancelGlobalVoiceHold?: () => void;
-} | null>(null);
-
-/**
- * 整层长按录音（与听播页一致）：除返回按钮、答案滚动区、输入框与语音按钮之外，
- * 任意位置按住 300ms 都能开口说话。手势判定在这里，录音 / 识别 / 面板视觉
- * 全部复用 AiChatInput 里的 useVoiceInput，事件照旧上抛给父页面。
- */
-const GLOBAL_HOLD_MS = 300;
-/** 按住后移动超过这个距离按「滚动 / 滑动」处理，不长按录音 */
-const GLOBAL_HOLD_MOVE_PX = 12;
-const GLOBAL_HOLD_EXCLUDE_SELECTOR = [
-  ".input-bar__voice-hold",
-  ".voice-confirm",
-  "textarea",
-  "input",
-  ".podcast-qa-overlay__back",
-  ".podcast-qa-overlay__scroll",
-].join(", ");
-
-let globalHoldTimer: ReturnType<typeof setTimeout> | null = null;
-let globalHoldStarted = false;
-let globalHoldStartX = 0;
-let globalHoldStartY = 0;
-
-function readHoldPointer(e: any) {
-  const touch = e?.touches?.[0] ?? e?.changedTouches?.[0];
-  return {
-    x: Number(touch?.clientX ?? e?.clientX),
-    y: Number(touch?.clientY ?? e?.clientY),
-  };
-}
-
-function clearGlobalHold() {
-  if (globalHoldTimer) {
-    clearTimeout(globalHoldTimer);
-    globalHoldTimer = null;
-  }
-}
-
-function onChatTouchStart(e: any) {
-  // 触屏环境只认 touch 事件：触摸后浏览器还会补一套 mousedown/mouseup，避免重复计时
-  if (e?.type === "mousedown" && typeof window !== "undefined" && "ontouchstart" in window) return;
-  if (globalHoldStarted) return;
-  // 新的一次按压：清掉可能残留的上一次计时（某些元素 stop 冒泡会漏掉 touchend）
-  clearGlobalHold();
-  const target = e?.target as HTMLElement | null;
-  if (target?.closest?.(GLOBAL_HOLD_EXCLUDE_SELECTOR)) return;
-  const { x, y } = readHoldPointer(e);
-  globalHoldStartX = x;
-  globalHoldStartY = y;
-  globalHoldTimer = setTimeout(() => {
-    globalHoldTimer = null;
-    globalHoldStarted = true;
-    chatInputRef.value?.startGlobalVoiceHold?.(globalHoldStartY);
-  }, GLOBAL_HOLD_MS);
-}
-
-function onChatTouchMove(e: any) {
-  const { x, y } = readHoldPointer(e);
-  if (!globalHoldStarted) {
-    if (Number.isFinite(x) && Number.isFinite(y)
-      && (Math.abs(x - globalHoldStartX) > GLOBAL_HOLD_MOVE_PX
-        || Math.abs(y - globalHoldStartY) > GLOBAL_HOLD_MOVE_PX)) {
-      clearGlobalHold();
-    }
-    return;
-  }
-  if (Number.isFinite(y)) chatInputRef.value?.updateGlobalVoiceHold?.(y);
-}
-
-function onChatTouchEnd() {
-  clearGlobalHold();
-  if (!globalHoldStarted) return;
-  globalHoldStarted = false;
-  chatInputRef.value?.endGlobalVoiceHold?.();
-}
-
-function onChatTouchCancel() {
-  clearGlobalHold();
-  if (!globalHoldStarted) return;
-  globalHoldStarted = false;
-  chatInputRef.value?.cancelGlobalVoiceHold?.();
-}
-
-onBeforeUnmount(() => {
-  clearGlobalHold();
-});
 </script>
 
 <template>
@@ -159,13 +65,6 @@ onBeforeUnmount(() => {
     v-if="visible"
     class="podcast-qa-overlay"
     aria-modal="true"
-    @touchstart.stop="onChatTouchStart"
-    @touchmove.stop="onChatTouchMove"
-    @touchend.stop="onChatTouchEnd"
-    @touchcancel.stop="onChatTouchCancel"
-    @mousedown.stop="onChatTouchStart"
-    @mousemove.stop="onChatTouchMove"
-    @mouseup.stop="onChatTouchEnd"
   >
     <view class="podcast-qa-overlay__header" :style="headerTopStyle">
       <view
@@ -221,7 +120,6 @@ onBeforeUnmount(() => {
     -->
     <view class="podcast-qa-overlay__footer">
       <AiChatInput
-        ref="chatInputRef"
         :model-value="inputText"
         :attachment-disabled="true"
         :compact-voice-listening="true"

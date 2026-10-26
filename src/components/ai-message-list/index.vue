@@ -941,7 +941,8 @@ watch(
   margin: 13px 0 0;
 }
 .business-overview {
-  padding: 148rpx 40rpx 0;
+  // 顶部留白 148rpx（74px）+ 整体下移 30px（60rpx）
+  padding: 208rpx 40rpx 0;
 }
 
 @keyframes business-overview-skeleton-pulse {

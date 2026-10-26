@@ -386,12 +386,18 @@ const DETAIL_TAG_STAGGER_MS = CHOICE_STAGGER_MS;
 const DETAIL_HOLO_DELAY_MS = CHOICE_HOLO_DELAY_MS;
 
 /**
- * 口播文本：展示文案按行排版，交给 TTS 前补上句读拼成一句完整的话
- * （行末已有逗号的不会重复补）。
+ * 口播文本：展示文案按行排版，交给 TTS 前按行补句读拼成一段话。
+ * 第一行是完整的介绍句，用句号收住 —— TTS 才会在这里做句末停顿，
+ * 不会把「欢迎了解日常运营AI助手」和后面的口号一口气连读；
+ * 后两行是连读的口号，用逗号衔接，避免读成一字一顿。
  */
 function buildIntroSpeechText() {
-  const merged = INTRO_LINES.map(line => line.trim()).join("，").replace(/[，,]+/g, "，");
-  return `${merged}。`;
+  const lines = INTRO_LINES
+    .map(line => line.trim().replace(/[，,。.]$/, ""))
+    .filter(Boolean);
+  if (!lines.length) return "";
+  const [head, ...rest] = lines;
+  return rest.length ? `${head}。${rest.join("，")}。` : `${head}。`;
 }
 
 /**
@@ -461,6 +467,10 @@ function resetIntro() {
     clearTimeout(detailSpeakTimer);
     detailSpeakTimer = null;
   }
+  if (identityHitTimer) {
+    clearTimeout(identityHitTimer);
+    identityHitTimer = null;
+  }
   disarmVoiceRetry();
   introTts.stop();
   introVisible.value = false;
@@ -526,12 +536,19 @@ const chooseOut = ref(false);
 const isRoleDetail = ref(false);
 /** 详情内容是否已浮出（控制淡入上浮） */
 const detailVisible = ref(false);
+/**
+ * 语音命中某个身份球后的停留时长：先点亮命中的那颗球（高亮玻璃 + 放大光晕 + 呼吸），
+ * 让用户看清「选中了哪个」，停顿一下再进身份信息页，避免选中态一闪而过。
+ */
+const IDENTITY_HIT_HOLD_MS = 900;
 
 let holdTimer: ReturnType<typeof setTimeout> | null = null;
 let speechFailsafeTimer: ReturnType<typeof setTimeout> | null = null;
 let choiceEnterTimer: ReturnType<typeof setTimeout> | null = null;
 let choiceSpeakTimer: ReturnType<typeof setTimeout> | null = null;
 let detailEnterTimer: ReturnType<typeof setTimeout> | null = null;
+/** 命中身份球 → 进详情页的延时器 */
+let identityHitTimer: ReturnType<typeof setTimeout> | null = null;
 /** 跳转中标记：避免重复触发 openRoleSelect / startExperience，也用来掐掉跳转前的待播口播 */
 let navigating = false;
 let holdStartX = 0;
@@ -950,11 +967,19 @@ async function validateWakeText(seq: number, text: string, step: WakeStep) {
       return;
     }
     const hitRole = String(result?.hitValue || "").trim().toUpperCase();
-    // 身份选择页命中某个身份：按 data.hitValue 拉该角色的 IDENTITY_DETAIL（标题 + 气泡），
-    // 直接进入「身份信息」页；先置详情态再 enterWelcome，底部才保留详情页那套极光
+    // 身份选择页命中某个身份：先把命中的那颗球点亮（高亮玻璃 + 放大光晕 + 呼吸），
+    // 停留一下让用户看清「选中了哪个」，再按 data.hitValue 拉 IDENTITY_DETAIL 进「身份信息」页；
+    // 先置详情态再 enterWelcome，底部才保留详情页那套极光
     if (step === "IDENTITY" && isChoosing.value && hitRole) {
-      enterRoleDetail(hitRole);
-      enterWelcome();
+      selectedBubbleKey.value = hitRole.toLowerCase();
+      if (identityHitTimer) clearTimeout(identityHitTimer);
+      identityHitTimer = setTimeout(() => {
+        identityHitTimer = null;
+        // 停留期间又按了一次录音 / 离开页面：这次命中的后续动作作废
+        if (seq !== recordSeq) return;
+        enterRoleDetail(hitRole);
+        enterWelcome();
+      }, IDENTITY_HIT_HOLD_MS);
       return;
     }
     enterWelcome();
@@ -1174,6 +1199,7 @@ onBeforeUnmount(() => {
   if (choiceSpeakTimer) clearTimeout(choiceSpeakTimer);
   if (detailEnterTimer) clearTimeout(detailEnterTimer);
   if (detailSpeakTimer) clearTimeout(detailSpeakTimer);
+  if (identityHitTimer) clearTimeout(identityHitTimer);
   clearWakeMissedTimer();
   disarmVoiceRetry();
 });
@@ -1430,7 +1456,8 @@ function openRoleSelect() {
     #c8def4 90%,
     #bfdaf4 100%
   );
-  transition: opacity 320ms ease;
+  // 唤醒 / 收尾时这缕淡蓝要让位给波浪，过渡压短，切换更跟手
+  transition: opacity 200ms ease;
 }
 
 /*
@@ -1448,7 +1475,8 @@ function openRoleSelect() {
   left: 0;
   height: 236rpx; // 118px：波形容器高度
   opacity: 0;
-  transition: opacity 0.24s ease;
+  // 唤醒（按下 / 松手）/ 校验 / 未命中都靠这条过渡切换，压短让渐变色立刻到位
+  transition: opacity 140ms ease;
   pointer-events: none;
   will-change: opacity;
 }
@@ -1928,6 +1956,31 @@ function openRoleSelect() {
   filter: brightness(0.96);
 }
 
+/* 命中 / 选中的那颗球：放大 + 白色柔光外圈 + 轻微呼吸。
+   语音命中后要停一会儿才进身份信息页，这段动效就是让用户看清「选中了哪个身份」；
+   复合选择器压过上面的漂浮动画，避免两条 animation 抢 transform（选中后不再漂浮） */
+.welcome-visitor__choose--in .welcome-visitor__bubble--role.welcome-visitor__bubble--active {
+  z-index: 2;
+  filter: none;
+  animation: welcome-bubble-pick 1.2s ease-in-out infinite;
+  box-shadow:
+    0 0 12rpx 2rpx rgba(255, 255, 255, 0.8),
+    0 0 20rpx 4rpx rgba(158, 199, 255, 0.35),
+    0 10rpx 24rpx rgba(88, 138, 220, 0.24);
+}
+
+/* 选中呼吸：8% 的放大起步（接着漂浮的落位，看不出跳变）+ 上下轻浮 */
+@keyframes welcome-bubble-pick {
+  0%,
+  100% {
+    transform: translateY(0) scale(1.08);
+  }
+
+  50% {
+    transform: translateY(-8rpx) scale(1.15);
+  }
+}
+
 /* 动效方案 4「全息升维翻展」：气泡以图标中心为轴心 3D 翻折展开成饱满球体。
    起始帧贴在图标圆心（--holo-dx/--holo-dy 由模板按设计稿坐标算好），
    60% 处先亮到 1.2 再回落到 1，做出全息扫描的高光扫过感 */
@@ -2042,8 +2095,7 @@ function openRoleSelect() {
 /* 设备信息胶囊（1006:313 / 1006:346 / 1006:277 / 1006:350 / 1006:291 / 1006:293）：
    - 填充：线性渐变，整体 16% 不透明（#3D21CD 0% → #C1E4FF 27.8% → #7B9CFF 50.9%
      → #C067FA 71.2% → #F7CFFF 85.8% → #FD90C4 100%）；Figma 渐变方向 3.66°，换成 CSS 93.66deg
-   - 描边：strokeWeight 2、OUTSIDE 线性渐变，整体 26% 不透明（#3D21CD 0% → #1999FE 48.7%
-     → #C067FA 76% → #FD90C4 100%），见下方 ::before
+   - 描边：按需求去掉，只保留渐变填充（原 2px OUTSIDE 渐变描边的 ::before 已移除）
    - 投影：DROP_SHADOW 0 3 16 rgba(0,159,235,0.127)
    - 背景模糊：BACKGROUND_BLUR 29 → backdrop-filter blur(58rpx)
    - 圆角 38（76rpx，高度 32 → 药丸）、14px / 行高 20px / Medium / #0D0D0D，
@@ -2078,28 +2130,6 @@ function openRoleSelect() {
   opacity: 0;
   pointer-events: none;
   will-change: transform, opacity;
-}
-
-/* 2px 外描边：用 ::before 撑到胶囊外 2px，再用双线性遮罩相减只保留那一圈，
-   圆内透出胶囊自己的渐变填充与磨砂（直接写 border 会变成实色，做不出渐变描边） */
-.welcome-visitor__detail-tag::before {
-  position: absolute;
-  inset: -4rpx; // 2px（OUTSIDE）
-  padding: 4rpx; // 描边 2px
-  border-radius: 80rpx; // 38px + 2px
-  background-image: linear-gradient(
-    90deg,
-    rgba(61, 33, 205, 0.26) 0%,
-    rgba(25, 153, 254, 0.26) 48.72%,
-    rgba(192, 103, 250, 0.26) 76%,
-    rgba(253, 144, 196, 0.26) 100%
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  content: "";
-  pointer-events: none;
 }
 
 /* 与身份球同款方案 4「全息升维翻展」：从图标中心 3D 翻折展开，落位后保持设计稿的静止位置 */

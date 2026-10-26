@@ -853,15 +853,28 @@ onBeforeUnmount(() => {
   border-color: transparent;
 }
 
-/* 只有「思考中」放大；一旦出字（回答中）就回落到原始 92×92 */
+/* 只有「思考中」呼吸放大：1 → 1.1 → 1 循环；一旦出字（回答中）就回落到原始 92×92 */
 .chat-header__island--thinking {
-  transform: translateZ(0) scale(1.1);
+  animation: island-breathe 1.6s ease-in-out infinite;
+}
+
+/* 呼吸动效：两端平滑、无跳变；translateZ(0) 保持独立合成层，
+   避免 WebView 在缩放过程中重新裁剪圆角 */
+@keyframes island-breathe {
+  0%,
+  100% {
+    transform: translateZ(0) scale(1);
+  }
+
+  50% {
+    transform: translateZ(0) scale(1.1);
+  }
 }
 
 /* 思考中 / 回答中的渐变描边环：722:339.strokes[1]
    #3D21CD → #1999FE → #C067FA → #FD90C4 → rgba(253,144,196,0)
    与胶囊描边同一套 mask 挖空法，只保留 3rpx 的环。
-   动效是「追着转」而不是整圈铺满：色带只占一段圆弧（约 55% 周长），
+   动效是「追着转」而不是整圈铺满：色带只占一段圆弧（约 39% 周长），
    其余角度透明，整环自转时看起来就是一段彩色光沿圆周追赶 */
 .chat-header__island-ring {
   position: absolute;
@@ -881,15 +894,15 @@ onBeforeUnmount(() => {
     #fd90c4 67.37%,
     rgba(253, 144, 196, 0) 100%
   );
-  /* 追光：40deg 起色 → 240deg 收尾透明，中间 160deg 留白形成「缺口」 */
+  /* 追光：60deg 起色 → 200deg 收尾透明，色带约 140deg，其余角度留白形成「缺口」 */
   background-image: conic-gradient(
     from 0deg,
     rgba(61, 33, 205, 0) 0deg,
-    #3d21cd 40deg,
-    #1999fe 110deg,
-    #c067fa 160deg,
-    #fd90c4 200deg,
-    rgba(253, 144, 196, 0) 240deg,
+    #3d21cd 60deg,
+    #1999fe 105deg,
+    #c067fa 145deg,
+    #fd90c4 175deg,
+    rgba(253, 144, 196, 0) 200deg,
     rgba(253, 144, 196, 0) 360deg
   );
   /* 先写标准属性、再用 -webkit- 兜底：老 WebView 只认前缀版本 */
@@ -957,8 +970,9 @@ onBeforeUnmount(() => {
   margin-top: -12rpx; // 与圆形底部重叠 6px
   padding: 12rpx 40rpx; // 6 / 20
   border-radius: 40rpx; // 20px
+  /* 纯白底 + 向下投影：靠投影从滚动内容里浮起来（白底不再需要背景模糊） */
   background: #ffffff;
-  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04); // 0 2 8 rgba(0,0,0,.04)
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.08); // 0 4px 12px rgba(0,0,0,.08)
 }
 
 .chat-header__status-pill--active {
@@ -967,15 +981,8 @@ onBeforeUnmount(() => {
 }
 
 /**
- * 描边：INSIDE 1.5px 线性渐变（85:3217.strokes），带流光动效。
- * 设计稿叠了 2 层同宽描边，第 2 层色标全不透明并完全盖住第 1 层，
- * 因此这里只绘制可见的第 2 层；第 1 层色标留档：
- *   0% #EBB4E9(alpha 0) / 48.72% #56ABFA(alpha 50%) / 100% #9795E8
- * 用 mask 挖空中间，只保留 3rpx 的环（渐变无法直接作用于 border）。
- *
- * 动效：把设计稿的色标放在背景图的前半段（0→50%），后半段做镜像（50→100%），
- * 背景宽度取 2 倍，色带整体左移一个图宽即可无缝循环；
- * 静止帧（t=0 / 关闭动效时）与设计稿色标位置完全一致。
+ * 描边：去掉彩色渐变，改为与圆形灵动岛一致的 1px 纯白描边。
+ * 渐变无法直接作用于 border，仍沿用 mask 挖空法，只保留 2rpx 的环。
  */
 .chat-header__status-pill-border {
   position: absolute;
@@ -984,21 +991,9 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   left: 0;
-  padding: 3rpx; // 1.5px 描边宽度
+  padding: 2rpx; // 1px 描边宽度，与圆形 1px 白描边对齐
   border-radius: 40rpx; // 跟随胶囊 20px
-  background-image: linear-gradient(
-    135deg,
-    #9197ea 0%,
-    #4392e4 16.515%,
-    #e3f1ff 24.42%,
-    #f8fbff 50%,
-    #e3f1ff 75.58%,
-    #4392e4 83.485%,
-    #9197ea 100%
-  );
-  background-size: 200% 100%;
-  animation: header-capsule-flow 4s linear infinite;
-  will-change: background-position;
+  background: #ffffff;
   /* 先写标准属性、再用 -webkit- 兜底：老 WebView 只认前缀版本 */
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   mask-composite: exclude;
@@ -1007,28 +1002,10 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-/* 色带左移一个背景图宽（200% 的元素宽即为一个完整图案周期），首尾同色，循环无缝 */
-@keyframes header-capsule-flow {
-  from {
-    background-position: 0% 50%;
-  }
-  to {
-    background-position: 200% 50%;
-  }
-}
-
-/* 系统偏好减少动效时停在设计稿的静态渐变 */
-@media (prefers-reduced-motion: reduce) {
-  .chat-header__status-pill-border,
-  .chat-header__island-ring {
-    animation: none;
-  }
-}
-
 // 胶囊文案：设计稿 722:327 / 722:337（Source Han Sans CN Medium 14px / #0D0D0D / 行盒 20px）
 .chat-header__status-text {
   position: relative;
-  z-index: 1; // 压在流光描边之上
+  z-index: 1; // 压在描边之上
   color: #0d0d0d;
   font-family:
     "Source Han Sans CN",
@@ -1041,16 +1018,6 @@ onBeforeUnmount(() => {
   line-height: 40rpx; // 20px
   letter-spacing: 0;
   text-align: center;
-}
-
-@keyframes header-generating {
-  0%, 100% { opacity: .35; transform: scale(.84); }
-  50% { opacity: 1; transform: scale(1); }
-}
-
-@keyframes header-generating-border {
-  0% { background-position: 0 50%; }
-  100% { background-position: 300% 50%; }
 }
 
 // --- icons (用 CSS 近似 Figma 形状，后续可替换为 svg 资源) ---
