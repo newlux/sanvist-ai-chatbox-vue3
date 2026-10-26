@@ -401,9 +401,11 @@ onBeforeUnmount(() => {
       @tap.stop="onMaskTap"
     />
 
-    <!-- 监听态挂到 body：全屏对焦态（listening）要盖住导航与浮动按钮；
-         首页 / 听播的紧凑态（compact）只做底部装饰，层级压在导航与输入栏之下 -->
-    <Teleport to="body">
+    <!-- 只有全屏对焦态（listening）才挂到 body：它要盖住底部导航与浮动按钮。
+         紧凑态（首页 / 听播 / 异常列表追问）只做底部装饰，留在输入栏容器里渲染，
+         这样它在页面内的层级跟着使用者走 —— 弹层（异常列表追问浮层）打开的
+         时候不会被浮层背景整块遮住，视觉态和首页一致 -->
+    <Teleport to="body" :disabled="compactVoiceListening">
       <view
         v-if="inputMode === 'voice' && voicePhase === 'recording'"
         class="voice-sheet"
@@ -776,10 +778,13 @@ onBeforeUnmount(() => {
   }
 }
 
-// 首页紧凑录音态：录音面板（Teleport 到 body、z-index 0）只做底部装饰，
-// 输入栏本身层级就比它高，这里只需要把容器底色去掉，
-// 否则 #fafafa 实色底会把面板的渐变色波浪下半截切掉
+// 紧凑录音态（首页 / 听播 / 异常列表追问）：
+// 1) 整条输入栏容器降到 z-index 0 —— 底部导航（z-index 1）仍然浮在渐变之上；
+// 2) 容器底色去掉，否则 #fafafa 实色底会把面板的渐变色波浪下半截切掉。
+// 面板不 Teleport，留在容器内部（z-index 0）渲染，所以它一定在输入栏之下、
+// 又跟着所在页面 / 弹层走，不会被浮层背景遮住。
 .chat-input--voice-panel-open {
+  z-index: 0;
   background: transparent;
 }
 
@@ -896,6 +901,9 @@ onBeforeUnmount(() => {
    ========================================================================== */
 .voice-sheet--listening-compact {
   position: fixed;
+  /* 紧凑态不 Teleport，留在输入栏容器（z-index 1）内渲染：
+     层级只跟输入栏比，天然压在输入栏之下，又能跟着所在页面 / 弹层走，
+     不会被异常列表追问浮层这类高层级容器整块盖住 */
   /* 只做底部装饰：层级压在底部导航（z-index 1）与输入栏之下，
      录音时「听汇报 / 作业指导」等入口照旧可点可见 */
   z-index: 0;
