@@ -97,8 +97,8 @@ const {
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
 const realtimeTts = useRealtimeTts(chatScope);
 const { sendMessage, sendSilentMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
-  // 任务协同下发的场景标识：TEST（早期下发过 TASK，两者在历史会话里都按任务协同归类，见 utils/session-scene）
-  scene: "TEST",
+  // 任务协同下发的场景标识：TASK（早期下发过 TEST，两者在历史会话里都按任务协同归类，见 utils/session-scene）
+  scene: "TASK",
   // 同首页 / 作业指导：问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
   // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
   onAiAnswerDelta({ aiMsgId, delta, ended }) {
