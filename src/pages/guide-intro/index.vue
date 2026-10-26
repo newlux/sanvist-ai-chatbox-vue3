@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getDeviceModels, getOperatorRoles } from "@/api/user-role";
 import { OPERATOR_ROLE_KEYS, toOperatorRoleOption } from "@/api/user-role/operator-roles";
 import brandLogo from "@/assets/img/header-island-logo.png";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 
@@ -28,6 +29,12 @@ defineOptions({ name: "GuideIntroPage" });
 
 const logger = createLogger("guide-intro");
 const userStore = useUserStore();
+/**
+ * 顶部状态栏高度：设计稿 375×812（含 54 高状态栏），自我介绍标题 y=117（节点 347:5095）。
+ * 本页所有 y 都是扣掉状态栏后的值（126rpx = 63px），靠这层 padding 补回状态栏；
+ * 不注入时 var(--safe-top-px) 取 0，整页会比设计稿高出一个状态栏。
+ */
+const { safeAreaStyle } = useSafeArea();
 
 /** 设计稿的四个动态态 */
 type Step = 1 | 2 | 3 | 4;
@@ -240,7 +247,7 @@ onBeforeUnmount(clearTimers);
 </script>
 
 <template>
-  <view class="gi" @tap="onPageTap">
+  <view class="gi" :style="safeAreaStyle" @tap="onPageTap">
     <!-- 背景：设计稿 #F5FCFF → #FFF 的冷色渐变 + 右下角一抹粉紫 -->
     <view class="gi__bg" />
     <view class="gi__glow" />

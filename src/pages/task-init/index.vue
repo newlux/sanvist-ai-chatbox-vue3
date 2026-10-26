@@ -8,6 +8,7 @@ import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl,
 import { getFlowSteps } from "@/api/flow";
 import brandLogo from "@/assets/img/header-island-logo.png";
 import { usePlainTts } from "@/hooks/usePlainTts";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useUserStore } from "@/stores";
 import { VISITOR_ROLE_ACCOUNTS } from "@/stores/modules/user";
 import { createLogger } from "@/utils/logger";
@@ -17,14 +18,20 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
 /**
  * 任务协同初始化页（Ardot 350:1052 SANI 自我介绍 / 350:964 选择身份 / 350:1119、1204、1288 调度员信息）。
  *
- * 实现与「作业指导初始化页」同一套骨架：唤醒帧 → 自我介绍 → 步骤页，步骤的标题 / 提示 / 选项全部来自
+ * 实现与「作业指导初始化页」同一套骨架：唤醒帧 → 自我介绍 → 步骤页，步骤的标题 / 提示 / 选项优先取
  * GET /flow/steps?module=TASK，页面只负责按 stepCode 选版式与推进：
- *   WELCOME（Hey,SANI 招呼帧，说「你好三一」唤醒）→ HEY（自我介绍）
- *   → IDENTITY（选择身份）→ IDENTITY_DETAIL（身份信息）→ 进任务协同。
+ *   入口即 WELCOME（Hey,SANI 招呼帧，说「你好三一」唤醒）→ HEY（自我介绍）
+ *   → IDENTITY（选择身份）→ IDENTITY_DETAIL（该角色的身份信息帧）→ 说「开始体验」→ 进任务协同。
+ *
+ * 三个身份各自一帧（标题与所选角色一一对应，见 ROLE_DETAIL_PRESETS）：
+ *   - 工地调度员        350:1119「搅拌车晚到，工地后续浇筑安排受到影响」
+ *   - 泵送公司调度主管  350:1204「两个工地同时要泵车，当前只有一台可调」
+ *   - 商混站调度员      350:1288「现场浇筑变慢，多辆搅拌车排队，混凝土面临初凝、退料风险」
  *
  * 两个接口各管一件事：
  *   - GET  /flow/steps?module=TASK：每一步的 title / hint / options（options 按 sortNo 升序）。
- *     选中身份后带上 roleCode 再拉一次，拿到该身份的 IDENTITY_DETAIL（标题 + 胶囊）；
+ *     选中身份后带上 roleCode 再拉一次：接口真下发了 IDENTITY_DETAIL 就用接口的标题 + 胶囊，
+ *     没下发（当前就是这样）则用上面三个预设帧；
  *   - POST /speech/wake/validate：长按说话 → ASR 文本 + 当前 step 送后端比热词。
  *     命中（matched）读 currentStep 前进；BACK 读 targetStep 回退（null 表示已在 HEY，不跳转）；
  *     未命中播报兜底话术（fallbackTexts 按 fallbackRound 循环），有效选择后轮次归零；
@@ -50,6 +57,12 @@ defineOptions({ name: "AiTaskInitPage" });
 const logger = createLogger("task-init-page");
 const { t, locale } = useI18n();
 const userStore = useUserStore();
+/**
+ * 顶部状态栏高度：设计稿 375×812（含 54 高状态栏），自我介绍帧标题 y=117（节点 350:1052 /
+ * 722:2492 这一帧里 Main Title 的位置）。本页所有 y 都是扣掉状态栏后的值（126rpx = 63px），
+ * 必须靠这层 padding 把状态栏补回来；不注入时 var(--safe-top-px) 取 0，整页会比设计稿高出一个状态栏。
+ */
+const { safeAreaStyle } = useSafeArea();
 
 /** /flow/steps 的模块名：任务协同 */
 const FLOW_MODULE = "TASK";
@@ -90,31 +103,43 @@ const INTRO_MAX_WAIT_MS = 20000;
 const SELECT_DELAY_MS = 220;
 
 /**
- * 气泡槽位（选择身份，设计稿 350:964）：三颗 82px 的圆，直径 164rpx，
- * 位置按设计稿「右上 / 左中 / 右下」分布。
+ * 气泡槽位（选择身份，设计稿 350:964）：三颗 82.6px 的圆（164rpx），
+ * 设计稿 y=243 / 310.5 / 459（含 54 高状态栏），页面外层已经让出状态栏，
+ * 这里统一扣掉 54px 再换算：378 / 513 / 810rpx。
+ * 最低那颗底边 810 + 164 = 974rpx，到提示（内容区 543px）正好留 55.4px，与设计稿一致。
  */
 const TASK_BUBBLES = [
-  { left: 489, top: 486, size: 164 },
-  { left: 55, top: 621, size: 164 },
-  { left: 489, top: 911, size: 164 },
+  { left: 489, top: 378, size: 164 },
+  { left: 55, top: 513, size: 164 },
+  { left: 489, top: 810, size: 164 },
 ];
 
 /** 装饰虚化球：不参与交互，只补设计稿里的层次 */
 const GHOST_BUBBLES = [
-  { key: "dot-a", fill: ["#e7eaff", "#f0f2ff"], left: 210, top: 540, size: 60 },
-  { key: "dot-b", fill: ["#e3f5ff", "#f1faff"], left: 636, top: 740, size: 52 },
-  { key: "dot-c", fill: ["#def1fc", "#f1faff"], left: 96, top: 878, size: 44 },
+  { key: "dot-a", fill: ["#e7eaff", "#f0f2ff"], left: 210, top: 432, size: 60 },
+  { key: "dot-b", fill: ["#e3f5ff", "#f1faff"], left: 636, top: 632, size: 52 },
+  { key: "dot-c", fill: ["#def1fc", "#f1faff"], left: 96, top: 770, size: 44 },
 ];
 
 /**
  * 胶囊槽位（身份信息，设计稿 350:1119）：按内容撑开，同时给每颗一个最大宽度，
  * 长文案在自己的槽位里折行，不会压到旁边那颗。
+ * 设计稿 y=313.5 / 333 / 467、高 32（含 54 高状态栏），扣掉后为 519 / 558 / 826rpx；
+ * 最低那颗底边 826 + 64 = 890rpx，到提示（内容区 543px）留 98px，与设计稿一致
+ * （另外两帧 350:1204 / 350:1288 的胶囊只差几 px，共用这一张槽位表）。
  */
 const TASK_PILL_SLOTS = [
-  { left: 77, top: 627, minWidth: 200, maxWidth: 360 },
-  { left: 485, top: 666, minWidth: 180, maxWidth: 249 },
-  { left: 57, top: 934, minWidth: 220, maxWidth: 380 },
+  { left: 77, top: 519, minWidth: 200, maxWidth: 360 },
+  { left: 485, top: 558, minWidth: 180, maxWidth: 249 },
+  { left: 57, top: 826, minWidth: 220, maxWidth: 380 },
 ];
+
+/**
+ * 中心图标圆心，胶囊全息翻折的起飞点（rpx）。
+ * 设计稿容器 @(120,333) 134×134，扣掉 54 高状态栏后纵坐标 279 → 圆心 y = (279 + 67) × 2。
+ */
+const PILL_CORE_X = (120 + 67) * 2;
+const PILL_CORE_Y = (279 + 67) * 2;
 
 /** 身份页标题里的称呼：游客态没有昵称时用设计稿的占位名 */
 const visitorName = computed(() => String(userStore.username || "").trim() || t("task-init-guest"));
@@ -127,25 +152,19 @@ const FALLBACK_STEPS = computed<FlowStep[]>(() => [
     hint: t("task-init-hint-identity"),
     options: [
       { label: t("task-init-role-site"), bubbleType: "STATIC", hitValue: "SITE_DISPATCHER", sortNo: 1 },
-      { label: t("task-init-role-pump"), bubbleType: "STATIC", hitValue: "PUMPING_DISPATCHER", sortNo: 2 },
-      { label: t("task-init-role-plant"), bubbleType: "STATIC", hitValue: "PLANT_DISPATCHER", sortNo: 3 },
-    ],
-  },
-  {
-    stepCode: STEP_IDENTITY_DETAIL,
-    title: t("task-init-detail-title"),
-    hint: t("task-init-hint-detail"),
-    options: [
-      { label: t("task-init-detail-pill-late"), bubbleType: "STATIC", hitValue: "TRUCK_LATE", sortNo: 1 },
-      { label: t("task-init-detail-pill-pour"), bubbleType: "STATIC", hitValue: "POUR_AFFECTED", sortNo: 2 },
-      { label: t("task-init-detail-pill-risk"), bubbleType: "STATIC", hitValue: "POUR_RISK", sortNo: 3 },
+      { label: t("task-init-role-pump"), bubbleType: "STATIC", hitValue: "PUMP_DISPATCHER", sortNo: 2 },
+      { label: t("task-init-role-plant"), bubbleType: "STATIC", hitValue: "MIXING_DISPATCHER", sortNo: 3 },
     ],
   },
 ]);
 
 /** 接口返回的步骤；空数组时整页走 FALLBACK_STEPS */
 const flowSteps = ref<FlowStep[]>([]);
-/** 当前所在的 step：WELCOME / HEY / IDENTITY / IDENTITY_DETAIL / RECOMMEND */
+/**
+ * 当前所在的 step：WELCOME / HEY / IDENTITY / IDENTITY_DETAIL / RECOMMEND。
+ * 与作业指导初始化页同一套入口：首帧「你好三一」招呼页（WELCOME）说「你好三一」唤醒
+ * 后进自我介绍帧（HEY），再到选择身份（IDENTITY）。
+ */
 const activeStep = ref(STEP_WELCOME);
 /** 当前处于「已选中」反馈态的选项（hValue） */
 const selectedKey = ref("");
@@ -153,6 +172,47 @@ const selectedKey = ref("");
 const answers = ref<Record<string, string>>({});
 /** 选中的身份：hValue 是拉 IDENTITY_DETAIL 用的 roleCode，label 用于兜底展示 */
 const pickedRole = ref<{ hitValue: string; label: string } | null>(null);
+
+/**
+ * 三个调度身份各自的身份信息帧（Ardot 350:1119 工地调度员 / 350:1204 泵送公司调度主管 /
+ * 350:1288 商混站调度员）：标题就是该角色碰到的调度难题，三颗胶囊是这一步的痛点，
+ * 底部统一「可以和我说“开始体验”」。
+ *
+ * 后端 module=TASK 目前只下发 IDENTITY，所以 IDENTITY_DETAIL 按所选角色在这里补出来；
+ * 一旦接口带 roleCode 真的下发了 IDENTITY_DETAIL，仍以接口为准（见 stepMap）。
+ */
+const ROLE_DETAIL_PRESETS: Record<string, { titleKey: string; pillKeys: [string, string, string] }> = {
+  SITE_DISPATCHER: {
+    titleKey: "task-init-detail-site-title",
+    pillKeys: ["task-init-detail-site-pill-1", "task-init-detail-site-pill-2", "task-init-detail-site-pill-3"],
+  },
+  PUMP_DISPATCHER: {
+    titleKey: "task-init-detail-pump-title",
+    pillKeys: ["task-init-detail-pump-pill-1", "task-init-detail-pump-pill-2", "task-init-detail-pump-pill-3"],
+  },
+  MIXING_DISPATCHER: {
+    titleKey: "task-init-detail-mix-title",
+    pillKeys: ["task-init-detail-mix-pill-1", "task-init-detail-mix-pill-2", "task-init-detail-mix-pill-3"],
+  },
+};
+
+/** 按所选角色合成身份信息帧；角色没有预设（后端新增身份）时返回 null，交给接口或直接收尾 */
+const roleDetailStep = computed<FlowStep | null>(() => {
+  const role = normalizeStep(pickedRole.value?.hitValue);
+  const preset = ROLE_DETAIL_PRESETS[role];
+  if (!preset) return null;
+  return {
+    stepCode: STEP_IDENTITY_DETAIL,
+    title: t(preset.titleKey),
+    hint: t("task-init-hint-detail"),
+    options: preset.pillKeys.map((key, index) => ({
+      label: t(key),
+      bubbleType: "STATIC",
+      hitValue: `${role}_PAIN_${index + 1}`,
+      sortNo: index + 1,
+    })),
+  };
+});
 /**
  * 兜底话术轮次：未命中时随 fallbackRound 递增，按 fallbackTexts 顺序循环；
  * 有效选择（命中 / 点选 / 换页）后重置为 0。
@@ -191,6 +251,8 @@ const stepMap = computed<Record<string, FlowStep>>(() => {
     const code = String(step?.stepCode || "").trim().toUpperCase();
     if (code) map[code] = step;
   });
+  // 接口没下发 IDENTITY_DETAIL 时，用所选角色对应的身份信息帧补上（标题与角色一一匹配）
+  if (!map[STEP_IDENTITY_DETAIL] && roleDetailStep.value) map[STEP_IDENTITY_DETAIL] = roleDetailStep.value;
   return map;
 });
 
@@ -468,14 +530,23 @@ function bubbleStyle(item: { left: number; top: number; size: number }) {
  * 胶囊宽度不写死：中文与设计稿同宽，接口那种长 label / 英文按 max-width 折行，
  * 胶囊变高而不是顶出屏幕；maxWidth 同时受槽位列宽与屏幕右侧约束。
  */
-function pillStyle(item: { left: number; top: number; minWidth: number; maxWidth?: number }) {
+function pillStyle(item: { left: number; top: number; minWidth: number; maxWidth?: number }, index = 0) {
   const available = 750 - item.left - 16;
   const max = Math.min(item.maxWidth ?? available, available);
+  // 全息翻折入场的起飞点：与首页「开始体验」帧同一套 —— 从图标中心飞出。
+  // 胶囊宽度是内容撑开的，这里按最小宽度估一个中心，视觉上就是从图标里展开。
+  const centerX = item.left + Math.min(item.minWidth, max) / 2;
+  const centerY = item.top + 32; // 胶囊高 64rpx
   return {
     left: `${item.left}rpx`,
     top: `${item.top}rpx`,
     minWidth: `${item.minWidth}rpx`,
     maxWidth: `${max}rpx`,
+    "--holo-dx": `${PILL_CORE_X - centerX}rpx`,
+    "--holo-dy": `${PILL_CORE_Y - centerY}rpx`,
+    "--holo-rx": centerY < PILL_CORE_Y ? "85deg" : "-85deg",
+    "--holo-ry": centerX > PILL_CORE_X ? "45deg" : "-45deg",
+    "--holo-delay": `${index * 90}ms`,
   };
 }
 
@@ -614,12 +685,33 @@ async function stopRecordingAndRecognize() {
       isChecking.value = false;
       return;
     }
+    // 身份信息帧说「开始体验」：直接进任务协同
+    if (normalizeStep(step) === STEP_IDENTITY_DETAIL && isStartCommand(text)) {
+      logger.info("task detail start command", { step, text });
+      isChecking.value = false;
+      fallbackRound.value = 0;
+      finish();
+      return;
+    }
     await validateVoiceText(seq, text, step);
   }
   catch (error) {
     logger.warn("guide speech recognize failed", error);
     if (seq === recordSeq) isChecking.value = false;
   }
+}
+
+/**
+ * 身份信息帧的收尾口令：这一帧的 CTA 是「开始体验」，后端 TASK 流程还没有这一步的意图，
+ * 先在端上认；命中就直接进任务协同，不必等校验接口（接口失败也不会卡住）。
+ */
+const START_COMMANDS = ["开始体验", "开始", "体验", "start", "begin", "let's go", "go ahead"];
+
+function isStartCommand(text: string) {
+  // 去掉空白与标点后做包含判断，避免「开始体验。」「Start!」这类识别结果漏判
+  const value = String(text || "").replace(/[\s，。,.!！?？、"'“”]/g, "").toLowerCase();
+  if (!value) return false;
+  return START_COMMANDS.some(word => value.includes(word.replace(/[\s']/g, "")));
 }
 
 /** 当前页面的 step 即校验接口的 step（HEY / IDENTITY / IDENTITY_DETAIL） */
@@ -821,8 +913,8 @@ function onOptionTap(item: FlowStepOption) {
 
 /**
  * 记下这一步的答案并推进：
- * 点选与语音命中走同一条路；选中身份后**直接进首页**（module=TASK 的接口只下发 IDENTITY，
- * 身份信息那一步不参与本页流程，其余步骤仍按同一条链推进）。
+ * 点选与语音命中走同一条路；选中身份后进**该角色对应的身份信息帧**
+ * （IDENTITY → IDENTITY_DETAIL，标题由角色决定），身份信息帧里说「开始体验」才进任务协同。
  */
 async function applySelection(stepCode: string, hitValue: string, label: string) {
   const code = normalizeStep(stepCode);
@@ -832,11 +924,8 @@ async function applySelection(stepCode: string, hitValue: string, label: string)
     pickedRole.value = { hitValue, label: label || hitValue };
   }
 
-  if (isIdentityStep) {
-    finish();
-    return;
-  }
-
+  // 带上 roleCode 补拉一次：后端若下发了该角色的 IDENTITY_DETAIL，会用接口文案覆盖本地预设
+  if (isIdentityStep) void loadFlowSteps();
   goToStep(nextStepAfter(code), code);
 }
 
@@ -844,7 +933,7 @@ async function applySelection(stepCode: string, hitValue: string, label: string)
 const VISITOR_ROLE_CODES = new Set<string>(Object.keys(VISITOR_ROLE_ACCOUNTS));
 
 /**
- * 收尾：把身份写进 store（首页按它取建议问题 / 觉醒语），随后进首页。
+ * 收尾：把身份写进 store，随后进任务协同页——身份信息帧说「开始体验」（或点任意胶囊）走到这里。
  * 后端给的身份码不一定等于本地 VisitorRole，对不上就保留当前值。
  */
 function applyVisitorRole(roleCode: string) {
@@ -863,8 +952,8 @@ function finish() {
   clearTimers();
   introTts.stop();
   applyVisitorRole(pickedRole.value?.hitValue || answers.value[STEP_IDENTITY] || "");
-  // 选完身份直接回首页：带 mode=demo 与「选择体验身份」页一致，首页会跳过欢迎态直接进对话
-  uni.redirectTo({ url: "/pages/index/index?mode=demo" });
+  // 身份信息帧说「开始体验」→ 正式进入任务协同
+  uni.redirectTo({ url: "/pages/task/index" });
 }
 
 /**
@@ -897,7 +986,7 @@ onMounted(() => {
   navigating = false;
   voiceInteracted = false;
   void loadFlowSteps();
-  // 首帧是招呼页：不自动推进，等用户说「你好三一」唤醒（或点屏幕跳过）
+  // 首帧是欢迎页：不自动推进，等用户说「你好三一」唤醒（或点屏幕跳过）
   clearIntroAdvance();
 });
 
@@ -913,6 +1002,7 @@ onBeforeUnmount(() => {
 <template>
   <view
     class="gi"
+    :style="safeAreaStyle"
     :class="{
       'gi--en': isEnglish,
       'gi--welcome': isWelcomeStep,
@@ -1036,7 +1126,7 @@ onBeforeUnmount(() => {
           :key="`${optionValue(item)}-${index}`"
           class="gi__pill"
           :class="{ 'gi__pill--selected': selectedKey === optionValue(item) }"
-          :style="{ ...pillStyle(TASK_PILL_SLOTS[index]), animationDelay: `${index * 90}ms` }"
+          :style="pillStyle(TASK_PILL_SLOTS[index], index)"
           @tap.stop="onOptionTap(item)"
         >
           <text class="gi__pill-text">
@@ -1499,48 +1589,66 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
-/* ===== 胶囊版式（350:1119 身份信息）=====
-   设计稿填充是低透明度的紫粉蓝渐变（opacity 0.16）+ 1px 浅蓝描边 + 背景模糊。
+/* ===== 胶囊版式（350:1119 / 350:1204 / 350:1288 身份信息）=====
+   与首页「开始体验」帧（welcome-visitor__detail-tag）同一套处理：
+   - 填充：紫粉蓝线性渐变，整体 16% 不透明（#3D21CD 0% → #C1E4FF 27.8% → #7B9CFF 50.9%
+     → #C067FA 71.2% → #F7CFFF 85.8% → #FD90C4 100%），Figma 方向 3.66° → CSS 93.66deg
+   - 描边：2px OUTSIDE 渐变，整体 26% 不透明，见下方 ::before
+   - 投影：0 1 11 rgba(0,0,0,.1) + 0 3 16 rgba(0,159,235,.127)；背景模糊 29px
+   - 入场：方案 4「全息升维翻展」，从中心图标圆心翻折飞回自己的槽位
    宽度不写死：中文与设计稿同宽，英文按 max-width 折行，胶囊变高而不是顶出屏幕 */
 .gi__pill {
   position: absolute;
   display: flex;
   align-items: center;
+  justify-content: center;
   box-sizing: border-box;
-  /* 设计稿内边距 6/18；左右收到 32rpx，给中英文混排留一点余量，避免刚好卡在折行边界 */
-  padding: 12rpx 32rpx;
-  border: 1px solid rgba(204, 226, 252, 0.9);
+  min-height: 64rpx; // 32px
+  /* 设计稿内边距 6/18：单行时正好 12 + 40 + 12 = 64rpx */
+  padding: 12rpx 36rpx;
   border-radius: 76rpx; // 38
-  background:
-    linear-gradient(
-      135deg,
-      rgba(61, 33, 205, 0.16) 0%,
-      rgba(253, 144, 196, 0.16) 24%,
-      rgba(193, 228, 255, 0.16) 42%,
-      rgba(192, 103, 250, 0.14) 64%,
-      rgba(123, 156, 255, 0.14) 80%,
-      rgba(247, 207, 255, 0.16) 100%
-    ),
-    rgba(255, 255, 255, 0.72);
-  box-shadow: 0 2rpx 22rpx rgba(0, 0, 0, 0.1), 0 6rpx 32rpx rgba(0, 159, 235, 0.1272);
-  backdrop-filter: blur(16rpx);
-  animation: gi-pop 560ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
-  will-change: transform, opacity;
+  background-image: linear-gradient(
+    93.66deg,
+    rgba(61, 33, 205, 0.16) 0%,
+    rgba(193, 228, 255, 0.16) 27.8%,
+    rgba(123, 156, 255, 0.16) 50.9%,
+    rgba(192, 103, 250, 0.16) 71.2%,
+    rgba(247, 207, 255, 0.16) 85.8%,
+    rgba(253, 144, 196, 0.16) 100%
+  );
+  box-shadow: 0 2rpx 22rpx rgba(0, 0, 0, 0.1), 0 6rpx 32rpx rgba(0, 159, 235, 0.127);
+  -webkit-backdrop-filter: blur(58rpx); // 29px
+  backdrop-filter: blur(58rpx);
+  animation: gi-bubble-holo 1200ms cubic-bezier(0.16, 1, 0.3, 1) var(--holo-delay, 0ms) backwards;
+  will-change: transform, opacity, filter;
 }
 
+/* 2px 外描边：撑到胶囊外 2px，再用双层遮罩相减只留那一圈；
+   直接写 border 会是实色，做不出设计稿的渐变描边 */
+.gi__pill::before {
+  position: absolute;
+  inset: -4rpx; // 2px（OUTSIDE）
+  padding: 4rpx; // 描边 2px
+  border-radius: 80rpx; // 38px + 2px
+  background-image: linear-gradient(
+    90deg,
+    rgba(61, 33, 205, 0.26) 0%,
+    rgba(25, 153, 254, 0.26) 48.72%,
+    rgba(192, 103, 250, 0.26) 76%,
+    rgba(253, 144, 196, 0.26) 100%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  content: "";
+  pointer-events: none;
+}
+
+/* 点按反馈：全息胶囊本身很轻，压一下 + 提亮就够，不改填充 */
 .gi__pill:active,
 .gi__pill--selected {
-  background:
-    linear-gradient(
-      135deg,
-      rgba(61, 33, 205, 0.22) 0%,
-      rgba(253, 144, 196, 0.22) 24%,
-      rgba(193, 228, 255, 0.22) 42%,
-      rgba(192, 103, 250, 0.2) 64%,
-      rgba(123, 156, 255, 0.2) 80%,
-      rgba(247, 207, 255, 0.22) 100%
-    ),
-    rgba(255, 255, 255, 0.82);
+  filter: brightness(1.08);
   transform: scale(0.97);
 }
 
@@ -1549,15 +1657,40 @@ onBeforeUnmount(() => {
   font-size: 28rpx; // 14
   font-weight: 500;
   line-height: 40rpx; // 20
+  text-align: center;
   white-space: pre-line;
   word-break: break-word;
 }
 
-/* 底部提示：16px #8E8E8E 居中，设计稿 y=597 → 1194rpx */
+/* 方案 4「全息升维翻展」：与首页欢迎页的身份球 / 开始体验胶囊同一套关键帧，
+   起始帧贴在图标圆心（--holo-dx/dy 由模板按槽位算好），60% 处先亮到 1.2 再回落 */
+@keyframes gi-bubble-holo {
+  0% {
+    transform: translate(var(--holo-dx, 0), var(--holo-dy, 0)) rotateX(var(--holo-rx, 85deg))
+      rotateY(var(--holo-ry, 45deg)) scale(0);
+    opacity: 0;
+    filter: brightness(2);
+  }
+
+  60% {
+    opacity: 1;
+    filter: brightness(1.2);
+  }
+
+  100% {
+    transform: translate(0, 0) rotateX(0deg) rotateY(0deg) scale(1);
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+/* 底部提示：16px / 23px #8E8E8E 居中。
+   与首页「开始体验」帧同一套定位：设计稿 y=597（812 高）→ 距底 192px = 384rpx，
+   贴底定位不受状态栏高度影响，短屏也不会被推到屏幕外 */
 .gi__hint {
   position: absolute;
-  top: 1194rpx;
   right: 0;
+  bottom: 384rpx;
   left: 0;
   padding: 0 40rpx;
   color: #8e8e8e;
@@ -1565,7 +1698,8 @@ onBeforeUnmount(() => {
   font-weight: 500;
   line-height: 46rpx;
   text-align: center;
-  animation: gi-rise 520ms cubic-bezier(0.22, 0.61, 0.36, 1) 160ms both;
+  /* 与首页欢迎态 detail-hint 同一套：淡入上浮、延后 300ms */
+  animation: gi-rise 480ms cubic-bezier(0.22, 0.61, 0.36, 1) 300ms both;
 }
 
 /* ===== 英文版式：同样的位置，字号收一档 =====
