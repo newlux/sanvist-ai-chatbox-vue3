@@ -450,8 +450,11 @@ function observeContentHeight() {
 }
 
 onMounted(() => {
+  // 视口高度能同步量到就同步量，避免首帧先按顶部对齐渲染再跳到底部
+  observeListHeight();
   nextTick(() => {
     observeContentHeight();
+    observeListHeight();
     bindScrollGesture();
   });
 });
@@ -459,6 +462,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   contentObserver?.disconnect();
   contentObserver = null;
+  viewportObserver?.disconnect();
+  viewportObserver = null;
   // #ifdef H5
   if (gestureReleaseTimer) clearTimeout(gestureReleaseTimer);
   gestureReleaseTimer = null;
@@ -669,11 +674,53 @@ function ganttBlocks(message: UiChatMessage) {
   return (message?.blocks || []).filter(block => block?.type === "gantt");
 }
 
-const listPadStyle = computed(() =>
-  (props.bottomInset
-    ? { paddingBottom: `calc(${props.bottomInset} + ${MESSAGE_LIST_EXTRA_GAP_PX}px)` }
-    : {}),
-);
+/**
+ * 贴底布局：让对话内容从输入栏上方往上堆，而不是从页面顶部往下堆。
+ *
+ * scroll-view 的内层容器高度是 auto，`min-height: 100%` 在这条高度链上取不到可视高，
+ * 所以直接量 `.msg-list` 的 clientHeight 写成像素最小高度；
+ * `.chat-box` 再用 `margin-top: auto` 吃掉剩余空间 —— 内容超出可视区时这个 auto 退化为 0，
+ * 列表回到普通滚动，不会出现「顶部内容被裁掉且滚不上去」。
+ */
+const listViewportHeight = ref(0);
+/** 只有进入对话才贴底：空会话的业务概览仍要按原来的从上往下排 */
+const dockedToBottom = computed(() => (props.messages?.length ?? 0) > 0);
+
+let viewportObserver: ResizeObserver | null = null;
+
+function measureListHeight() {
+  // #ifdef H5
+  const list = document.querySelector(".msg-list") as HTMLElement | null;
+  const height = list?.clientHeight ?? 0;
+  if (height > 0 && Math.abs(height - listViewportHeight.value) > 1) {
+    listViewportHeight.value = height;
+  }
+  // #endif
+}
+
+/** 键盘 / 语音面板 / 横竖屏都会改可视高，跟着 ResizeObserver 走 */
+function observeListHeight() {
+  // #ifdef H5
+  measureListHeight();
+  if (viewportObserver || typeof ResizeObserver === "undefined") return;
+  const list = document.querySelector(".msg-list");
+  if (!list) return;
+  viewportObserver = new ResizeObserver(() => measureListHeight());
+  viewportObserver.observe(list);
+  // #endif
+}
+
+const listPadStyle = computed(() => {
+  const style: Record<string, string> = {};
+  if (props.bottomInset) {
+    style.paddingBottom = `calc(${props.bottomInset} + ${MESSAGE_LIST_EXTRA_GAP_PX}px)`;
+  }
+  // 最小高度取可视高：剩余空间由下面的 margin-top: auto 转成顶部空白
+  if (dockedToBottom.value && listViewportHeight.value > 0) {
+    style.minHeight = `${listViewportHeight.value}px`;
+  }
+  return style;
+});
 
 /**
  * 当前要顶到对话区顶部的那张核对卡的 DOM id：切卡落在哪一轮，就顶那一轮正在展示的那张。
@@ -748,7 +795,11 @@ watch(
       @scrolltolower="onScrollToLower"
       @scrolltoupper="onScrollTop"
     >
-      <view class="msg-list__inner" :style="listPadStyle">
+      <view
+        class="msg-list__inner"
+        :class="{ 'msg-list__inner--docked': dockedToBottom }"
+        :style="listPadStyle"
+      >
         <view v-if="showQuickPrompts && showBusinessOverview" class="business-overview">
           <!-- 首页问候、摘要、早报与问题列表加载骨架 -->
           <view v-if="awakeningLoading" class="business-overview__skeleton">
@@ -927,6 +978,18 @@ watch(
 }
 .msg-list__inner {
   box-sizing: border-box;
+}
+
+/* 对话态贴底：内层撑满可视高，气泡组被 margin-top: auto 推到输入栏上方，
+   内容超过一屏时 auto 归零、退回普通滚动列表 */
+.msg-list__inner--docked {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.msg-list__inner--docked .chat-box {
+  margin-top: auto;
 }
 .chat-box {
   padding: 40rpx 40rpx 0;
