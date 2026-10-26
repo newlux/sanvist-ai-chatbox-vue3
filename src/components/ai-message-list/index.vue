@@ -491,12 +491,12 @@ function onGanttOpen(payload) {
   emit("gantt-open", payload);
 }
 
-function onGuideStepOpen(payload) {
-  emit("guide-step-open", payload);
+function onGuideStepOpen(payload, auto = false) {
+  emit("guide-step-open", payload, auto);
 }
 
-function onGuideSuggestionOpen(payload) {
-  emit("guide-suggestion-open", payload);
+function onGuideSuggestionOpen(payload, auto = false) {
+  emit("guide-suggestion-open", payload, auto);
 }
 
 /** 点核对卡步骤条某一段：交给页面切步骤 + 打开底部白板 */

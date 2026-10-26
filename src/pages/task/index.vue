@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onLoad, onShow, onUnload } from "@dcloudio/uni-app";
+import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -93,16 +93,42 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
+// 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用实时 TTS 做流式听播（与作业指导页一致）。
+const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
+const realtimeTts = useRealtimeTts(chatScope);
 const { sendMessage, sendSilentMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
-  // 任务协同下发的场景标识：TASK（早期下发过 TEST，两者在历史会话里都按任务协同归类，见 utils/session-scene）
-  scene: "TASK",
+  // 任务协同下发的场景标识：TEST（早期下发过 TASK，两者在历史会话里都按任务协同归类，见 utils/session-scene）
+  scene: "TEST",
+  // 同首页 / 作业指导：问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
+  // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
+  onAiAnswerDelta({ aiMsgId, delta, ended }) {
+    const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
+    if (index < 0) return;
+    realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
+  },
 });
 
-/** 页面统一发送入口：直接走真实接口（首次提问前先续上初始化那一轮的会话） */
+/** 停掉本页两套听播引擎（实时流式 + 历史整段）：换交互 / 离开页面时统一走这里。 */
+function stopSceneTts() {
+  realtimeTts.stop();
+  stopHistoryTts();
+}
+
+/**
+ * 页面统一发送入口：直接走真实接口（首次提问前先续上初始化那一轮的会话）。
+ * 发送瞬间同步停掉旧播报，避免旧答案还念着就切到新一轮。
+ */
 function sendTaskMessage(payload?: Parameters<typeof sendMessage>[0]) {
   applyPendingInitSession();
+  stopSceneTts();
   void sendMessage(payload);
 }
+
+// 「再次发起其他提问 / 切换会话 / 停止生成」时立刻停掉正在进行的听播（同作业指导页）：
+// activeRequestSeq 在新请求开始和取消/重置时都会变化，一个 watcher 兜底覆盖全部入口。
+watch(() => chatStore.activeRequestSeq, () => {
+  stopSceneTts();
+});
 
 /** 进入页面自动问的初始化问题（跟随当前语言） */
 const initialCardQuery = computed(() => t("task-initial-query"));
@@ -198,8 +224,6 @@ const {
   onCopySharePoster,
 } = useChatShare(sharePosterWrap, chatScope);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback(chatScope);
-const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
-const realtimeTts = useRealtimeTts(chatScope);
 /** 步骤卡「拍照」入口专用：独立实例，选完一张图直接把文件交给 sendMessage */
 const photoPicker = useComposerAttachments();
 
@@ -283,8 +307,56 @@ function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
   sendAskSlotSelection(payload);
 }
 
+/**
+ * 自动弹层的延时：答案生成结束后再等 5s 再弹，避免答案刚出来就被浮层盖住。
+ * 定时器必须放在页面层——生成结束时气泡正文会被整体卸载（见 ai-bubble-v2 的 hideBody），
+ * 挂在卡片组件里的定时器会跟着组件一起销毁，卡片就永远等不到自动弹起。
+ */
+const AUTO_OPEN_DELAY_MS = 5000;
+let autoOpenTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingAutoOpen: (() => void) | null = null;
+
+function armAutoOpenTimer() {
+  if (!pendingAutoOpen || autoOpenTimer) return;
+  autoOpenTimer = setTimeout(() => {
+    autoOpenTimer = null;
+    const run = pendingAutoOpen;
+    pendingAutoOpen = null;
+    run?.();
+  }, AUTO_OPEN_DELAY_MS);
+}
+
+/** 自动弹层：生成中先挂起，等 loading 变 false 后再计时 5s */
+function scheduleAutoOpen(open: () => void) {
+  pendingAutoOpen = open;
+  if (isLoading.value) return;
+  armAutoOpenTimer();
+}
+
+watch(isLoading, (loading) => {
+  if (!loading) armAutoOpenTimer();
+});
+
+function clearAutoOpenTimer() {
+  if (autoOpenTimer) {
+    clearTimeout(autoOpenTimer);
+    autoOpenTimer = null;
+  }
+  pendingAutoOpen = null;
+}
+
 /** 步骤卡片：单步是多轮追问（点一下直接发），多步选好后确认，统一按普通问题发送。 */
-function onGuideStepOpen(payload: GuideStepPayload) {
+function onGuideStepOpen(payload: GuideStepPayload, auto = false) {
+  // 自动弹起：等答案生成结束再延时；手动点卡片立即打开
+  if (auto) {
+    scheduleAutoOpen(() => openGuideStepSheet(payload));
+    return;
+  }
+  openGuideStepSheet(payload);
+}
+
+/** 真正打开步骤卡白板（自动 / 手动共用） */
+function openGuideStepSheet(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
   guideStepSheetVisible.value = true;
   // 这一轮的核对卡：按本轮第一步定位（每轮回答各带一张自己的卡）
@@ -341,7 +413,16 @@ const guideSuggestionSheetVisible = ref(false);
 /** 追问卡实时高度（px）：同步骤卡，展开时给列表底部让位 */
 const guideSuggestionSheetHeight = ref(0);
 
-function onGuideSuggestionOpen(payload: GuideSuggestionPayload) {
+function onGuideSuggestionOpen(payload: GuideSuggestionPayload, auto = false) {
+  // 自动弹起：等答案生成结束再延时；手动点文本立即打开
+  if (auto) {
+    scheduleAutoOpen(() => openGuideSuggestionSheet(payload));
+    return;
+  }
+  openGuideSuggestionSheet(payload);
+}
+
+function openGuideSuggestionSheet(payload: GuideSuggestionPayload) {
   guideSuggestionPayload.value = payload;
   guideSuggestionSheetVisible.value = true;
 }
@@ -619,8 +700,15 @@ onShow(() => {
   // startPendingScheduleAsk();
 });
 
+onHide(() => {
+  stopSceneTts();
+  clearAutoOpenTimer();
+});
+
 onUnload(() => {
   cancelActiveStream();
+  stopSceneTts();
+  clearAutoOpenTimer();
 });
 </script>
 
@@ -829,6 +917,8 @@ onUnload(() => {
         :speaking="realtimeTts.playing.value"
         @send="sendTaskMessage"
         @stop="stopGenerating"
+        @voice-start="stopSceneTts"
+        @voice-restart="stopSceneTts"
         @recognize-begin="beginAsrPlaceholder"
         @recognize-fail="discardAsrPlaceholder"
         @toggle-quick-list="toggleQuickList"

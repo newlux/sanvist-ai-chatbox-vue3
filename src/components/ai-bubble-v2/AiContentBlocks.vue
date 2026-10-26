@@ -86,12 +86,12 @@ function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
 }
 
-function onGuideStepOpen(payload) {
-  emit("guide-step-open", payload);
+function onGuideStepOpen(payload, auto = false) {
+  emit("guide-step-open", payload, auto);
 }
 
-function onGuideSuggestionOpen(payload) {
-  emit("guide-suggestion-open", payload);
+function onGuideSuggestionOpen(payload, auto = false) {
+  emit("guide-suggestion-open", payload, auto);
 }
 
 function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {

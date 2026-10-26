@@ -324,12 +324,12 @@ function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
 }
 
-function onGuideStepOpen(payload) {
-  emit("guide-step-open", payload);
+function onGuideStepOpen(payload, auto = false) {
+  emit("guide-step-open", payload, auto);
 }
 
-function onGuideSuggestionOpen(payload) {
-  emit("guide-suggestion-open", payload);
+function onGuideSuggestionOpen(payload, auto = false) {
+  emit("guide-suggestion-open", payload, auto);
 }
 
 /** 点调度视图入口卡：继续往上抛，由页面存数据并跳横屏调度视图 */
