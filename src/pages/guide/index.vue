@@ -8,7 +8,6 @@ import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { getRecommendedGuideQuestions } from "@/api/guide";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
-import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
@@ -235,8 +234,56 @@ function focusGuideStepCardAtTop() {
   if (stepId && chatStore.focusStepBlock(stepId)) chatStore.setPinnedToBottom(false);
 }
 
+/**
+ * 自动弹层的延时：答案生成结束后再等 5s 再弹，避免答案刚出来就被浮层盖住。
+ * 定时器必须放在页面层——生成结束时气泡正文会被整体卸载（见 ai-bubble-v2 的 hideBody），
+ * 挂在卡片组件里的定时器会跟着组件一起销毁，卡片就永远等不到自动弹起。
+ */
+const AUTO_OPEN_DELAY_MS = 5000;
+let autoOpenTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingAutoOpen: (() => void) | null = null;
+
+function armAutoOpenTimer() {
+  if (!pendingAutoOpen || autoOpenTimer) return;
+  autoOpenTimer = setTimeout(() => {
+    autoOpenTimer = null;
+    const run = pendingAutoOpen;
+    pendingAutoOpen = null;
+    run?.();
+  }, AUTO_OPEN_DELAY_MS);
+}
+
+/** 自动弹层：生成中先挂起，等 loading 变 false 后再计时 5s */
+function scheduleAutoOpen(open: () => void) {
+  pendingAutoOpen = open;
+  if (isLoading.value) return;
+  armAutoOpenTimer();
+}
+
+watch(isLoading, (loading) => {
+  if (!loading) armAutoOpenTimer();
+});
+
+function clearAutoOpenTimer() {
+  if (autoOpenTimer) {
+    clearTimeout(autoOpenTimer);
+    autoOpenTimer = null;
+  }
+  pendingAutoOpen = null;
+}
+
 /** 步骤卡片：单步是多轮追问（点一下直接发），多步选好后确认，统一按普通问题发送。 */
-function onGuideStepOpen(payload: GuideStepPayload) {
+function onGuideStepOpen(payload: GuideStepPayload, auto = false) {
+  // 自动弹起：等答案生成结束再延时；手动点卡片立即打开
+  if (auto) {
+    scheduleAutoOpen(() => openGuideStepSheet(payload));
+    return;
+  }
+  openGuideStepSheet(payload);
+}
+
+/** 真正打开步骤卡白板（自动 / 手动共用） */
+function openGuideStepSheet(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
   guideStepRequestedIndex.value = 0;
   guideStepSheetVisible.value = true;
@@ -342,7 +389,16 @@ const guideSuggestionSheetVisible = ref(false);
 /** 追问卡实时高度（px）：同步骤卡，展开时给列表底部让位 */
 const guideSuggestionSheetHeight = ref(0);
 
-function onGuideSuggestionOpen(payload: GuideSuggestionPayload) {
+function onGuideSuggestionOpen(payload: GuideSuggestionPayload, auto = false) {
+  // 自动弹起：等答案生成结束再延时；手动点文本立即打开
+  if (auto) {
+    scheduleAutoOpen(() => openGuideSuggestionSheet(payload));
+    return;
+  }
+  openGuideSuggestionSheet(payload);
+}
+
+function openGuideSuggestionSheet(payload: GuideSuggestionPayload) {
   guideSuggestionPayload.value = payload;
   guideSuggestionSheetVisible.value = true;
 }
@@ -641,10 +697,12 @@ onShow(() => {
 // 两个 TTS hook 自带的 onBeforeUnmount 清理不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
   stopSceneTts();
+  clearAutoOpenTimer();
 });
 onUnload(() => {
   cancelActiveStream();
   stopSceneTts();
+  clearAutoOpenTimer();
 });
 </script>
 
@@ -653,8 +711,6 @@ onUnload(() => {
     <view class="ai-page__chat" :style="chatViewportStyle">
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
-      <!-- 设备线稿背景图：跟着上方机型选择走（履带吊 / 混凝土泵车） -->
-      <AiChatBackdrop />
       <!-- Header -->
       <AiChatHeader
         ref="chatHeader"
@@ -917,9 +973,6 @@ $color-white: #ffffff;
   background: #fafafa;
   overflow: hidden;
   position: relative;
-  /* 形成层叠上下文：机型背景图（AiChatBackdrop）是 z-index: -1，
-     不隔离时负层会被本元素的 #fafafa 底色盖住，选了机型也看不到图 */
-  isolation: isolate;
 }
 
 // 头部要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
