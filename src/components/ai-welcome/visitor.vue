@@ -7,7 +7,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl, validateWakeWord } from "@/api/chat";
 import { getFlowSteps } from "@/api/flow";
 import { getRoleOptions, getTodayAwakeningPrompt } from "@/api/user-role";
-import brandLogo from "@/assets/img/header-island-logo.png";
+// 中心 SANI 图标换成动态 GIF（原 header-island-logo.png 的动画版）：
+// 源图 3840×1920 / 156 帧 / 72MB，已裁掉透明留白、缩到 300×267、150 帧 / 40ms，约 2.5MB
+import saniLogo from "@/assets/img/sani-logo.gif";
 import { LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY, VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
 import { REPORT_STYLE_STORAGE_KEY } from "@/config/report-styles";
 import { REPORT_VOICE_STORAGE_KEY } from "@/config/report-voices";
@@ -1363,9 +1365,9 @@ function openRoleSelect() {
           <text class="welcome-visitor__title-brand">SANI</text>
         </view>
         <!-- 主视觉：306:2783 容器 134×134 / 306:2791 图 110×110（居中，投影 0 3 9 rgba(0,0,0,.14)）
-             收尾态只淡出上下文案，图标本体与位置都不动 -->
+             中心图标为动态 GIF（原 306:2791 静态图的动画版），收尾态只淡出上下文案，图标本体与位置都不动 -->
         <view class="welcome-visitor__logo">
-          <image class="welcome-visitor__logo-img" :src="brandLogo" mode="aspectFit" />
+          <image class="welcome-visitor__logo-img" :src="saniLogo" mode="aspectFit" />
           <!-- 老板身份详情胶囊 331:389 / 331:392 / 331:444 / 331:394 / 331:456 / 331:442：
                挂在图标容器上做绝对定位（偏移由模板按设计稿注入），保证任意屏高下
                胶囊始终绕着图标，图标自身不动；入场与身份球同款方案 4 全息翻折 -->
