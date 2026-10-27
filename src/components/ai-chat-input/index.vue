@@ -275,6 +275,25 @@ function onToggleInputModeUi() {
   onToggleInputMode();
 }
 
+/**
+ * 语音胶囊左侧键盘段的点击：先让右侧白色语音段往右滑出（纯视觉过渡），
+ * 滑完再切到文本输入 —— 直接切换会显得整块胶囊"啪"地消失。
+ */
+const VOICE_PILL_SLIDE_MS = 180;
+const voicePillSlidingOut = ref(false);
+let voicePillSlideTimer: ReturnType<typeof setTimeout> | null = null;
+
+function onVoicePillKeyboardTap() {
+  // 手势进行中或正在滑出时不重复触发
+  if (voicePillSlidingOut.value || voice.gesture.active) return;
+  voicePillSlidingOut.value = true;
+  voicePillSlideTimer = setTimeout(() => {
+    voicePillSlideTimer = null;
+    voicePillSlidingOut.value = false;
+    onToggleInputModeUi();
+  }, VOICE_PILL_SLIDE_MS);
+}
+
 function onTrySend() {
   submitMessage();
 }
@@ -378,6 +397,8 @@ onMounted(() => nextTick(observeComposer));
 
 onBeforeUnmount(() => {
   if (maskLingerTimer) clearTimeout(maskLingerTimer);
+  if (voicePillSlideTimer) clearTimeout(voicePillSlideTimer);
+  voicePillSlideTimer = null;
   composerResizeObserver?.disconnect();
   composerResizeObserver = null;
 });
@@ -655,13 +676,14 @@ onBeforeUnmount(() => {
               v-if="!showSendButton"
               class="input-bar__voice-keyboard"
               :class="{ 'input-bar__voice-keyboard--disabled': voice.gesture.active }"
-              @tap="onToggleInputModeUi"
+              @tap="onVoicePillKeyboardTap"
             >
               <image src="@/assets/img/icon-keyboard-dark.svg" mode="aspectFit" />
             </view>
             <!-- 语音段：设计稿 48×36 / #FFFFFF，按住说话 -->
             <view
               class="input-bar__voice-hold"
+              :class="{ 'input-bar__voice-hold--leaving': voicePillSlidingOut }"
               @touchstart.prevent="onVoicePillTouchStart"
               @touchmove.prevent="updateVoiceGesture"
               @touchend.prevent="onVoicePillTouchEnd"
@@ -1449,6 +1471,14 @@ onBeforeUnmount(() => {
   touch-action: none; /* 桌面/触屏长按时禁用滚动/缩放，pointer 事件不被默认手势劫持 */
   -webkit-user-select: none;
   user-select: none;
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+// 点胶囊左侧键盘段：语音段往左滑出（朝键盘段方向），滑完再切到文本输入
+// （见 onVoicePillKeyboardTap）
+.input-bar__voice-hold--leaving {
+  transform: translateX(-64rpx);
+  opacity: 0;
 }
 
 // 段内图标：设计稿 20px 画布（声纹 18.33×16.67、键盘 18.33×15）
@@ -1555,8 +1585,7 @@ onBeforeUnmount(() => {
 .input-bar__voice-keyboard:active,
 .input-bar__voice-hold:active,
 .input-bar__plus:active,
-.input-bar__send:active,
-.input-bar__stop:active {
+.input-bar__send:active {
   opacity: 0.7;
 }
 
