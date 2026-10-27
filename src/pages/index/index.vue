@@ -809,10 +809,11 @@ onBeforeUnmount(() => {
       <AiChatBackdrop />
       <!-- 顶部白色渐变：页面上沿由白向下渐隐，压住线稿背景与滚上来的内容 -->
       <view class="ai-page__top-fade" />
-      <!-- Header -->
+      <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
       <AiChatHeader
         v-model:sessions="sessions"
         class="ai-page__header"
+        plain-bg
         :load-sessions="getAISessionList"
         :selected-session-id="aiSessionId"
         :generating="isLoading"
@@ -830,6 +831,7 @@ onBeforeUnmount(() => {
       />
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
+        top-inset="var(--chat-top-inset, 300rpx)"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
@@ -1111,18 +1113,27 @@ $color-white: #ffffff;
   background: #fafafa;
   overflow: hidden;
   position: relative;
+  // 顶部毛玻璃层的高度 = 悬浮头部在内容里的占位：
+  // 两者共用一个值，消息正好从渐隐的下沿起步，往上滚就被模糊掉
+  --chat-top-inset: calc(constant(safe-area-inset-top) + 300rpx);
+  --chat-top-inset: calc(env(safe-area-inset-top) + 300rpx);
 }
 
-// 头部要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
+// 头部悬浮：不占布局高度，消息可以滚到它下面，透过 .ai-page__top-fade 的毛玻璃淡出；
+// 同时要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
 // 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）
 .ai-page__chat > .ai-page__header {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
   z-index: 30;
 }
 
-// 顶部白色渐变（对应设计稿 722:152「回答」头部底板）：
-// 上沿纯白压住状态栏与工具条，往下经过灵动岛/状态胶囊时逐步透出，
-// 到底边完全透明，让滚到顶部的消息像被白雾盖住一样柔和淡出。
-// 高度 = 刘海安全区 + 300rpx，实测刚好盖到「正在回答中..」胶囊下沿。
+// 顶部毛玻璃渐隐（对应设计稿 722:152「回答」头部底板）：
+// 不铺白色底 —— 透明 + 背后模糊，消息滚到头部下面还能看见字，只是被虚化；
+// 「渐变」体现在模糊强度上：上沿最糊，往下渐弱到完全清晰，接住正文，没有硬边。
+// 高度 = 刘海安全区 + 300rpx（与 --chat-top-inset 一致，消息正好从渐隐下沿起步）。
 .ai-page__top-fade {
   position: absolute;
   z-index: 1;
@@ -1132,12 +1143,18 @@ $color-white: #ffffff;
   height: calc(constant(safe-area-inset-top) + 300rpx);
   height: calc(env(safe-area-inset-top) + 300rpx);
   pointer-events: none;
+  // 只模糊、不遮挡（老内核拿不到 backdrop-filter 时，退化成下面那层极淡的雾，文字照样看得见）
+  backdrop-filter: blur(16rpx); // 8px
+  -webkit-backdrop-filter: blur(16rpx);
+  // 模糊强度按 mask 的 alpha 渐变：0% 满强度 → 45% 约七成 → 100% 完全清晰
+  mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, rgba(0, 0, 0, 0) 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, rgba(0, 0, 0, 0) 100%);
+  // 极淡一层同色雾：顶部文字比正文稍淡一点，但不至于被吃掉
   background: linear-gradient(
     180deg,
-    #ffffff 0%,
-    rgba(255, 255, 255, 0.96) 38%,
-    rgba(255, 255, 255, 0.72) 72%,
-    rgba(255, 255, 255, 0) 100%
+    rgba(250, 250, 250, 0.34) 0%,
+    rgba(250, 250, 250, 0.18) 48%,
+    rgba(250, 250, 250, 0) 100%
   );
 }
 

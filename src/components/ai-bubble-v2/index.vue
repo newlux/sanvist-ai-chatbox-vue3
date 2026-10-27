@@ -660,11 +660,14 @@ function onNegativeFeedback() {
 </template>
 
 <style lang="scss" scoped>
+/* ===== 单条消息容器：设计稿 1187:1「日常运营助手-AI正在回答」里的一行 =====
+   勾选框 / 附件 / 气泡之间的横向间距统一走 gap（8px），不靠 margin 撑 */
 .ai-bubble-v2 {
   display: flex;
   margin-bottom: 40rpx;
   gap: 16rpx;
 }
+/* 带追问时换行排：追问整行铺满，与回答卡的间距 12px */
 .ai-bubble-v2--with-suggestions {
   flex-wrap: wrap;
   row-gap: 24rpx;
@@ -674,6 +677,7 @@ function onNegativeFeedback() {
   min-width: 0;
   box-sizing: border-box;
 }
+/* 勾选态：右侧让出勾选框宽度，追问与气泡左边缘对齐（不是间距，是缩进对齐） */
 .ai-bubble-v2--selected .ai-bubble-v2__suggestions {
   flex-basis: calc(100% - 48rpx);
   margin-left: 48rpx;
@@ -718,16 +722,23 @@ function onNegativeFeedback() {
   -webkit-user-select: text;
   user-select: text;
 }
-/* 回答气泡：白底 #FFFFFF + 1rpx 浅灰描边 */
+/* ===== AI 回答卡：设计稿 1187:14 / 1187:56「AI Answer Card」=====
+   底色 #F3F3F3 / 描边 1px #EFEFEF / 圆角 20px / 内边距 20px /
+   纵向 gap 12px（卡片内各区域统一用 gap 排布，不再用 margin 凑）/
+   阴影 0 2px 8px rgba(0,0,0,0.04)（设计稿 effects 里 visible=false，按原值写出） */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
   padding: 40rpx;
-  border: 1rpx solid #eeeeee;
-  border-radius: 32rpx;
-  background: #ffffff;
-  box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
+  border: 1px solid #efefef;
+  border-radius: 40rpx;
+  background: #f3f3f3;
+  // box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04);
 }
 /* 没有正文只有独立卡片：不画白卡外壳，只留操作栏 */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--bare {
+  gap: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -736,20 +747,24 @@ function onNegativeFeedback() {
 }
 /* 维修助手回流卡片本身承担边框和底色，不使用通用 AI 气泡外壳。 */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--assistant-callback {
+  gap: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
 }
+/* 维修助手回流卡（设计稿 1187:1 之外的独立态）：白卡 / 1px #EFEFEF 描边 / 20px 圆角，
+   标题区与详情区之间用 gap 排（16px） */
 .ai-bubble-v2__assistant-callback-card {
   display: flex;
+  flex-direction: column;
+  gap: 32rpx;
   box-sizing: border-box;
   width: 100%;
   padding: 36rpx;
-  flex-direction: column;
   border: 1px solid #efefef;
-  border-radius: 32rpx;
+  border-radius: 40rpx;
   background: #ffffff;
 }
 .ai-bubble-v2__assistant-callback-card--clickable {
@@ -757,6 +772,7 @@ function onNegativeFeedback() {
 }
 .ai-bubble-v2__assistant-callback-heading {
   display: flex;
+  gap: 16rpx;
   width: 100%;
   align-items: flex-start;
 }
@@ -764,13 +780,14 @@ function onNegativeFeedback() {
   flex: 0 0 auto;
   width: 32rpx;
   height: 32rpx;
-  margin: 1rpx 8rpx 0 0;
+  margin-top: 2rpx; // 与标题首行视觉对齐（对齐偏移，不是间距）
 }
 .ai-bubble-v2__assistant-callback-copy {
   display: flex;
   flex: 1;
   min-width: 0;
   flex-direction: column;
+  gap: 24rpx;
 }
 .ai-bubble-v2__assistant-callback-title {
   overflow: hidden;
@@ -783,9 +800,8 @@ function onNegativeFeedback() {
   white-space: nowrap;
 }
 .ai-bubble-v2__assistant-callback-status {
-  margin-top: 12rpx;
   overflow: hidden;
-  color: #999999;
+  color: #8f8f8f;
   font-size: 22rpx;
   line-height: 26rpx;
   text-overflow: ellipsis;
@@ -795,67 +811,71 @@ function onNegativeFeedback() {
   flex: 0 0 auto;
   width: 40rpx;
   height: 40rpx;
-  margin: 14rpx 6rpx 0 8rpx;
+  margin-top: 28rpx; // 与标题行垂直居中（对齐偏移，不是间距）
 }
 .ai-bubble-v2__assistant-callback-details {
   display: flex;
   width: 100%;
-  margin-top: 32rpx;
   flex-direction: column;
   gap: 20rpx;
 }
 .ai-bubble-v2__assistant-callback-detail {
   display: flex;
+  gap: 24rpx;
   width: 100%;
   min-width: 0;
   align-items: flex-start;
 }
 .ai-bubble-v2__assistant-callback-index {
   flex: 0 0 auto;
-  width: 26rpx;
-  color: #999999;
+  color: #8f8f8f;
   font-size: 24rpx;
   line-height: 30rpx;
 }
 .ai-bubble-v2__assistant-callback-label {
   flex: 0 0 auto;
-  color: #999999;
+  color: #8f8f8f;
   font-size: 24rpx;
   line-height: 30rpx;
 }
+/* 数值列占满剩余宽度并右对齐：靠 flex 撑开（flex:1），不用 margin 推 */
 .ai-bubble-v2__assistant-callback-value {
   flex: 1;
   min-width: 0;
-  margin-left: 24rpx;
-  color: #1a1a1a;
+  color: #1a1a1e;
   font-size: 24rpx;
   line-height: 30rpx;
   text-align: right;
   word-break: break-all;
   white-space: normal;
 }
+/* 分享海报：逐块渲染、块间距由内容块自己控制，这里不再加卡片级 gap */
 .ai-bubble-v2--no-answer-group:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
+  gap: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
-/* 用户消息气泡：#EFEFEF 浅灰底、无描边，文字 #0D0D0D（与回答白卡形成对比） */
+/* ===== 用户消息气泡：设计稿 1187:82「User Message Row / User Bubble」=====
+   白底 #FFFFFF / 描边 1px #EFEFEF / 圆角 24px /
+   内边距 左右 18px · 上下 12px */
 .ai-bubble-v2--user .ai-bubble-v2__body {
   flex: 0 1 auto;
   max-width: calc(100% - 64rpx);
-  padding: 22rpx 32rpx;
-  border: 0;
-  border-radius: 28rpx;
-  background: #efefef;
+  padding: 24rpx 36rpx;
+  border: 1px solid #efefef;
+  border-radius: 48rpx;
+  background: #ffffff;
 }
 .ai-bubble-v2__body--highlighted {
   background: rgba(248, 49, 94, 0.06);
 }
+/* 用户正文：设计稿 1187:84「User Question」14px / 22px / #0D0D0D */
 .ai-bubble-v2--user .ai-bubble-v2__user-content {
-  font-size: 28rpx;
-  line-height: 40rpx;
   color: #0d0d0d;
+  font-size: 28rpx;
+  line-height: 44rpx;
   white-space: pre-wrap;
   word-break: break-word;
   // 允许划词选中复制；长按仍走整条复制
@@ -863,13 +883,13 @@ function onNegativeFeedback() {
   user-select: text;
 }
 
+/* ASR 识别中占位：沿用用户正文的字号/行高，末尾三个点做呼吸动画 */
 .ai-bubble-v2__asr {
   display: flex;
   align-items: baseline;
-  font-size: 28rpx;
-  line-height: 40rpx;
-  // 气泡底色已改为白色，识别中文案同步用主文字色，避免白字看不见
   color: #0d0d0d;
+  font-size: 28rpx;
+  line-height: 44rpx;
 }
 
 .ai-bubble-v2__asr-dot {
@@ -940,31 +960,34 @@ function onNegativeFeedback() {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* 用户附件条：设计稿 1187:82「User Message Row」上方独立成条，
+   与文字气泡的上下间距由 .ai-bubble-v2--user 的 gap 统一给（此处不再用 margin-bottom） */
 .ai-bubble-v2__files {
   max-width: calc(100% - 64rpx);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 12rpx;
-  // 与下方文字气泡之间的间距；没有文字时这条留白也不碍事
-  margin-bottom: 16rpx;
 }
 
+/* 附件图片：20px 圆角、#F1F2F4 占位底 */
 .ai-bubble-v2__file-image {
   width: 320rpx;
   height: 320rpx;
-  border-radius: 20rpx;
+  border-radius: 40rpx;
   background: #f1f2f4;
 }
 
+/* 附件卡片：白底 / 1px #EFEFEF 描边 / 20px 圆角 / 阴影 0 4px 10px rgba(0,0,0,0.04) */
 .ai-bubble-v2__file-card {
   max-width: 460rpx;
   display: flex;
   align-items: center;
+  gap: 16rpx;
   box-sizing: border-box;
   padding: 20rpx 24rpx;
-  border: 1rpx solid #eeeeee;
-  border-radius: 20rpx;
+  border: 1px solid #efefef;
+  border-radius: 40rpx;
   background: #ffffff;
   box-shadow: 0 8rpx 20rpx rgba(0, 0, 0, 0.04);
 }
@@ -977,9 +1000,9 @@ function onNegativeFeedback() {
 
 .ai-bubble-v2__file-info {
   min-width: 0;
-  margin-left: 16rpx;
   display: flex;
   flex-direction: column;
+  gap: 4rpx;
 }
 
 .ai-bubble-v2__file-name,
@@ -991,24 +1014,24 @@ function onNegativeFeedback() {
 }
 
 .ai-bubble-v2__file-name {
-  color: #1a1a1a;
-  font-size: 26rpx;
-  line-height: 36rpx;
+  color: #1a1a1e;
+  font-size: 28rpx;
+  line-height: 40rpx;
 }
 
 .ai-bubble-v2__file-size {
-  margin-top: 2rpx;
-  color: #999999;
-  font-size: 22rpx;
-  line-height: 30rpx;
+  color: #8f8f8f;
+  font-size: 24rpx;
+  line-height: 36rpx;
 }
 
+/* 等待响应：设计稿 1187:14「✓ 已完成 0.5m」那一行的未完成形态，
+   行内各段之间用 gap 排，与下方正文的间距由卡片父级 gap 统一给 */
 .ai-bubble-v2__waiting {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8rpx;
-  margin-bottom: 24rpx;
   color: #a5a5a5;
   font-family: "PingFang SC";
   font-size: 26rpx;
@@ -1030,37 +1053,34 @@ function onNegativeFeedback() {
 .ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-label {
   color: #7b7b7b;
 }
+/* ===== 过程状态行：设计稿 1187:14「✓ 已完成 0.5m」=====
+   12px / 18px / #5D5D5D，图标与文字间距 4px；
+   下面有正文时跟一条 1px #E8E8E8 分隔线（对应 1187:40 Divider），
+   文字到线的间距 12px，线到正文的间距由卡片父级 gap 给 */
 .ai-bubble-v2__process-status {
   display: flex;
   align-items: center;
+  gap: 8rpx;
   min-width: 0;
-  height: 40rpx;
-  color: #777777;
-  font-size: 28rpx;
-  line-height: 40rpx;
+  color: #5d5d5d;
+  font-size: 24rpx;
+  line-height: 36rpx;
 }
 .ai-bubble-v2__process-status--with-content {
-  margin-bottom: 32rpx;
   padding-bottom: 24rpx;
-  border-bottom: 1rpx solid #eeeeee;
+  border-bottom: 1px solid #e8e8e8;
 }
 .ai-bubble-v2__process-status--with-subtitle {
-  margin-bottom: 20rpx;
   padding-bottom: 24rpx;
-  border-bottom: 1rpx solid #eeeeee;
+  border-bottom: 1px solid #e8e8e8;
 }
 .ai-bubble-v2__process-subtitle {
   display: block;
   min-width: 0;
-  height: 36rpx;
-  margin-top: 0;
   overflow: hidden;
-  color: #999999;
+  color: #8f8f8f;
   font-size: 24rpx;
   line-height: 36rpx;
-}
-.ai-bubble-v2__process-subtitle--with-content {
-  margin-bottom: 32rpx;
 }
 .ai-bubble-v2__process-subtitle-text {
   display: block;
@@ -1075,11 +1095,12 @@ function onNegativeFeedback() {
   from { opacity: 0; transform: translateY(24rpx); }
   to { opacity: 1; transform: translateY(0); }
 }
+/* 状态行里的「✓」：设计稿 1187:17 与文字同色，不单独着色 */
 .ai-bubble-v2__process-icon {
   flex-shrink: 0;
-  margin-right: 8rpx;
-  color: #5a8dff;
-  font-size: 28rpx;
+  color: #5d5d5d;
+  font-size: 24rpx;
+  line-height: 36rpx;
 }
 .ai-bubble-v2__process-text {
   min-width: 0;
@@ -1097,12 +1118,12 @@ function onNegativeFeedback() {
   -webkit-text-fill-color: transparent;
   animation: ai-bubble-process-shimmer 2.8s linear infinite;
 }
+/* 右侧耗时：设计稿 1187:35「已消耗 2.5」11px / #8F8F8F，靠右对齐（flex 对齐，不靠 padding 撑） */
 .ai-bubble-v2__process-duration {
   flex-shrink: 0;
   margin-left: auto;
-  padding-left: 16rpx;
-  color: #999999;
-  font-size: 24rpx;
+  color: #8f8f8f;
+  font-size: 22rpx;
   white-space: nowrap;
 }
 .ai-bubble-v2__process-status--failed { color: #d54941; }
@@ -1139,16 +1160,19 @@ function onNegativeFeedback() {
 .ai-bubble-v2__streaming {
   padding-top: 24rpx;
 }
+/* ===== 操作栏：设计稿 1187:18「Actions Bar」=====
+   横向 gap 8px，图标 16px（首个 18px）；上方 1px #E8E8E8 分隔线（1187:16 Divider 2），
+   线与图标的间距 12px；与正文的间距由卡片父级 gap 统一给 */
 .ai-bubble-v2__actions {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 28rpx;
-  margin-top: 32rpx;
-  padding-top: 28rpx;
-  border-top: 2rpx solid #f0f0f2;
+  gap: 16rpx;
+  padding-top: 24rpx;
+  border-top: 1px solid #e8e8e8;
 }
-/* 空回答兜底提示：外观对齐回答正文卡（灰底圆角 + 正文字号） */
+/* ===== 空回答兜底提示 =====
+   （设计稿无此状态，沿用回答正文的字号/行高规范：14px / 20px / #1A1A1E） */
 .ai-bubble-v2__busy-hint {
   box-sizing: border-box;
   width: 100%;
@@ -1157,10 +1181,20 @@ function onNegativeFeedback() {
   background: #f9f9f9;
 }
 .ai-bubble-v2__busy-hint-text {
+  color: #1a1a1e;
   font-size: 28rpx;
-  line-height: 42rpx;
-  color: #2f323c;
+  line-height: 40rpx;
   word-break: break-word;
+}
+
+/* ===== 回答正文：设计稿 1187:14「设备运行状态正常…」/ 1187:37 参数列表 =====
+   14px / 20px / #1A1A1E（正文主色 #0D0D0D 80%）；
+   markdown-renderer 是全局组件，这里只在气泡作用域内对齐设计稿的字号与配色 */
+.ai-bubble-v2__body :deep(p),
+.ai-bubble-v2__body :deep(li) {
+  color: #1a1a1e;
+  font-size: 28rpx;
+  line-height: 40rpx;
 }
 .ai-bubble-v2__action-btn {
   width: 32rpx;
@@ -1210,9 +1244,6 @@ function onNegativeFeedback() {
 }
 .ai-bubble-v2__tts-wave-bar--4 {
   animation-delay: 0.36s;
-}
-.ai-bubble-v2__duration {
-  margin-left: 8rpx;
 }
 
 @keyframes ai-bubble-tts-spin {

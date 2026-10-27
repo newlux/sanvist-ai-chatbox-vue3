@@ -51,27 +51,29 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
 </template>
 
 <style lang="scss" scoped>
+/* 表格：底色跟随外层 AI 气泡（#F3F3F3，见 ai-bubble-v2 的回答卡），
+   表格本身不铺白底、表头也不再压深，只用描边和字重区分行列 */
 .table-block {
   width: 100%;
   overflow: hidden;
-  border: 1px solid #e4e9f0;
+  border: 1px solid #efefef;
   border-radius: 20rpx;
-  background: #fff;
+  background: transparent;
 }
 .table-block__table {
   width: 100%;
 }
 .table-block__row {
   display: flex;
-  border-top: 1px solid #e4e9f0;
-  color: #5f6775;
+  border-top: 1px solid #e5e5e5;
+  color: #1a1a1e;
 }
 .table-block__row:first-child {
   border-top: 0;
 }
+/* 表头：不再铺 #F9F9F9，与正文同底色，靠加粗和深一档的文字色区分 */
 .table-block__row--head {
-  background: #f9f9f9;
-  color: #2f323c;
+  color: #1a1a1e;
   font-weight: 600;
 }
 .table-block__cell {
