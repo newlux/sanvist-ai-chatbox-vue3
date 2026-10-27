@@ -275,7 +275,7 @@ watch(() => [props.visible, currentIndex.value], () => {
           @touchstart.stop.prevent="onSubmitText"
           @tap="onSubmitText"
         >
-          <image class="guide-step-sheet__send-icon" src="@/assets/img/icon-send.svg" mode="aspectFit" />
+          <image class="guide-step-sheet__send-icon" src="@/assets/img/icon-send-up.svg" mode="aspectFit" />
         </view>
       </view>
     </view>

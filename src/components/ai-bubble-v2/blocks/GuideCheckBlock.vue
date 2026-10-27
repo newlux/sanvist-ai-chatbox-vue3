@@ -188,7 +188,7 @@ function onSelectStep(index: number) {
   font-family: "PingFang SC", "Inter", sans-serif;
   font-size: 24rpx;
   line-height: 34rpx;
-  color: #c8201e;
+  color: #000;
 }
 
 /* 步骤条：轨道 295×2 => 590×4，按步骤数等分成 N 段、段间留 2px（4rpx）空隙；
@@ -235,7 +235,7 @@ function onSelectStep(index: number) {
 }
 
 .guide-check-block__segment--active {
-  background: #c8201e;
+  background: #000;
 }
 
 .guide-check-block__content {

@@ -1014,12 +1014,18 @@ $color-white: #ffffff;
 }
 
 /* ===== 待机引导（Ardot 347:5392）=====
-   画板 375×812：标题 y=178，往下依次是 greeting（说明）、「你可以这么问」与问题列表；
-   状态栏 54 + 头部 50 之后是 74（148rpx），左右留白 20（40rpx）。 */
+   画板 375×812：标题 y=178，往下依次是 greeting（说明）、「你可以这么问」与问题列表，
+   左右留白 20（40rpx）。
+
+   顶部留白与作业协同页（pages/task/index.vue 的 .task-welcome）对齐：
+   头部是流内元素（状态栏 0 + 栏高 50），灵动岛（92）+ 下方「SANI」胶囊是绝对定位浮在
+   内容之上，换算到内容区岛底 ≈ 84rpx、胶囊底 ≈ 136rpx。设计稿的 148rpx 会让标题顶
+   只比胶囊低 12rpx（6px），视觉上贴着 logo；这里同样抬到 216rpx，
+   标题距胶囊底约 80rpx（40px）。 */
 .guide-welcome {
   position: relative;
   z-index: 1;
-  padding: 148rpx 40rpx 0;
+  padding: 216rpx 40rpx 0;
 }
 
 /* 固定问候语（Ardot 347:5392 Greeting Title）：28px Bold #0D0D0D，行高 41 */
