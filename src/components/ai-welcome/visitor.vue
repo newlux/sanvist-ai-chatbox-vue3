@@ -446,13 +446,13 @@ function startIntro() {
 }
 
 /**
- * 整页长按：按住 280ms 进入「录音态」（底部渐变切深色）并真的开始录音，松手后停录并送识别；
- * 同时底部沿用这套蓝渐变与波浪、文案换成本次自我介绍并口播，口播播完就地过渡到「身份选择」态。
- * 识别结果这一版只打日志 —— 后续要拿这段话再调一次接口，由接口决定是否能进入下一步。
+ * 整页按住说话：手势与首页输入栏「按住说话」保持一致 ——
+ * 手指一落下就进「录音态」（底部立刻切成录音蓝渐变）并同步开始录音，不再等长按判定；
+ * 松手即停录并送识别 + 唤醒校验，短于 TAP_CANCEL_MS 的轻点按误触处理（不送识别、也不闪红）。
  */
-const HOLD_START_MS = 280;
-/** 长按判定前手指位移超过这个距离视为滑动，不进入录音态 */
-const HOLD_MOVE_PX = 12;
+const TAP_CANCEL_MS = 300;
+/** 录音中上划超过这个距离即取消（与首页输入栏的上划取消同一阈值） */
+const CANCEL_SWIPE_PX = 60;
 /** 识别接口兜底超时：上传的 timeout 在个别容器里不生效 */
 const ASR_TIMEOUT_MS = 30_000;
 /**
@@ -504,7 +504,6 @@ const detailVisible = ref(false);
  */
 const IDENTITY_HIT_HOLD_MS = 900;
 
-let holdTimer: ReturnType<typeof setTimeout> | null = null;
 let speechFailsafeTimer: ReturnType<typeof setTimeout> | null = null;
 let choiceEnterTimer: ReturnType<typeof setTimeout> | null = null;
 let choiceSpeakTimer: ReturnType<typeof setTimeout> | null = null;
@@ -513,8 +512,12 @@ let detailEnterTimer: ReturnType<typeof setTimeout> | null = null;
 let identityHitTimer: ReturnType<typeof setTimeout> | null = null;
 /** 跳转中标记：避免重复触发 openRoleSelect / startExperience，也用来掐掉跳转前的待播口播 */
 let navigating = false;
-let holdStartX = 0;
+/** 本次按下的起点纵坐标：上划取消按它算位移 */
 let holdStartY = 0;
+/** 本次按下的时刻：松手时按按住时长区分「轻点误触」与「说完一句」 */
+let pressStartedAt = 0;
+/** 本次按压已上划进取消区：松手时丢掉这段录音，不送识别 */
+let pressCancelling = false;
 
 /** 收尾态复位：文案退回隐藏、口播停止、身份选择态收起（从角色选择页返回时回到起始态） */
 function resetIntro() {
@@ -568,19 +571,13 @@ function readPoint(e: any) {
   return { x: Number(point?.clientX ?? 0), y: Number(point?.clientY ?? 0) };
 }
 
-function clearHoldTimer() {
-  if (!holdTimer) return;
-  clearTimeout(holdTimer);
-  holdTimer = null;
-}
-
 function clearSpeechFailsafe() {
   if (!speechFailsafeTimer) return;
   clearTimeout(speechFailsafeTimer);
   speechFailsafeTimer = null;
 }
 
-/* ---------------- 长按录音：按住真的录，松手走一次语音识别 ---------------- */
+/* ---------------- 按住说话：按下就录，松手走一次语音识别 ---------------- */
 
 /** 录音器（VoiceRecorder 是 JS 文件，这里按实际用到的接口描述一下） */
 interface RecorderResult {
@@ -1012,53 +1009,55 @@ function cancelRecording() {
 }
 
 /**
- * 按住：任意位置长按 280ms 起录音（起始页 / 身份选择页 / 身份信息页共用同一套录音管线）。
- * 身份选择页与身份信息页长按都是「就地录音」——标题 / 气泡 / 胶囊 / 提示一律不动，
- * 只让底部换成与起始页完全一致的按住态蓝渐变；松手后照旧走识别 + 唤醒校验。
+ * 按住：整页任意位置**一按下**就进录音态并开录（起始页 / 身份选择页 / 身份信息页共用同一套录音管线）。
+ * 与首页输入栏「按住说话」同速：不再等 280ms 长按判定，视觉与麦克风立刻到位；
+ * 身份选择页与身份信息页是「就地录音」——标题 / 气泡 / 胶囊 / 提示一律不动，
+ * 只让底部换成与起始页完全一致的按住态蓝渐变；松手后照旧走识别 + 唤醒校验（接口不变）。
  */
 function onHoldStart(e: any) {
   if (isRecording.value) return;
-  // 自我介绍播放中（还没到选择态）不长按，避免和口播打架
+  // 自我介绍播放中（还没到选择态）不录音，避免和口播打架
   if (isFinishing.value && !isChoosing.value) return;
   // 新的按压：撤掉上一次「未命中」的红，重新开始
   clearWakeMissed();
   const point = readPoint(e);
-  holdStartX = point.x;
   holdStartY = point.y;
-  clearHoldTimer();
-  holdTimer = setTimeout(() => {
-    holdTimer = null;
-    // 这 280ms 里上一次的唤醒校验已经命中并进了欢迎流程，就别再起一段录音
-    if (isFinishing.value && !isChoosing.value) return;
-    // 置为录音态后底部自动从常态切成录音蓝渐变（见 isGlowIdle）
-    isRecording.value = true;
-    // 长按开始即打断当前语音播报，别让「请选择你的身份吧」/ 身份信息标题盖住录音
-    introTts.stop();
-    disarmVoiceRetry();
-    isChecking.value = false;
-    startRecording();
-  }, HOLD_START_MS);
+  pressStartedAt = Date.now();
+  pressCancelling = false;
+  // 按下即置录音态：底部从常态切成录音蓝渐变（见 isGlowIdle），录音同时开录
+  isRecording.value = true;
+  isChecking.value = false;
+  // 开录前先掐掉正在播的口播，别让「请选择你的身份吧」/ 身份信息标题盖住录音
+  introTts.stop();
+  disarmVoiceRetry();
+  startRecording();
 }
 
+/** 录音中上划取消：与首页输入栏同一套手感，进取消区后松手不再送识别 */
 function onHoldMove(e: any) {
-  if (isRecording.value || !holdTimer) return;
+  if (!isRecording.value) return;
   const point = readPoint(e);
-  if (Math.abs(point.x - holdStartX) > HOLD_MOVE_PX || Math.abs(point.y - holdStartY) > HOLD_MOVE_PX) {
-    clearHoldTimer();
-  }
+  pressCancelling = holdStartY - point.y >= CANCEL_SWIPE_PX;
 }
 
 /**
  * 松手：停录并送一次识别 + 唤醒校验，**结果回来才决定去向**。
- * - 校验中（--checking）：底部沿用录音态的蓝渐变与波浪，页面文案不动；
+ * - 轻点 / 上划取消：直接丢掉这段录音，不识别也不闪红（页面上还有身份球等可点区域）；
+ * - 校验中：底部立刻回到常态淡蓝，命中后由 --finishing 接管；
  * - 命中 → enterWelcome()：标题淡出、自我介绍浮出并口播，播完过渡到身份选择态；
  * - 未命中 → enterWakeMissed()：底部渐变切红（331:147），留在起始页。
- * 未进入录音态的短按不做任何事（页面上已没有可点的按钮）。
  */
 function onHoldEnd() {
-  clearHoldTimer();
   if (!isRecording.value) return;
+  const pressDuration = Date.now() - pressStartedAt;
   isRecording.value = false;
+  if (pressCancelling || pressDuration < TAP_CANCEL_MS) {
+    // 与首页输入栏一致的短按语义：按一下就松手视为误触，不进识别、不进校验
+    pressCancelling = false;
+    cancelRecording();
+    return;
+  }
+  pressCancelling = false;
   isChecking.value = true;
   void stopRecordingAndRecognize();
 }
@@ -1177,7 +1176,8 @@ async function speakDetailTitle(job: Promise<void>) {
 /** 点身份气泡：老板留在本页看设备信息，其余身份仍进「明细 + 开始体验」的角色选择页 */
 function onChooseBubble(bubble: ChoiceBubble) {
   if (!bubble.label) return;
-  // 长按已经进入录音 / 校验：松手那一下不算点选，避免误跳
+  // 还按着（录音中）或松手后已进校验：这一下不算点选，避免误跳；
+  // 轻点松开走的是「短按按误触取消」，松手时录音已复位，点到球上照常生效
   if (isRecording.value || isChecking.value) return;
   // 命中哪颗就点亮哪颗：只有选中的球切到高亮玻璃态
   selectedBubbleKey.value = bubble.key;
@@ -1237,8 +1237,8 @@ async function chooseNonOwnerRole(bubble: ChoiceBubble) {
 
 /** 触摸被系统打断（来电、手势返回等）：丢掉这次录音并复位，不跳转 */
 function onHoldCancel() {
-  clearHoldTimer();
   clearSpeechFailsafe();
+  pressCancelling = false;
   cancelRecording();
   isRecording.value = false;
   isFinishing.value = false;
@@ -1246,7 +1246,6 @@ function onHoldCancel() {
 }
 
 onBeforeUnmount(() => {
-  clearHoldTimer();
   clearSpeechFailsafe();
   cancelRecording();
   if (introEnterTimer) clearTimeout(introEnterTimer);
@@ -1287,7 +1286,7 @@ onMounted(async () => {
 <template>
   <!-- 游客欢迎页：Ardot 306:2777「起始态 • 未唤醒」（375×812，D 方案全白主题）
        状态栏由宿主绘制（父级 safe-area padding），设计稿里的 54 高状态栏只作示意
-       整页任意位置长按 280ms 进入录音态；松手切到 306:6388 的自我介绍态（沿用录音态的底部渐变 + 文字 + 口播），
+       整页任意位置一按下就进录音态（同首页输入栏「按住说话」，短按松手按误触取消）；松手切到 306:6388 的自我介绍态（沿用录音态的底部渐变 + 文字 + 口播），
        口播播完就地过渡到 306:6468 的身份选择态（标题 + 身份气泡 + 底部提示），全程不跳页 -->
   <view
     class="welcome-visitor"
