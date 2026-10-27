@@ -107,19 +107,29 @@ const STEP_REFRESH_WAIT_MS = 600;
 const INTRO_MIN_VISIBLE_MS = 1600;
 const INTRO_FALLBACK_MS = 6000;
 const INTRO_MAX_WAIT_MS = 20000;
-/** 选中态亮一下再切下一步，避免点下去没有反馈 */
+/** 点选时命中态亮一下再切下一步，避免点下去没有反馈 */
 const SELECT_DELAY_MS = 220;
+/**
+ * 语音命中后的停留时长：与首页身份球（visitor.vue 的 IDENTITY_HIT_HOLD_MS）一致，
+ * 先点亮命中的那一项（高亮玻璃 + 柔光外圈 + 呼吸），让用户看清「选中了哪个」再进下一步。
+ */
+const HIT_HOLD_MS = 900;
 
 /**
  * 机型胶囊槽位：设计稿是 116×72 的三行小胶囊，接口 label 是「400吨燃油履带起重机SCC4000A-8」
  * 这种一整行，按内容撑开会左右撞在一起，所以左右两列各给一个最大宽度（左列到 436rpx、
  * 右列到屏幕右侧），胶囊在自己的列里折行变高，不会压到旁边那颗。
+ *
+ * 第二颗（320吨）向中心图标（220rpx @ top 582rpx，圆心 375,692）靠拢，left 456 / top 520，
+ * 底边压到图标右侧，不挡左上那颗（左列右缘 ≈433rpx，横向留 23rpx）。
+ * 宽度必须 ≥ 278rpx：内容是三行「320吨智混履带 / 起重机 / SCC3200T-EV」，
+ * 机型代号一行要 ≈200rpx 内容宽（maxWidth − 左右 padding 72rpx），
+ * 收到 264rpx 会把「SCC3200T-EV」断成「SCC3200T-」+「EV」变四行。
  */
 const DEVICE_SLOTS = [
   { left: 76, top: 470, minWidth: 250, maxWidth: 360 },
-  { left: 456, top: 368, minWidth: 230, maxWidth: 278 },
+  { left: 456, top: 520, minWidth: 230, maxWidth: 278 },
   { left: 74, top: 848, minWidth: 244, maxWidth: 360 },
-  { left: 456, top: 826, minWidth: 244, maxWidth: 278 },
 ];
 
 const EXPERIENCE_SLOTS = [
@@ -206,6 +216,11 @@ const fallbackRound = ref(0);
 const isRecording = ref(false);
 /** 松手后的识别 / 校验中：底部保持录音那套波纹，等接口回结果 */
 const isChecking = ref(false);
+/**
+ * 未命中（语音没对上任何选项）：与首页 331:147「唤醒失败」一致，底部声纹切成红色，
+ * 停留 MISS_RESET_MS 后自动淡回常态；重新按压 / 命中 / 换页都会提前撤掉。
+ */
+const isMissed = ref(false);
 /** 用户已经用语音交互过：唤醒页不再因为「播报停了」自动往下走（等接口结果决定去向） */
 let voiceInteracted = false;
 /** 长按已进入录音：松手后补出来的 tap 要吞掉，不能当成「跳过唤醒页」 */
@@ -215,6 +230,10 @@ let navigating = false;
 
 let introTimer: ReturnType<typeof setTimeout> | null = null;
 let selectTimer: ReturnType<typeof setTimeout> | null = null;
+/** 语音命中 → 停留后推进的延时器 */
+let hitTimer: ReturnType<typeof setTimeout> | null = null;
+/** 未命中红色 → 自动淡回常态的延时器 */
+let missTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 英文文案比中文长，字号与行高单独收一档，避免气泡 / 胶囊被撑破 */
 const isEnglish = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));
@@ -321,12 +340,13 @@ function nextStepAfter(from: string): string {
   return found || STEP_RECOMMEND;
 }
 
-/** 换页：换页即视为一次有效选择，兜底轮次归零 */
+/** 换页：换页即视为一次有效选择，兜底轮次归零，未命中的红也一并撤掉 */
 function switchTo(code: string) {
   if (activeStep.value === code) return;
   activeStep.value = code;
   fallbackRound.value = 0;
   selectedKey.value = "";
+  clearMissed();
 }
 
 /**
@@ -590,6 +610,8 @@ const HOLD_MOVE_PX = 12;
 const ASR_TIMEOUT_MS = 30_000;
 /** 校验超时：超过就按未命中处理，别让页面一直停在「校验中」 */
 const WAKE_VALIDATE_TIMEOUT_MS = 8_000;
+/** 未命中的红色停留时长：与首页 WAKE_MISS_RESET_MS 一致，2s 后自动淡回常态 */
+const MISS_RESET_MS = 2_000;
 
 interface RecorderResult {
   success?: boolean;
@@ -690,6 +712,7 @@ async function stopRecordingAndRecognize() {
     if (seq !== recordSeq) return;
     if (!started?.success) {
       isChecking.value = false;
+      enterMissed();
       return;
     }
 
@@ -697,13 +720,18 @@ async function stopRecordingAndRecognize() {
     if (seq !== recordSeq) return;
     if (!result?.success || result?.cancelled) {
       isChecking.value = false;
-      if (!result?.cancelled) logger.warn("guide recorder stop failed", result?.error);
+      // 用户主动划走取消不算未命中，不上红
+      if (!result?.cancelled) {
+        logger.warn("guide recorder stop failed", result?.error);
+        enterMissed();
+      }
       return;
     }
 
     const { tempFilePath, audioUrl, audioBase64, mimeType } = result.data || {};
     if (!tempFilePath && !audioUrl && !audioBase64) {
       isChecking.value = false;
+      enterMissed();
       return;
     }
 
@@ -711,15 +739,20 @@ async function stopRecordingAndRecognize() {
     if (seq !== recordSeq) return;
     const text = String(response?.text || "").trim();
     logger.info("guide asr result", { step, text });
+    // 没识别出文字：等同未命中，底部切红让用户知道这次没被听懂
     if (!text) {
       isChecking.value = false;
+      enterMissed();
       return;
     }
     await validateVoiceText(seq, text, step);
   }
   catch (error) {
     logger.warn("guide speech recognize failed", error);
-    if (seq === recordSeq) isChecking.value = false;
+    if (seq === recordSeq) {
+      isChecking.value = false;
+      enterMissed();
+    }
   }
 }
 
@@ -753,8 +786,34 @@ async function validateVoiceText(seq: number, text: string, step: string) {
   }
   catch (error) {
     logger.warn("guide wake validate failed", error);
-    if (seq === recordSeq) isChecking.value = false;
+    if (seq === recordSeq) {
+      isChecking.value = false;
+      enterMissed();
+    }
   }
+}
+
+/** 红色淡回常态（重新按压 / 命中 / 换页 / 卸载时调用） */
+function clearMissed() {
+  if (missTimer) {
+    clearTimeout(missTimer);
+    missTimer = null;
+  }
+  isMissed.value = false;
+}
+
+/**
+ * 未命中：底部声纹切成首页 331:147「唤醒失败」的红
+ * （竖向 rgba(239,239,238,0) → #E02E2A），停留 MISS_RESET_MS 后自动淡回常态。
+ * 页面内容不动，用户可重试或直接点选。
+ */
+function enterMissed() {
+  isMissed.value = true;
+  if (missTimer) clearTimeout(missTimer);
+  missTimer = setTimeout(() => {
+    missTimer = null;
+    isMissed.value = false;
+  }, MISS_RESET_MS);
 }
 
 /** 播报兜底话术：优先用后端这一轮给的 defaultHint，否则按 fallbackTexts 顺序循环 */
@@ -774,8 +833,10 @@ function speakFallback(result?: WakeValidateResult | null) {
 /**
  * 校验结果 → 页面动作，严格按文档：
  * - BACK：读 targetStep 回退，null / 空表示已在 HEY，不跳转；
- * - matched：读 currentStep 前进（带 hitValue 时先把这一步的答案记下来）；
- * - 未命中：播报兜底话术，页面不动，fallbackRound +1，有效选择后归零。
+ * - matched：带 hitValue 时先把命中的那一项点亮（选择特效，见 playHit）再推进，
+ *   不带 hitValue 时读 currentStep 前进；
+ * - 未命中：底部声纹切红（enterMissed），播报兜底话术，页面不动，
+ *   fallbackRound +1，有效选择后归零。
  */
 function applyValidateResult(result: WakeValidateResult | null | undefined, step: string) {
   const matched = Boolean(result?.matched ?? result?.success);
@@ -786,15 +847,20 @@ function applyValidateResult(result: WakeValidateResult | null | undefined, step
   if (localStep === STEP_WELCOME) {
     if (matched && intent !== "BACK") {
       fallbackRound.value = 0;
+      clearMissed();
       enterIntroFrame();
       return;
     }
-    if (!matched) speakFallback(result);
+    if (!matched) {
+      enterMissed();
+      speakFallback(result);
+    }
     return;
   }
 
   if (matched && intent === "BACK") {
     fallbackRound.value = 0;
+    clearMissed();
     const target = normalizeStep(result?.targetStep);
     if (!target) return;
     introTts.stop();
@@ -803,15 +869,18 @@ function applyValidateResult(result: WakeValidateResult | null | undefined, step
   }
 
   if (!matched) {
+    enterMissed();
     speakFallback(result);
     return;
   }
 
+  clearMissed();
   const hitValue = String(result?.hitValue ?? "").trim();
   const code = normalizeStep(step);
   if (hitValue && stepMap.value[code]) {
     fallbackRound.value = 0;
-    void applySelection(code, hitValue, findOptionLabel(code, hitValue) || hitValue);
+    // 命中项先点亮再推进（同首页身份球的命中态），见 playHit
+    playHit(code, hitValue, findOptionLabel(code, hitValue) || hitValue);
     return;
   }
 
@@ -820,6 +889,40 @@ function applyValidateResult(result: WakeValidateResult | null | undefined, step
     || normalizeStep(result?.targetStep)
     || nextStepAfter(step);
   goToStep(next, step);
+}
+
+/** 命中值是否真对得上这一步的某个选项（对不上就没有可点亮的项） */
+function hasOptionValue(code: string, hitValue: string) {
+  const options = Array.isArray(stepMap.value[code]?.options) ? stepMap.value[code].options : [];
+  return options.some(option => optionValue(option) === hitValue);
+}
+
+/**
+ * 语音命中的「选择特效」：与首页 index 的身份球（ai-welcome/visitor.vue 的 --active）同一套 ——
+ * 命中的那一项先点亮（高亮玻璃填充 + 白色柔光外圈 + 1.08 倍呼吸），停留 HIT_HOLD_MS
+ * 让用户看清「选中了哪个」，再按流程链推进，避免选中态一闪而过。
+ * 停留期间又起录 / 换页 / 卸载：recordSeq 或当前 step 变了，这次命中的后续动作作废。
+ */
+function playHit(code: string, hitValue: string, label: string) {
+  if (hitTimer) {
+    clearTimeout(hitTimer);
+    hitTimer = null;
+  }
+  // 命中值对不上任何选项：没有可点亮的项，直接推进，别让用户白等一个停顿
+  if (!hasOptionValue(code, hitValue)) {
+    void applySelection(code, hitValue, label);
+    return;
+  }
+  selectedKey.value = hitValue;
+  const seq = recordSeq;
+  hitTimer = setTimeout(() => {
+    hitTimer = null;
+    if (seq !== recordSeq) return;
+    if (normalizeStep(activeStep.value) !== normalizeStep(code)) return;
+    // 同上：先别清 selectedKey，等真正换页（switchTo）时再清，
+    // 否则胶囊会退回入场动画重播一遍，再跳下一帧
+    void applySelection(code, hitValue, label);
+  }, HIT_HOLD_MS);
 }
 
 function readPoint(e: any) {
@@ -832,8 +935,9 @@ function onHoldStart(e: any) {
   if (isRecording.value || isChecking.value) return;
   holdFired = false;
   voiceInteracted = true;
-  // 用户开口了：撤掉「自我介绍播完自动进下一步」的计时器
+  // 用户开口了：撤掉「自我介绍播完自动进下一步」的计时器，以及上一次未命中的红
   clearIntroAdvance();
+  clearMissed();
   const point = readPoint(e);
   holdStartX = point.x;
   holdStartY = point.y;
@@ -882,6 +986,14 @@ function clearTimers() {
     clearTimeout(selectTimer);
     selectTimer = null;
   }
+  if (hitTimer) {
+    clearTimeout(hitTimer);
+    hitTimer = null;
+  }
+  if (missTimer) {
+    clearTimeout(missTimer);
+    missTimer = null;
+  }
   clearHoldTimer();
 }
 
@@ -907,6 +1019,8 @@ function onOptionTap(item: FlowStepOption) {
   if (isRecording.value || isChecking.value) return;
   const step = currentStep.value;
   if (!step || selectedKey.value) return;
+  // 点选也是一次有效选择：上一次未命中的红提前撤掉
+  clearMissed();
   const hit = optionValue(item);
   if (!hit) return;
   selectedKey.value = hit;
@@ -915,7 +1029,11 @@ function onOptionTap(item: FlowStepOption) {
   const label = String(item.label || "").trim() || hit;
   selectTimer = setTimeout(() => {
     selectTimer = null;
-    selectedKey.value = "";
+    // 注意：**不要**在这里清 selectedKey。
+    // 清掉 --selected 会让胶囊退回基类的 gi-bubble-holo 入场动画（backwards 填充），
+    // 而 applySelection 在 DEVICE 步还要等 loadFlowSteps（最多 600ms），
+    // 于是就出现「选中动效没了 → 胶囊重新翻折渲染一遍 → 才跳下一帧」。
+    // 选中态交给 switchTo（换页时清）、或 applySelection 兜底清。
     void applySelection(code, hit, label);
   }, SELECT_DELAY_MS);
 }
@@ -936,6 +1054,7 @@ async function applySelection(stepCode: string, hitValue: string, label: string)
   // 同类设备「还没开过」：后面「当前机型经验」那一问没必要再问，直接进作业指导。
   // modelExperience 不传，作业指导页按第一轮 experience 兜底（见 api/guide/types）。
   if (code === STEP_EXPERIENCE && normalizeStep(hitValue) === "NOT_EXPERIENCED") {
+    selectedKey.value = "";
     finish();
     return;
   }
@@ -951,6 +1070,9 @@ async function applySelection(stepCode: string, hitValue: string, label: string)
     next = nextStepAfter(code);
   }
   goToStep(next, code);
+  // 换页时 switchTo 已经清过；这里兜住「next 仍是当前步」（接口没给出下一步）的情况，
+  // 否则胶囊会一直亮着、后续点不动
+  selectedKey.value = "";
 }
 
 /**
@@ -1064,6 +1186,7 @@ onBeforeUnmount(() => {
       'gi--speaking': speaking,
       'gi--recording': isRecording,
       'gi--checking': isChecking,
+      'gi--missed': isMissed,
     }"
     @tap="onPageTap"
     @touchstart="onHoldStart"
@@ -1229,14 +1352,16 @@ onBeforeUnmount(() => {
   background: #fafafa;
 }
 
-/* ===== 底部光效：常态一缕淡蓝，播报时换成三色带波纹 =====
-   与欢迎页 welcome-visitor__glow 完全同一套结构与切换时机：
+/* ===== 底部光效：常态淡蓝水面，播报 / 按住说话换成波纹色带 =====
+   参考首页 index 的底部语音波纹（ai-chat-input 的 voice-panel__wave / welcome-visitor__glow）：
    - __glow：贴底 120px 容器（比波形容器多留 2px 给遮罩模糊的出血），overflow hidden；
-   - __glow-fade：常态 #FAFAFA → #BFDAF4 的 62px 渐变，曲线按反馈图逐段采样，上半段不过早显色；
-   - __glow-voice：播报态 118px 波形容器，只靠外层 opacity 淡入淡出（避免 transition 和 keyframes 抢属性）；
-   - __wave-band：11332:97 Rectangle 106 的三色带（#EBB4E9 → #56ABFA → #9795E8），
-     用 voice-listening-wave-blur-mask.svg 的波形遮罩裁出软边。
-   状态类是根节点上的 gi--speaking，对应欢迎页的 --finishing / --glow-idle。 */
+   - __glow-fade：**常态也是波形** —— 与 .gi__wave-band 同一套几何（top 130rpx / 106rpx 高）
+     和同一张 voice-listening-wave-blur-mask.svg 波形遮罩，只把色带换成最淡的冷蓝，
+     顶部透明接页面背景、底部 #BFDAF4，缓慢起伏；原来那条 62px 直边渐变已去掉
+     （它起点是 #FAFAFA，落在步骤态冷色背景上会露一条硬边）；
+   - __glow-voice：118px 波形容器，只靠外层 opacity 淡入淡出（避免 transition 和 keyframes 抢属性）；
+   - __wave-band：11332:97 Rectangle 106 的水面，播报三色带、按住 / 校验竖直蓝水面。
+   状态类是根节点上的 gi--speaking / gi--recording / gi--checking。 */
 .gi__glow {
   position: absolute;
   right: 0;
@@ -1253,18 +1378,40 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   left: 0;
-  height: 124rpx; // 62px
+  height: 236rpx; // 与波形容器同高，::before 才能沿用同一套遮罩坐标
+  opacity: 1;
+  transition: opacity 240ms ease;
+  pointer-events: none;
+}
+
+/* 常态水面：几何 / 遮罩参数与 .gi__wave-band 完全一致，只换渐变——
+   顶部透明（贴着页面背景消失，没有硬边）→ 底部 #BFDAF4，7s 极缓起伏 */
+.gi__glow-fade::before {
+  position: absolute;
+  top: 130rpx; // y759 − y694 = 65px，与语音色带同一条基准线
+  left: 0;
+  width: 750rpx; // 375px
+  height: 106rpx; // 53px
   background-image: linear-gradient(
     180deg,
-    #fafafa 0%,
-    #f7f8f9 38%,
-    #f0f4f8 52%,
-    #e7eff6 65%,
-    #d9e8f6 77%,
-    #c8def4 90%,
+    rgba(250, 250, 250, 0) 0%,
+    rgba(240, 245, 251, 0.55) 36%,
+    #dfeaf7 64%,
+    #cfe0f5 84%,
     #bfdaf4 100%
   );
-  transition: opacity 320ms ease;
+  -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
+  mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 990rpx 286rpx; // 遮罩画布 495×143 @2x
+  mask-size: 990rpx 286rpx;
+  -webkit-mask-position: -121rpx -14rpx; // 画布原点对齐页面 (−60.5, 752)
+  mask-position: -121rpx -14rpx;
+  animation: gi-wave-sway 7s ease-in-out infinite alternate;
+  content: "";
+  pointer-events: none;
+  will-change: mask-position;
 }
 
 .gi__glow-voice {
@@ -1290,6 +1437,13 @@ onBeforeUnmount(() => {
 .gi--recording .gi__glow-fade,
 .gi--checking .gi__glow-fade {
   opacity: 0;
+}
+
+/* 已经看不见了，常态水面的起伏动画没必要继续占合成线程 */
+.gi--speaking .gi__glow-fade::before,
+.gi--recording .gi__glow-fade::before,
+.gi--checking .gi__glow-fade::before {
+  animation-play-state: paused;
 }
 
 /* 11332:91 Frame 45：波浪容器，贴底 118px */
@@ -1336,22 +1490,79 @@ onBeforeUnmount(() => {
   transform: translateY(8rpx);
 }
 
-/* 动画只在播报时跑（同欢迎页 --finishing）：色带横向流动 + 遮罩左右摆动，后层更慢且反向；
+/* 播报态（同欢迎页 --finishing）：三色带横向流动 + 遮罩左右摆动，后层更慢且反向；
    常态下不挂动画，不占合成线程 */
-.gi--speaking .gi__wave-band,
-.gi--recording .gi__wave-band,
-.gi--checking .gi__wave-band {
+.gi--speaking .gi__wave-band {
   animation:
     gi-wave-color-flow 5.6s linear infinite,
     gi-wave-sway 4.8s ease-in-out infinite alternate;
 }
 
-.gi--speaking .gi__wave-band--back,
-.gi--recording .gi__wave-band--back,
-.gi--checking .gi__wave-band--back {
+.gi--speaking .gi__wave-band--back {
   animation:
     gi-wave-color-flow 7.6s linear infinite reverse,
     gi-wave-sway 6s ease-in-out infinite alternate;
+}
+
+/* 按住说话 / 校验中：与首页「按住说话」面板（voice-panel__wave-band）一致 ——
+   竖向 #EFEFEE → #0F7EEE 的水面，没有横向色差，改用「色彩上下涨落」+ 波形摆动。
+   放在三色带规则之后，同特异度覆盖播报态那套 */
+.gi--recording .gi__wave-band,
+.gi--checking .gi__wave-band {
+  background-image: linear-gradient(180deg, #efefee 0%, #0f7eee 100%);
+  background-size: 100% 160%;
+  animation:
+    gi-wave-drift 4.8s ease-in-out infinite alternate,
+    gi-wave-sway 4.8s ease-in-out infinite alternate;
+}
+
+.gi--recording .gi__wave-band--back,
+.gi--checking .gi__wave-band--back {
+  background-image: linear-gradient(180deg, #efefee 0%, #0f7eee 100%);
+  background-size: 100% 160%;
+  animation:
+    gi-wave-drift 6s ease-in-out infinite alternate-reverse,
+    gi-wave-sway 6s ease-in-out infinite alternate;
+}
+
+/* 竖向渐变的涨落：背景比容器高 60%，上下位移时水色在浅灰与深蓝之间呼吸 */
+@keyframes gi-wave-drift {
+  from {
+    background-position: 0 0;
+  }
+
+  to {
+    background-position: 0 100%;
+  }
+}
+
+/* 语音未命中：底部声纹切红 —— 与首页 331:147「唤醒失败」同一条色带
+   （Rectangle 106 375×107：竖向 rgba(239,239,238,0) 0% → #E02E2A 100%）。
+   红期间不做色带横向流动 / 上下涨落，只保留波形摆动，保证红色一直压在最底下；
+   规则放在播报 / 录音那几套之后，同特异度靠源码顺序覆盖。
+   2s 后 isMissed 自动复位，色带靠 opacity 过渡淡回常态 */
+.gi--missed .gi__glow-voice {
+  opacity: 1;
+}
+
+.gi--missed .gi__glow-fade {
+  opacity: 0;
+}
+
+.gi--missed .gi__glow-fade::before {
+  animation-play-state: paused;
+}
+
+.gi--missed .gi__wave-band {
+  background-image: linear-gradient(180deg, rgba(239, 239, 238, 0) 0%, #e02e2a 100%);
+  background-size: 100% 100%;
+  animation: gi-wave-sway 4.8s ease-in-out infinite alternate;
+}
+
+.gi--missed .gi__wave-band--back {
+  background-image: linear-gradient(180deg, rgba(239, 239, 238, 0) 0%, #e02e2a 100%);
+  background-size: 100% 100%;
+  animation: gi-wave-sway 6s ease-in-out infinite alternate;
 }
 
 /* 色带横向流动：位移一个背景周期（1500rpx），首尾同色，循环无缝 */
@@ -1627,9 +1838,30 @@ onBeforeUnmount(() => {
   display: none;
 }
 
+/* 命中 / 选中态：与首页 index 身份球（welcome-visitor__bubble--active）同一套 ——
+   玻璃填充提亮 + 白色柔光外圈 + 1.08 倍呼吸。语音命中会停留 HIT_HOLD_MS 让用户看清
+   「选中了哪个」，点选走同一套视觉（停留更短）；z-index 提到最上层，柔光不被旁边的球压住。
+   复合动画直接覆盖入场 keyframes：命中发生在入场之后，两段不会抢 transform */
 .gi__bubble--selected {
-  transform: scale(0.94);
-  filter: brightness(1.04);
+  z-index: 2;
+  background: linear-gradient(160deg, #eef8ff 0%, #ffffff 100%);
+  box-shadow:
+    0 0 12rpx 2rpx rgba(255, 255, 255, 0.8),
+    0 0 20rpx 4rpx rgba(158, 199, 255, 0.35),
+    0 10rpx 24rpx rgba(88, 138, 220, 0.24);
+  animation: gi-bubble-pick 1.2s ease-in-out infinite;
+}
+
+/* 选中呼吸：8% 的放大起步，与首页 welcome-bubble-pick 同一节奏 */
+@keyframes gi-bubble-pick {
+  0%,
+  100% {
+    transform: scale(1.04);
+  }
+
+  50% {
+    transform: scale(1.1);
+  }
 }
 
 .gi__bubble-text {
@@ -1644,11 +1876,15 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 胶囊版式（第三 / 四态）=====
-   与首页「开始体验」帧（welcome-visitor__detail-tag）同一套处理：
-   16% 不透明的紫粉蓝渐变填充 + 2px 渐变外描边（::before）+ 背景模糊 29px + 投影，
+   与首页「老板身份信息」帧（welcome-visitor__detail-tag，1006:313 等）同一套处理：
+   只有 16% 不透明的紫粉蓝渐变填充 + 背景模糊 29px + 投影，**不画描边**
+   （原 2px OUTSIDE 渐变描边的 ::before 已移除，与首页保持一致）；
    入场同为方案 4「全息升维翻展」，从中心图标圆心翻折飞回槽位。
    宽度不写死：中文与设计稿同宽，英文按 max-width 折行，胶囊变高而不是顶出屏幕 */
 .gi__pill {
+  /* 填充不透明度抽成变量：默认态是设计稿的 16%，
+     命中态（--selected）抬到 34%，与首页身份球「高亮玻璃」同一套思路 */
+  --pill-fill-alpha: 0.16;
   position: absolute;
   display: flex;
   align-items: center;
@@ -1659,45 +1895,50 @@ onBeforeUnmount(() => {
   border-radius: 76rpx; // 38
   background-image: linear-gradient(
     93.66deg,
-    rgba(61, 33, 205, 0.16) 0%,
-    rgba(193, 228, 255, 0.16) 27.8%,
-    rgba(123, 156, 255, 0.16) 50.9%,
-    rgba(192, 103, 250, 0.16) 71.2%,
-    rgba(247, 207, 255, 0.16) 85.8%,
-    rgba(253, 144, 196, 0.16) 100%
+    rgba(61, 33, 205, var(--pill-fill-alpha)) 0%,
+    rgba(193, 228, 255, var(--pill-fill-alpha)) 27.8%,
+    rgba(123, 156, 255, var(--pill-fill-alpha)) 50.9%,
+    rgba(192, 103, 250, var(--pill-fill-alpha)) 71.2%,
+    rgba(247, 207, 255, var(--pill-fill-alpha)) 85.8%,
+    rgba(253, 144, 196, var(--pill-fill-alpha)) 100%
   );
-  box-shadow: 0 2rpx 22rpx rgba(0, 0, 0, 0.1), 0 6rpx 32rpx rgba(0, 159, 235, 0.127);
+  /* 投影按首页 detail-tag：只留 0 3 16 那层冷蓝光，去掉黑色投影 */
+  box-shadow: 0 6rpx 32rpx rgba(0, 159, 235, 0.127);
   -webkit-backdrop-filter: blur(58rpx); // 29px
   backdrop-filter: blur(58rpx);
   animation: gi-bubble-holo 1200ms cubic-bezier(0.16, 1, 0.3, 1) var(--holo-delay, 0ms) backwards;
   will-change: transform, opacity, filter;
 }
 
-/* 2px 外描边：撑到胶囊外 2px，再用双层遮罩相减只留那一圈渐变 */
-.gi__pill::before {
-  position: absolute;
-  inset: -4rpx; // 2px（OUTSIDE）
-  padding: 4rpx;
-  border-radius: 80rpx; // 38px + 2px
-  background-image: linear-gradient(
-    90deg,
-    rgba(61, 33, 205, 0.26) 0%,
-    rgba(25, 153, 254, 0.26) 48.72%,
-    rgba(192, 103, 250, 0.26) 76%,
-    rgba(253, 144, 196, 0.26) 100%
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  content: "";
-  pointer-events: none;
-}
-
-.gi__pill:active,
-.gi__pill--selected {
+/* 按住反馈：压一下 + 提亮，不改填充 */
+.gi__pill:active {
   filter: brightness(1.08);
   transform: scale(0.97);
+}
+
+/* 命中 / 选中态：与首页 index 身份球（welcome-visitor__bubble--active）同一套 ——
+   玻璃填充提亮 + 白色柔光外圈 + 1.04 → 1.08 呼吸。语音命中停留 HIT_HOLD_MS，
+   点选走同一套（停留 SELECT_DELAY_MS）；animation 覆盖入场 keyframes，两段不抢 transform */
+.gi__pill--selected {
+  --pill-fill-alpha: 0.34;
+  z-index: 2;
+  box-shadow:
+    0 0 12rpx 2rpx rgba(255, 255, 255, 0.85),
+    0 0 20rpx 4rpx rgba(158, 199, 255, 0.45),
+    0 10rpx 24rpx rgba(88, 138, 220, 0.24);
+  animation: gi-pill-pick 1.2s ease-in-out infinite;
+}
+
+/* 胶囊命中呼吸：与首页 welcome-bubble-pick 同一节奏 */
+@keyframes gi-pill-pick {
+  0%,
+  100% {
+    transform: scale(1.03);
+  }
+
+  50% {
+    transform: scale(1.07);
+  }
 }
 
 .gi__pill-text {
