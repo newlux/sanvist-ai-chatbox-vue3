@@ -32,6 +32,11 @@ const props = defineProps({
   shareAllChecked: { type: Boolean, default: false },
   shareSelectedRoundCount: { type: Number, default: 0 },
   backOnly: { type: Boolean, default: false },
+  /**
+   * 头部底色透明（首页对话页用）：页面把它做成悬浮层，消息可以滚到头部下面，
+   * 由页面顶部的毛玻璃层负责渐隐；其它页面保持原来的实底渐变。
+   */
+  plainBg: { type: Boolean, default: false },
 });
 const emit = defineEmits([
   "back",
@@ -65,6 +70,13 @@ const thinking = computed(() => props.generating && !answering.value);
 
 const logger = createLogger("chat-header");
 const { t, locale } = useI18n();
+/**
+ * 灵动岛下方的长条胶囊只在生成过程中出现：
+ * 未出字「思考中」→ 出字后「正在回答」，其余状态整个胶囊不渲染。
+ */
+const statusText = computed(() =>
+  answering.value ? t("chat-status-generating") : t("chat-status-thinking"),
+);
 const { safeTopPx } = useSafeArea();
 /** 设计稿 309:3088：抽屉顶部的「中 / EN」切换，复用全局 i18n locale（默认 zh_CN） */
 const isEnglishLocale = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));
@@ -372,7 +384,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <view class="ai-chat-header">
+  <!-- 分享选择态是「文字 + 勾选」条，保留原来的实底渐隐，避免文字压在滚动内容上看不清 -->
+  <view class="ai-chat-header" :class="{ 'ai-chat-header--plain': plainBg && !shareMode }">
     <view class="chat-header">
       <!-- 状态栏占位：动态读取真实机型状态栏高度 -->
       <view class="chat-header__statusbar" :style="statusbarStyle" />
@@ -399,18 +412,13 @@ onBeforeUnmount(() => {
           </view>
 
           <!-- 顶部中间「灵动岛」+ 下方状态胶囊
-               Ardot 722:2498（浅色-等待中）：圆形 722:328 / 胶囊 722:326
-               Ardot 722:69（浅色思考中）/ 722:489（浅色回答中）：渐变描边 722:339 / 胶囊 722:336 -->
+               Ardot 722:69（浅色思考中）/ 722:489（浅色回答中）：胶囊只在生成中出现
+               未生成时只留圆形灵动岛，胶囊整体不渲染 -->
           <view class="chat-header__island-wrap">
             <view
               class="chat-header__island"
-              :class="{
-                'chat-header__island--active': props.generating,
-                'chat-header__island--thinking': thinking,
-              }"
+              :class="{ 'chat-header__island--thinking': thinking }"
             >
-              <!-- 思考中 / 回答中：渐变描边环，紫→蓝→紫→粉→透明，绕圈旋转 -->
-              <view v-if="props.generating" class="chat-header__island-ring" />
               <!-- 圆形玻璃底盘单独一层：底盘负责圆形轮廓，模糊只作用在这一层 -->
               <view class="chat-header__island-glass" />
               <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），
@@ -421,17 +429,12 @@ onBeforeUnmount(() => {
                 mode="aspectFit"
               />
             </view>
-            <view
-              class="chat-header__status-pill"
-              :class="{ 'chat-header__status-pill--active': props.generating }"
-            >
-              <view v-if="props.generating" class="chat-header__status-pill-border" />
+            <!-- 长条胶囊：仅「思考中 / 正在回答」两个生成态展示，其余状态不出现 -->
+            <view v-if="props.generating" class="chat-header__status-pill">
+              <view class="chat-header__status-pill-border" />
+              <!-- 胶囊只留一行：思考中「思考中」/ 出字后「正在回答」 -->
               <text class="chat-header__status-text">
-                SANI
-              </text>
-              <!-- 出字前「正在思考中..」，出字后「正在回答中..」（722:69 / 722:489 文案） -->
-              <text v-if="props.generating" class="chat-header__status-text">
-                {{ answering ? t("chat-status-generating") : t("chat-status-thinking") }}
+                {{ statusText }}
               </text>
             </view>
           </view>
@@ -758,6 +761,12 @@ onBeforeUnmount(() => {
   // box-shadow: 0 8rpx 24rpx rgba(26, 26, 26, 0.06);
 }
 
+/* 悬浮头部（首页对话页）：底色交给页面顶部的毛玻璃渐隐层，
+   这里完全透明，滚上来的消息才能透到图标下面，而不是被一层实底挡住 */
+.ai-chat-header--plain {
+  background: linear-gradient(180deg, #fafafa 0%, rgba(250, 250, 250, 0.92) 10%, rgba(250, 250, 250, 0) 100%);
+}
+
 :deep(.uni-popup) {
   z-index: 1000 !important;
 }
@@ -813,10 +822,10 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 顶部中间「灵动岛」：Ardot 722:2498（等待中）/ 722:489（回答中）→ Group 133 =====
-   圆形 92×92：透明填充（设计稿是白 40%，按需求改为透明）+ 背景模糊 2
-     · 等待中：1px #FFFFFF 描边（Ellipse 55）
-     · 回答中：渐变描边环（722:339）+ 整体放大 10% + 环自转
-   Logo 72×72：圆内偏移 左 10 / 上 6，投影 0 3 9 rgba(0,0,0,.14)
+   圆形 80×80（722:338 Group 133 → 722:339 Ellipse 55）：透明填充（设计稿是白 40%，按需求改为透明）+ 背景模糊 2
+    · 各状态统一 1px #FFFFFF 描边（彩色渐变描边环与自转「跑马灯」已去掉）
+    · 只有思考中会呼吸放大到 100px（200rpx，设计稿 722:96 Group 134），出字后回落
+   Logo 62×62（722:340 / 页面实例 1187:41;722:340）：圆内偏移 左 9 / 上 5.2，投影 0 3 9 rgba(0,0,0,.14)
 
    浮动定位：绝对定位浮在状态栏下沿，向下悬在内容之上，
    不占布局、不撑高头部，也不改变两侧按钮的位置（pointer-events: none 不拦截点击） */
@@ -834,8 +843,8 @@ onBeforeUnmount(() => {
 
 .chat-header__island {
   position: relative;
-  width: 184rpx; // 92px
-  height: 184rpx;
+  width: 160rpx; // 80px（722:338 Group 133 / 722:339 Ellipse 55 的实际尺寸）
+  height: 160rpx;
   box-sizing: border-box;
   border: 1px solid #ffffff;
   border-radius: 50%;
@@ -844,86 +853,28 @@ onBeforeUnmount(() => {
   // 独立合成层：避免 backdrop-filter 在部分内核把圆角裁剪丢掉（表现为方形图标）
   transform: translateZ(0);
   // 缩放过渡做柔：480ms + 两端平滑的缓动曲线，变大/变小都不是硬切
-  transition:
-    transform 480ms cubic-bezier(0.4, 0, 0.2, 1),
-    border-color 360ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 480ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* 思考中 / 回答中（Ardot 722:69 / 722:489 → 722:339）：白色描边让位给渐变描边
-   （722:339 里 #EFEFEF 那条描边 visible=false，渐变描边 visible=true） */
-.chat-header__island--active {
-  border-color: transparent;
-}
-
-/* 只有「思考中」呼吸放大：1 → 1.1 → 1 循环；一旦出字（回答中）就回落到原始 92×92 */
+/* 只有「思考中」呼吸放大：160rpx → 200rpx（设计稿 80px → 100px）循环；
+   一旦出字（回答中）就回落到原始 160rpx（80px），其他状态尺寸不变 */
 .chat-header__island--thinking {
-  animation: island-breathe 1.6s ease-in-out infinite;
+  // 呼吸节奏放慢：1.6s → 2.2s（一轮放大+回落），起伏更舒缓
+  animation: island-breathe 2.2s ease-in-out infinite;
 }
 
 /* 呼吸动效：两端平滑、无跳变；translateZ(0) 保持独立合成层，
-   避免 WebView 在缩放过程中重新裁剪圆角 */
+   避免 WebView 在缩放过程中重新裁剪圆角。
+   峰值按设计稿 722:96 Group 134 = 100px = 200rpx：
+   基数 160rpx，200 / 160 = 1.25 */
 @keyframes island-breathe {
   0%,
   100% {
-    transform: translateZ(0) scale(1);
+    transform: translateZ(0) scale(1); // 160rpx（80px）
   }
 
   50% {
-    transform: translateZ(0) scale(1.1);
-  }
-}
-
-/* 思考中 / 回答中的渐变描边环：722:339.strokes[1]
-   #3D21CD → #1999FE → #C067FA → #FD90C4 → rgba(253,144,196,0)
-   与胶囊描边同一套 mask 挖空法，只保留 3rpx 的环。
-   动效是「追着转」而不是整圈铺满：色带只占一段圆弧（约 39% 周长），
-   其余角度透明，整环自转时看起来就是一段彩色光沿圆周追赶 */
-.chat-header__island-ring {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  padding: 3rpx; // 1.5px 环宽
-  border-radius: 50%;
-  /* 兜底：不支持 conic-gradient 的内核仍能看到整圈线性渐变描边 */
-  background-image: linear-gradient(
-    126deg,
-    #3d21cd 0%,
-    #1999fe 27.52%,
-    #c067fa 48.32%,
-    #fd90c4 67.37%,
-    rgba(253, 144, 196, 0) 100%
-  );
-  /* 追光：60deg 起色 → 200deg 收尾透明，色带约 140deg，其余角度留白形成「缺口」 */
-  background-image: conic-gradient(
-    from 0deg,
-    rgba(61, 33, 205, 0) 0deg,
-    #3d21cd 60deg,
-    #1999fe 105deg,
-    #c067fa 145deg,
-    #fd90c4 175deg,
-    rgba(253, 144, 196, 0) 200deg,
-    rgba(253, 144, 196, 0) 360deg
-  );
-  /* 先写标准属性、再用 -webkit- 兜底：老 WebView 只认前缀版本 */
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  animation: island-ring-spin 2s linear infinite;
-  will-change: transform;
-  pointer-events: none;
-}
-
-/* 环是正圆，整体旋转只让这段色带绕圈追赶，不会改变轮廓 */
-@keyframes island-ring-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
+    transform: translateZ(0) scale(1.25); // 200rpx（100px）
   }
 }
 
@@ -947,10 +898,12 @@ onBeforeUnmount(() => {
 .chat-header__island-logo {
   position: absolute;
   z-index: 1;
-  top: 12rpx; // 6px
-  left: 20rpx; // 10px
-  width: 144rpx; // 72px
-  height: 144rpx;
+  // 设计稿 722:340：图相对圆外沿 左 9 / 上 5.2；绝对定位基准是 padding box，
+  // 圆的 1px 描边占掉 1px，所以要减掉（9-1=8 → 16rpx，5.2-1=4.2 → 8.4rpx）
+  top: 8.4rpx; // 5.2px
+  left: 16rpx; // 9px
+  width: 124rpx; // 62px（722:340 实测 62×62）
+  height: 124rpx;
   // 图片本身是透明背景 GIF（300×267，内容已裁到图案边界），这里再显式声明一次透明底，
   // 防止 image 组件/内核给它补上默认白底而露出方形
   background-color: transparent;
@@ -961,7 +914,7 @@ onBeforeUnmount(() => {
 
 /* ===== 岛屿下方的状态胶囊 =====
    等待中 722:326：h32 / r20 / 白 / 内边距 6·20 / 文案 "SANI" 14px Medium
-   回答中 722:336：hug / r20 / 白 / 内边距 10·13 / 文案 "SANI / 正在回答中.."
+   思考中 / 回答中：同一尺寸，只把文案换成一行「思考中」/「正在回答」
    胶囊与圆形底部重叠 6px（722:2498 里胶囊 y=138，圆形 y=52~144） */
 .chat-header__status-pill {
   position: relative;
@@ -972,14 +925,10 @@ onBeforeUnmount(() => {
   margin-top: -12rpx; // 与圆形底部重叠 6px
   padding: 12rpx 40rpx; // 6 / 20
   border-radius: 40rpx; // 20px
+  overflow: hidden; // clipsContent: true（描边环不溢出圆角）
   /* 纯白底 + 向下投影：靠投影从滚动内容里浮起来（白底不再需要背景模糊） */
   background: #ffffff;
   box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.08); // 0 4px 12px rgba(0,0,0,.08)
-}
-
-.chat-header__status-pill--active {
-  padding: 20rpx 26rpx; // 10 / 13
-  overflow: hidden; // clipsContent: true（描边环不溢出圆角）
 }
 
 /**

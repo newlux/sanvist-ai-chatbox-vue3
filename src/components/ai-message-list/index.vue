@@ -57,6 +57,14 @@ const props = defineProps({
     type: String,
     default: "",
   },
+  /**
+   * 顶部悬浮头部的高度：内容按这段留白往下起步，滚动时又能穿到头部下面
+   * （首页对话页的头部是悬浮的，靠顶部的毛玻璃层渐隐，见 index 页 .ai-page__top-fade）。
+   */
+  topInset: {
+    type: String,
+    default: "",
+  },
   /** 当前要顶到对话区顶部的核对卡（多步骤卡）属于哪一步：按它从最新一轮往回找那张卡 */
   stepCardStepId: {
     type: String,
@@ -712,6 +720,10 @@ function observeListHeight() {
 
 const listPadStyle = computed(() => {
   const style: Record<string, string> = {};
+  // 顶部留白给悬浮头部让位：留白在滚动内容里，所以内容往上滚时能穿到头部毛玻璃下面
+  if (props.topInset) {
+    style.paddingTop = props.topInset;
+  }
   if (props.bottomInset) {
     style.paddingBottom = `calc(${props.bottomInset} + ${MESSAGE_LIST_EXTRA_GAP_PX}px)`;
   }

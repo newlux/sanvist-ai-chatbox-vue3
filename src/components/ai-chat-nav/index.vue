@@ -52,7 +52,7 @@ const { isPc } = usePcMode();
 /** 当前首个可见项下标：交给 swiper 的 current 做受控滑动（手势滑动改它） */
 const currentIndex = ref(0);
 
-// 四个入口都另开专属页面：听汇报 / 作业指导 / 故障维修 / 任务协同
+// 四个入口都另开专属页面：听汇报 / 作业指导 / 任务协同 / 维修助手
 const DEFAULT_NAV_ITEMS: NavItem[] = [
   {
     key: "vox-core",
@@ -72,20 +72,20 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     url: "/pages/guide-init/index",
   },
   {
-    key: "repair-master-ai",
-    titleKey: "nav-repair",
-    icon: iconRepair,
-    subagent: "repair",
-    mode: "page",
-    url: "/pages/repair/index",
-  },
-  {
     key: "ai-form",
     titleKey: "nav-task",
     icon: iconForm,
     subagent: "task",
     mode: "page",
     url: "/pages/task-init/index",
+  },
+  {
+    key: "repair-master-ai",
+    titleKey: "nav-repair",
+    icon: iconRepair,
+    subagent: "repair",
+    mode: "page",
+    url: "/pages/repair/index",
   },
 ];
 
