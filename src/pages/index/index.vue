@@ -278,6 +278,13 @@ function startRepairSummaryCallback() {
   });
   chatStore.scrollToBottom(true);
 
+  /**
+   * 已经补到卡片上的维修助手会话 ID。
+   * 诊断中没有回填明细，但 ID 一到位就要让卡片可点（气泡只按这个字段决定是否显示右箭头），
+   * 所以要单独记一份，避免每轮都重复 patch，也避免 Completed 回包没带 ID 时把它覆盖成空。
+   */
+  let patchedConversationId = "";
+
   const poll = async () => {
     repairSummaryPollingAttempts += 1;
     try {
@@ -289,20 +296,37 @@ function startRepairSummaryCallback() {
         assistantCallbackTitle: summary.title,
         assistantCallbackStatus: summary.statusText,
         assistantCallbackDetails: summary.details,
-        assistantCallbackConversationId: summary.repairConversationId,
+        assistantCallbackConversationId: summary.repairConversationId || patchedConversationId,
       });
-      // 快速问答没有状态字段，首次获取结果后直接回流，不进入轮询。
-      if (!data.status) {
-        applySummary();
-        await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: "维修助手-快速问答" });
-        return;
-      }
-      // 故障诊断：状态为 Completed，或回流已带回 repairConversationId 时结束轮询并回流。
-      if (data.status === "Completed" || summary.repairConversationId) {
+      /**
+       * 结果就绪：只有下面两种情况才结束轮询并回流。
+       * - 无 status：快速问答没有状态字段，首次取到结果就回流；
+       * - Completed：诊断报告已完成。
+       * Diagnosing 是「诊断中」，服务端此时返回的 conclusion / treatment 还只是
+       * 「当前故障案例报告还未生成」这种占位文案，提前回流会把占位内容当成结论写进卡片，
+       * 而且会走到下面的 return，把 setTimeout 掐断 —— 表现就是只请求了一次、不再轮询。
+       * 所以 Diagnosing 一律放行到末尾继续轮询，等状态收敛成 Completed。
+       * repairConversationId 只决定卡片能不能点进详情（为空时气泡不渲染箭头），
+       * 不能拿它当作「结果就绪」的依据。
+       */
+      const status = String(data.status || "");
+      if (!status || status === "Completed") {
         clearRepairSummaryPolling();
         applySummary();
         await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: "维修助手-快速问答" });
         return;
+      }
+
+      /**
+       * 还没到 Completed（如 Diagnosing 诊断中）：结论仍是占位文案，明细 / 副标题一律不写；
+       * 但只要服务端这次带回了 repairConversationId，就立刻把卡片补成可点击的，
+       * 用户不用等诊断结束也能点右箭头跳到维修助手看诊断详情。
+       * 只补这一个字段，不碰明细，也不打断下面的轮询。
+       */
+      const conversationId = summary.repairConversationId;
+      if (conversationId && conversationId !== patchedConversationId) {
+        patchedConversationId = conversationId;
+        chatStore.patchMessageById(aiMsgId, { assistantCallbackConversationId: conversationId });
       }
     }
     catch (error) {
