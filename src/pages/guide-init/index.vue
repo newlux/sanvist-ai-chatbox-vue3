@@ -310,6 +310,88 @@ const currentOptions = computed(() => {
     .slice(0, limit);
 });
 
+/**
+ * 粗估一颗胶囊折行后的高度（rpx）：28rpx 字号、行高 40rpx、上下 padding 24rpx。
+ * CJK 按 1em、西文按 0.55em 计宽，与「maxWidth − 左右 padding 72rpx」比对折行数。
+ * 机型文案会折到 2–3 行（「400吨燃油履带起重机SCC4000A-8」2 行、
+ * 「320吨智混履带起重机SCC3200T-EV」3 行），固定按 64rpx 估会低估，底部提示就会被压住。
+ */
+function estimatePillHeight(label: string, slot: { minWidth: number; maxWidth: number }) {
+  const contentWidth = Math.max(64, (slot.maxWidth || slot.minWidth) - 72);
+  let lines = 1;
+  let lineWidth = 0;
+  for (const char of String(label || "")) {
+    const width = /[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/.test(char) ? 28 : 15.4;
+    if (lineWidth + width > contentWidth && lineWidth > 0) {
+      lines += 1;
+      lineWidth = width;
+    }
+    else {
+      lineWidth += width;
+    }
+  }
+  return lines * 40 + 24;
+}
+
+/**
+ * 当前这一步选项区的最低点（rpx），只统计真正渲染出来的选项：
+ * - 气泡版式：top + size；
+ * - 胶囊版式：top + 折行高度（见 estimatePillHeight）。
+ */
+const optionAreaBottom = computed(() => {
+  const isBubbles = currentLayout.value === "bubbles";
+  const slots = isBubbles ? BUBBLE_SLOTS : currentSlots.value;
+  return currentOptions.value.reduce((bottom, item, index) => {
+    const slot: { top: number; size?: number; minWidth?: number; maxWidth?: number } | undefined = slots[index];
+    if (!slot) return bottom;
+    const height = isBubbles ? Number(slot.size) || 0 : estimatePillHeight(item.label, slot as { minWidth: number; maxWidth: number });
+    return Math.max(bottom, slot.top + height);
+  }, 0);
+});
+
+/** 提示文字与选项区的固定间距（rpx，56px）：与 task-init 的 HINT_GAP_RPX 同一档 */
+const HINT_GAP_RPX = 112;
+/** 设计稿里提示是贴底的：y=597 / 812 高，行高 23px → 距底 192px（384rpx）+ 46rpx 行盒 */
+const HINT_BOTTOM_RPX = 384;
+const HINT_LINE_RPX = 46;
+
+/** 视口高度（rpx）：提示的贴底基线要按屏高换算，短屏才会往上顶 */
+const viewportHeightRpx = ref(0);
+
+/**
+ * 提示文字的 top（rpx）= max(选项区底部 + 56px, 设计稿贴底基线)。
+ * 高屏（≥812）上等于设计稿位置，页面观感不变；
+ * 短屏（如 667 高）上选项区会越过贴底基线，这时改为跟在选项下面，避免压住文字。
+ */
+const hintTop = computed(() => {
+  const follow = optionAreaBottom.value ? optionAreaBottom.value + HINT_GAP_RPX : 0;
+  const design = viewportHeightRpx.value
+    ? viewportHeightRpx.value - HINT_BOTTOM_RPX - HINT_LINE_RPX
+    : 0;
+  return Math.max(follow, design);
+});
+
+/**
+ * 底部提示的定位：算出 top 就改成 top 定位（间距与选项高度无关）；
+ * 没有选项的纯文案帧（欢迎 / 自我介绍）仍走 CSS 里的贴底定位。
+ */
+const hintStyle = computed(() => (hintTop.value > 0
+  ? { top: `${Math.round(hintTop.value)}rpx`, bottom: "auto" }
+  : {}));
+
+/** 量一次视口，换算成 rpx（750rpx = 屏宽） */
+function measureViewport() {
+  try {
+    const info = uni.getSystemInfoSync();
+    const height = Number(info.windowHeight) || 0;
+    const width = Number(info.windowWidth) || 0;
+    viewportHeightRpx.value = height && width ? Math.round((height * 750) / width) : 0;
+  }
+  catch (error) {
+    logger.warn("failed to measure viewport", error);
+  }
+}
+
 /** step 码统一大写，接口与 i18n 兜底都用同一套写法 */
 function normalizeStep(value: unknown) {
   return String(value || "").trim().toUpperCase();
@@ -1160,6 +1242,8 @@ onMounted(() => {
   introShownAt = Date.now();
   navigating = false;
   voiceInteracted = false;
+  // 底部提示要按屏高算贴底基线，先量一次视口
+  measureViewport();
   void loadFlowSteps();
   void loadOperatorRoles();
   // 入口就是自我介绍帧：口播没起来（WebView 拦自动播放 / TTS 失败）也要能进下一步
@@ -1312,11 +1396,13 @@ onBeforeUnmount(() => {
         </view>
       </view>
 
-      <!-- 底部提示：唤醒帧与自我介绍帧按设计稿留白，其余步骤用接口 hint -->
+      <!-- 底部提示：唤醒帧与自我介绍帧按设计稿留白，其余步骤用接口 hint；
+           top 跟着选项区底部走（选项折行变高时间距不变），不再贴底定位 -->
       <text
         v-if="!isWelcomeStep && !isWakeStep && currentHint"
         :key="`hint-${activeStep}`"
         class="gi__hint"
+        :style="hintStyle"
       >
         {{ currentHint }}
       </text>
@@ -1972,9 +2058,10 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 底部提示：16px / 23px #8E8E8E 居中。
-   与首页欢迎态的 choose-hint / detail-hint 同一套：设计稿 y=597（812 高）→ 距底 192px = 384rpx，
-   贴底定位不受状态栏高度影响，短屏也不会被推出屏幕；入场淡入上浮、延后 300ms */
+/* 底部提示：16px / 23px #8E8E8E 居中，入场淡入上浮、延后 300ms。
+   定位基准改成「选项区底部 + 固定间距」与「设计稿贴底基线」取大者（见 hintStyle / hintTop）：
+   高屏上仍是设计稿的贴底位置，短屏上选项区越过基线时自动跟到选项下面，
+   不再和机型胶囊 / 气泡重叠。这里的 bottom 只作为「没有选项的纯文案帧」的兜底 */
 .gi__hint {
   position: absolute;
   right: 0;
