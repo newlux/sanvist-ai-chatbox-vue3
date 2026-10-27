@@ -419,10 +419,10 @@ onBeforeUnmount(() => {
               class="chat-header__island"
               :class="{ 'chat-header__island--thinking': thinking }"
             >
-              <!-- 圆形玻璃底盘单独一层：底盘负责圆形轮廓，模糊只作用在这一层 -->
-              <view class="chat-header__island-glass" />
+              <!-- 圆形玻璃底盘（.chat-header__island-glass）与 1px 白描边已按需求去掉，
+                   容器只作为呼吸动画的载体 + 图标的定位基准，本身不再有任何可见形状 -->
               <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），
-                   只换图源，尺寸 / 裁剪 / 投影 / 状态环等一律不动 -->
+                   只换图源，尺寸 / 投影 / 状态环等一律不动 -->
               <image
                 class="chat-header__island-logo"
                 src="@/assets/img/sani-logo.gif"
@@ -822,10 +822,13 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 顶部中间「灵动岛」：Ardot 722:2498（等待中）/ 722:489（回答中）→ Group 133 =====
-   圆形 80×80（722:338 Group 133 → 722:339 Ellipse 55）：透明填充（设计稿是白 40%，按需求改为透明）+ 背景模糊 2
-    · 各状态统一 1px #FFFFFF 描边（彩色渐变描边环与自转「跑马灯」已去掉）
-    · 只有思考中会呼吸放大到 100px（200rpx，设计稿 722:96 Group 134），出字后回落
-   Logo 62×62（722:340 / 页面实例 1187:41;722:340）：圆内偏移 左 9 / 上 5.2，投影 0 3 9 rgba(0,0,0,.14)
+   按需求只保留岛内的三角图标，圆形部分全部去掉：
+    · 圆形玻璃底盘（.chat-header__island-glass：1204 那套透明底 + 背景模糊 2 + 圆角裁切）不再渲染
+    · 容器的 1px 白描边 / 圆角 / 圆形外投影 / overflow 裁切一并移除
+   容器仍是 80×80（160rpx），只是由「圆」变成透明容器：
+    · 继续作为「思考中」呼吸放大（→ 100px / 200rpx，设计稿 722:96 Group 134）的动画载体
+    · 继续作为 Logo 的定位基准，下方状态胶囊的落位不受影响
+   Logo 62×62（722:340 / 页面实例 1187:41;722:340）：相对外沿 左 9 / 上 5.2，投影 0 3 9 rgba(0,0,0,.14)
 
    浮动定位：绝对定位浮在状态栏下沿，向下悬在内容之上，
    不占布局、不撑高头部，也不改变两侧按钮的位置（pointer-events: none 不拦截点击） */
@@ -846,11 +849,8 @@ onBeforeUnmount(() => {
   width: 160rpx; // 80px（722:338 Group 133 / 722:339 Ellipse 55 的实际尺寸）
   height: 160rpx;
   box-sizing: border-box;
-  border: 1px solid #ffffff;
-  border-radius: 50%;
-  overflow: hidden; // 圆形轮廓由底盘裁死：内层一律按圆裁切，任何内核都不会画成方块
-  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04); // 0 2 8 rgba(0,0,0,.04)
-  // 独立合成层：避免 backdrop-filter 在部分内核把圆角裁剪丢掉（表现为方形图标）
+  // 圆形已去掉：不再有描边 / 圆角 / 圆形外投影，也不再裁剪内层
+  // 独立合成层：呼吸缩放过程中保持独立图层，避免 WebView 反复重绘
   transform: translateZ(0);
   // 缩放过渡做柔：480ms + 两端平滑的缓动曲线，变大/变小都不是硬切
   transition: transform 480ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -878,30 +878,16 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 圆形底盘：背景改成完全透明（不留任何不透明白色，避免被内核画成白色方块），
-   只保留背景模糊与 1px 白描边；用 mask 再兜一层圆角裁剪 */
-.chat-header__island-glass {
-  position: absolute;
-  z-index: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  border-radius: 50%;
-  background: transparent;
-  backdrop-filter: blur(4rpx); // BACKGROUND_BLUR 2
-  -webkit-backdrop-filter: blur(4rpx);
-  mask-image: radial-gradient(circle closest-side, #000 99%, transparent 100%);
-  -webkit-mask-image: -webkit-radial-gradient(circle closest-side, #000 99%, transparent 100%);
-}
+/* 圆形玻璃底盘整层删除：原来它负责圆形轮廓、透明底 + BACKGROUND_BLUR 2 与圆角裁切，
+   现在圆形不再需要，容器本身已是透明的，只剩 Logo */
 
 .chat-header__island-logo {
   position: absolute;
   z-index: 1;
-  // 设计稿 722:340：图相对圆外沿 左 9 / 上 5.2；绝对定位基准是 padding box，
-  // 圆的 1px 描边占掉 1px，所以要减掉（9-1=8 → 16rpx，5.2-1=4.2 → 8.4rpx）
-  top: 8.4rpx; // 5.2px
-  left: 16rpx; // 9px
+  // 设计稿 722:340：图相对圆外沿 左 9 / 上 5.2。
+  // 描边去掉后绝对定位原点就是容器的外沿，直接用设计稿原值，不再减 1px
+  top: 10.4rpx; // 5.2px
+  left: 18rpx; // 9px
   width: 124rpx; // 62px（722:340 实测 62×62）
   height: 124rpx;
   // 图片本身是透明背景 GIF（300×267，内容已裁到图案边界），这里再显式声明一次透明底，
