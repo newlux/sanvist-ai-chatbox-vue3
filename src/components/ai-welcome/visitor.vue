@@ -107,7 +107,7 @@ const CHOICE_ROLE_SLOTS: Record<string, { x: number; y: number }> = {
 };
 /** 上面没覆盖到的角色码依次领剩下的位置，保证顺序稳定 */
 const CHOICE_SLOT_ORDER = ["OWNER", "ADMIN", "OPERATOR"];
-const CHOICE_ROLE_SIZE = 164; // 82px
+const CHOICE_ROLE_SIZE = 160; // 80px（Ardot 1006:3 / 1006:16 的身份球均为 80×80）
 const CHOICE_ROLE_FONT_SIZE = 32; // 16px
 
 /** 装饰玻璃球 722:2720 (97,243)50 / 722:2717 (314,374)42 / 722:2714 (55,471)28 / 722:2665 (140,523)28 */
@@ -670,9 +670,21 @@ function clearWakeMissed() {
 }
 
 /**
+ * 进入欢迎流程（唤醒命中 / 点标题下方文案共用，Ardot 306:6467 → 306:6468）：
+ * 标题与文案淡出、底部粉色三色带、自我介绍逐行浮出并口播，播完过渡到身份选择态。
+ */
+function beginWelcomeFlow() {
+  isChecking.value = false;
+  isFinishing.value = true;
+  startIntro();
+  armSpeechFailsafe();
+  // 自我介绍口播的同时把 ASK 流程步骤拉回来，身份选择页的标题与气泡都用它
+  void loadIdentityFlow();
+}
+
+/**
  * 校验命中：
- * - 起始页 → 进入欢迎流程（Ardot 306:6467 → 306:6468）：标题淡出、底部粉色三色带、
- *   自我介绍浮出并口播，播完过渡到身份选择态；
+ * - 起始页 → 进入欢迎流程；
  * - 身份选择页 / 身份信息页（就地录音）→ 页面内容一律不动，只把底部从录音态收回常态
  *   （是否常态由 isGlowIdle 按「播报 / 录音 / 校验 / 未命中」自动判定）。
  */
@@ -682,12 +694,25 @@ function enterWelcome() {
     isChecking.value = false;
     return;
   }
-  isChecking.value = false;
-  isFinishing.value = true;
-  startIntro();
-  armSpeechFailsafe();
-  // 自我介绍口播的同时把 ASK 流程步骤拉回来，身份选择页的标题与气泡都用它
-  void loadIdentityFlow();
+  beginWelcomeFlow();
+}
+
+/**
+ * 点标题下方的文案（「随时，为你而在」+ 两行描述）：
+ * 等同于说对唤醒词，直接进「欢迎了解日常运营AI助手」这段自我介绍播报，
+ * 播完继续走身份选择 —— 不方便长按说话时也能往下走。
+ * 已经在欢迎流程里（自我介绍 / 身份选择 / 身份详情）就不再重复触发。
+ */
+function onCaptionTap() {
+  if (navigating || isFinishing.value || isChoosing.value || isRoleDetail.value) return;
+  clearWakeMissed();
+  beginWelcomeFlow();
+}
+
+/** 事件是否落在文案区：那里只响应点击，不参与整页按住说话，免得点一下先闪一次录音态 */
+function isCaptionArea(e: any) {
+  const el = e?.target as HTMLElement | undefined;
+  return Boolean(el?.closest?.(".welcome-visitor__caption"));
 }
 
 /**
@@ -929,6 +954,19 @@ async function startExperience(role: VisitorRole) {
 }
 
 /**
+ * 点身份信息页底部的「…开始体验」提示语：与在这一页长按说「开始体验」走同一个出口。
+ * 语音那条路是「录音 → ASR → POST /speech/wake/validate（step=START）→ startExperience(detailRoleCode)」，
+ * 点击只是省掉前两步，最终执行的动作完全一致（清会话 → 记录身份 → 预取觉醒内容 → 进首页 demo）。
+ */
+function onStartExperienceTap() {
+  // 只在身份信息页生效；已经在跳转中就别重复触发
+  if (!isRoleDetail.value || navigating) return;
+  // 长按已进入录音 / 校验：这一下不算点击，交给松手后的语音链路，避免两边各跳一次
+  if (isRecording.value || isChecking.value) return;
+  void startExperience(detailRoleCode);
+}
+
+/**
  * 唤醒 / 热词校验（语雀 2.2）：长按录音识别出的文本，按「模块 ASK + 当前阶段」
  * POST 到 /speech/wake/validate，后端比对热词表后回 matched / hitValue / intent 等。
  * - 阶段 HEY：起始页说的唤醒词；
@@ -1018,6 +1056,8 @@ function onHoldStart(e: any) {
   if (isRecording.value) return;
   // 自我介绍播放中（还没到选择态）不录音，避免和口播打架
   if (isFinishing.value && !isChoosing.value) return;
+  // 标题下方的文案区是「点击进欢迎流程」的入口，不参与整页按住说话
+  if (isCaptionArea(e)) return;
   // 新的按压：撤掉上一次「未命中」的红，重新开始
   clearWakeMissed();
   const point = readPoint(e);
@@ -1336,16 +1376,16 @@ onMounted(async () => {
         :style="bubble.style"
         @tap.stop="onChooseBubble(bubble)"
       >
-        <!-- 玻璃球内部虹彩（722:3064 的 Mask group）：
-             Ellipse 62 / 61 / 60 三团模糊色斑 → Ellipse 58 薄雾 → Vector 80 球面高光 → Vector 81 深蓝细条 -->
-        <template v-if="bubble.glass">
-          <view class="welcome-visitor__bubble-iris welcome-visitor__bubble-iris--magenta" />
-          <view class="welcome-visitor__bubble-iris welcome-visitor__bubble-iris--cyan" />
-          <view class="welcome-visitor__bubble-iris welcome-visitor__bubble-iris--indigo" />
-          <view class="welcome-visitor__bubble-veil" />
-          <view class="welcome-visitor__bubble-sheen" />
-          <view class="welcome-visitor__bubble-stripe" />
-        </template>
+        <!-- 身份球内部（Ardot 1006:3 / 1006:16 的 Mask group 1204:224 / 1204:218）：
+             Vector 111（蓝 #0063E5 斜带）+ Vector 112（粉 #FF70F9 月牙）两团高斯模糊色斑，
+             由 export_nodes 导出的真实路径 SVG 渲染（含 feGaussianBlur 14.5 / 12 与圆形裁切），
+             保证与设计稿逐像素一致 —— 不再用椭圆近似 -->
+        <image
+          v-if="bubble.glass"
+          class="welcome-visitor__bubble-aurora"
+          src="@/assets/img/bubble-role-aurora.svg"
+          mode="aspectFit"
+        />
         <text v-if="bubble.label" class="welcome-visitor__bubble-text">{{ bubble.label }}</text>
       </view>
       <!-- 底部提示 722:2744：x=102 y=597 176×23，16px/23 Medium #8E8E8E 居中 -->
@@ -1363,8 +1403,9 @@ onMounted(async () => {
       <!-- 标题 331:391：x=53 y=117 180×29，20px/29 Medium #0D0D0D；
            文案取 GET /flow/steps 里 IDENTITY_DETAIL 步的 title，取不到才用设计稿文案 -->
       <text class="welcome-visitor__detail-title">{{ identityDetailTitle }}</text>
-      <!-- 底部提示 331:428：x=102 y=597 176×23，16px/23 Medium #8E8E8E 居中 -->
-      <text class="welcome-visitor__detail-hint">{{ ROLE_DETAIL_HINT }}</text>
+      <!-- 底部提示 331:428：x=102 y=597 176×23，16px/23 Medium #8E8E8E 居中；
+           文案本身就是「可以和我说“开始体验”」，点一下等价于在这里说这句话（见 onStartExperienceTap） -->
+      <text class="welcome-visitor__detail-hint" @tap.stop="onStartExperienceTap">{{ ROLE_DETAIL_HINT }}</text>
     </view>
 
     <!-- 底部光效：常态贴底一缕淡蓝渐变（约 62px）；
@@ -1419,8 +1460,9 @@ onMounted(async () => {
         </view>
       </view>
 
-      <!-- 文案组：306:2780 副标题 + 306:2800 描述两行（收尾态淡出） -->
-      <view class="welcome-visitor__caption">
+      <!-- 文案组：306:2780 副标题 + 306:2800 描述两行（收尾态淡出）
+           点这里等同于说对唤醒词：直接进「欢迎了解日常运营AI助手」的自我介绍播报，播完继续走身份选择 -->
+      <view class="welcome-visitor__caption" @tap.stop="onCaptionTap">
         <text class="welcome-visitor__slogan">随时，为你而在</text>
         <view class="welcome-visitor__desc">
           <text class="welcome-visitor__desc-line">你的三一设备伙伴。</text>
@@ -1439,8 +1481,26 @@ onMounted(async () => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  // 设计稿 306:2781 Rectangle 51：fills 最上层为不透明 #FAFAFA（下面两层渐变被完全遮住）
-  background: #fafafa;
+  /**
+   * 页面背景：设计稿 722:2664 Rectangle 51（375×812 全屏底板），fills 三层由下至上为
+   *   L1 渐变 #F5FCFF → #FFFFFF（0deg，底部 → 顶部）
+   *   L2 渐变 #EFEFFF → #FFFFFF 23.59% → #FBFDFF 40.99% → #F1F8FF 69.55% → rgba(250,228,243,.579)（34.3deg）
+   *   L3 纯色 #FAFAFA（不透明，把上面两层完全盖住 —— 稿里现在实际看到的就是这一层）
+   * 规范里 CSS 的 background-image 第一项在最上层，所以书写顺序与 Figma fills 相反。
+   * 三层全部保留：将来设计去掉顶层 #FAFAFA 时，渐变会自动显出来，不用返工。
+   */
+  background-color: #fafafa; // 兜底（与 L3 同色）
+  background-image:
+    linear-gradient(180deg, #fafafa 0%, #fafafa 100%), // L3（顶层）
+    linear-gradient(
+      34.3deg,
+      #efefff 0%,
+      #ffffff 23.59%,
+      #fbfdff 40.99%,
+      #f1f8ff 69.55%,
+      rgba(250, 228, 243, 0.579) 100%
+    ), // L2
+    linear-gradient(0deg, #f5fcff 0%, #ffffff 100%); // L1（底层）
   color: #0d0d0d;
   font-family: "Source Han Sans CN", "PingFang SC", sans-serif;
   // 整页承担长按录音，长按期间不允许选中文字 / 拖出系统菜单
@@ -1782,139 +1842,44 @@ onMounted(async () => {
   --holo-glow-off: brightness(1);
 }
 
-/* 身份玻璃球（722:3064 老板 / 1006:16 设备管理员 / 1006:3 操作手），82×82，自下而上五层：
-   ① Ellipse 59 底色 + 1px 渐变描边（见下方 --glass-* 两组色值）
-   ② Ellipse 62/61/60 虹彩色斑：#F693FF / #70C7FF / #5B70CB（见 .welcome-visitor__bubble-iris）
-   ③ Ellipse 58 薄雾 + INNER_SHADOW 5 7 6 6 rgba(255,255,255,.25)
-   ④ Vector 80 球面高光：白 100% → 26%
-   ⑤ Vector 81 深蓝细条：#2F3DD4 60%
-   设计稿里 722:3064 老板画的是「选中态」：三颗球默认统一用 1006:3 操作手那套淡色，
-   只有被选中 / 按下的那颗才切到 722:3064 的高亮玻璃（见下一条 --active 规则） */
+/* 身份球：Ardot 1006:3（操作手）/ 1006:16（设备管理员），80×80，自下而上两层：
+   ① 1204:228 / 1204:222 Ellipse 69：80×80 圆，填充 #FAFAFA；
+      INNER_SHADOW rgba(54,191,255,0.2966) offset 1 / 5、radius 14、spread −1
+      DROP_SHADOW  rgba(84,152,168,0.2163) offset 2 / 4、radius 12、spread 0
+      （strokes 里那圈渐变环 visible:false，不还原）
+   ② 1204:224 / 1204:218「Mask group」：80×80，Ellipse 72（1204:225，isMask）只做圆形裁切，
+      里面是 Vector 111（蓝 #0063E5）+ Vector 112（粉 #FF70F9）两团高斯模糊光斑
+   ③ 1006:5 / 1006:17 球名：16px / Source Han Sans CN Medium / #0D0D0D / 居中（见 __bubble-text） */
 .welcome-visitor__bubble--role {
-  // 默认态 = 1006:3 操作手那套：Ellipse 59 #DFF0FF 36% / Ellipse 58 #B9DCFF 41% / 描边 #E7EDFA → #CCE2FC
-  --glass-fill: rgba(223, 240, 255, 0.36); // Ellipse 59
-  --glass-inner: rgba(185, 220, 255, 0.41); // Ellipse 58
-  --glass-stroke-a: #e7edfa; // Ellipse 59 stroke
-  --glass-stroke-b: #cce2fc;
-
-  // Ellipse 59 底色
-  background-image: linear-gradient(180deg, var(--glass-fill) 0%, var(--glass-fill) 100%);
-  // DROP_SHADOW 0 −20px 12px 6px rgba(218,233,252,0.34)，向上打冷光
-  box-shadow: 0 -40rpx 24rpx 12rpx rgba(218, 233, 252, 0.34);
+  // Ellipse 69 填充：#FAFAFA（0.9804 × 255 = 250）
+  background: #fafafa;
+  // 内阴影 + 外投影，两道都按设计稿原值写出
+  box-shadow:
+    inset 2rpx 10rpx 28rpx -2rpx rgba(54, 191, 255, 0.297),
+    4rpx 8rpx 24rpx 0 rgba(84, 152, 168, 0.216);
 }
 
-/* 选中 / 命中态 = 722:3064 老板：Ellipse 59 #D1E9FF 79% / Ellipse 58 #B9DCFF 66% / 描边 #D1DFFF → #BBDAFF
-   :active 覆盖按住的那一下，--active 留给业务侧「选中」；
-   默认三颗球长得完全一样，只有被点亮的那颗才用这套高亮玻璃 */
+/* 选中 / 按下：沿用 722:3064 的高亮玻璃底色（Ellipse 59 #D1E9FF 79%）；
+   光斑与阴影不变，选中光晕见 .welcome-visitor__choose--in ... --active 那条规则 */
 .welcome-visitor__bubble--role.welcome-visitor__bubble--active,
 .welcome-visitor__bubble--role:active {
-  --glass-fill: rgba(209, 233, 255, 0.79); // Ellipse 59
-  --glass-inner: rgba(185, 220, 255, 0.66); // Ellipse 58
-  --glass-stroke-a: #d1dfff; // Ellipse 59 stroke
-  --glass-stroke-b: #bbdaff;
+  background: rgba(209, 233, 255, 0.79);
 }
 
-/* Ellipse 58 内层薄雾：压在彩斑之上，把虹彩调成设计稿里那种奶白玻璃感
-   填充色随选中态切换 + INNER_SHADOW inset 5px 7px 6px 6px rgba(255,255,255,0.25) */
-.welcome-visitor__bubble-veil {
+/* 色斑图层：Ardot 1204:224「Mask group」用 export_nodes 导出的 SVG
+   （assets/img/bubble-role-aurora.svg，80×80）：
+   - Vector 111（1204:227）#0063E5 渐变（α .3 → .9）：真实路径是从右上扫到左下的细斜带
+   - Vector 112（1204:226）#FF70F9 渐变（α .5815 → 0）：真实路径是左上的月牙形
+   - feGaussianBlur stdDeviation 14.5 / 12（= 设计稿 LAYER_BLUR 29 / 24 的一半，
+     CSS blur() 的参数是标准差，之前误写成 blur(29px) 糊了两倍）
+   - SVG 内自带 clipPath circle(40,40,40)，等价 Ellipse 72（1204:225 isMask）的圆形裁切
+   之前用 border-radius:50% 的椭圆近似，把颜色摊满了整颗球（截图对比中那颗紫灰糊圆），
+   改用真实路径后球心恢复留白，颜色只落在蓝带 / 月牙扫过的位置 */
+.welcome-visitor__bubble-aurora {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
-  background: var(--glass-inner, transparent);
-  box-shadow: inset 10rpx 14rpx 12rpx 12rpx rgba(255, 255, 255, 0.25);
-  pointer-events: none;
-}
-
-/* Ellipse 59 的 1px 描边渐变（左上 → 右下）：用 ::before 只画那一圈，
-   直接用 border-box 铺渐变会把整个圆涂成不透明的描边色，盖掉底色 */
-.welcome-visitor__bubble--role::before {
-  position: absolute;
-  inset: 0;
-  padding: 1px; // 描边 1px
-  border-radius: 50%;
-  background-image: linear-gradient(
-    135deg,
-    var(--glass-stroke-a, transparent) 0%,
-    var(--glass-stroke-b, transparent) 100%
-  );
-  // 双线性遮罩相减，只保留 1px 环（圆内透出底色）
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  content: "";
-  pointer-events: none;
-}
-
-/* 虹彩色斑（722:3064 的 Mask group 内 Ellipse 62 / 61 / 60）：
-   设计稿的彩斑与高光都压在球体**左半边**（左上 → 左下），斜向 40.65° */
-.welcome-visitor__bubble-iris {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-}
-
-// Ellipse 62：#F693FF，56.11×40.81 @ (17.4, −5)，LAYER_BLUR 16
-.welcome-visitor__bubble-iris--magenta {
-  top: -10rpx;
-  left: -21.3rpx;
-  width: 112.2rpx;
-  height: 81.6rpx;
-  background: #f693ff;
-  filter: blur(32rpx);
-  transform: rotate(40.65deg);
-}
-
-// Ellipse 61：#70C7FF，45.43×32.33 @ (17.6, 0.26)，LAYER_BLUR 10
-.welcome-visitor__bubble-iris--cyan {
-  top: 0.5rpx;
-  left: 4.7rpx;
-  width: 90.9rpx;
-  height: 64.7rpx;
-  background: #70c7ff;
-  filter: blur(20rpx);
-  transform: rotate(40.65deg);
-}
-
-// Ellipse 60：#5B70CB，38.72×11.01 @ (17.35, 3.68)，LAYER_BLUR 7
-.welcome-visitor__bubble-iris--indigo {
-  top: 7.4rpx;
-  left: 18.7rpx;
-  width: 77.4rpx;
-  height: 22rpx;
-  background: #5b70cb;
-  filter: blur(14rpx);
-  transform: rotate(40.65deg);
-}
-
-/* Vector 80 球面高光：69.55×17.99 @ (11.6, 49.37)，15°，白 100% → 26%，LAYER_BLUR 5
-   压在球体左下的底缘，是整颗球最亮的那团柔光 */
-.welcome-visitor__bubble-sheen {
-  position: absolute;
-  top: 98.7rpx;
-  left: 23.2rpx;
-  width: 139.1rpx;
-  height: 36rpx;
-  border-radius: 50%;
-  background-image: linear-gradient(180deg, #ffffff 0%, rgba(255, 255, 255, 0.263) 100%);
-  filter: blur(10rpx);
-  transform: rotate(15deg);
-  pointer-events: none;
-}
-
-/* Vector 81 深蓝细条：52.82×12 @ (−44.78, 66.42)，17.83°，#2F3DD4 60% 不透明，LAYER_BLUR 7
-   贴球体左下缘，只露出一小条，压出冷蓝的底边 */
-.welcome-visitor__bubble-stripe {
-  position: absolute;
-  top: 132.8rpx;
-  left: -89.6rpx;
-  width: 105.6rpx;
-  height: 24rpx;
-  border-radius: 50%;
-  background-image: linear-gradient(180deg, #2f3dd4 0%, rgba(47, 61, 212, 0.263) 100%);
-  opacity: 0.6;
-  filter: blur(14rpx);
-  transform: rotate(17.83deg);
+  width: 100%;
+  height: 100%;
   pointer-events: none;
 }
 
@@ -2043,11 +2008,12 @@ onMounted(async () => {
   }
 }
 
-/* 16px Medium / #8E8E8E：设计稿 y=597（内容区 758 高）→ 距底 192px */
+/* 16px Medium / #8E8E8E：设计稿 y=597（内容区 758 高）→ 距底 192px，
+   视觉上调低 40rpx（20px）后取 172px */
 .welcome-visitor__choose-hint {
   position: absolute;
   right: 0;
-  bottom: 384rpx; // 192px
+  bottom: 344rpx; // 172px（设计稿 192px − 下移 20px）
   left: 0;
   color: #8e8e8e;
   font-size: 32rpx; // 16px
@@ -2098,7 +2064,7 @@ onMounted(async () => {
 .welcome-visitor__detail-hint {
   position: absolute;
   right: 0;
-  bottom: 384rpx; // 距底 192px（y=597 + 23 高）
+  bottom: 344rpx; // 距底 172px（设计稿 192px − 下移 20px）
   left: 0;
   color: #8e8e8e;
   font-size: 32rpx; // 16px
@@ -2108,6 +2074,26 @@ onMounted(async () => {
   opacity: 0;
   transform: translateY(16rpx);
   transition: opacity 480ms ease 300ms, transform 480ms cubic-bezier(0.22, 0.61, 0.36, 1) 300ms;
+  // 可点：文案本身是「可以和我说“开始体验”」，点一下等价于说这句话（见 onStartExperienceTap）。
+  // 父层 .welcome-visitor__detail 是 pointer-events: none，这里单独放开
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 触摸热区外扩：文本只有 23px 高，上下各多给 10px；
+   用伪元素而不是 padding，文本自身的定位 / 行高不变，视觉位置与改动前一致 */
+.welcome-visitor__detail-hint::after {
+  position: absolute;
+  top: -20rpx;
+  right: 0;
+  bottom: -20rpx;
+  left: 0;
+  content: "";
+}
+
+/* 按下反馈只压深字色，不做位移，避免和入场 transition 抢 transform */
+.welcome-visitor__detail-hint:active {
+  color: #5f5f5f;
 }
 
 .welcome-visitor__detail--in .welcome-visitor__detail-title {
@@ -2120,12 +2106,14 @@ onMounted(async () => {
   transform: translateY(0);
 }
 
-/* 设备信息胶囊（1006:313 / 1006:346 / 1006:277 / 1006:350 / 1006:291 / 1006:293）：
-   - 填充：线性渐变，整体 16% 不透明（#3D21CD 0% → #C1E4FF 27.8% → #7B9CFF 50.9%
-     → #C067FA 71.2% → #F7CFFF 85.8% → #FD90C4 100%）；Figma 渐变方向 3.66°，换成 CSS 93.66deg
-   - 描边：按需求去掉，只保留渐变填充（原 2px OUTSIDE 渐变描边的 ::before 已移除）
-   - 投影：DROP_SHADOW 0 3 16 rgba(0,159,235,0.127)
-   - 背景模糊：BACKGROUND_BLUR 29 → backdrop-filter blur(58rpx)
+/* 设备信息胶囊（1006:313 / 1006:346 / 1006:277 / 1006:350 / 1006:291 / 1006:293，六枚数据完全一致）：
+   - 填充：线性渐变，元素级 opacity 0.16 分摊到每个色标（#3D21CD 0% → #C1E4FF 27.8%
+     → #7B9CFF 50.9% → #C067FA 71.2% → #F7CFFF 85.8% → #FD90C4 100%）；
+     gradientTransform 方向向量 (0.8784, −0.8175) → CSS 47.05°（左下深紫 → 右上粉）
+   - 描边：strokes visible:false，不还原（原 2px 渐变描边的 ::before 已移除）
+   - 投影：DROP_SHADOW rgba(0,159,235,0.1272) offset 0 / 3、radius 16（另一道黑色投影 visible:false）
+   - 背景模糊：BACKGROUND_BLUR 29 → 标准差 14.5 → blur(29rpx)（CSS blur() 参数就是标准差，
+     之前误写 blur(58rpx) 糊了一倍，玻璃感被冲淡）
    - 圆角 38（76rpx，高度 32 → 药丸）、14px / 行高 20px / Medium / #0D0D0D，
      文字上下各 6、左右各 18（宽度 = 文字宽 + 72rpx，由模板按文案算出来注入）
    位置同样由模板注入：相对 134×134 图标容器的偏移，图标不动，胶囊绕着它翻折落位 */
@@ -2138,7 +2126,7 @@ onMounted(async () => {
   height: 64rpx; // 32px
   border-radius: 76rpx; // 38px
   background-image: linear-gradient(
-    93.66deg,
+    47.05deg,
     rgba(61, 33, 205, 0.16) 0%,
     rgba(193, 228, 255, 0.16) 27.8%,
     rgba(123, 156, 255, 0.16) 50.9%,
@@ -2147,8 +2135,8 @@ onMounted(async () => {
     rgba(253, 144, 196, 0.16) 100%
   );
   box-shadow: 0 6rpx 32rpx rgba(0, 159, 235, 0.127); // 0 3 16
-  -webkit-backdrop-filter: blur(58rpx); // 29px
-  backdrop-filter: blur(58rpx);
+  -webkit-backdrop-filter: blur(29rpx); // stdDev 14.5px
+  backdrop-filter: blur(29rpx);
   color: #0d0d0d;
   font-size: 28rpx; // 14px
   font-weight: 500; // Medium
