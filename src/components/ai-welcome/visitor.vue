@@ -247,6 +247,7 @@ const CHOICE_BUBBLE_HOLO = computed(() => {
         "--holo-rx": centerY < CHOICE_CORE_Y ? "85deg" : "-85deg",
         "--holo-ry": centerX > CHOICE_CORE_X ? "45deg" : "-45deg",
         "--holo-delay": `${CHOICE_HOLO_DELAY_MS + index * CHOICE_STAGGER_MS}ms`,
+        "--holo-duration": `${CHOICE_HOLO_DURATION_MS}ms`,
       },
     };
   });
@@ -326,7 +327,8 @@ function toVisitorRole(roleCode: string): VisitorRole {
 /** 胶囊宽度按文案估算：汉字 1em、半角 0.5em，再加左右内边距 */
 function estimateDetailTagWidth(text: string) {
   const textWidth = Array.from(text).reduce(
-    (sum, char) => sum + (/[\u0000-\u00ff]/.test(char) ? DETAIL_TAG_FONT_SIZE / 2 : DETAIL_TAG_FONT_SIZE),
+    // 半角字符（码点 ≤ 0xFF）按半个字号估，全角按一个字号估
+    (sum, char) => sum + ((char.codePointAt(0) ?? 0) <= 0xFF ? DETAIL_TAG_FONT_SIZE / 2 : DETAIL_TAG_FONT_SIZE),
     0,
   );
   return Math.round(textWidth + DETAIL_TAG_PADDING);
@@ -443,6 +445,77 @@ function startIntro() {
   }, INTRO_SPEAK_DELAY_MS);
 }
 
+/**
+ * 整页长按：按住 280ms 进入「录音态」（底部渐变切深色）并真的开始录音，松手后停录并送识别；
+ * 同时底部沿用这套蓝渐变与波浪、文案换成本次自我介绍并口播，口播播完就地过渡到「身份选择」态。
+ * 识别结果这一版只打日志 —— 后续要拿这段话再调一次接口，由接口决定是否能进入下一步。
+ */
+const HOLD_START_MS = 280;
+/** 长按判定前手指位移超过这个距离视为滑动，不进入录音态 */
+const HOLD_MOVE_PX = 12;
+/** 识别接口兜底超时：上传的 timeout 在个别容器里不生效 */
+const ASR_TIMEOUT_MS = 30_000;
+/**
+ * 口播兜底时长：正常流程是「播完才过渡」，这个只针对压根没播起来的情况
+ * （自动播放被 WebView 拦掉、TTS 合成失败），到点直接过渡到身份选择态。
+ */
+const INTRO_SPEECH_FAILSAFE_MS = 5000;
+
+/** 按住中：底部渐变切到录音态配色 */
+const isRecording = ref(false);
+/** 松手后的收尾态：底部沿用录音态的蓝渐变 + 波浪，文案换成本次自我介绍 */
+const isFinishing = ref(false);
+/**
+ * 松手后的「唤醒校验中」：只表示 /speech/wake/validate 还在路上（逻辑态，用来挡重复长按 / 点选）。
+ * 视觉上不挂波纹 —— 手一松底部就释放回常态淡蓝，接口回来后再由 --finishing / --missed 接管。
+ */
+const isChecking = ref(false);
+/** 唤醒未命中：底部渐变换成 331:147「唤醒失败」的红，停在起始页等用户重试 */
+const isWakeMissed = ref(false);
+/** 口播收尾后的身份选择态：标题 + 身份气泡 + 底部提示，仍在同一页内 */
+const isChoosing = ref(false);
+/**
+ * 底部是否回到「常态」那一缕淡蓝：只要还在播报 / 按住录音 / 未命中红，
+ * 就交给对应的色带（--finishing / --recording / --missed），这几样都停了才淡回常态。
+ * 校验中（isChecking）不参与判定：它只挡重复长按 / 点选，波纹只在按住或真正出声时出现，
+ * 松手、命中停留那 900ms 都不该挂着波纹。
+ * 身份选择页与身份信息页共用同一套判定：详情页没有播报、没有长按时同样是常态视觉。
+ */
+const isGlowIdle = computed(
+  () => isFinishing.value && !isRecording.value && !isWakeMissed.value && !introTts.playing.value,
+);
+/** 身份选择内容是否已浮出（控制淡入上浮） */
+const choiceVisible = ref(false);
+/**
+ * 当前被选中 / 命中的身份球 key。
+ * 三颗玻璃球默认长一样（1006:3 操作手那套配色）；只有选中的那颗切到 722:3064 的高亮玻璃态，
+ * 按压时也走同一套高亮（样式表里的 :active）。
+ */
+const selectedBubbleKey = ref("");
+/** 点老板后身份球原地淡出（淡出后不再可点），图标不参与任何位移 */
+const chooseOut = ref(false);
+/** 老板身份详情态：Ardot 331:382，标题 + 6 个设备胶囊 + 提示 + 底部极光 */
+const isRoleDetail = ref(false);
+/** 详情内容是否已浮出（控制淡入上浮） */
+const detailVisible = ref(false);
+/**
+ * 语音命中某个身份球后的停留时长：先点亮命中的那颗球（高亮玻璃 + 放大光晕 + 呼吸），
+ * 让用户看清「选中了哪个」，停顿一下再进身份信息页，避免选中态一闪而过。
+ */
+const IDENTITY_HIT_HOLD_MS = 900;
+
+let holdTimer: ReturnType<typeof setTimeout> | null = null;
+let speechFailsafeTimer: ReturnType<typeof setTimeout> | null = null;
+let choiceEnterTimer: ReturnType<typeof setTimeout> | null = null;
+let choiceSpeakTimer: ReturnType<typeof setTimeout> | null = null;
+let detailEnterTimer: ReturnType<typeof setTimeout> | null = null;
+/** 命中身份球 → 进详情页的延时器 */
+let identityHitTimer: ReturnType<typeof setTimeout> | null = null;
+/** 跳转中标记：避免重复触发 openRoleSelect / startExperience，也用来掐掉跳转前的待播口播 */
+let navigating = false;
+let holdStartX = 0;
+let holdStartY = 0;
+
 /** 收尾态复位：文案退回隐藏、口播停止、身份选择态收起（从角色选择页返回时回到起始态） */
 function resetIntro() {
   if (introEnterTimer) {
@@ -489,72 +562,6 @@ function resetIntro() {
   detailSpeakSeq += 1;
   clearWakeMissed();
 }
-
-/**
- * 整页长按：按住 280ms 进入「录音态」（底部渐变切深色）并真的开始录音，松手后停录并送识别；
- * 同时底部沿用这套蓝渐变与波浪、文案换成本次自我介绍并口播，口播播完就地过渡到「身份选择」态。
- * 识别结果这一版只打日志 —— 后续要拿这段话再调一次接口，由接口决定是否能进入下一步。
- */
-const HOLD_START_MS = 280;
-/** 长按判定前手指位移超过这个距离视为滑动，不进入录音态 */
-const HOLD_MOVE_PX = 12;
-/** 识别接口兜底超时：上传的 timeout 在个别容器里不生效 */
-const ASR_TIMEOUT_MS = 30_000;
-/**
- * 口播兜底时长：正常流程是「播完才过渡」，这个只针对压根没播起来的情况
- * （自动播放被 WebView 拦掉、TTS 合成失败），到点直接过渡到身份选择态。
- */
-const INTRO_SPEECH_FAILSAFE_MS = 5000;
-
-/** 按住中：底部渐变切到录音态配色 */
-const isRecording = ref(false);
-/** 松手后的收尾态：底部沿用录音态的蓝渐变 + 波浪，文案换成本次自我介绍 */
-const isFinishing = ref(false);
-/** 松手后的「唤醒校验中」：底部保持按住那套蓝波纹，等 /speech/wake/validate 回结果 */
-const isChecking = ref(false);
-/** 唤醒未命中：底部渐变换成 331:147「唤醒失败」的红，停在起始页等用户重试 */
-const isWakeMissed = ref(false);
-/** 口播收尾后的身份选择态：标题 + 身份气泡 + 底部提示，仍在同一页内 */
-const isChoosing = ref(false);
-/**
- * 底部是否回到「常态」那一缕淡蓝：只要还在播报 / 按住录音 / 校验中 / 未命中红，
- * 就交给对应的色带（--finishing / --recording / --checking / --missed），这几样都停了才淡回常态。
- * 身份选择页与身份信息页共用同一套判定：详情页没有播报、没有长按时同样是常态视觉。
- */
-const isGlowIdle = computed(
-  () => isFinishing.value && !isRecording.value && !isChecking.value && !isWakeMissed.value && !introTts.playing.value,
-);
-/** 身份选择内容是否已浮出（控制淡入上浮） */
-const choiceVisible = ref(false);
-/**
- * 当前被选中 / 命中的身份球 key。
- * 三颗玻璃球默认长一样（1006:3 操作手那套配色）；只有选中的那颗切到 722:3064 的高亮玻璃态，
- * 按压时也走同一套高亮（样式表里的 :active）。
- */
-const selectedBubbleKey = ref("");
-/** 点老板后身份球原地淡出（淡出后不再可点），图标不参与任何位移 */
-const chooseOut = ref(false);
-/** 老板身份详情态：Ardot 331:382，标题 + 6 个设备胶囊 + 提示 + 底部极光 */
-const isRoleDetail = ref(false);
-/** 详情内容是否已浮出（控制淡入上浮） */
-const detailVisible = ref(false);
-/**
- * 语音命中某个身份球后的停留时长：先点亮命中的那颗球（高亮玻璃 + 放大光晕 + 呼吸），
- * 让用户看清「选中了哪个」，停顿一下再进身份信息页，避免选中态一闪而过。
- */
-const IDENTITY_HIT_HOLD_MS = 900;
-
-let holdTimer: ReturnType<typeof setTimeout> | null = null;
-let speechFailsafeTimer: ReturnType<typeof setTimeout> | null = null;
-let choiceEnterTimer: ReturnType<typeof setTimeout> | null = null;
-let choiceSpeakTimer: ReturnType<typeof setTimeout> | null = null;
-let detailEnterTimer: ReturnType<typeof setTimeout> | null = null;
-/** 命中身份球 → 进详情页的延时器 */
-let identityHitTimer: ReturnType<typeof setTimeout> | null = null;
-/** 跳转中标记：避免重复触发 openRoleSelect / startExperience，也用来掐掉跳转前的待播口播 */
-let navigating = false;
-let holdStartX = 0;
-let holdStartY = 0;
 
 function readPoint(e: any) {
   const point = e?.touches?.[0] || e?.changedTouches?.[0] || e;
@@ -1178,7 +1185,54 @@ function onChooseBubble(bubble: ChoiceBubble) {
     enterRoleDetail("OWNER");
     return;
   }
-  openRoleSelect();
+  // 操作手 / 设备管理员：与「长按说出身份」走同一个校验接口，只是 text 换成这颗球的文案；
+  // 接口返回的 hitValue 才是最终角色，接着点亮球、停留一下再进该角色的身份信息页
+  void chooseNonOwnerRole(bubble);
+}
+
+/**
+ * 点击非老板身份时的接口链路（与录音命中完全同一条）：
+ * /speech/wake/validate?module=ASK&step=IDENTITY，text 用这颗球上的文案，
+ * 命中后按 data.hitValue 拉该角色的 IDENTITY_DETAIL；接口异常也照旧进点击的角色详情，
+ * 不让网络问题挡住用户已经明确做出的选择。
+ */
+async function chooseNonOwnerRole(bubble: ChoiceBubble) {
+  // 与录音共用会话序号：期间又长按录音 / 离开页面，这次点击的结果一律作废
+  const seq = ++recordSeq;
+  clearWakeMissed();
+  isChecking.value = true;
+  introTts.stop();
+  disarmVoiceRetry();
+  try {
+    const result = await withTimeout(
+      validateWakeWord({ module: "ASK", step: "IDENTITY", text: bubble.label || "" }),
+      WAKE_VALIDATE_TIMEOUT_MS,
+    );
+    if (seq !== recordSeq) return;
+    const hitRole = String(result?.hitValue || "").trim().toUpperCase();
+    const roleCode = hitRole || bubble.roleCode || "OWNER";
+    logger.info("visitor choice validate result", {
+      clicked: bubble.roleCode,
+      matched: result?.matched,
+      hitValue: result?.hitValue,
+      roleCode,
+    });
+    selectedBubbleKey.value = roleCode.toLowerCase();
+    if (identityHitTimer) clearTimeout(identityHitTimer);
+    identityHitTimer = setTimeout(() => {
+      identityHitTimer = null;
+      if (seq !== recordSeq) return;
+      enterRoleDetail(roleCode);
+      enterWelcome();
+    }, IDENTITY_HIT_HOLD_MS);
+  }
+  catch (error) {
+    if (seq !== recordSeq) return;
+    logger.warn("visitor choice validate failed", error);
+    isChecking.value = false;
+    enterRoleDetail(bubble.roleCode || "OWNER");
+    enterWelcome();
+  }
 }
 
 /** 触摸被系统打断（来电、手势返回等）：丢掉这次录音并复位，不跳转 */
@@ -1228,34 +1282,6 @@ onMounted(async () => {
     logger.warn("failed to prefetch role options", error);
   }
 });
-
-/** 点身份气泡后进「老板 / 操作手」明细与开始体验页 */
-function openRoleSelect() {
-  if (navigating) return;
-  navigating = true;
-  // 离开起始页：兜底计时器、待播口播与手势补播监听一并收掉，避免在角色选择页背后继续说话
-  clearSpeechFailsafe();
-  if (choiceSpeakTimer) {
-    clearTimeout(choiceSpeakTimer);
-    choiceSpeakTimer = null;
-  }
-  if (detailSpeakTimer) {
-    clearTimeout(detailSpeakTimer);
-    detailSpeakTimer = null;
-  }
-  detailSpeakSeq += 1;
-  introTts.stop();
-  disarmVoiceRetry();
-  uni.navigateTo({
-    url: "/pages/role-select/index",
-    complete: () => {
-      // 从角色页返回时回到起始态：彩色渐变收起、自我介绍与身份气泡隐藏
-      navigating = false;
-      isFinishing.value = false;
-      resetIntro();
-    },
-  });
-}
 </script>
 
 <template>
@@ -1267,7 +1293,6 @@ function openRoleSelect() {
     class="welcome-visitor"
     :class="{
       'welcome-visitor--recording': isRecording,
-      'welcome-visitor--checking': isChecking,
       'welcome-visitor--missed': isWakeMissed,
       'welcome-visitor--finishing': isFinishing,
       'welcome-visitor--glow-idle': isGlowIdle,
@@ -1378,14 +1403,15 @@ function openRoleSelect() {
               class="welcome-visitor__detail-tag"
               :class="{ 'welcome-visitor__detail-tag--in': detailVisible }"
               :style="{
-                left: `${tag.left}rpx`,
-                top: `${tag.top}rpx`,
-                width: `${tag.width}rpx`,
+                'left': `${tag.left}rpx`,
+                'top': `${tag.top}rpx`,
+                'width': `${tag.width}rpx`,
                 '--holo-dx': `${tag.holoDx}rpx`,
                 '--holo-dy': `${tag.holoDy}rpx`,
                 '--holo-rx': tag.holoRx,
                 '--holo-ry': tag.holoRy,
                 '--holo-delay': `${DETAIL_HOLO_DELAY_MS + index * DETAIL_TAG_STAGGER_MS}ms`,
+                '--holo-duration': `${CHOICE_HOLO_DURATION_MS}ms`,
               }"
             >
               <text class="welcome-visitor__detail-tag-text">{{ tag.text }}</text>
@@ -1430,7 +1456,10 @@ function openRoleSelect() {
 /* ===== 底部光效：常态贴底一缕淡蓝（62px）；
    按住 / 收尾态换成首页「按住说话」面板那套粉蓝渐变波浪（118px），各层自己贴底定位 ===== */
 .welcome-visitor__glow {
-  position: absolute;
+  /* 贴的是「视口底边」而不是父容器底边：
+     iOS / 小米的 WebView 里页面容器高度有时会比屏幕少掉一条安全区，
+     用 absolute 就会停在安全区上方、底下漏出白带；fixed 直接咬住屏幕物理底边 */
+  position: fixed;
   right: 0;
   bottom: 0;
   left: 0;
@@ -1483,9 +1512,10 @@ function openRoleSelect() {
   will-change: opacity;
 }
 
-/* 按住 / 唤醒校验中 / 收尾态 / 未命中：底部都换成这套波纹色带 */
+/* 按住 / 收尾态 / 未命中：底部换成这套波纹色带。
+   校验中（松手后等接口那一段）不再参与 —— 手一松波纹立即释放，底部回到常态淡蓝，
+   接口返回后再由 --finishing / --missed 接管 */
 .welcome-visitor--recording .welcome-visitor__glow-voice,
-.welcome-visitor--checking .welcome-visitor__glow-voice,
 .welcome-visitor--missed .welcome-visitor__glow-voice,
 .welcome-visitor--finishing .welcome-visitor__glow-voice {
   opacity: 1;
@@ -1493,7 +1523,6 @@ function openRoleSelect() {
 
 /* 常态那缕淡蓝在按住后让位，换成面板里的粉白底色 */
 .welcome-visitor--recording .welcome-visitor__glow-fade,
-.welcome-visitor--checking .welcome-visitor__glow-fade,
 .welcome-visitor--missed .welcome-visitor__glow-fade,
 .welcome-visitor--finishing .welcome-visitor__glow-fade {
   opacity: 0;
@@ -1572,10 +1601,9 @@ function openRoleSelect() {
     welcome-voice-wave-sway 6s ease-in-out infinite alternate;
 }
 
-/* 按住 / 唤醒校验中：竖向 #EFEFEE → #0F7EEE 的水面。色带没有横向色差了，
+/* 按住：竖向 #EFEFEE → #0F7EEE 的水面。色带没有横向色差了，
    流动改成「色彩上下涨落」——同一个波形遮罩继续摆动，观感与收尾态一致 */
-.welcome-visitor--recording .welcome-visitor__glow-voice-band,
-.welcome-visitor--checking .welcome-visitor__glow-voice-band {
+.welcome-visitor--recording .welcome-visitor__glow-voice-band {
   background-image: linear-gradient(180deg, #efefee 0%, #0f7eee 100%);
   background-size: 100% 160%;
   animation:
@@ -1583,8 +1611,7 @@ function openRoleSelect() {
     welcome-voice-wave-sway 4.8s ease-in-out infinite alternate;
 }
 
-.welcome-visitor--recording .welcome-visitor__glow-voice-band--back,
-.welcome-visitor--checking .welcome-visitor__glow-voice-band--back {
+.welcome-visitor--recording .welcome-visitor__glow-voice-band--back {
   background-image: linear-gradient(180deg, #efefee 0%, #0f7eee 100%);
   background-size: 100% 160%;
   animation:
@@ -1944,8 +1971,8 @@ function openRoleSelect() {
   opacity: 1;
   transform: translateY(0) scale(1);
   animation:
-    welcome-bubble-holo 1200ms cubic-bezier(0.16, 1, 0.3, 1) var(--holo-delay, 0ms) backwards,
-    welcome-bubble-float var(--float-duration, 7.6s) ease-in-out calc(var(--holo-delay, 0ms) + 1200ms) infinite alternate;
+    welcome-bubble-holo var(--holo-duration, 1200ms) cubic-bezier(0.16, 1, 0.3, 1) var(--holo-delay, 0ms) backwards,
+    welcome-bubble-float var(--float-duration, 7.6s) ease-in-out calc(var(--holo-delay, 0ms) + var(--holo-duration, 1200ms)) infinite alternate;
 }
 
 /* 浮出之后才可点：避免过渡期间点到还看不见的气泡 */
@@ -2138,7 +2165,7 @@ function openRoleSelect() {
 .welcome-visitor__detail-tag--in {
   opacity: 1;
   transform: translateY(0);
-  animation: welcome-bubble-holo 1200ms cubic-bezier(0.16, 1, 0.3, 1) var(--holo-delay, 0ms) backwards;
+  animation: welcome-bubble-holo var(--holo-duration, 1200ms) cubic-bezier(0.16, 1, 0.3, 1) var(--holo-delay, 0ms) backwards;
 }
 
 .welcome-visitor__detail-tag-text {

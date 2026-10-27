@@ -26,6 +26,11 @@ const props = defineProps({
    */
   bottomGradient: { type: Boolean, default: false },
   /**
+   * 临时收掉底部氛围图形（首页「正在思考中」用）：
+   * 发起提问后、还没出字的这段时间渐变不出现，出字进入「回答中」再按原逻辑显示。
+   */
+  hideBottomArt: { type: Boolean, default: false },
+  /**
    * 语音播报（TTS）进行中：底部换成「请选择你的身份吧」页同一套三色带波纹。
    * 播报期间常态那条淡蓝波浪让位，避免两种底纹叠在一起。
    */
@@ -599,9 +604,10 @@ onBeforeUnmount(() => {
       </view>
     </view>
     <!-- 底部氛围图形：设计稿 326:1336 Frame 45（375×118），压在输入栏下面。
-         语音播报期间让位给三色带波纹，录音期间让位给录音面板自带的同一张底部波浪 -->
+         语音播报期间让位给三色带波纹，录音期间让位给录音面板自带的同一张底部波浪，
+         思考中（hideBottomArt）同样先收起来，出字后自动回来 -->
     <view
-      v-if="bottomGradient && !speaking && !keyboardOpen && !voiceKeyboardOpen && voicePhase !== 'recording'"
+      v-if="bottomGradient && !speaking && !keyboardOpen && !voiceKeyboardOpen && voicePhase !== 'recording' && !hideBottomArt"
       class="chat-input__bottom-art"
       aria-hidden="true"
     />

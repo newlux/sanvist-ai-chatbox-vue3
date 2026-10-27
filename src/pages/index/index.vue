@@ -194,6 +194,20 @@ const messageBottomInset = computed(() => {
   // 导航与输入栏始终固定在底部；无论是否显示首页快捷问题，都预留导航实际高度。
   return `calc(${composerBottomInset.value} + 88rpx)`;
 });
+/**
+ * 「正在思考中」：已发起请求，但最后一条 AI 消息还没有 answer 正文。
+ * 这一态要把输入栏下方的氛围渐变收起来（与头部灵动岛的状态判定一致），
+ * 一旦出字进入「回答中」，渐变按原逻辑自动回来。
+ */
+const chatThinking = computed(() => {
+  if (!isLoading.value) return false;
+  const list = messages.value || [];
+  const last = list[list.length - 1];
+  if (!last || last.role !== "ai") return false;
+  return !(last.blocks || []).some(
+    block => block.type === "answer" && String(block.payload?.content || "").trim().length > 0,
+  );
+});
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 const askSlotQueue = ref<AskSlotPayload[]>([]);
 const askSlotDrawerVisible = ref(false);
@@ -998,6 +1012,7 @@ onBeforeUnmount(() => {
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
         bottom-gradient
+        :hide-bottom-art="chatThinking"
         :compact-voice-listening="true"
         :speaking="realtimeTts.playing.value"
         @send="sendMessage"
