@@ -2127,11 +2127,15 @@ onMounted(async () => {
 }
 
 /* 设备信息胶囊（1006:313 / 1006:346 / 1006:277 / 1006:350 / 1006:291 / 1006:293，六枚数据完全一致）：
-   - 填充：线性渐变，元素级 opacity 0.16 分摊到每个色标（#3D21CD 0% → #C1E4FF 27.8%
-     → #7B9CFF 50.9% → #C067FA 71.2% → #F7CFFF 85.8% → #FD90C4 100%）；
-     gradientTransform 方向向量 (0.8784, −0.8175) → CSS 47.05°（左下深紫 → 右上粉）
-   - 描边：strokes visible:false，不还原（原 2px 渐变描边的 ::before 已移除）
-   - 投影：DROP_SHADOW rgba(0,159,235,0.1272) offset 0 / 3、radius 16（另一道黑色投影 visible:false）
+   - 填充：设计稿是「左下紫 → 右上」的虹彩渐变，方向向量 (0.8784, −0.8175) → CSS 47.05°。
+     Figma 给的六段色标（#3D21CD → #C1E4FF → #7B9CFF → #C067FA → #F7CFFF → #FD90C4）
+     是按 0.16 的低透明度写的，落到 #FAFAFA 上几乎看不出渐变，整颗胶囊发灰。
+     现在按设计稿截图的观感改成「紫 → 蓝紫 → 透白 → 青」的色带，浓度抬到 0.4 左右
+   - 描边：设计稿截图里每颗胶囊外缘都有一圈更亮的虹彩细边，
+     用 mask 挖空法留 1px 环（见 .welcome-visitor__detail-tag::before），
+     不用 border 或 2px 外描边，胶囊尺寸不变
+   - 投影：DROP_SHADOW rgba(0,159,235,0.1272) offset 0 / 3、radius 16（另一道黑色投影 visible:false），
+     另加一圈彩色柔光还原设计稿里胶囊外的辉光
    - 背景模糊：BACKGROUND_BLUR 29 → 标准差 14.5 → blur(29rpx)（CSS blur() 参数就是标准差，
      之前误写 blur(58rpx) 糊了一倍，玻璃感被冲淡）
    - 圆角 38（76rpx，高度 32 → 药丸）、14px / 行高 20px / Medium / #0D0D0D，
@@ -2145,16 +2149,21 @@ onMounted(async () => {
   box-sizing: border-box;
   height: 64rpx; // 32px
   border-radius: 76rpx; // 38px
+  /* 填充：原来 0.16 的浓度压在 #FAFAFA 上根本看不出渐变，整颗胶囊发灰发白。
+     这里按设计稿截图的观感取「左下紫 → 中段透白 → 右上青」，并把浓度抬到 0.3 上下：
+     再高就会盖过底层白色发闷，再低又退回发灰。 */
   background-image: linear-gradient(
     47.05deg,
-    rgba(61, 33, 205, 0.16) 0%,
-    rgba(193, 228, 255, 0.16) 27.8%,
-    rgba(123, 156, 255, 0.16) 50.9%,
-    rgba(192, 103, 250, 0.16) 71.2%,
-    rgba(247, 207, 255, 0.16) 85.8%,
-    rgba(253, 144, 196, 0.16) 100%
+    rgba(98, 72, 232, 0.4) 0%,
+    rgba(163, 178, 255, 0.31) 26%,
+    rgba(225, 235, 255, 0.19) 44%,
+    rgba(255, 255, 255, 0.12) 56%,
+    rgba(150, 214, 250, 0.29) 78%,
+    rgba(118, 206, 246, 0.42) 100%
   );
-  box-shadow: 0 6rpx 32rpx rgba(0, 159, 235, 0.127); // 0 3 16
+  box-shadow:
+    0 6rpx 32rpx rgba(0, 159, 235, 0.127), // 0 3 16
+    0 0 22rpx rgba(150, 175, 255, 0.42); // 外圈柔光：设计稿里胶囊边缘有一层彩色辉光
   -webkit-backdrop-filter: blur(29rpx); // stdDev 14.5px
   backdrop-filter: blur(29rpx);
   color: #0d0d0d;
@@ -2166,6 +2175,31 @@ onMounted(async () => {
   opacity: 0;
   pointer-events: none;
   will-change: transform, opacity;
+}
+
+/* 虹彩细边：设计稿里每颗胶囊外缘都有一圈比填充更亮的紫 → 青描边，
+   用 mask 挖空法只留 1px 环（与身份玻璃球、灵动岛描边同一套做法），
+   不额外撑大胶囊尺寸，也不影响里面的文案排版 */
+.welcome-visitor__detail-tag::before {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background-image: linear-gradient(
+    47.05deg,
+    rgba(126, 100, 255, 0.52) 0%,
+    rgba(176, 190, 255, 0.4) 26%,
+    rgba(200, 220, 255, 0.32) 50%,
+    rgba(140, 210, 250, 0.4) 76%,
+    rgba(110, 200, 245, 0.52) 100%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  content: "";
+  pointer-events: none;
 }
 
 /* 与身份球同款方案 4「全息升维翻展」：从图标中心 3D 翻折展开，落位后保持设计稿的静止位置 */
