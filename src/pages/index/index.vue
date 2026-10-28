@@ -628,6 +628,36 @@ function backToWelcome() {
   if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
 }
 
+/**
+ * 长按顶部三角图标 5 秒：回到初始页。
+ * 不换路由 —— 首页本身就是「初始页 / 对话页」两个态（pageStage），
+ * 把 stage 打回 welcome 就等于重进初始页（AiWelcome 重新挂载，内部状态全清），
+ * 同时把 demo 标记与「已进过对话」的存储标记清掉，
+ * 否则 onShow 里的 syncPageStage 会立刻把页面拽回对话。
+ */
+function onRestartToStart() {
+  // 生成中：先掐在途请求与听播，避免旧回包继续往新状态里写
+  cancelActiveStream();
+  realtimeTts.stop();
+  // 收起挂着的浮层，别让抽屉 / 追问卡压在初始页上
+  guideStepSheetVisible.value = false;
+  guideSuggestionSheetVisible.value = false;
+  askSlotDrawerVisible.value = false;
+  guideStepPayload.value = null;
+  guideSuggestionPayload.value = null;
+  askSlotQueue.value = [];
+  // 离开 demo 模式，并清掉「欢迎页已完成」标记（会员分支靠它决定要不要直接进对话）
+  isDemoPage = false;
+  try {
+    uni.removeStorageSync(AI_ASK_WELCOME_DONE_KEY);
+  } catch (error) {
+    logger.warn("failed to clear welcome flag", error);
+  }
+  // 初始页重新进来就是一轮新会话，与 role-select / 初始页「开始体验」的入口保持一致
+  chatStore.resetConversation();
+  pageStage.value = "welcome";
+}
+
 async function openLocalHistory(id: string | number, force = false) {
   if (!force && String(chatStore.aiSessionId) === String(id) && chatStore.messages.length) return;
   cancelActiveStream();
@@ -845,7 +875,9 @@ onBeforeUnmount(() => {
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
         :share-selected-round-count="shareSelectedRoundCount"
+        restartable
         @back="backToWelcome"
+        @restart="onRestartToStart"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"
         @session-delete="onSessionDelete"

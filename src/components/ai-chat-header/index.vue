@@ -37,6 +37,11 @@ const props = defineProps({
    * 由页面顶部的毛玻璃层负责渐隐；其它页面保持原来的实底渐变。
    */
   plainBg: { type: Boolean, default: false },
+  /**
+   * 长按灵动岛 5 秒回到初始页（首页对话页开）。
+   * 默认关：作业指导 / 任务协同也用这个头部，那边的岛保持纯展示、不吃触摸事件。
+   */
+  restartable: { type: Boolean, default: false },
 });
 const emit = defineEmits([
   "back",
@@ -48,6 +53,7 @@ const emit = defineEmits([
   "session-rename",
   "update:sessions",
   "share-select-all",
+  "restart",
 ]);
 
 /**
@@ -377,9 +383,59 @@ function deleteSelected() {
   cancelMultiSelect();
 }
 
+/**
+ * 长按灵动岛回到初始页（只有首页对话页开 restartable 时生效）。
+ * 5 秒是「明显有意为之」的时长：短按 / 误触都不会触发，所以按下即开始计时，
+ * 手指移动超过阈值（视作滑动）或松手就取消，不需要额外的进度反馈。
+ */
+const ISLAND_LONG_PRESS_MS = 5000;
+/** 判定为滑动的手指位移（px）：与首页整页长按录音的阈值保持一致 */
+const ISLAND_MOVE_TOLERANCE_PX = 12;
+let islandPressTimer: ReturnType<typeof setTimeout> | null = null;
+let islandPressOrigin = { x: 0, y: 0 };
+/** 按住中：驱动那圈 5 秒走满的进度环，松手 / 滑动 / 计时结束都会复位 */
+const islandPressing = ref(false);
+
+function clearIslandPressTimer() {
+  islandPressing.value = false;
+  if (!islandPressTimer) return;
+  clearTimeout(islandPressTimer);
+  islandPressTimer = null;
+}
+
+function readPressPoint(e: any) {
+  const point = e?.touches?.[0] || e?.changedTouches?.[0] || e;
+  return { x: Number(point?.clientX ?? 0), y: Number(point?.clientY ?? 0) };
+}
+
+function onIslandPressStart(e: any) {
+  if (!props.restartable) return;
+  islandPressOrigin = readPressPoint(e);
+  // 先归零上一轮，再点亮进度环（clearIslandPressTimer 会把 islandPressing 压回 false）
+  clearIslandPressTimer();
+  islandPressing.value = true;
+  islandPressTimer = setTimeout(() => {
+    islandPressTimer = null;
+    emit("restart");
+  }, ISLAND_LONG_PRESS_MS);
+}
+
+/** 手指一移动就当滑动处理：避免用户上下滑消息列表时误触发 */
+function onIslandPressMove(e: any) {
+  if (!islandPressTimer) return;
+  const point = readPressPoint(e);
+  if (
+    Math.abs(point.x - islandPressOrigin.x) > ISLAND_MOVE_TOLERANCE_PX
+    || Math.abs(point.y - islandPressOrigin.y) > ISLAND_MOVE_TOLERANCE_PX
+  ) {
+    clearIslandPressTimer();
+  }
+}
+
 onBeforeUnmount(() => {
   clearTimeout(sessionScrollIdleTimer);
   clearTimeout(historyReloadTimer);
+  clearIslandPressTimer();
 });
 </script>
 
@@ -421,12 +477,34 @@ onBeforeUnmount(() => {
             >
               <!-- 圆形玻璃底盘（.chat-header__island-glass）与 1px 白描边已按需求去掉，
                    容器只作为呼吸动画的载体 + 图标的定位基准，本身不再有任何可见形状 -->
+              <!-- 长按进度环：按住才出现，5s 走满一圈；松手 / 滑动 / 计时结束都会卸载，
+                   卸载即复位，下次按住重新从 0 开始 -->
+              <view
+                v-if="props.restartable && islandPressing"
+                class="chat-header__press-ring"
+              >
+                <svg class="chat-header__press-ring-svg" viewBox="0 0 72 72">
+                  <circle class="chat-header__press-ring-track" cx="36" cy="36" r="34" />
+                  <circle class="chat-header__press-ring-arc" cx="36" cy="36" r="34" />
+                </svg>
+              </view>
               <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），
                    只换图源，尺寸 / 投影 / 状态环等一律不动 -->
+              <!-- 长按 5 秒回到初始页：只有 restartable（首页对话页）碰触摸事件，
+                   其它页面的岛保持纯展示、不抢触摸；热区就是三角图本身（62×62） -->
               <image
                 class="chat-header__island-logo"
+                :class="{ 'chat-header__island-logo--restartable': props.restartable }"
                 src="@/assets/img/sani-logo.gif"
                 mode="aspectFit"
+                @touchstart="onIslandPressStart"
+                @touchmove="onIslandPressMove"
+                @touchend="clearIslandPressTimer"
+                @touchcancel="clearIslandPressTimer"
+                @mousedown="onIslandPressStart"
+                @mousemove="onIslandPressMove"
+                @mouseup="clearIslandPressTimer"
+                @mouseleave="clearIslandPressTimer"
               />
             </view>
             <!-- 长条胶囊：仅「思考中 / 正在回答」两个生成态展示，其余状态不出现 -->
@@ -854,6 +932,67 @@ onBeforeUnmount(() => {
   transform: translateZ(0);
   // 缩放过渡做柔：480ms + 两端平滑的缓动曲线，变大/变小都不是硬切
   transition: transform 480ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 首页对话页：三角图要接住长按，父层 .chat-header__island-wrap 是 pointer-events: none，
+   这里单独放开；同时禁掉系统长按菜单（按 5 秒会被 WebView 当成选字 / 呼出菜单） */
+.chat-header__island-logo--restartable {
+  pointer-events: auto;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 长按进度环：144rpx（72px）套在 124rpx（62px）的三角图上，
+   logo 中心 = (9+31, 5.2+31) = (40, 36.2) → 环左上角 (40-36, 36.2-36) = (4, 0.2) */
+.chat-header__press-ring {
+  position: absolute;
+  top: 0;
+  left: 8rpx;
+  width: 144rpx;
+  height: 144rpx;
+  pointer-events: none;
+  // 独立合成层：进度环每帧都在变 dashoffset，别带着下面的 GIF 一起重绘
+  transform: translateZ(0);
+}
+
+.chat-header__press-ring-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  // 从 12 点方向开始走，而不是 3 点
+  transform: rotate(-90deg);
+  // 环本身很细，加一点同色外发光，白底上才看得清
+  filter: drop-shadow(0 0 6rpx rgba(124, 108, 255, 0.55));
+}
+
+.chat-header__press-ring-track,
+.chat-header__press-ring-arc {
+  fill: none;
+  stroke-width: 2;
+}
+
+.chat-header__press-ring-track {
+  stroke: rgba(124, 108, 255, 0.16);
+}
+
+/* 周长 = 2π × 34 ≈ 213.63：dashoffset 从满值走到 0 就是「走满一圈」 */
+.chat-header__press-ring-arc {
+  stroke: #7c6cff;
+  stroke-linecap: round;
+  stroke-dasharray: 213.63;
+  stroke-dashoffset: 213.63;
+  animation: island-press-ring 5s linear forwards;
+}
+
+@keyframes island-press-ring {
+  from {
+    stroke-dashoffset: 213.63;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
 /* 只有「思考中」呼吸放大：160rpx → 200rpx（设计稿 80px → 100px）循环；
