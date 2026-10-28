@@ -46,6 +46,55 @@ export function useLandscape(onReflow?: () => void, options: { lock?: boolean } 
     rotated.value = !locked && viewportIsPortrait();
   }
 
+  /**
+   * 等可视区真的恢复竖屏。
+   *
+   * 原生横屏（`landscapeFullscreen(false)`）是异步生效的：接口一返回不代表屏幕已经转回来，
+   * 此时直接跳页 / 发送问题，对话页和键盘会落在还没转完的横屏里（键盘弹出后布局错乱）。
+   * 这里用 resize / orientationchange 事件 + 50ms 轮询双保险，超时也返回（不卡死流程）。
+   *
+   * @returns 是否已确认竖屏；超时返回 false（调用方通常仍继续返回，只记录日志）
+   */
+  function waitForPortrait(timeoutMs = 1000): Promise<boolean> {
+    if (typeof window === "undefined") return Promise.resolve(false);
+    if (viewportIsPortrait()) return Promise.resolve(true);
+
+    return new Promise<boolean>((resolve) => {
+      const startedAt = Date.now();
+      let timer = 0;
+      let done = false;
+
+      const onViewport = () => {
+        if (viewportIsPortrait()) cleanup(true);
+      };
+
+      const cleanup = (restored: boolean) => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer);
+        window.removeEventListener("resize", onViewport);
+        window.removeEventListener("orientationchange", onViewport);
+        resolve(restored);
+      };
+
+      const tick = () => {
+        if (viewportIsPortrait()) {
+          cleanup(true);
+          return;
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          cleanup(false);
+          return;
+        }
+        timer = window.setTimeout(tick, 50);
+      };
+
+      window.addEventListener("resize", onViewport);
+      window.addEventListener("orientationchange", onViewport);
+      tick();
+    });
+  }
+
   function applyBodyRotation(on: boolean) {
     if (typeof document === "undefined" || !document.body) return;
     const { style } = document.body;
@@ -135,7 +184,16 @@ export function useLandscape(onReflow?: () => void, options: { lock?: boolean } 
     }
   }
 
-  function exitLandscape() {
+  /**
+   * 退出横屏：通知宿主把原生横屏置为 false（`landscapeFullscreen({ enable: false })`），
+   * 撤掉 CSS 旋转 / 解锁方向 / 退全屏，然后**等可视区真的回到竖屏**再返回。
+   *
+   * 调用方（返回按钮、语音/键盘提问后的自动返回、页面卸载）拿到 Promise 后再跳页或发送问题，
+   * 避免对话页在还没转回来的横屏里渲染、键盘弹出时布局错乱。
+   *
+   * @returns 是否已确认恢复竖屏；等待超时返回 false（调用方仍可继续，只记录日志）
+   */
+  async function exitLandscape() {
     // 退出横屏：通知宿主恢复竖屏（离开调度视图 / 点返回 / 页面卸载都会走到这里）
     setLandscapeFullscreen(false);
 
@@ -168,6 +226,12 @@ export function useLandscape(onReflow?: () => void, options: { lock?: boolean } 
     requestedFullscreen = false;
     rotated.value = false;
     applyBodyRotation(false);
+
+    // 原生转屏是异步的：等可视区真的变回竖屏（竖屏下这一步立刻返回 true）
+    const restored = await waitForPortrait();
+    if (restored) logger.debug("退出横屏：已确认恢复竖屏");
+    else logger.warn("退出横屏：等待竖屏超时，继续后续流程");
+    return restored;
   }
 
   onMounted(() => {
@@ -175,7 +239,7 @@ export function useLandscape(onReflow?: () => void, options: { lock?: boolean } 
   });
 
   onBeforeUnmount(() => {
-    exitLandscape();
+    void exitLandscape();
   });
 
   return { rotated, exitLandscape };

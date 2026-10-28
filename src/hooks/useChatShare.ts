@@ -77,6 +77,11 @@ export function useChatShare(posterEl: Ref<unknown>, scope?: string) {
   const sharePosterVisible = ref(false);
   const sharePosterDataUrl = ref("");
   const sharePosterGenerating = ref(false);
+  /**
+   * 步骤卡分享：非空时直接截这张卡片，不走「会话选段」那套。
+   * 卡片里被隐藏 / 未渲染的正文不能拼成文本分享，分享的就是用户眼前这张卡。
+   */
+  const sharePosterTarget = ref<HTMLElement | null>(null);
 
   const shareSheetOptions = computed(() => [
     { key: "wechat", label: t("share-wechat"), icon: iconWechat },
@@ -151,7 +156,12 @@ export function useChatShare(posterEl: Ref<unknown>, scope?: string) {
     }
   }
 
-  function onShareClick(payload: { group?: number[] }) {
+  function onShareClick(payload: { group?: number[]; element?: HTMLElement | null }) {
+    // 步骤卡：带卡片元素时直接把这卡截成图，不弹选段面板、也不去拼未渲染的正文
+    if (payload?.element) {
+      openSharePoster(payload.element);
+      return;
+    }
     shareSelectedIndexes.value = Array.isArray(payload?.group) ? payload.group : [];
     shareSheetVisible.value = true;
     shareSuppressHighlight.value = true;
@@ -192,8 +202,12 @@ export function useChatShare(posterEl: Ref<unknown>, scope?: string) {
     shareSuppressHighlight.value = meta.roundCount > 0 && meta.roundCount < 5 && meta.hasInterrupted;
   }
 
-  async function onCopyMessage({ msg }: { msg: UiChatMessage }) {
-    const content = getCopyableMessageContent(msg);
+  /**
+   * 复制：`text` 优先（步骤卡这类独立卡片复制的是卡内文案，
+   * 它所属消息的气泡正文是隐藏的，按消息正文取会拿到空串或原始 SSE），没有 text 才回落到消息正文。
+   */
+  async function onCopyMessage({ msg, text }: { msg?: UiChatMessage; text?: string }) {
+    const content = String(text || "").trim() || (msg ? getCopyableMessageContent(msg) : "");
     if (!content) {
       uni.showToast({ title: t("copy-failed-please-manually-copy"), icon: "none" });
       return;
@@ -202,7 +216,44 @@ export function useChatShare(posterEl: Ref<unknown>, scope?: string) {
     uni.showToast({ title: copied ? t("copy-success") : t("copy-failed-please-manually-copy"), icon: "none" });
   }
 
+  /**
+   * 截一张页面上的真实元素（步骤卡）。
+   *
+   * 卡片长在可滚动的消息列表里，直接截会被祖先容器的 overflow 裁掉一部分，
+   * 所以先克隆一份、摘掉 `data-share-poster-ignore`（动作区不上海报），
+   * 放到屏幕外的定宽容器里再截——克隆保留 class 与 scoped 属性，样式照旧生效。
+   */
+  async function captureElementPoster(target: HTMLElement) {
+    if (typeof document === "undefined") throw new Error("poster-element-missing");
+    const clone = target.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll("[data-share-poster-ignore]").forEach((node) => {
+      node.parentNode?.removeChild(node);
+    });
+
+    const width = Math.round(target.getBoundingClientRect().width) || 320;
+    const holder = document.createElement("div");
+    holder.style.cssText = `position:fixed;top:0;left:-99999px;width:${width}px;background:#ffffff;`;
+    holder.appendChild(clone);
+    document.body.appendChild(holder);
+    try {
+      const canvas = await html2canvas(clone, {
+        backgroundColor: "#ffffff",
+        useCORS: true,
+        allowTaint: true,
+        scale: 2,
+      });
+      return canvas.toDataURL("image/png");
+    } finally {
+      document.body.removeChild(holder);
+    }
+  }
+
   async function generateSharePoster() {
+    const cardTarget = sharePosterTarget.value;
+    if (cardTarget) {
+      sharePosterDataUrl.value = await captureElementPoster(cardTarget);
+      return;
+    }
     const wrapFromDom = typeof document !== "undefined" ? document.getElementById("share-poster-wrap") : null;
     const wrap = (wrapFromDom || posterEl.value) as HTMLElement | null;
     const poster = wrap?.firstElementChild as HTMLElement | null;
@@ -215,8 +266,10 @@ export function useChatShare(posterEl: Ref<unknown>, scope?: string) {
     })).toDataURL("image/png");
   }
 
-  function openSharePoster() {
+  /** target 有值 = 截这张卡片（步骤卡分享），否则截会话海报 */
+  function openSharePoster(target?: HTMLElement | null) {
     if (sharePosterGenerating.value) return;
+    sharePosterTarget.value = target || null;
     sharePosterVisible.value = true;
     sharePosterDataUrl.value = "";
     sharePosterGenerating.value = true;
@@ -237,6 +290,7 @@ export function useChatShare(posterEl: Ref<unknown>, scope?: string) {
     sharePosterVisible.value = false;
     sharePosterDataUrl.value = "";
     sharePosterGenerating.value = false;
+    sharePosterTarget.value = null;
     closeShareSheet(true);
   }
 
