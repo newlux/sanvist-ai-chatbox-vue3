@@ -1,11 +1,11 @@
-import bunnyPreview from "@/assets/audio/voice/bunny.mp3";
-import mochiPreview from "@/assets/audio/voice/dylan.wav";
-import ethanPreview from "@/assets/audio/voice/ethan.mp3";
-import kaiPreview from "@/assets/audio/voice/kai.mp3";
-import maiaPreview from "@/assets/audio/voice/maia.mp3";
-import miaPreview from "@/assets/audio/voice/mia.mp3";
-import neilPreview from "@/assets/audio/voice/neil.mp3";
-import serenaPreview from "@/assets/audio/voice/serena.mp3";
+import bunnyPreview from "@/assets/audio/voice/brief_qiaoxiaojiao.wav";
+import mochiPreview from "@/assets/audio/voice/brief_anmingyuan.wav";
+import ethanPreview from "@/assets/audio/voice/brief_longanyang.wav";
+import kaiPreview from "@/assets/audio/voice/brief_longzhe.wav";
+import maiaPreview from "@/assets/audio/voice/brief_guyunshu.wav";
+import miaPreview from "@/assets/audio/voice/brief_xieshurou.wav";
+import neilPreview from "@/assets/audio/voice/brief_longsanshu.wav";
+import serenaPreview from "@/assets/audio/voice/brief_xuyuyuan.wav";
 // 8 个 Qwen 音色试听（本地 wav），id 与声音一一对应
 
 import avatarBunny from "@/assets/img/voice-assistant/voice-avatar-Bunny.png";
@@ -49,8 +49,8 @@ export interface ReportVoiceOption {
 /** 按设计稿要求交错排列：女、男、女、男、女、男、女、男。 */
 export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
   {
-    id: "Mia",
-    voiceName: "乖小妹",
+    id: "xieshurou_v3.1",
+    voiceName: "谢舒柔",
     name: "温柔治愈",
     description: "适合日常汇报",
     tag: "温柔治愈",
@@ -60,8 +60,8 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     preview: miaPreview,
   },
   {
-    id: "Ethan",
-    voiceName: "晨煦",
+    id: "longanyang_v3.1",
+    voiceName: "龙安洋",
     name: "阳光温暖",
     description: "适合日常汇报",
     tag: "干练职场",
@@ -71,8 +71,8 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     preview: ethanPreview,
   },
   {
-    id: "Serena",
-    voiceName: "苏瑶",
+    id: "xuyuyuan_v3.1",
+    voiceName: "许玉远",
     name: "温柔知性",
     description: "适合日常汇报",
     tag: "温柔知性",
@@ -82,8 +82,8 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     preview: serenaPreview,
   },
   {
-    id: "Kai",
-    voiceName: "凯",
+    id: "longzhe_v3.1",
+    voiceName: "龙哲",
     name: "沉稳磁性",
     description: "适合日常汇报",
     tag: "成熟沉稳",
@@ -93,8 +93,8 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     preview: kaiPreview,
   },
   {
-    id: "Bunny",
-    voiceName: "萌小姬",
+    id: "qiaoxiaojiao_v3.1",
+    voiceName: "乔小娇",
     name: "灵动可爱",
     description: "适合日常汇报",
     tag: "潮流活力",
@@ -104,8 +104,8 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     preview: bunnyPreview,
   },
   {
-    id: "Neil",
-    voiceName: "阿闻",
+    id: "longsanshu_v3.1",
+    voiceName: "龙三叔",
     name: "专业播报",
     description: "适合日常汇报",
     tag: "专业播报",
@@ -115,8 +115,8 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     preview: neilPreview,
   },
   {
-    id: "Maia",
-    voiceName: "四月",
+    id: "guyunshu_v3.1",
+    voiceName: "顾云舒",
     name: "知性温柔",
     description: "适合日常汇报",
     tag: "成熟沉稳",
@@ -126,8 +126,8 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     preview: maiaPreview,
   },
   {
-    id: "Dylan",
-    voiceName: "沙小弥",
+    id: "anmingyuan_v3.1",
+    voiceName: "安明远",
     name: "聪明伶俐",
     description: "适合日常汇报",
     tag: "轻快活力",

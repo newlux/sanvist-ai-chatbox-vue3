@@ -273,7 +273,7 @@ const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceh
 });
 
 // —— 回答 TTS：发问得到答案后，用停播 + TTS 朗读把结果播出来 ——
-// 流式合成（POST /speech/tts/stream）支持任意文本，不必依赖 chat/tts 的 messageId。
+// 流式合成（POST /speech/tts/v2/stream）支持任意文本，不必依赖 chat/tts 的 messageId。
 interface AnswerTtsAudioItem {
   dataUrl?: string | null;
   audioBase64?: string | null;
@@ -385,9 +385,11 @@ function playAnswerTts(answer: string) {
   answerTtsStreamFinished = false;
   answerTtsPlaying.value = true;
   const language = resolveAnswerTtsLanguage();
+  // 音色跟随本轮听播所选音色（偏好设置 / 已验证过的 params），没取到就不带这个字段
+  const voice = String(reportBroadcastParams.value?.voice || "").trim();
   try {
     answerTtsStream = consumeTextToSpeechStream(
-      { text, language },
+      { text, language, ...(voice ? { voice } : {}) },
       (payload) => {
         if (seq !== answerTtsSeq) return;
         if (!payload || typeof payload !== "object") return;

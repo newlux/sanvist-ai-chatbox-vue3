@@ -7,6 +7,7 @@ import { useI18n } from "vue-i18n";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { useChatStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
+import { markdownToPlainText } from "@/utils/markdown-to-text";
 
 const logger = createLogger("rt-tts");
 
@@ -30,58 +31,11 @@ function extractAnswerText(message: UiChatMessage): string {
 }
 
 /**
- * 把 /messages 返回的 answer 清洗成自然连贯的中文口播文本。
- * 去掉 markdown 语法（标题/加粗/列表符/代码块/链接等），列表项改顿号连接，
- * 换行直接串起来，凑成一个完整句子，避免 TTS 读出 “n-”“\n” 这类符号。
+ * 把 answer（Markdown）转成纯文本再送 TTS。
+ * 转换规则统一收在 utils/markdown-to-text —— 流式切片会把 `**` `|` 这类标记切在两段之间，
+ * 单批清洗配不上对，只能靠那边的兜底规则一起剔掉，否则 text 里会残留 Markdown 符号。
  */
-function cleanAnswerText(raw: string): string {
-  let text = String(raw || "");
-
-  // 正文里残留的协议块（如 <COMPONENT>{...}</COMPONENT>）只用于渲染，不参与口播
-  text = text.replace(/<(SANVIST|ASK|GUIDE|COMPONENT)>[\s\S]*?<\/\1>/g, "");
-
-  // 代码块与行内代码
-  text = text.replace(/```[\s\S]*?```/g, "");
-  text = text.replace(/`([^`]+)`/g, "$1");
-
-  // 图片 / 链接：只保留文本
-  text = text.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
-  text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
-
-  // 加粗 / 斜体
-  text = text.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2");
-  text = text.replace(/(^|[^*])\*([^*]+)\*/g, "$1$2");
-  text = text.replace(/(^|[^_])_([^_]+)_/g, "$1$2");
-
-  // 标题 / 引用
-  text = text.replace(/^#{1,6}\s*/gm, "");
-  text = text.replace(/^>\s*/gm, "");
-
-  // 无序 / 有序列表项：连带的空格和换行一起替换成顿号
-  text = text.replace(/(?:[ \t]*\n)+[ \t]*[-*+][ \t]+/g, "、");
-  text = text.replace(/(?:[ \t]*\n)+[ \t]*\d+[.、)）][ \t]*/g, "、");
-
-  // 表格：去掉表头分隔行，| 转顿号
-  text = text.replace(/^[\s|:\-]+$/gm, "");
-  text = text.replace(/\|/g, "、");
-
-  // 合并空白，去掉换行，串成一句
-  text = text.replace(/[ \t\r]+/g, " ");
-  text = text.replace(/\n+/g, "");
-
-  // 修正连续分隔符与「：、」这类错误
-  text = text.replace(/([：:])\s*、+/g, "$1");
-  text = text.replace(/[、，,]{2,}/g, "、");
-
-  text = text.replace(/^[、，,；;：:。\s]+/g, "");
-  text = text.trim();
-
-  // 边界情况：非代码文本里残留的列表符
-  text = text.replace(/^\s*[-*+]\s+/gm, "");
-
-  if (text && !/[。！？!?；;]$/.test(text)) text += "。";
-  return text;
-}
+const cleanAnswerText = markdownToPlainText;
 
 /** 流式喂数时取「最后一个句末标点之后」的边界：边界之前的文本视为完整句子可送 TTS。 */
 function lastSentenceBoundary(text: string) {
@@ -99,7 +53,7 @@ function lastSentenceBoundary(text: string) {
 
 /**
  * 实时 TTS（分句并发合成，SSE 流式）。只在用户点击新对话消息的播音按钮时触发：
- * 直接取当前消息对象里已经渲染好的 content 文本，再 POST /speech/tts/stream 逐句流式播放。
+ * 直接取当前消息对象里已经渲染好的 content 文本，再 POST /speech/tts/v2/stream 逐句流式播放。
  * audio_chunk 按到达顺序（即原文句序）排进单一队列，逐条播放；
  * dataUrl/audioBase64 都为空的占位/失败句直接跳过，继续播下一句。
  *

@@ -48,6 +48,18 @@ function defineChatStore(scope: string) {
     const stopAtReplyEnd = ref(false);
     /** 滚动请求令牌：自增一次 = 一次请求，由消息列表量完 DOM 自己按 px 定位 */
     const replyEndToken = ref(0);
+    /**
+     * 「问题顶到上方」模式（首页普通问答开启）：
+     * 发送后把用户消息顶到对话区上方的固定落点，回答从下面一路往下写，不再贴底跟随。
+     *
+     * 一直保留到换会话 / 新对话 / 重新发问才复位 —— **不能**在回答流结束时就关掉：
+     * 图表、表格、图片是正文之后才撑开高度的，那一下的 content-grow 会触发贴底，
+     * 表现就是「长回答写完了，页面突然跳到最后那张表」。
+     */
+    const alignRoundToTop = ref(false);
+    /** 顶到上方的请求令牌 + 目标消息 id：自增一次 = 一次请求，由消息列表按 px 定位 */
+    const pinMessageToken = ref(0);
+    const pinMessageId = ref("");
     const requestSeq = ref(0);
     const activeRequestSeq = ref(0);
     /** 当前正在生成的那条 AI 消息 id。按 id 而不是下标记录，切会话后不会指错 */
@@ -111,6 +123,10 @@ function defineChatStore(scope: string) {
       aiSessionId.value = null;
       activeMessageId.value = "";
       pinnedToBottom.value = true;
+      alignRoundToTop.value = false;
+      // 新会话从干净状态起步：顶部呼吸位也一起复位
+      pinMessageId.value = "";
+      pinMessageToken.value = 0;
     }
 
     function setSubagent(value: string) {
@@ -131,6 +147,9 @@ function defineChatStore(scope: string) {
     function scrollToBottom(force = false) {
       if (force) pinnedToBottom.value = true;
       if (!pinnedToBottom.value) return;
+      // 「问题顶到上方」的本轮里不跟随底部：流式增量、内容撑高、停止生成都不该把页面拽下去。
+      // 强制请求（切会话、发送以外的一次性对齐）除外。
+      if (alignRoundToTop.value && !force) return;
       if (scrollPending) return;
       scrollPending = true;
       nextTick(() => {
@@ -149,6 +168,22 @@ function defineChatStore(scope: string) {
           else jumpToAnchor();
         }, 120);
       });
+    }
+
+    /** 进入 / 退出「本轮问题顶到上方」模式（回合结束、换会话时复位） */
+    function setAlignRoundToTop(value: boolean) {
+      alignRoundToTop.value = Boolean(value);
+    }
+
+    /**
+     * 请求把某条消息顶到对话区上方（悬浮头部下沿）。
+     * 只动令牌，真正的 px 定位由消息列表量完 DOM 做 —— 这里拿不到布局。
+     */
+    function pinMessageToTop(messageId: string) {
+      const target = String(messageId || "").trim();
+      if (!target) return;
+      pinMessageId.value = target;
+      pinMessageToken.value += 1;
     }
 
     function setPinnedToBottom(pinned: boolean) {
@@ -235,8 +270,21 @@ function defineChatStore(scope: string) {
       setPinnedToBottom,
       setStopAtReplyEnd,
       focusStepBlock,
+      alignRoundToTop,
+      pinMessageToken,
+      pinMessageId,
+      setAlignRoundToTop,
+      pinMessageToTop,
     };
   });
+}
+
+/**
+ * 消息在 DOM 上的锚点 id，给「顶到对话区上方」的 px 定位用。
+ * 统一在这里拼，消息列表渲染与滚动请求才不会各写一套拼错。
+ */
+export function chatMessageAnchorDomId(id: Identifier | string | number | null | undefined) {
+  return `msg-anchor-${id ?? ""}`;
 }
 
 /**

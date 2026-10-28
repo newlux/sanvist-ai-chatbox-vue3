@@ -24,7 +24,7 @@ function resolveAudioSource(chunk: RealtimeTtsChunk) {
 }
 
 /**
- * 任意文案的实时 TTS 播报（POST /speech/tts/stream）。
+ * 任意文案的实时 TTS 播报（POST /speech/tts/v2/stream）。
  *
  * 和 useRealtimeTts 的区别：不挂在聊天消息上、不写 chat store，
  * 只把分句音频按到达顺序排队播完，供欢迎页这类「页面自带一段话」的场景使用。

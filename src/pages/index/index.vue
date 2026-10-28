@@ -126,6 +126,8 @@ const {
     if (index < 0) return;
     realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
   },
+  // 发送后把这条提问顶到对话区上方，回答从下面往下写，本轮回合内不再贴底跟随
+  alignSentMessageToTop: true,
 });
 
 /**
@@ -780,6 +782,26 @@ function syncPageStage() {
   }
 }
 
+/**
+ * 一键回到底部：没贴底时出现，回到底部（含发送后强制贴底）自动消失。
+ * 分享选择态、贴底卡片（步骤卡 / 追问卡）展开时不显示，避免和这些浮层抢位置。
+ */
+const showScrollToBottom = computed(
+  () =>
+    !shareSheetVisible.value
+    && !guideStepSheetVisible.value
+    && !askSlotDrawerVisible.value
+    && !pinnedToBottom.value
+    && (messages.value?.length || 0) > 0,
+);
+
+function onScrollToBottomTap() {
+  // 点了就恢复「跟随底部」：本轮「提问顶到上方」的上顶模式一起关掉，
+  // 否则流式增量不会继续跟随，得反复点
+  chatStore.alignRoundToTop = false;
+  chatStore.scrollToBottom(true);
+}
+
 async function onScrollTop() {
   if (!chatStore.aiSessionId) return;
   try {
@@ -893,6 +915,8 @@ onBeforeUnmount(() => {
         :show-quick-prompts="showQuickPrompts"
         :scroll-into-view="scrollIntoView"
         :reply-end-token="replyEndToken"
+        :pin-message-token="chatStore.pinMessageToken"
+        :pin-message-id="chatStore.pinMessageId"
         :show-quick-list="showQuickList"
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
@@ -927,6 +951,16 @@ onBeforeUnmount(() => {
         @scroll-top="onScrollTop"
         @pinned-change="chatStore.setPinnedToBottom"
       />
+      <!-- 一键回到底部：离底时出现，贴底自动隐藏；
+           位置 = 输入栏高（含键盘抬起）+ 88rpx 底部导航 + 24rpx 间隙，不压住「听汇报 / 作业指导 / 任务协同」 -->
+      <view
+        v-if="showScrollToBottom"
+        class="chat-scroll-bottom"
+        :style="{ bottom: `calc(${composerBottomInset} + 112rpx)` }"
+        @tap="onScrollToBottomTap"
+      >
+        <view class="chat-scroll-bottom__chevron" />
+      </view>
       <AiSlotDrawer
         :slots="askSlotQueue"
         :visible="askSlotDrawerVisible"
@@ -1173,6 +1207,33 @@ $color-white: #ffffff;
   // 两者共用一个值，消息正好从渐隐的下沿起步，往上滚就被模糊掉
   --chat-top-inset: calc(constant(safe-area-inset-top) + 300rpx);
   --chat-top-inset: calc(env(safe-area-inset-top) + 300rpx);
+}
+
+// 一键回到底部：白底圆钮 + 细线下箭头，浮在底部导航（听汇报 / 作业指导 / 任务协同）上方右侧。
+// bottom 由行内样式给：composerBottomInset（输入栏高 + 键盘抬起）+ 88rpx 导航高 + 24rpx 间隙
+.chat-scroll-bottom {
+  position: absolute;
+  right: 32rpx;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 76rpx;
+  height: 76rpx;
+  border: 1px solid rgba(51, 51, 51, 0.08);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 4rpx 16rpx rgba(15, 126, 238, 0.12);
+  -webkit-backdrop-filter: blur(20rpx);
+  backdrop-filter: blur(20rpx);
+}
+
+.chat-scroll-bottom__chevron {
+  width: 20rpx;
+  height: 20rpx;
+  border-right: 1px solid #333333;
+  border-bottom: 1px solid #333333;
+  transform: translateY(-6rpx) rotate(45deg);
 }
 
 // 头部悬浮：不占布局高度，消息可以滚到它下面，透过 .ai-page__top-fade 的毛玻璃淡出；
