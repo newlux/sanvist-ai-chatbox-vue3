@@ -23,8 +23,8 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
  * `#C8201E` 描边 + 阴影（`0 3px 5px -1px rgba(0,0,0,.086)`），内部 20×20 键盘图形（`#6B6B6B`）；
  * 按需求做「输入框显隐开关」：点它收起 / 展开输入胶囊。
  *
- * 语音识别沿用项目既有链路（VoiceRecorder + /speech/asr/*），识别结果直接落到输入框里，
- * 再由发送按钮交给页面（页面负责收起横屏、回对话页并发送）。
+ * 语音识别沿用项目既有链路（VoiceRecorder + /speech/asr/*），识别出文本后**直接作为问题发出**，
+ * 由页面负责收起横屏、回对话页并发送；打字则用发送按钮交给页面。
  */
 defineOptions({ name: "ScheduleAskBar" });
 
@@ -223,8 +223,12 @@ async function stopRecordingAndRecognize() {
       toast(t("no-speech-recognized"));
       return;
     }
-    // 识别结果进输入框（有内容后输入栏右侧就变成发送按钮）
-    draft.value = `${draft.value}${text}`;
+    // 语音问完直接当问题发出去：合并已有草稿 → 交给页面（返回对话页并发送），
+    // 不再要求用户再看一眼、再点一次发送按钮。
+    const question = `${draft.value}${text}`.trim();
+    draft.value = "";
+    uni.hideKeyboard();
+    emit("send", question);
   }
   catch (error) {
     logger.error("speech recognize failed", error);

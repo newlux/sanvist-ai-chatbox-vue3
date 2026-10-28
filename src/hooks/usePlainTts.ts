@@ -28,6 +28,9 @@ function resolveAudioSource(chunk: RealtimeTtsChunk) {
  *
  * 和 useRealtimeTts 的区别：不挂在聊天消息上、不写 chat store，
  * 只把分句音频按到达顺序排队播完，供欢迎页这类「页面自带一段话」的场景使用。
+ *
+ * 另有 play()：直接播一段现成的音频地址（本地录音欢迎语音），跳过 TTS 接口，
+ * 但共用同一个播放队列与 playing / started，播完推进的逻辑不用改。
  */
 export function usePlainTts(language = "zh") {
   /** 当前是否有音频在播 */
@@ -148,10 +151,31 @@ export function usePlainTts(language = "zh") {
     }
   }
 
+  /**
+   * 直接播放一个现成的音频地址（本地欢迎语音这类录音文件），不走 TTS 接口。
+   *
+   * 实现上只是把这条地址当成唯一一段「分片」丢进同一个播放队列，
+   * 所以 playing / started / stop / 播完回调（onEnded）与 speak 完全一致：
+   * 调用方既可以用它驱动波浪动画，也能继续靠「播报结束」推进页面。
+   */
+  function play(source: string) {
+    const src = String(source || "").trim();
+    if (!src) return;
+
+    stop();
+    // started 按「这一次播放」重置，与 speak 同一口径
+    started.value = false;
+    const id = session;
+    streamFinished = true;
+    queue = [{ dataUrl: src }];
+    playNext(id);
+  }
+
   onBeforeUnmount(stop);
 
   return {
     speak,
+    play,
     stop,
     playing,
     started,

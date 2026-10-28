@@ -56,6 +56,24 @@ defineProps({
     type: String,
     default: "",
   },
+  /** 核对卡底部动作区：生成中 / 被中断时不展示 */
+  showCardActions: {
+    type: Boolean,
+    default: true,
+  },
+  /** 播报状态（由消息列表按这一轮消息透传，卡片只负责画图标） */
+  ttsEnabled: {
+    type: Boolean,
+    default: false,
+  },
+  ttsLoading: {
+    type: Boolean,
+    default: false,
+  },
+  ttsPlaying: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits([
@@ -66,6 +84,9 @@ const emit = defineEmits([
   "guide-suggestion-open",
   "guide-check-step-select",
   "gantt-open",
+  "tts-click",
+  "copy-click",
+  "share-click",
 ]);
 
 function onSuggestionTap(suggestion: unknown) {
@@ -97,6 +118,19 @@ function onGuideSuggestionOpen(payload: GuideSuggestionPayload, auto = false) {
 /** 点核对卡步骤条某一段：把步数（1 起）+ step_id 继续往上抛，由页面切步骤并打开底部白板 */
 function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   emit("guide-check-step-select", payload);
+}
+
+/** 核对卡动作区：播报 / 复制 / 分享都由页面复用现成能力，这里只透传 */
+function onGuideCheckTts() {
+  emit("tts-click");
+}
+
+function onGuideCheckCopy(payload: { text: string }) {
+  emit("copy-click", payload);
+}
+
+function onGuideCheckShare(payload: { element: HTMLElement | null }) {
+  emit("share-click", payload);
 }
 </script>
 
@@ -142,7 +176,14 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
     v-else-if="block.type === 'guide-check'"
     :id="domId || block.id"
     :payload="block.payload"
+    :show-actions="showCardActions"
+    :tts-enabled="ttsEnabled"
+    :tts-loading="ttsLoading"
+    :tts-playing="ttsPlaying"
     @select-step="onGuideCheckStepSelect"
+    @tts-click="onGuideCheckTts"
+    @copy-click="onGuideCheckCopy"
+    @share-click="onGuideCheckShare"
   />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
   <!-- 调度视图入口卡（COMPONENT scene=task / type=gantt）：点它跳横屏调度视图并带上整包数据 -->
