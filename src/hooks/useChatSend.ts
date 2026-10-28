@@ -177,6 +177,12 @@ export function useChatSend(scope?: string, handlers?: {
    * 由卡片置顶逻辑（focusStepBlock）把新出现的核对卡滚到顶部，不再被强制拽到底部。
    */
   keepScrollOnSend?: boolean;
+  /**
+   * 发送后把这一条用户消息顶到对话区上方（悬浮头部下沿），本轮回合内不再贴底跟随。
+   * 首页普通问答开启：长回答一路往下写、不把用户拽到底部；
+   * 作业指导 / 任务协同不传，行为保持原样（发送即回底）。
+   */
+  alignSentMessageToTop?: boolean;
 }) {
   const { t } = useI18n();
   const chatStore = useChatStore(scope);
@@ -242,6 +248,22 @@ export function useChatSend(scope?: string, handlers?: {
     if (!chatStore.isLoading) return;
     cancelActiveStream(true);
     chatStore.scrollToBottom();
+  }
+
+  /**
+   * 消息入列后的定位：
+   * - 首页这类开了 alignSentMessageToTop 的页面：把这条用户消息顶到对话区上方，
+   *   并关掉本轮的贴底跟随，长回答不会再一路把页面拽到底；
+   * - 其它页面：保持原来的「发送即强制回底」（作业指导另有 keepScrollOnSend 保留阅读位置）。
+   */
+  function alignAfterUserMessage(userMsgId: string) {
+    if (handlers?.alignSentMessageToTop) {
+      chatStore.setAlignRoundToTop(true);
+      chatStore.setPinnedToBottom(false);
+      chatStore.pinMessageToTop(userMsgId);
+      return;
+    }
+    if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
   }
 
   function applySnapshot(
@@ -345,6 +367,12 @@ export function useChatSend(scope?: string, handlers?: {
     chatStore.patchMessageById(aiMsgId, { loading: false });
     chatStore.isLoading = false;
     chatStore.activeMessageId = "";
+    // 这一下在「顶到上方」模式下会被跳过（不主动跳底）。
+    //
+    // 注意：这里**不能**顺手把模式关掉。回答正文写完后，图表 / 表格 / 图片还要再晚一步
+    // 才撑开高度，那时会再来一次 content-grow → scrollToBottom；只要此处把模式关了，
+    // 这一次就会把整整一屏内容拽到底部（表现就是长回答直接跳到末尾那张表）。
+    // 模式一直保留到本轮对话结束（换会话 / 新对话 / 重新发问时复位），本页从此不再自动贴底。
     chatStore.scrollToBottom();
     if (!hadSessionId && chatStore.aiSessionId) {
       sessionStore
@@ -600,8 +628,8 @@ export function useChatSend(scope?: string, handlers?: {
       processStatus: { phase: "thinking" },
     });
     chatStore.activeMessageId = aiMsgId;
-    // 作业指导等页面要求发送后保留阅读位置（不强制回底），由卡片置顶逻辑接管滚动
-    if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
+    // 问题顶到上方（首页）或强制回底（其余页面），见 alignAfterUserMessage
+    alignAfterUserMessage(userMsgId);
     const options = { aiMsgId, userMsgId, content: query, files, hadSessionId, requestSeq };
     // 听播问答与首页问答共用同一条流式接口，场景差异只体现在 inputs 与答案出口上。
     await sendAiFlow(options);
@@ -713,16 +741,17 @@ export function useChatSend(scope?: string, handlers?: {
     const pending = chatStore.messages.find(item => item.role === "user" && item.asrPending);
     if (pending?.id) return;
     chatStore.showQuickPrompts = false;
+    const placeholderId = `user-asr-${Date.now()}`;
     chatStore.messages.push({
-      id: `user-asr-${Date.now()}`,
+      id: placeholderId,
       role: "user",
       content: t("identifying"),
       asrPending: true,
       sessionId: chatStore.aiSessionId,
       messageId: null,
     });
-    // 作业指导等页面：发送不强制回底，语音占位同样不拽到底部
-    if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
+    // 「识别中」这条同样是这一轮的提问气泡：首页直接把它顶到上方，识别结果回填后不再跳位置
+    alignAfterUserMessage(placeholderId);
   }
 
   function discardAsrPlaceholder() {
@@ -733,6 +762,8 @@ export function useChatSend(scope?: string, handlers?: {
       chatStore.showQuickPrompts = true;
       chatStore.showQuickList = true;
     }
+    // 这一轮没发出去：撤掉「顶到上方」模式，恢复原来的贴底
+    chatStore.setAlignRoundToTop(false);
     if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
   }
 

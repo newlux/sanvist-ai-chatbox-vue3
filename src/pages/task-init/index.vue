@@ -251,7 +251,7 @@ let missTimer: ReturnType<typeof setTimeout> | null = null;
 const isEnglish = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));
 
 /**
- * 语音播报：与首页 / 欢迎页共用同一套（usePlainTts → POST /speech/tts/stream），
+ * 语音播报：与首页 / 欢迎页共用同一套（usePlainTts → POST /speech/tts/v2/stream），
  * 每一步出现时口播标题；播报期间底部三色带波浪流动，播完回到设计稿的静态基线。
  */
 const introTts = usePlainTts(isEnglish.value ? "en" : "zh");

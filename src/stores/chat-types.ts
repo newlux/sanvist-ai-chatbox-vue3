@@ -51,7 +51,7 @@ export interface UiChatMessage {
   /** 新生成消息实时播放，历史加载消息播放整段语音。 */
   ttsPlaybackMode?: "realtime" | "history";
   ttsLoading?: boolean;
-  /** 语音播放中（整段 /chat/tts 或流式 /speech/tts/stream/Users/liuyy/Library/Application Support/LarkShell-ka-sasysa542/sdk_storage/5daf88797dd462895dc04bb11feb6a2e/resources/images/img_v3_0216n_77be5a3f-71c4-4ff8-a529-30231a5852bg.jpg，二者互斥） */
+  /** 语音播放中（整段 /chat/tts 或流式 /speech/tts/v2/stream/Users/liuyy/Library/Application Support/LarkShell-ka-sasysa542/sdk_storage/5daf88797dd462895dc04bb11feb6a2e/resources/images/img_v3_0216n_77be5a3f-71c4-4ff8-a529-30231a5852bg.jpg，二者互斥） */
   ttsPlaying?: boolean;
   rawSseText?: string;
   attachments?: ChatMessageAttachment[];
