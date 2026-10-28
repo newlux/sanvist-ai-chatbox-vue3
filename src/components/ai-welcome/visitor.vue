@@ -2130,10 +2130,11 @@ onMounted(async () => {
    - 填充：设计稿是「左下紫 → 右上」的虹彩渐变，方向向量 (0.8784, −0.8175) → CSS 47.05°。
      Figma 给的六段色标（#3D21CD → #C1E4FF → #7B9CFF → #C067FA → #F7CFFF → #FD90C4）
      是按 0.16 的低透明度写的，落到 #FAFAFA 上几乎看不出渐变，整颗胶囊发灰。
-     现在按设计稿截图的观感改成「紫 → 蓝紫 → 透白 → 青」的色带，浓度抬到 0.4 左右
-   - 描边：设计稿截图里每颗胶囊外缘都有一圈更亮的虹彩细边，
-     用 mask 挖空法留 1px 环（见 .welcome-visitor__detail-tag::before），
-     不用 border 或 2px 外描边，胶囊尺寸不变
+     现在按设计稿截图的观感改成「紫 → 蓝紫 → 透白 → 青」的色带，浓度抬到 0.4 左右；
+     渐变画在 ::before 上并做高斯模糊，边缘化开（见下）
+   - 描边：不加。设计稿里胶囊只有虹彩填充 + 外圈柔光，边缘是虚的，
+     没有 1px 实线环；之前的 mask 挖空环在真机上会显出明显的「边线」，
+     与设计稿的柔和边缘相悖，已移除
    - 投影：DROP_SHADOW rgba(0,159,235,0.1272) offset 0 / 3、radius 16（另一道黑色投影 visible:false），
      另加一圈彩色柔光还原设计稿里胶囊外的辉光
    - 背景模糊：BACKGROUND_BLUR 29 → 标准差 14.5 → blur(29rpx)（CSS blur() 参数就是标准差，
@@ -2148,19 +2149,9 @@ onMounted(async () => {
   justify-content: center;
   box-sizing: border-box;
   height: 64rpx; // 32px
+  /* 填充不放元素本身：设计稿的胶囊没有硬边，颜色是「化开」的，
+     直接把渐变裁在圆角里会截出一条硬轮廓。填充改由 ::before 承载并做高斯模糊（见下） */
   border-radius: 76rpx; // 38px
-  /* 填充：原来 0.16 的浓度压在 #FAFAFA 上根本看不出渐变，整颗胶囊发灰发白。
-     这里按设计稿截图的观感取「左下紫 → 中段透白 → 右上青」，并把浓度抬到 0.3 上下：
-     再高就会盖过底层白色发闷，再低又退回发灰。 */
-  background-image: linear-gradient(
-    47.05deg,
-    rgba(98, 72, 232, 0.4) 0%,
-    rgba(163, 178, 255, 0.31) 26%,
-    rgba(225, 235, 255, 0.19) 44%,
-    rgba(255, 255, 255, 0.12) 56%,
-    rgba(150, 214, 250, 0.29) 78%,
-    rgba(118, 206, 246, 0.42) 100%
-  );
   box-shadow:
     0 6rpx 32rpx rgba(0, 159, 235, 0.127), // 0 3 16
     0 0 22rpx rgba(150, 175, 255, 0.42); // 外圈柔光：设计稿里胶囊边缘有一层彩色辉光
@@ -2177,27 +2168,28 @@ onMounted(async () => {
   will-change: transform, opacity;
 }
 
-/* 虹彩细边：设计稿里每颗胶囊外缘都有一圈比填充更亮的紫 → 青描边，
-   用 mask 挖空法只留 1px 环（与身份玻璃球、灵动岛描边同一套做法），
-   不额外撑大胶囊尺寸，也不影响里面的文案排版 */
+/* 填充层：原来 0.16 的浓度压在 #FAFAFA 上根本看不出渐变，整颗胶囊发灰发白。
+   这里按设计稿截图的观感取「左下紫 → 中段透白 → 右上青」，浓度 0.3 ~ 0.4。
+   渐变画在这层上并整体高斯模糊（σ = 10rpx ≈ 5px），边缘自然化开，
+   像设计稿那样没有一条能看出来的轮廓线。这层比胶囊外扩 8rpx 再模糊：
+   模糊会把边缘往里外各抹一圈，外扩后原本的胶囊边界仍接近满浓度，
+   只是外面多出一圈渐隐的辉光 —— 尺寸观感不变，边线消失。
+   文案是元素自己的子节点，不受这层模糊影响（见 .detail-tag-text） */
 .welcome-visitor__detail-tag::before {
   position: absolute;
-  z-index: 1;
-  inset: 0;
-  padding: 1px;
-  border-radius: inherit;
+  z-index: 0;
+  inset: -8rpx;
+  border-radius: 84rpx; // 76 + 8，与外扩后的盒形保持同心
   background-image: linear-gradient(
     47.05deg,
-    rgba(126, 100, 255, 0.52) 0%,
-    rgba(176, 190, 255, 0.4) 26%,
-    rgba(200, 220, 255, 0.32) 50%,
-    rgba(140, 210, 250, 0.4) 76%,
-    rgba(110, 200, 245, 0.52) 100%
+    rgba(98, 72, 232, 0.4) 0%,
+    rgba(163, 178, 255, 0.31) 26%,
+    rgba(225, 235, 255, 0.19) 44%,
+    rgba(255, 255, 255, 0.12) 56%,
+    rgba(150, 214, 250, 0.29) 78%,
+    rgba(118, 206, 246, 0.42) 100%
   );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
+  filter: blur(10rpx);
   content: "";
   pointer-events: none;
 }
@@ -2209,7 +2201,10 @@ onMounted(async () => {
   animation: welcome-bubble-holo var(--holo-duration, 1200ms) cubic-bezier(0.16, 1, 0.3, 1) var(--holo-delay, 0ms) backwards;
 }
 
+/* 文案压在填充层之上（::before 是定位元素，默认会盖住普通流内文本） */
 .welcome-visitor__detail-tag-text {
+  position: relative;
+  z-index: 1;
   display: block;
 }
 
@@ -2222,7 +2217,11 @@ onMounted(async () => {
 
 /* 球已移出 choose 层：淡出规则同样改挂根节点状态类 */
 .welcome-visitor--choosing-out .welcome-visitor__bubble {
-  opacity: 0;
+  /* 必须带 !important：入场动画（welcome-bubble-holo）的 keyframes 里也有 opacity，
+     而且延迟段靠 fill: backwards 停帧，动画值会一直压住这里写的 opacity。
+     选择身份页刚出现、球还在翻折入场时就点选，未落位的球会被暂停在半空（opacity 仍为 1），
+     详情页出来还挂在图标旁边。!important 在层叠里高于动画，淡出才能照常走完 */
+  opacity: 0 !important;
   transition: opacity 260ms ease;
   pointer-events: none;
   // 已经淡出画面，漂浮动画没必要继续占合成线程
