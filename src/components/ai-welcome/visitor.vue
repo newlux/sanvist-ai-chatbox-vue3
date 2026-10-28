@@ -74,6 +74,12 @@ const CHOICE_HOLO_DURATION_MS = 1200;
 /** 中心图标容器（设计稿 x=120 y=333 134×134）在内容区的中心点，rpx：(374, 692) */
 const CHOICE_CORE_X = 374;
 const CHOICE_CORE_Y = 692;
+/**
+ * 图标容器左上角 = 中心 − 半边 134：身份球挂进图标容器后，坐标全部相对它换算，
+ * 球群与图标永远绑定，任意屏高（含 4K 竖屏这类比 375:812 更矮的比例）都保持相对居中
+ */
+const CHOICE_CORE_LEFT = CHOICE_CORE_X - 134; // 240
+const CHOICE_CORE_TOP = CHOICE_CORE_Y - 134; // 558
 
 interface ChoiceBubble {
   key: string;
@@ -96,15 +102,17 @@ interface ChoiceBubble {
   fontSize: number;
 }
 
-/** 身份球在 722:2651 里的三个位置（坐标已扣 54 高状态栏并换算成 rpx），按角色码对位；
-    老板 / 操作手两颗按视觉要求整体上移 40rpx（20px），设备管理员与中心图标不动 */
+/**
+ * 身份球在 722:2651 里的三个位置（坐标已扣 54 高状态栏并换算成 rpx），按角色码对位。
+ * 曾为补偿大屏错位整体上移过 40rpx：球挂进图标容器后错位已根治，这里恢复设计稿原值
+ */
 const CHOICE_ROLE_SLOTS: Record<string, { x: number; y: number }> = {
-  // 722:3064 老板：x=242 y=268 82×82
-  OWNER: { x: 484, y: 388 },
+  // 722:3064 老板：x=242 y=268 82×82（轻压图标右上角）
+  OWNER: { x: 484, y: 428 },
   // 1006:16 设备管理员：x=39 y=337.4 82×82
   ADMIN: { x: 78, y: 566.8 },
-  // 1006:3 操作手：x=242 y=449 82×82
-  OPERATOR: { x: 484, y: 750 },
+  // 1006:3 操作手：x=242 y=449 82×82（轻压图标右下角）
+  OPERATOR: { x: 484, y: 790 },
 };
 /** 上面没覆盖到的角色码依次领剩下的位置，保证顺序稳定 */
 const CHOICE_SLOT_ORDER = ["OWNER", "ADMIN", "OPERATOR"];
@@ -225,7 +233,8 @@ function buildChoiceRoleBubbles(): ChoiceBubble[] {
  * - holoRx / holoRy：翻起的起始倾角，按气泡相对图标的方位取，保证「翻折面」朝外，
  *   与方案稿里老板 85°/45°、设备管理员 -85°/-45°、操作手 85°/-45° 的取法一致
  * - style：模板直接绑定的静态样式（位置 / 尺寸 / 字号 / 翻折起点），
- *   逐项对应 722:2651 身份选择稿，避免在模板里堆表达式
+ *   逐项对应 722:2651 身份选择稿，避免在模板里堆表达式；
+ *   left / top 相对「中心图标容器」换算（球挂在图标容器里，与图标同坐标系）
  */
 const CHOICE_BUBBLE_HOLO = computed(() => {
   return [...buildChoiceRoleBubbles(), ...CHOICE_DECO_BUBBLES].map((bubble, index) => {
@@ -234,8 +243,8 @@ const CHOICE_BUBBLE_HOLO = computed(() => {
     return {
       ...bubble,
       style: {
-        left: `${bubble.x}rpx`,
-        top: `${bubble.y}rpx`,
+        left: `${bubble.x - CHOICE_CORE_LEFT}rpx`,
+        top: `${bubble.y - CHOICE_CORE_TOP}rpx`,
         width: `${bubble.size}rpx`,
         height: `${bubble.size}rpx`,
         fontSize: `${bubble.fontSize}rpx`,
@@ -1336,6 +1345,10 @@ onMounted(async () => {
       'welcome-visitor--missed': isWakeMissed,
       'welcome-visitor--finishing': isFinishing,
       'welcome-visitor--glow-idle': isGlowIdle,
+      // 身份球挂在中心图标容器里（content 层），入场 / 淡出状态改由根节点标记，
+      // 球的 pointer-events / 动画 / 选中态选择器统一从这里取态
+      'welcome-visitor--choosing-in': choiceVisible,
+      'welcome-visitor--choosing-out': chooseOut,
     }"
     @touchstart="onHoldStart"
     @touchmove="onHoldMove"
@@ -1363,32 +1376,8 @@ onMounted(async () => {
       <!-- 标题 722:2734：x=53 y=117 275×29，20px/29 Medium #0D0D0D；
            文案取 GET /flow/steps 里 IDENTITY 步的 title，取不到才用设计稿文案 -->
       <text class="welcome-visitor__choose-title">{{ identityTitle }}</text>
-      <!-- 身份玻璃球 722:3064 / 1006:16 / 1006:3 + 装饰球 722:2720 / 722:2717 / 722:2714 / 722:2665
-           入场用动效方案 4「全息升维翻展」：从图标中心 3D 翻折展开后落位 -->
-      <view
-        v-for="bubble in CHOICE_BUBBLE_HOLO"
-        :key="bubble.key"
-        class="welcome-visitor__bubble"
-        :class="{
-          'welcome-visitor__bubble--role': bubble.label,
-          'welcome-visitor__bubble--ghost': !bubble.label,
-          'welcome-visitor__bubble--active': selectedBubbleKey === bubble.key,
-        }"
-        :style="bubble.style"
-        @tap.stop="onChooseBubble(bubble)"
-      >
-        <!-- 身份球内部（Ardot 1006:3 / 1006:16 的 Mask group 1204:224 / 1204:218）：
-             Vector 111（蓝 #0063E5 斜带）+ Vector 112（粉 #FF70F9 月牙）两团高斯模糊色斑，
-             由 export_nodes 导出的真实路径 SVG 渲染（含 feGaussianBlur 14.5 / 12 与圆形裁切），
-             保证与设计稿逐像素一致 —— 不再用椭圆近似 -->
-        <image
-          v-if="bubble.glass"
-          class="welcome-visitor__bubble-aurora"
-          src="@/assets/img/bubble-role-aurora.svg"
-          mode="aspectFit"
-        />
-        <text v-if="bubble.label" class="welcome-visitor__bubble-text">{{ bubble.label }}</text>
-      </view>
+      <!-- 身份玻璃球与装饰球挂在中心图标容器里（见下方 .welcome-visitor__logo），
+           与图标同一坐标系：屏幕高宽比再怎么变（含 4K 竖屏），球群始终绕着图标居中 -->
       <!-- 底部提示 722:2744：x=102 y=597 176×23，16px/23 Medium #8E8E8E 居中 -->
       <text class="welcome-visitor__choose-hint">{{ CHOICE_HINT }}</text>
     </view>
@@ -1434,6 +1423,35 @@ onMounted(async () => {
              中心图标为动态 GIF（原 306:2791 静态图的动画版），收尾态只淡出上下文案，图标本体与位置都不动 -->
         <view class="welcome-visitor__logo">
           <image class="welcome-visitor__logo-img" :src="saniLogo" mode="aspectFit" />
+          <!-- 身份玻璃球 722:3064 / 1006:16 / 1006:3 + 装饰球 722:2720 / 722:2717 / 722:2714 / 722:2665：
+               挂在图标容器上（与下方详情胶囊同一套定位思路），left/top 已换算成相对容器偏移；
+               入场用动效方案 4「全息升维翻展」：从图标中心 3D 翻折展开后落位 -->
+          <template v-if="isChoosing">
+            <view
+              v-for="bubble in CHOICE_BUBBLE_HOLO"
+              :key="bubble.key"
+              class="welcome-visitor__bubble"
+              :class="{
+                'welcome-visitor__bubble--role': bubble.label,
+                'welcome-visitor__bubble--ghost': !bubble.label,
+                'welcome-visitor__bubble--active': selectedBubbleKey === bubble.key,
+              }"
+              :style="bubble.style"
+              @tap.stop="onChooseBubble(bubble)"
+            >
+              <!-- 身份球内部（Ardot 1006:3 / 1006:16 的 Mask group 1204:224 / 1204:218）：
+                   Vector 111（蓝 #0063E5 斜带）+ Vector 112（粉 #FF70F9 月牙）两团高斯模糊色斑，
+                   由 export_nodes 导出的真实路径 SVG 渲染（含 feGaussianBlur 14.5 / 12 与圆形裁切），
+                   保证与设计稿逐像素一致 —— 不再用椭圆近似 -->
+              <image
+                v-if="bubble.glass"
+                class="welcome-visitor__bubble-aurora"
+                src="@/assets/img/bubble-role-aurora.svg"
+                mode="aspectFit"
+              />
+              <text v-if="bubble.label" class="welcome-visitor__bubble-text">{{ bubble.label }}</text>
+            </view>
+          </template>
           <!-- 老板身份详情胶囊 331:389 / 331:392 / 331:444 / 331:394 / 331:456 / 331:442：
                挂在图标容器上做绝对定位（偏移由模板按设计稿注入），保证任意屏高下
                胶囊始终绕着图标，图标自身不动；入场与身份球同款方案 4 全息翻折 -->
@@ -1932,7 +1950,7 @@ onMounted(async () => {
    - 第二段：延迟 = 第一段结束，两段首尾相接，不会同时抢 transform；
    - 用 backwards 而不是 both，动画结束后样式交回 CSS，
      这样「点老板后原地淡出」的 opacity / filter 过渡仍然生效 */
-.welcome-visitor__choose--in .welcome-visitor__bubble {
+.welcome-visitor--choosing-in .welcome-visitor__bubble {
   opacity: 1;
   transform: translateY(0) scale(1);
   animation:
@@ -1940,20 +1958,21 @@ onMounted(async () => {
     welcome-bubble-float var(--float-duration, 7.6s) ease-in-out calc(var(--holo-delay, 0ms) + var(--holo-duration, 1200ms)) infinite alternate;
 }
 
-/* 浮出之后才可点：避免过渡期间点到还看不见的气泡 */
-.welcome-visitor__choose--in .welcome-visitor__bubble--role {
+/* 浮出之后才可点：避免过渡期间点到还看不见的气泡
+   （球挂在 content 层的图标容器里，不再有 .welcome-visitor__choose--in 祖先，改取根节点状态） */
+.welcome-visitor--choosing-in .welcome-visitor__bubble--role {
   pointer-events: auto;
 }
 
 /* 漂浮动画占着 transform，按下反馈改用亮度，两套动效不打架 */
-.welcome-visitor__choose--in .welcome-visitor__bubble--role:active {
+.welcome-visitor--choosing-in .welcome-visitor__bubble--role:active {
   filter: brightness(0.96);
 }
 
 /* 命中 / 选中的那颗球：放大 + 白色柔光外圈 + 轻微呼吸。
    语音命中后要停一会儿才进身份信息页，这段动效就是让用户看清「选中了哪个身份」；
    复合选择器压过上面的漂浮动画，避免两条 animation 抢 transform（选中后不再漂浮） */
-.welcome-visitor__choose--in .welcome-visitor__bubble--role.welcome-visitor__bubble--active {
+.welcome-visitor--choosing-in .welcome-visitor__bubble--role.welcome-visitor__bubble--active {
   z-index: 2;
   filter: none;
   animation: welcome-bubble-pick 1.2s ease-in-out infinite;
@@ -2167,7 +2186,8 @@ onMounted(async () => {
   transition: opacity 260ms ease;
 }
 
-.welcome-visitor__choose--out .welcome-visitor__bubble {
+/* 球已移出 choose 层：淡出规则同样改挂根节点状态类 */
+.welcome-visitor--choosing-out .welcome-visitor__bubble {
   opacity: 0;
   transition: opacity 260ms ease;
   pointer-events: none;
