@@ -22,7 +22,7 @@ function hasSpeakableText(text: unknown) {
 }
 
 /**
- * 分句并发合成的实时 TTS SSE 流（POST /speech/tts/stream）。
+ * 分句并发合成的实时 TTS SSE 流（POST /speech/tts/v2/stream）。
  *
  * 用 fetch + ReadableStream 消费，复用项目里的 createSseSession 做帧切分与 data 解析。
  * 返回只做单一职责：把事件逐条丢给 onEvent，结束时回调 onClose，出错回调 onError。
@@ -51,7 +51,7 @@ export function consumeTextToSpeechStream(
   }
 
   const controller = new AbortController();
-  const url = `${getRequestBaseURL().replace(/\/$/, "")}/speech/tts/stream`;
+  const url = `${getRequestBaseURL().replace(/\/$/, "")}/speech/tts/v2/stream`;
   // 语速由后端在合成时生效（int）；调用方不传时统一按默认语速下发。
   const body = {
     ...params,

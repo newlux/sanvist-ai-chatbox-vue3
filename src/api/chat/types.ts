@@ -659,12 +659,17 @@ export interface TextToSpeechResult {
 export interface RealtimeTtsParams {
   text: string;
   language?: string;
+  /**
+   * 音色 id（如听播页所选 `xieshurou_v3.1`）。
+   * 听播页的问答朗读按用户选的音色合成；不传时后端按默认音色处理。
+   */
+  voice?: string;
   /** TTS 合成语速（int 类型，如 1.2）；不传时由接口层固定按默认语速下发。 */
   ttsSpeechRate?: number;
 }
 
 /**
- * /speech/tts/stream 的 SSE 帧。audio_chunk 的 data 带 seq；done 的 data 形如 { event: "done" }。
+ * /speech/tts/v2/stream 的 SSE 帧。audio_chunk 的 data 带 seq；done 的 data 形如 { event: "done" }。
  * 某句失败时后端会推占位帧，audioBase64/dataUrl 为 null，前端应跳过该 seq 继续播下一句。
  */
 export interface RealtimeTtsChunk {

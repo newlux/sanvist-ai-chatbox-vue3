@@ -6,6 +6,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n";
 import iconWaveForm from "@/assets/img/icon-waveform.svg";
 import { guideStepCardDomId } from "@/utils/guide-content";
+import { chatMessageAnchorDomId } from "@/stores/modules/chat";
 import { isListenReportListened } from "@/utils/listen-report";
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import AiBlockRenderer from "../ai-bubble-v2/AiBlockRenderer.vue";
@@ -113,6 +114,16 @@ const props = defineProps({
     type: Number,
     default: 0,
   },
+  /** 顶到上方的请求令牌：自增一次 = 一次请求，把 pinMessageId 那条消息落到悬浮头部下沿 */
+  pinMessageToken: {
+    type: Number,
+    default: 0,
+  },
+  /** 要顶到对话区上方的那条消息 id */
+  pinMessageId: {
+    type: String,
+    default: "",
+  },
 });
 
 const emit = defineEmits([
@@ -212,10 +223,44 @@ function findConversationGroup(aiIndex) {
  */
 const MESSAGE_LIST_EXTRA_GAP_PX = 16;
 const UNPIN_SCROLL_UP_PX = 12;
+/**
+ * 提问顶到上方时，气泡顶边距离列表顶部的目标位置（px）：
+ * 取 150，与顶部悬浮头部下沿 / 右上角工具条同一条水平线。
+ *
+ * 头部留白 = 安全区 + 300rpx，刘海 / 灵动岛机型本身更大，所以实际取 max(留白, 150)；
+ * 再减掉 .chat-box 自己的上内边距（见样式里的 --chat-box-top-padding），气泡顶边才真落在目标位置上，
+ * 否则会白白低 20px。
+ */
+const PIN_MESSAGE_TOP_MIN_Y_PX = 150;
+/**
+ * 第 2 问起，提问气泡在「本轮实际落点」上再往上抬的高度（px）。
+ *
+ * 刚发出去时提问下面只有一个等待占位 + 输入栏留白，落点会被夹住（滚到底也顶不到头部下沿），
+ * 气泡就比第一问低一截。这里只补一小段（40~60 之间），保持贴底的观感，不让屏幕下部空一大片。
+ */
+const PIN_ROUND2_LIFT_PX = 48;
+/** 行内样式的 rpx 在 H5 不会被编译，减去的这段走 CSS 变量（值定义在 .msg-list__inner 上） */
+const CHAT_BOX_TOP_PADDING_VAR = `var(--chat-box-top-padding, 20px)`;
 let lastScrollTop = 0;
 
 /** 绑给 scroll-view 的像素滚动位置：只在「落到内容末尾」时赋值，不回写 @scroll 的值 */
 const scrollTopPx = ref(0);
+
+/**
+ * 短回复上翻时垫在内容末尾的空白（px）。
+ *
+ * 内容末尾本身没有多余余量时（回答很短，下面只剩输入栏留白），滚到底也到不了
+ * 「提问顶到上方」那个落点 —— 屏幕下部根本挤不出这段距离。垫一段空白进去，
+ * 上翻落点才真的可达；回答变长 / 重新发问 / 换会话时自动收回 0。
+ *
+ * 不并进 paddingBottom：reservedBottomHeight() 是从 paddingBottom 读可视区的，
+ * 混进去会把「被输入栏盖住的高度」算多，落点跟着漂。
+ */
+const shortReplySpacerPx = ref(0);
+/** 空白量要按新布局再量一次才收敛（贴底布局的 margin-top: auto 会被吃掉一部分），最多补 3 次 */
+let shortReplySpacerPass = 0;
+/** 本轮提问已经做过「再往上抬一小段」：80ms 补量 / 重复定位时不再抬，免得越抬越高 */
+let pinLiftDone = false;
 
 /**
  * H5：取节点最近的「真正在滚」的祖先。
@@ -331,13 +376,71 @@ function occludedBottomHeight() {
 }
 
 /**
+ * 本轮提问（最后一条回答前那条用户消息）的锚点选择器：短回复落位时要把提问顶到上方。
+ * 回答前面没有紧邻的提问（例如开场问候那类只有 AI 的消息）时返回空串，不做上翻。
+ */
+function lastUserAnchorSelector() {
+  const messages = props.messages || [];
+  // 最后一条回答（hidden 的不参与定位）
+  let aiIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role !== "ai" || messages[i]?.hidden) continue;
+    aiIndex = i;
+    break;
+  }
+  if (aiIndex < 0) return "";
+  // 它前面最近的用户消息就是本轮提问；中间要是还夹着别的回答，说明这一轮没有提问，放弃
+  for (let i = aiIndex - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === "ai" && !message?.hidden) return "";
+    if (message?.role !== "user") continue;
+    // 与模板里的 :id 保持一致（没有 id 时用下标兜底）
+    return `#${chatMessageAnchorDomId(message.id ?? `idx-${i}`)}`;
+  }
+  return "";
+}
+
+/**
+ * 最后一条回答是否已收尾。
+ * 流式期间不做「整轮上翻」，否则回答刚冒出第一行就把页面拽上去，
+ * 等真正写长了又得拽回来，来回跳。
+ */
+function isLastAnswerSettled() {
+  const messages = props.messages || [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role !== "ai" || message?.hidden) continue;
+    return !message.loading;
+  }
+  return true;
+}
+
+/**
+ * 「提问顶到上方」时气泡的落点（距对话区顶边的 px）：与 alignMessageToTop 同一口径，
+ * 取内容区上内边距 + .chat-box 上内边距 —— 气泡顶边正好停在内容天然起步的位置。
+ */
+function pinnedTopGapPx() {
+  // #ifdef H5
+  const inner = document.querySelector(".msg-list__inner");
+  const chatBox = document.querySelector(".chat-box");
+  const innerTop = inner ? Number.parseFloat(getComputedStyle(inner).paddingTop) || 0 : 0;
+  const chatBoxTop = chatBox ? Number.parseFloat(getComputedStyle(chatBox).paddingTop) || 0 : 0;
+  return innerTop + chatBoxTop;
+  // #endif
+  // #ifndef H5
+  return 0;
+  // #endif
+}
+
+/**
  * @param forceUp 刚发过消息（强制回底）：允许把视图往上拉到落点；
  *                自动跟随时只往下，不打断用户看历史
  */
 function alignToReplyEnd(forceUp = false) {
   // 用户已经上翻看历史了就别再拽下去（贴底状态下才会由 store 请求这里）
   if (!props.pinnedToBottom) return;
-  uni.createSelectorQuery()
+  const userAnchor = lastUserAnchorSelector();
+  const query = uni.createSelectorQuery()
     .select(".msg-list")
     .boundingClientRect()
     .select(".msg-list__inner")
@@ -345,17 +448,23 @@ function alignToReplyEnd(forceUp = false) {
     .selectAll(".ai-content-blocks")
     .boundingClientRect()
     .selectAll(".guide-source-block")
-    .boundingClientRect()
+    .boundingClientRect();
+  // 提问锚点按需追加，取不到（没有用户消息）就跳过短回复落位
+  if (userAnchor) query.select(userAnchor).boundingClientRect();
+  query
     .exec((rects) => {
       const listRect = (Array.isArray(rects) ? rects[0] : null) as { top?: number; height?: number } | null;
       const innerRect = (Array.isArray(rects) ? rects[1] : null) as { top?: number; height?: number } | null;
       const blockRects = (Array.isArray(rects) ? rects[2] : null) as Array<{ top?: number; bottom?: number }> | null;
       const sourceRects = (Array.isArray(rects) ? rects[3] : null) as Array<{ top?: number; height?: number }> | null;
+      const userRect = (userAnchor ? (Array.isArray(rects) ? rects[4] : null) : null) as { top?: number } | null;
       const listTop = Number(listRect?.top);
       const listHeight = Number(listRect?.height);
       const innerTop = Number(innerRect?.top);
       const contentHeight = Number(innerRect?.height);
       if (!Number.isFinite(listTop) || !listHeight || !Number.isFinite(innerTop)) return;
+      // 去掉自己垫的空白后的真实内容高：算「贴底」落点与可滚余量都得按这个口径
+      const baseContentHeight = Math.max(0, contentHeight - shortReplySpacerPx.value);
 
       // 有效可视高度：扣掉被输入框遮住的那段（含多留的空隙，贴底时用得上）
       const visibleHeight = Math.max(0, listHeight - reservedBottomHeight());
@@ -380,7 +489,7 @@ function alignToReplyEnd(forceUp = false) {
       let target: number;
       if (forceUp) {
         // 刚发出去：强制回到最新内容（自己的消息 + 等待回复的占位）底部
-        target = contentHeight - visibleHeight;
+        target = baseContentHeight - visibleHeight;
       }
       else if (Number.isFinite(blocksBottom)) {
         // 内容块底边 − 其中参考来源总高
@@ -392,8 +501,42 @@ function alignToReplyEnd(forceUp = false) {
       }
       else {
         // 没有参考来源：贴底，与原逻辑一致
-        target = contentHeight - visibleHeight;
+        target = baseContentHeight - visibleHeight;
       }
+      /**
+       * 短回复不要把气泡单独贴在底边（夹在上一轮内容与底部工具栏之间很难看出是新回答），
+       * 改成把这一轮的提问顶到上方落点，整轮（提问 + 回答）一起露在视野里。
+       *
+       * 两个落点取更靠下的那个，条件自动等价于「整轮放得下就上翻」：
+       * - 上翻落点（提问顶到上方）> 贴底落点 → 说明整轮在可视高度内放得下，取上翻；
+       * - 回答一长，贴底落点反超 → 退回原来的「回复末尾贴底」，与改动前一致。
+       */
+      let nextSpacer = 0;
+      // baseContentHeight <= listHeight 说明整段对话本来就不到一屏（首轮短问答）：
+      // 贴底布局已经把它放在输入栏上方，这是正常观感，不往上翻（翻了下面会空一大片）
+      if (!forceUp && isLastAnswerSettled() && baseContentHeight > listHeight + 1) {
+        const userTop = Number(userRect?.top);
+        const topTarget = userTop - innerTop - pinnedTopGapPx();
+        if (Number.isFinite(topTarget) && topTarget > target) {
+          target = topTarget;
+          /**
+           * 上翻落点能不能滚到，取决于内容末尾还有多少余量：
+           * 现有内容最多滚到 baseContentHeight − 视口高，差多少就在末尾垫多少空白。
+           * 贴底布局的 margin-top: auto 会先被这段空白吃掉一部分，所以下面要按新布局再量一次。
+           */
+          nextSpacer = Math.round(
+            Math.min(listHeight, Math.max(0, topTarget - baseContentHeight + listHeight)),
+          );
+        }
+      }
+      if (Math.abs(nextSpacer - shortReplySpacerPx.value) > 1 && shortReplySpacerPass < 3) {
+        shortReplySpacerPass += 1;
+        shortReplySpacerPx.value = nextSpacer;
+        // 空白生效、内容高度变了之后重新落位（一般一次就收敛）
+        nextTick(() => alignToReplyEnd(forceUp));
+        return;
+      }
+      shortReplySpacerPass = 0;
       if (!Number.isFinite(target)) return;
 
       const currentScrollTop = Math.max(0, listTop - innerTop);
@@ -426,6 +569,71 @@ watch(
       if (props.replyEndToken !== token) return;
       alignToReplyEnd(forceUp);
     }, delay));
+  },
+  { flush: "post" },
+);
+
+/**
+ * 把某条消息顶到「悬浮头部下沿」。
+ *
+ * 不用 scroll-into-view：那个是把元素顶部对到滚动容器最上沿，消息会钻到悬浮头部（毛玻璃层）底下被糊掉。
+ * 这里按 px 定位 —— 列表顶部本来就有一段等于头部高度的 padding-top，
+ * 目标 scrollTop = 元素在内容里的偏移 − 这段 padding，落点就是头部的下沿。
+ * 再往下那点呼吸位由 padding 自己给出（见 listPadStyle），因为第一轮问答时上面没有内容可滚，
+ * 靠滚动压不下去。
+ */
+function alignMessageToTop(messageId: string) {
+  // #ifdef H5
+  const inner = document.querySelector(".msg-list__inner") as HTMLElement | null;
+  const anchor = document.getElementById(chatMessageAnchorDomId(messageId));
+  if (!inner || !anchor) return;
+  const scroller = findScrollableAncestor(inner);
+  if (!scroller) return;
+  const padTop = Number.parseFloat(getComputedStyle(inner).paddingTop) || 0;
+  // .chat-box 自己还有一段上内边距：气泡的「天然位置」是 padTop + 这段，
+  // 落点也要按这个口径算，否则内容还能滚时会比不滚时高 20px
+  const chatBox = document.querySelector(".chat-box") as HTMLElement | null;
+  const chatBoxTop = chatBox ? Number.parseFloat(getComputedStyle(chatBox).paddingTop) || 0 : 0;
+  const offsetInContent = anchor.getBoundingClientRect().top - inner.getBoundingClientRect().top;
+  const next = Math.max(0, Math.round(offsetInContent - padTop - chatBoxTop));
+  if (next !== Math.round(scroller.scrollTop)) {
+    scrollTopPx.value = next;
+    scroller.scrollTop = next;
+    // 定位是用户主动跳的，别把它当成「上翻看历史」而关掉后续的贴底判定
+    lastScrollTop = next;
+  }
+  /**
+   * 第 2 问起再往上抬一小段（见 PIN_ROUND2_LIFT_PX）：
+   * 落点被夹住时气泡会比第一问低一截，这里按「当前实际落点」抬 40~60px，
+   * 抬多少就在内容末尾垫多少空白（几十 px，落在输入栏留白里，看不出空）。
+   * 只抬一次，且已经贴到头部下沿就不抬，避免补量 / 重复定位时越抬越高。
+   */
+  const userRounds = (props.messages || []).filter(message => message?.role === "user").length;
+  const headerLine = padTop + chatBoxTop;
+  const landedY = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+  if (userRounds > 1 && !pinLiftDone && landedY - headerLine > 1) {
+    pinLiftDone = true;
+    shortReplySpacerPx.value = Math.round(
+      shortReplySpacerPx.value + Math.min(PIN_ROUND2_LIFT_PX, landedY - headerLine),
+    );
+    // 空白生效后再定位一次（这时才滚得到新的落点）
+    nextTick(() => alignMessageToTop(messageId));
+  }
+  // #endif
+}
+
+watch(
+  () => props.pinMessageToken,
+  async () => {
+    const targetId = props.pinMessageId;
+    if (!targetId) return;
+    // 新的一轮：抬升只做一次，上一步为了够到落点垫的空白也按本轮重新算
+    pinLiftDone = false;
+    shortReplySpacerPx.value = 0;
+    await nextTick();
+    alignMessageToTop(targetId);
+    // 头像、附件、首行文字是渲染后才定高的，补一次
+    setTimeout(() => alignMessageToTop(targetId), 80);
   },
   { flush: "post" },
 );
@@ -738,11 +946,16 @@ function observeListHeight() {
   // #endif
 }
 
+/** 已经有过「顶到上方」的问答：顶部多留一段呼吸位，提问落点才不会贴着头部下沿 */
+const pinnedTopGap = computed(() => Boolean(props.pinMessageId));
+
 const listPadStyle = computed(() => {
   const style: Record<string, string> = {};
   // 顶部留白给悬浮头部让位：留白在滚动内容里，所以内容往上滚时能穿到头部毛玻璃下面
   if (props.topInset) {
-    style.paddingTop = props.topInset;
+    style.paddingTop = pinnedTopGap.value
+      ? `calc(max(${props.topInset}, ${PIN_MESSAGE_TOP_MIN_Y_PX}px) - ${CHAT_BOX_TOP_PADDING_VAR})`
+      : props.topInset;
   }
   if (props.bottomInset) {
     style.paddingBottom = `calc(${props.bottomInset} + ${MESSAGE_LIST_EXTRA_GAP_PX}px)`;
@@ -921,7 +1134,13 @@ watch(
         <view class="chat-box">
           <!-- 对话内容 -->
           <!-- hidden：二维码占位回答这类「已跳转别处」的消息不进列表，索引仍保持原下标 -->
-          <view v-for="(msg, index) in messages" v-show="!msg.hidden" :key="index">
+          <!-- id 作为「顶到对话区上方」的定位锚点，见 alignMessageToTop -->
+          <view
+            v-for="(msg, index) in messages"
+            :id="chatMessageAnchorDomId(msg?.id ?? `idx-${index}`)"
+            v-show="!msg.hidden"
+            :key="index"
+          >
             <AiBubbleV2
               :role="msg.role"
               :content="msg.content"
@@ -992,6 +1211,12 @@ watch(
             </view>
           </view>
         </view>
+        <!-- 短回复上翻垫的空白：回答很短时内容末尾没有多余余量，滚到底也顶不上去（见 alignToReplyEnd） -->
+        <view
+          v-if="shortReplySpacerPx > 0"
+          class="msg-list__spacer"
+          :style="{ height: `${shortReplySpacerPx}px` }"
+        />
       </view>
       <!-- 底部锚点用于流式输出时触发滚动到底部，不额外制造底部间距 -->
       <view id="msg-bottom-anchor-a" style="height: 1px" />
@@ -1017,6 +1242,14 @@ watch(
 }
 .msg-list__inner {
   box-sizing: border-box;
+  /* .chat-box 的上内边距：行内样式里的 rpx 在 H5 不会被编译，只能靠变量带进去（见 listPadStyle） */
+  --chat-box-top-padding: 40rpx;
+}
+
+/* 短回复上翻垫的空白：只占高度，不参与 flex 伸缩（高度由行内样式给） */
+.msg-list__spacer {
+  flex: none;
+  width: 100%;
 }
 
 /* 对话态贴底：内层撑满可视高，气泡组被 margin-top: auto 推到输入栏上方，
@@ -1031,7 +1264,7 @@ watch(
   margin-top: auto;
 }
 .chat-box {
-  padding: 40rpx 40rpx 0;
+  padding: var(--chat-box-top-padding) 40rpx 0;
 }
 /* 独立于回答气泡的卡片（核对/步骤卡） */
 .chat-box__card {
