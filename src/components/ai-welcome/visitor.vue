@@ -96,14 +96,15 @@ interface ChoiceBubble {
   fontSize: number;
 }
 
-/** 身份球在 722:2651 里的三个位置（坐标已扣 54 高状态栏并换算成 rpx），按角色码对位 */
+/** 身份球在 722:2651 里的三个位置（坐标已扣 54 高状态栏并换算成 rpx），按角色码对位；
+    老板 / 操作手两颗按视觉要求整体上移 40rpx（20px），设备管理员与中心图标不动 */
 const CHOICE_ROLE_SLOTS: Record<string, { x: number; y: number }> = {
   // 722:3064 老板：x=242 y=268 82×82
-  OWNER: { x: 484, y: 428 },
+  OWNER: { x: 484, y: 388 },
   // 1006:16 设备管理员：x=39 y=337.4 82×82
   ADMIN: { x: 78, y: 566.8 },
   // 1006:3 操作手：x=242 y=449 82×82
-  OPERATOR: { x: 484, y: 790 },
+  OPERATOR: { x: 484, y: 750 },
 };
 /** 上面没覆盖到的角色码依次领剩下的位置，保证顺序稳定 */
 const CHOICE_SLOT_ORDER = ["OWNER", "ADMIN", "OPERATOR"];
