@@ -7,6 +7,7 @@ import type { GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSugges
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { getRecommendedGuideQuestions } from "@/api/guide";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
+import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
@@ -143,6 +144,9 @@ const { sendMessage: sendChatMessage, sendQuickPrompt, beginAsrPlaceholder, disc
     if (index < 0) return;
     realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
   },
+  // 与首页同一套滚动：发送时只登记本轮的提问（消息列表据此加大顶部呼吸位），
+  // 回答边写边贴底跟随，本轮提问顶到头部下沿就停住（见 ai-message-list 的 alignToReplyEnd）
+  alignSentMessageToTop: true,
 });
 
 /** 停掉本页两套听播引擎（实时流式 + 历史整段）：换交互 / 离开页面时统一走这里。 */
@@ -454,6 +458,38 @@ function onTtsClick(index: number) {
   void onHistoryTtsClick(index);
 }
 
+/** 已自动播报过核对卡的消息 id：同一条消息只自动播一次 */
+const autoSpokenCheckMessageIds = new Set<string>();
+
+/**
+ * 核对卡（guide-check）渲染出来就自动播报（不等底部步骤卡弹出）：
+ * 监听最后一条 AI 消息「生成中 → 生成完」的瞬间，只有这一刻满足「气泡正文为空 + 带核对卡」才播一次。
+ * 历史加载的消息直接就是 done、没有 loading 过渡，不会被误触发；
+ * 播报文本走 realtimeTts.togglePlay → extractAnswerText 里的核对卡（标题 + 步骤正文）兜底。
+ */
+watch(
+  () => {
+    const list = chatStore.messages;
+    const last = list[list.length - 1];
+    if (!last || last.role !== "ai") return "";
+    return `${String(last.id)}:${last.loading ? "loading" : "done"}`;
+  },
+  (state, prev) => {
+    if (!prev?.endsWith(":loading") || !state.endsWith(":done")) return;
+    const list = chatStore.messages;
+    const last = list[list.length - 1];
+    if (!last || last.role !== "ai" || !last.ttsEnabled) return;
+    const blocks = last.blocks || [];
+    if (!blocks.some(block => block?.type === "guide-check")) return;
+    // answer 正文已有内容时走 onAiAnswerDelta 的流式听播，这里不重复播
+    if (blocks.some(block => block?.type === "answer" && String(block.payload?.content || "").trim())) return;
+    const key = String(last.messageId ?? last.id);
+    if (autoSpokenCheckMessageIds.has(key)) return;
+    autoSpokenCheckMessageIds.add(key);
+    void realtimeTts.togglePlay(last);
+  },
+);
+
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
 /** 有 greeting 或有推荐问题时才渲染引导区（接口没给就走纯聊天界面） */
 const hasGuideWelcome = computed(() => Boolean(guideGreeting.value) || guideQuestions.value.length > 0);
@@ -493,6 +529,20 @@ function startNewConversation() {
 
 function onBack() {
   backFromScene();
+}
+
+/**
+ * 长按顶部三角图标 5 秒：回到首页初始「你好三一」页。
+ * 首页本身是「初始页 / 对话页」两个态（pageStage）：清掉「欢迎页已完成」标记后重载首页，
+ * 首页 onLoad 的 syncPageStage 才会落到 welcome 态（否则会因标记残留 / 旧实例仍停在对话态）。
+ */
+function onRestartToStart() {
+  try {
+    uni.removeStorageSync(AI_ASK_WELCOME_DONE_KEY);
+  } catch (error) {
+    logger.warn("failed to clear welcome flag", error);
+  }
+  uni.redirectTo({ url: "/pages/index/index" });
 }
 
 /**
@@ -601,6 +651,35 @@ async function loadAwakeningPrompt() {
   } finally {
     chatStore.awakeningLoading = false;
   }
+}
+
+/**
+ * 一键回到底部（与首页一致）：没贴底时出现，回到底部（含发送后强制贴底）自动消失。
+ * 分享选择态、贴底卡片（步骤卡 / 建议卡）展开时不显示，避免和这些浮层抢位置。
+ */
+const showScrollToBottom = computed(
+  () =>
+    !shareSheetVisible.value
+    && !guideStepSheetVisible.value
+    && !guideSuggestionSheetVisible.value
+    && !pinnedToBottom.value
+    && (messages.value?.length || 0) > 0,
+);
+
+function onScrollToBottomTap() {
+  // 落点是「真末尾」（含最后一条消息的操作栏 / 参考来源），不能用 scrollToBottom：
+  // 本页开着 stopAtReplyEnd，那条落点会把尾部操作栏留在输入栏下面，看起来没到底
+  chatStore.jumpToBottom();
+}
+
+/**
+ * 消息列表上报贴底状态，不能直接绑 setPinnedToBottom：
+ * 用户自己滑回底部时要把本轮的「提问封顶」一起撤掉，
+ * 否则下一帧内容长高，对齐又会把视图拽回提问那边（表现为「滑到底又弹回去」）。
+ */
+function onPinnedChange(pinned: boolean) {
+  chatStore.setPinnedToBottom(pinned);
+  if (pinned) chatStore.setCapRoundAtTop(false);
 }
 
 async function onScrollTop() {
@@ -744,7 +823,9 @@ onUnload(() => {
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
         :share-selected-round-count="shareSelectedRoundCount"
+        restartable
         @back="onBack"
+        @restart="onRestartToStart"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"
         @session-delete="onSessionDelete"
@@ -788,6 +869,9 @@ onUnload(() => {
         :show-business-overview="false"
         :scroll-into-view="scrollIntoView"
         :reply-end-token="replyEndToken"
+        :pin-message-token="chatStore.pinMessageToken"
+        :pin-message-id="chatStore.pinMessageId"
+        :cap-round-at-top="chatStore.capRoundAtTop"
         :show-quick-list="showQuickList"
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
@@ -813,8 +897,18 @@ onUnload(() => {
         @copy-click="onCopyMessage"
         @select-toggle="onShareSelectToggle"
         @scroll-top="onScrollTop"
-        @pinned-change="chatStore.setPinnedToBottom"
+        @pinned-change="onPinnedChange"
       />
+      <!-- 一键回到底部（与首页一致）：离底时出现，贴底自动隐藏；
+           位置 = 输入栏高（含键盘抬起）+ 72rpx 底部导航 + 24rpx 间隙，不压住输入栏 -->
+      <view
+        v-if="showScrollToBottom"
+        class="chat-scroll-bottom"
+        :style="{ bottom: `calc(${composerBottomInset} + 96rpx)` }"
+        @tap="onScrollToBottomTap"
+      >
+        <view class="chat-scroll-bottom__chevron" />
+      </view>
       <view v-if="isSessionSwitching" class="session-loading">
         <view class="session-loading__spinner" />
       </view>
@@ -924,6 +1018,7 @@ onUnload(() => {
         bottom-gradient
         :hide-bottom-art="chatThinking"
         :compact-voice-listening="true"
+        :speaking="realtimeTts.playing.value"
         @send="sendMessage"
         @stop="stopGenerating"
         @voice-start="stopSceneTtsOnVoiceStart"
@@ -1145,6 +1240,33 @@ $color-white: #ffffff;
   font-size: 28rpx; // 14
   font-weight: 400;
   line-height: 40rpx; // 20
+}
+
+// 一键回到底部（与首页同一套）：白底圆钮 + 细线下箭头，浮在输入栏上方右侧。
+// bottom 由行内样式给：composerBottomInset（输入栏高 + 键盘抬起）+ 72rpx 导航高 + 24rpx 间隙
+.chat-scroll-bottom {
+  position: absolute;
+  right: 32rpx;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 76rpx;
+  height: 76rpx;
+  border: 1px solid rgba(51, 51, 51, 0.08);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 4rpx 16rpx rgba(15, 126, 238, 0.12);
+  -webkit-backdrop-filter: blur(20rpx);
+  backdrop-filter: blur(20rpx);
+}
+
+.chat-scroll-bottom__chevron {
+  width: 20rpx;
+  height: 20rpx;
+  border-right: 1px solid #333333;
+  border-bottom: 1px solid #333333;
+  transform: translateY(-6rpx) rotate(45deg);
 }
 
 .session-loading {
