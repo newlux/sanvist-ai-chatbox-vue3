@@ -175,20 +175,7 @@ watch(() => chatStore.activeRequestSeq, () => {
   stopSceneTts();
 });
 
-/**
- * 「正在思考中」：已发起请求，但最后一条 AI 消息还没有 answer 正文。
- * 这一态要把输入栏下方的底部声纹（氛围渐变）收起来，与首页一致；
- * 一旦出字进入「回答中」，声纹按原逻辑自动回来。
- */
-const chatThinking = computed(() => {
-  if (!isLoading.value) return false;
-  const list = messages.value || [];
-  const last = list[list.length - 1];
-  if (!last || last.role !== "ai") return false;
-  return !(last.blocks || []).some(
-    block => block.type === "answer" && String(block.payload?.content || "").trim().length > 0,
-  );
-});
+
 
 /**
  * 作业指导是「核对卡顶到对话区最上方」的阅读方式，所以核对卡一旦置顶就不能再被流式追加拽走：
@@ -921,8 +908,6 @@ onUnload(() => {
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
-        bottom-gradient
-        :hide-bottom-art="chatThinking"
         :compact-voice-listening="true"
         @send="sendMessage"
         @stop="stopGenerating"

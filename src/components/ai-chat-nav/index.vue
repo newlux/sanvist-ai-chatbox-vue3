@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
+import iconParts from "@/assets/img/icon-parts.svg";
 import iconRepair from "@/assets/img/icon-repair.svg";
 import iconVox from "@/assets/img/icon-vox.svg";
 import { usePcMode } from "@/hooks/usePcMode";
@@ -52,7 +53,7 @@ const { isPc } = usePcMode();
 /** 当前首个可见项下标：交给 swiper 的 current 做受控滑动（手势滑动改它） */
 const currentIndex = ref(0);
 
-// 四个入口都另开专属页面：听汇报 / 作业指导 / 任务协同 / 维修助手
+// 入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手（配件助手暂为首页内联，其余另开专属页）
 const DEFAULT_NAV_ITEMS: NavItem[] = [
   {
     key: "vox-core",
@@ -86,6 +87,16 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     subagent: "repair",
     mode: "page",
     url: "/pages/repair/index",
+  },
+  {
+    key: "parts-master-ai",
+    titleKey: "nav-parts",
+    icon: iconParts,
+    subagent: "parts",
+    // 配件助手暂时没有独立页面：先作为首页内联智能体挂上去（点击切换 / 高亮，
+    // 后续提问带上 subagent=parts）。等配件页就绪，改成 mode: "page" + url 即可，
+    // 点击分发在 index 页的 onNavItemClick 里，不用另写。
+    mode: "inline",
   },
 ];
 
