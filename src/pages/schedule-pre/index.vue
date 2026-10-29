@@ -19,13 +19,15 @@ import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/sched
  * 重排是另一个页面：pages/schedule（稿子 7229:254，每个资源「旧 / 新」两排对照）。
  *
  * 版面：横屏 812×375（每小时 56px，时间轴以 08:00–21:00 为基准、按数据向外扩到整点）
- * - 顶部栏：标题「调度视图·预排草案」+ 日期；右侧为任务状态图例（6832:13，贴着返回按钮）
- *   + 返回对话按钮；
+ * - 顶部栏：标题「调度视图·预排草案」+ 日期；右侧只有返回对话按钮；
  * - 左侧资源列（140px，6464:279）：第一行「类别 + 名称」，第二行车号|班次；
  * - 右侧排程区：时间轴 + 竖向网格（#F3F3F3）+ 任务条（按起止时间定位），可横向滚动。
  *
+ * 预排不渲染任务状态：没有状态图例，任务条也不按状态换底色 / 描边（统一白底 + #F2F2F2），
+ * 条内第二行只写时段。状态只用于点开右侧详情面板时的「当前进度」判断。
+ *
  * 不画「当前时间虚线」：产品规范里只有全量调度视图（pages/schedule-gantt，viewType=schedule）
- * 显示这条线；本页只用 NOW_MIN 推任务状态，不渲染时间线。
+ * 显示这条线；本页不渲染时间线。
  *
  * 双指缩放：与甘特页同一套（useScheduleGestures 接管两指手势），按两指间距比例改「每小时像素宽」
  * （28–168px，基准 56px），捏合中心的时刻保持不动；刻度、任务条、竖网格线、箭头跟着实时重排。
@@ -449,36 +451,6 @@ function statusOf(bar: ScheduleBar): TaskDetailPanelStatus {
   return "pending";
 }
 
-/** 任务条状态前缀（稿子 6832:13 的条内第二行写成「[执行中]08:00-13:00」） */
-const BAR_STATUS_TEXT: Record<TaskDetailPanelStatus, string> = {
-  running: "执行中",
-  done: "已完成",
-  pending: "待执行",
-  overdue: "已逾期",
-  canceled: "已取消",
-};
-
-/** 条内第二行：状态 + 时段 */
-function barTimeLabel(bar: ScheduleBar) {
-  return `[${BAR_STATUS_TEXT[statusOf(bar)]}]${barTimeText(bar)}`;
-}
-
-/** 任务条样式类：按状态取四态配色（稿子 6832:13） */
-function barClass(bar: ScheduleBar) {
-  return `schedule__bar--${statusOf(bar)}`;
-}
-
-/**
- * 任务状态图例（稿子 6832:13）：已完成 / 执行中 / 待执行 / 逾期未开始。
- * 对应的 10×10 色块：6832:212 / 6832:280 / 6832:278 / 6832:273。
- */
-const legend = [
-  { key: "done", label: "已完成" },
-  { key: "running", label: "执行中" },
-  { key: "pending", label: "待执行" },
-  { key: "overdue", label: "逾期未开始" },
-] as const;
-
 /**
  * 点击任务条：按稿子 6832:292 + 6832:283 四态样本组装右侧详情面板的数据。
  * 站点 / 规格 / 方量 / 上一程 / 下一程都从接口下发的任务条里推；
@@ -551,15 +523,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
           <view class="schedule__collapse-icon" :class="{ 'schedule__collapse-icon--open': expanded }" />
         </view> -->
 
-        <!-- 任务状态图例（稿子 6832:13；色块 10×10 圆角 3），贴着返回按钮放 -->
-        <view class="schedule__legend">
-          <view v-for="item in legend" :key="item.key" class="schedule__legend-item">
-            <view class="schedule__legend-chip" :class="`schedule__legend-chip--${item.key}`" />
-            <text class="schedule__legend-text">
-              {{ item.label }}
-            </text>
-          </view>
-        </view>
+        <!-- 预排不渲染任务状态：没有状态图例（也不按状态换配色，见 .schedule__bar） -->
 
         <!-- 返回对话页：图标为「托盘 + 向上箭头」 -->
         <view class="schedule__exit" @tap="backToChat">
@@ -637,16 +601,16 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
               v-for="bar in row.bars"
               :key="bar.id"
               class="schedule__bar"
-              :class="[barClass(bar), { 'schedule__bar--mark': bar.highlight }]"
+              :class="{ 'schedule__bar--mark': bar.highlight }"
               :style="barStyle(bar)"
               @tap="onTaskTap(bar, row)"
             >
               <text class="schedule__bar-title">
                 {{ bar.title }}
               </text>
-              <!-- 第二行：状态 + 时段（稿子 6832:13） -->
+              <!-- 第二行：只写时段（预排不渲染任务状态，不再拼「[执行中]」前缀） -->
               <text class="schedule__bar-time">
-                {{ barTimeLabel(bar) }}
+                {{ barTimeText(bar) }}
               </text>
             </view>
           </view>
@@ -736,48 +700,6 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 .schedule__date {
   font-size: 11px;
   color: #999999;
-}
-
-/* 图例（稿子 6832:13）：色块 10×10 圆角 3 + 11px 标签；放在右侧工具区、贴返回按钮 */
-.schedule__legend {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.schedule__legend-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.schedule__legend-chip {
-  box-sizing: border-box;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  border: 1px solid #ffffff;
-  background: #f0f0f0;
-}
-
-.schedule__legend-chip--running {
-  background: #ecf5ff;
-}
-
-.schedule__legend-chip--pending {
-  border-color: #f2f2f2;
-  background: #ffffff;
-}
-
-.schedule__legend-chip--overdue {
-  border-color: #767676;
-  border-style: dashed;
-  background: #ffffff;
-}
-
-.schedule__legend-text {
-  font-size: 11px;
-  color: #000000;
 }
 
 .schedule__tools {
@@ -1054,28 +976,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   overflow: hidden;
 }
 
-/* 任务条四态（稿子 6832:13）：底 / 描边按状态切换 */
-.schedule__bar--running {
-  border-color: #ffffff;
-  background: #ecf5ff;
-}
-
-.schedule__bar--done {
-  border-color: #ffffff;
-  background: #f0f0f0;
-}
-
-.schedule__bar--pending {
-  border-color: #f2f2f2;
-  background: #ffffff;
-}
-
-/* 已逾期：白底 + #767676 虚线 [2,2] */
-.schedule__bar--overdue {
-  border-style: dashed;
-  border-color: #767676;
-  background: #ffffff;
-}
+/* 预排不区分任务状态：所有条统一白底 + #F2F2F2 描边（只有强调条换成红描边） */
 
 .schedule__bar:active {
   opacity: 0.85;

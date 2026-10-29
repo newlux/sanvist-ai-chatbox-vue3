@@ -89,8 +89,42 @@ export function useChatViewport() {
     if (next !== inputDockHeight.value) inputDockHeight.value = next;
   }
 
+  /**
+   * 页面高度连量三次的原因：宿主转屏是异步的。
+   *
+   * 从横屏调度视图（pushWindow 开的场景窗口）返回本页时，onShow 往往在设备转回竖屏之前就触发了，
+   * 这一刻拿到的还是横屏高度（约 375），之后再没有 onShow，页面就永远停在横屏高度上：
+   * 消息列表被压扁、下方留一大片空白。所以 onShow 后再补量两帧。
+   */
+  const WINDOW_HEIGHT_RETRY_DELAYS = [120, 400];
+
+  let heightSyncTimers: Array<ReturnType<typeof setTimeout>> = [];
+
+  function clearHeightSyncTimers() {
+    heightSyncTimers.forEach(timer => clearTimeout(timer));
+    heightSyncTimers = [];
+  }
+
+  /** 真正读取并写入高度（不变就不触发重渲染） */
+  function applyWindowHeight() {
+    const next = Number(uni.getSystemInfoSync().windowHeight) || 0;
+    if (next <= 0) return;
+    if (Math.abs(next - windowHeight.value) < 1) return;
+    logger.debug("同步页面高度", { from: windowHeight.value, to: next });
+    windowHeight.value = next;
+  }
+
   function syncWindowHeight() {
-    windowHeight.value = Number(uni.getSystemInfoSync().windowHeight) || 0;
+    applyWindowHeight();
+    if (typeof window === "undefined") return;
+    clearHeightSyncTimers();
+    WINDOW_HEIGHT_RETRY_DELAYS.forEach((delay) => {
+      heightSyncTimers.push(setTimeout(() => {
+        // 键盘弹着的时候可视区高度会被压缩，不能跟着改（输入栏自己按键盘高度抬升）
+        if (measuredKeyboardHeight.value > 0) return;
+        applyWindowHeight();
+      }, delay));
+    });
   }
 
   function normalizeKeyboardHeight(height: unknown) {
@@ -160,6 +194,14 @@ export function useChatViewport() {
     const height = readViewportKeyboardHeight();
     if (height > 0) pinLayoutViewport();
     if (inputFocused || height > 0) applyKeyboardHeight(height);
+    // 转屏（横屏调度视图切回竖屏）走的也是 resize：没有键盘时顺手把页面高度重新量一次
+    if (height <= 0 && measuredKeyboardHeight.value <= 0) applyWindowHeight();
+  }
+
+  /** 方向变化：页面高度会跟着变，多量两帧等它稳定 */
+  function onOrientationChange() {
+    if (measuredKeyboardHeight.value > 0) return;
+    syncWindowHeight();
   }
 
   function onFocusIn(event?: FocusEvent) {
@@ -312,6 +354,7 @@ export function useChatViewport() {
     if (typeof window !== "undefined") {
       window.addEventListener("scroll", onWindowScroll, { passive: true });
       window.addEventListener("resize", onViewportChange);
+      window.addEventListener("orientationchange", onOrientationChange);
       document.addEventListener("focusin", onFocusIn);
       document.addEventListener("focusout", onFocusOut);
       document.addEventListener("touchstart", onDocumentTouchStart, { passive: true });
@@ -330,10 +373,12 @@ export function useChatViewport() {
 
   onBeforeUnmount(() => {
     if (collapseTimer) clearTimeout(collapseTimer);
+    clearHeightSyncTimers();
     uni.offKeyboardHeightChange?.(onKeyboardHeightChange);
     if (typeof window !== "undefined") {
       window.removeEventListener("scroll", onWindowScroll);
       window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("orientationchange", onOrientationChange);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", onFocusOut);
       document.removeEventListener("touchstart", onDocumentTouchStart);
