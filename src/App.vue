@@ -5,6 +5,7 @@ import { setLocale } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
 import { setupDebugConsole } from "@/utils/debug-console";
 import { isEmbeddedInIframe, isSanvistPcEmbedded, notifyParentReady, resolveFromParam } from "@/utils/iframe";
+import { warmPhoneInfo } from "@/utils/landscape-device";
 import { createLogger } from "@/utils/logger";
 import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
 import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
@@ -134,6 +135,9 @@ onLaunch(async (options) => {
   await setLocale(baseInfo.lang);
   await systemStore.initPhoneSizesInfo();
   initializeDeviceInfo();
+  // 预热设备信息：横屏调度视图（甘特 / 预排 / 重排）要按机型决定是否转屏，
+  // 提前取一次，进页面时就不用再等原生回调（智慧屏 / 电视这类机型直接跳过转屏，见 utils/landscape-device）
+  void warmPhoneInfo();
 });
 </script>
 

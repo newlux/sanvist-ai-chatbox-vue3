@@ -1,9 +1,13 @@
 import type { GanttViewPayload } from "@/api/chat/types";
 
+import { isNativeLandscapeDevice, peekPhoneInfo } from "@/utils/landscape-device";
+import { createLogger } from "@/utils/logger";
 import { setLandscapeFullscreen } from "@/utils/platform/mpaas";
 import { navigateToScene } from "@/utils/scene-navigation";
 import { stashPendingScheduleView } from "@/utils/schedule-view";
 import { stashPendingTaskDetail } from "@/utils/task-detail-view";
+
+const logger = createLogger("gantt-navigation");
 
 /**
  * 甘特入口卡（COMPONENT scene=task / type=gantt）点击后的分流。
@@ -41,10 +45,19 @@ export function openGanttView(payload?: GanttViewPayload | null) {
   if (viewType === PERSONAL_VIEW_TYPE) {
     stashPendingTaskDetail(view);
   } else {
+    stashPendingScheduleView(view);
     // 横屏页（schedule / pre / replan）：进页面前先让宿主转屏（landscapeFullscreen），
     // 目标页 mounted 时会再调一次兜底；退出横屏页时由 useLandscape 置回 false。
-    setLandscapeFullscreen(true);
-    stashPendingScheduleView(view);
+    // 智慧屏 / 电视这类本身是横屏画布的机器不预转屏（见 utils/landscape-device）：
+    // 设备信息没回来时也不预转，交给目标页自己判断，避免先转了再撤。
+    const cached = peekPhoneInfo();
+    if (cached === undefined) {
+      logger.info("设备信息未就绪，跳转前不做预转屏（由目标页判定）");
+    } else if (isNativeLandscapeDevice(cached)) {
+      logger.info("该机型本身就是横屏画布，跳过预转屏");
+    } else {
+      setLandscapeFullscreen(true);
+    }
   }
 
   void navigateToScene(url);
