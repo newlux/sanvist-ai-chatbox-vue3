@@ -219,7 +219,8 @@ function toWorkflowRunResponse(item: DifyWorkflowRunResponse | null | undefined)
  * （Authorization + guest-role，后者来自 setGuestRole）。
  *
  * 任务协同的「查异常」走这里：
- *   inputs = { query_type: "查异常", user_id: 所选身份, role_id: "OWNER" }
+ *   inputs = { query_type: "查异常", user_id: 所选身份, role_id: "OWNER", language: "zh-CN" | "en-US" }
+ * language 跟随当前界面语言，后端按它返回对应语种的卡片文案。
  */
 export function runBlockingWorkflow(params: RunWorkflowParams) {
   const body = {

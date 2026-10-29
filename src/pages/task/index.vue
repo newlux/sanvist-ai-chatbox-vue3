@@ -38,7 +38,7 @@ import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
-import { resolveExceptionSummary, TASK_EXCEPTION_MOCK, type TaskExceptionCard } from "@/utils/task-exception";
+import { resolveExceptionSummary, type TaskExceptionCard } from "@/utils/task-exception";
 import { getTaskIdentity, type TaskIdentity } from "@/utils/task-identity";
 
 /**
@@ -57,7 +57,7 @@ import { getTaskIdentity, type TaskIdentity } from "@/utils/task-identity";
 defineOptions({ name: "AiTaskPage" });
 
 const logger = createLogger("task-page");
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const chatScope = provideChatScope("task");
 const userStore = useUserStore();
@@ -219,7 +219,8 @@ const welcomeCardKind = ref<"exception" | "gantt">("gantt");
 
 /**
  * 异常情况摘要卡片（Ardot 350:2151 / 节点 350:2199）：
- * 有值就铺在待机区（替代甘特图入口卡），数据由工作流 outputs 解析、认不出时用 mock 兜底。
+ * 只在 run 接口真的返回可解析的数据后才铺（替代甘特图入口卡）。
+ * 进页面时是 null —— 请求中 / 接口失败都不渲染，不再用设计稿样张顶替。
  */
 const exceptionCard = ref<TaskExceptionCard | null>(null);
 /**
@@ -230,25 +231,33 @@ const exceptionCard = ref<TaskExceptionCard | null>(null);
 const exceptionSuggestions = ref<string[]>([]);
 
 /**
+ * run 接口的 language：跟随当前界面语言（历史抽屉里的「中 / EN」切的就是同一个 i18n locale），
+ * 中文传 zh-CN、英文（及其它语言）传 en-US。
+ */
+function runLanguage() {
+  return String(locale.value || "").toLowerCase().startsWith("en") ? "en-US" : "zh-CN";
+}
+
+/**
  * 首屏「查异常」：身份来自 /flow/steps?module=TASK 的 IDENTITY 选项（如 DISPATCH-02）时走这里。
  *
  * 走 Dify 工作流而不是对话接口（POST /proxy/v1/workflows/run，blocking 一次性返回）：
- *   inputs = { query_type: 查异常, user_id: 所选身份, role_id: OWNER }
+ *   inputs = { query_type: 查异常, user_id: 所选身份, role_id: OWNER, language: zh-CN / en-US }
  *   user   = 当前用户标识（游客态兜底 guest）
  * 工作流没有 query / conversation，业务结果整包在 data.outputs 里
  * （`{ component: '<COMPONENT>{"scene":"task","type":"exception","data":{...}}</COMPONENT>' }`，
  * 由 utils/task-exception 拆外壳后取 data 里的 title / exceptionObject / description / suggestions）。
- * 请求期间先铺设计稿的 mock 卡片（页面不空），拿到数据再整体覆盖。
+ * 数据回来之前待机区不铺卡：解析不出内容就保持 null，页面上不会出现占位卡片。
  */
 async function loadExceptionInfo(identity: TaskIdentity) {
   initialCardsRequestedAt = Date.now();
-  exceptionCard.value = TASK_EXCEPTION_MOCK;
   try {
     const result = await runBlockingWorkflow({
       inputs: {
         query_type: EXCEPTION_QUERY,
         user_id: identity.code,
         role_id: EXCEPTION_ROLE_ID,
+        language: runLanguage(),
       },
       user: String(userStore.userId || "").trim() || "guest",
       // 网关按 guest-role 头鉴权：与 inputs.role_id 保持一致
@@ -260,7 +269,7 @@ async function loadExceptionInfo(identity: TaskIdentity) {
     logger.info("task exception info loaded", { identity: identity.code, outputs: result?.data?.outputs });
   }
   catch (error) {
-    // 接口挂了也保留 mock 卡片，不让待机区空着（建议问题回落到本地兜底文案）
+    // 接口挂了就保持空态：不铺卡片，建议问题回落到本地兜底文案
     logger.warn("failed to load task exception info", { identity: identity.code, error });
   }
 }
