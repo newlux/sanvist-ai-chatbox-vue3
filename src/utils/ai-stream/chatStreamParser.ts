@@ -237,12 +237,22 @@ export function applyEventToBlocks(
       };
     }
     case "gantt": {
-      // 一张调度视图卡：同一 viewId 重复下发时覆盖同一块（避免多张卡）
+      // 一张调度视图卡：同一 viewId（该视图「业务阶段 + 数据上下文」的唯一标识）重复下发时覆盖同一块，避免多张卡。
+      // viewId 缺失时也必须稳定落在同一块（固定 gantt-0），不能按「已有 gantt 块数量」递增——
+      // 否则同一视图在流式里被多次下发时会拆成多张卡，stage / rows 各散落一块，多轮里卡片数据串扰。
       const viewId = String(event.data?.viewId || "").trim();
-      const ganttIndex = blocks.filter(block => block.type === "gantt").length;
+      const ganttId = viewId ? `gantt-${viewId}` : "gantt-0";
+      const ganttIndex = blocks.findIndex(block => block.id === ganttId);
+      // gantt 是「整包快照」：每次下发都是该视图当前阶段的完整数据（viewType / card / rows / stage …），
+      // 直接整包替换 payload，不做浅合并——浅合并会把「本次省略的字段」残留成上一阶段的数据，
+      // 让卡片绑错业务阶段（例如执行中阶段还显示计划中的 rows）。
+      const ganttBlock: AiBlock = { id: ganttId, type: "gantt", payload: event.data, complete: true };
+      const nextBlocks = ganttIndex < 0
+        ? [...blocks, ganttBlock]
+        : blocks.map((block, index) => index === ganttIndex ? ganttBlock : block);
       return {
         ...base,
-        blocks: upsertBlock(blocks, stablePayloadId("gantt", [viewId], ganttIndex), "gantt", event.data, true),
+        blocks: nextBlocks,
         receivedContent: true,
       };
     }

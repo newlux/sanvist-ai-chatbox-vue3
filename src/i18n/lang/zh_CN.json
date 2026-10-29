@@ -104,6 +104,7 @@
   "nav-repair": "维修助手",
   "nav-task": "任务协同",
   "nav-parts": "配件助手",
+  "overview-fallback-user-name": "伏老板",
   "overview-greeting-suffix": "，你好。",
   "overview-morning-report": "（{date} 早报）",
   "overview-listen": "去收听",

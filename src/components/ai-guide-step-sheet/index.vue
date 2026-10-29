@@ -26,7 +26,7 @@ import closeIcon from "@/assets/img/icon-close.svg";
  * - 末尾输入框：placeholder 取 question_text，输入框右侧带「发送」图标（与原生输入栏 input-bar
  *   同款 icon-send.svg，与键盘回车等效，输入为空时置灰），用户自己写的问题按原样发出去。
  *
- * 语音播报：多步骤卡展开 / 切步时，只播当前步骤的 title + action（详情卡渲染的那两行），
+ * 语音播报：多步骤卡展开 / 切步时，只播当前步骤的 action（操作那一行），
  * 走 usePlainTts（固定文案）；切步打断旧的、播最新一步，收起即停。
  *
  * 视觉：白板贴底 + 向上阴影 + 灰色小标签 + 右上 ×，选项行默认 #f6f6f6；
@@ -92,23 +92,21 @@ const questionText = computed(() => String(currentStep.value?.question_text || "
 const canSubmitText = computed(() => Boolean(draftText.value.trim()));
 const photoText = computed(() => String(currentStep.value?.photo_text || "").trim());
 
-/* ---------------- 步骤播报：每一步只读「标题 + 操作」两行 ---------------- */
+/* ---------------- 步骤播报：每一步只读「操作」一行 ---------------- */
 
 /**
- * 多步骤卡播报用的是固定文案（详情卡渲染到页面上的 step.title 与 step.action），
+ * 多步骤卡播报用的是固定文案（详情卡渲染到页面上的 step.action），
  * 不是流式答案，所以走 usePlainTts（与 guide-init / task-init 同一套 POST /speech/tts/stream）。
  * 每切一步 speak 内部会先 stop 再播，天然满足「终止当前语音、播最新一步」。
  */
 const isEnglish = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));
 const stepTts = usePlainTts(isEnglish.value ? "en" : "zh");
 
-/** 这一步要读的文案：只播 title + action，不读确认问题 / 选项 / 输入框占位 */
+/** 这一步要读的文案：只播 action，不读 title / 确认问题 / 选项 / 输入框占位 */
 const narrationText = computed(() => {
   const step = currentStep.value;
   if (!step) return "";
-  return [String(step.title || "").trim(), String(step.action || "").trim()]
-    .filter(Boolean)
-    .join("\n");
+  return String(step.action || "").trim();
 });
 
 // 展开 / 切步时读当前步，收起即停；speak 重复调用会打断上一次，播最新一步
@@ -334,6 +332,13 @@ watch(() => [props.visible, currentIndex.value], () => {
       @pick="onPickAttachmentSource"
     />
   </view>
+
+  <!-- 播报中声纹：独立 fixed 元素贴屏幕底部，z-index 高于步骤卡（1002），
+       stepTts 播放时浮在卡片之上；步骤卡位置不变 -->
+  <view v-if="visible && stepTts.playing.value" class="guide-step-sheet__speaking" aria-hidden="true">
+    <view class="guide-step-sheet__speaking-band guide-step-sheet__speaking-band--back" />
+    <view class="guide-step-sheet__speaking-band" />
+  </view>
 </template>
 
 <style lang="scss" scoped>
@@ -351,6 +356,78 @@ watch(() => [props.visible, currentIndex.value], () => {
   padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
   background: #ffffff;
   box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.06);
+}
+
+/* 播报中声纹：贴屏幕底部，z-index 高于步骤卡（1002）浮在卡片之上；
+   与输入栏听播同款三色带波浪，见 ai-chat-input 的 chat-input__speaking-art */
+.guide-step-sheet__speaking {
+  position: fixed;
+  z-index: 1003;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 236rpx; /* 118px */
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.guide-step-sheet__speaking-band {
+  position: absolute;
+  top: 130rpx; /* 三色带在波形容器中上部 */
+  left: 0;
+  width: 750rpx;
+  height: 106rpx;
+  background: linear-gradient(
+    90deg,
+    #ebb4e9 0%,
+    #56abfa 24.36%,
+    #9795e8 50%,
+    #56abfa 75.64%,
+    #ebb4e9 100%
+  );
+  background-size: 1500rpx 100%;
+  -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
+  mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 990rpx 286rpx;
+  mask-size: 990rpx 286rpx;
+  -webkit-mask-position: -121rpx -14rpx;
+  mask-position: -121rpx -14rpx;
+  animation:
+    guide-step-speaking-flow 5.6s linear infinite,
+    guide-step-speaking-sway 4.8s ease-in-out infinite alternate;
+  will-change: background-position, mask-position;
+}
+
+.guide-step-sheet__speaking-band--back {
+  opacity: 0.4;
+  transform: translateY(8rpx);
+  animation:
+    guide-step-speaking-flow 7.6s linear infinite reverse,
+    guide-step-speaking-sway 6s ease-in-out infinite alternate;
+}
+
+/* 色带横向流动：位移一个背景周期（1500rpx），首尾同色，循环无缝 */
+@keyframes guide-step-speaking-flow {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 1500rpx 0;
+  }
+}
+
+/* 波形轮廓缓慢起伏：基准 mask-position 为 (−121rpx, −14rpx)，±20rpx 摆动 */
+@keyframes guide-step-speaking-sway {
+  from {
+    -webkit-mask-position: -141rpx -14rpx;
+    mask-position: -141rpx -14rpx;
+  }
+  to {
+    -webkit-mask-position: -101rpx -14rpx;
+    mask-position: -101rpx -14rpx;
+  }
 }
 
 .guide-step-sheet__header {
