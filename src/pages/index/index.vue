@@ -126,7 +126,7 @@ const {
     if (index < 0) return;
     realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
   },
-  // 发送后把这条提问顶到对话区上方，回答从下面往下写，本轮回合内不再贴底跟随
+  // 本轮的提问是跟随上限：回答边写边贴底跟随，提问顶到头部下沿就停住（见消息列表 alignToReplyEnd）
   alignSentMessageToTop: true,
 });
 
@@ -796,10 +796,20 @@ const showScrollToBottom = computed(
 );
 
 function onScrollToBottomTap() {
-  // 点了就恢复「跟随底部」：本轮「提问顶到上方」的上顶模式一起关掉，
-  // 否则流式增量不会继续跟随，得反复点
-  chatStore.alignRoundToTop = false;
-  chatStore.scrollToBottom(true);
+  // 点了就恢复「跟随底部」，后续流式增量会继续贴底
+  // 落点是「真末尾」（含最后一条消息的操作栏 / 参考来源），不能用 scrollToBottom：
+  // 首页开着 stopAtReplyEnd，那条落点会把尾部操作栏留在输入栏下面，看起来没到底
+  chatStore.jumpToBottom();
+}
+
+/**
+ * 消息列表上报贴底状态，不能直接绑 setPinnedToBottom：
+ * 用户自己滑回底部时要把本轮的「提问封顶」一起撤掉，
+ * 否则下一帧内容长高，对齐又会把视图拽回提问那边（表现为「滑到底又弹回去」）。
+ */
+function onPinnedChange(pinned: boolean) {
+  chatStore.setPinnedToBottom(pinned);
+  if (pinned) chatStore.setCapRoundAtTop(false);
 }
 
 async function onScrollTop() {
@@ -917,6 +927,7 @@ onBeforeUnmount(() => {
         :reply-end-token="replyEndToken"
         :pin-message-token="chatStore.pinMessageToken"
         :pin-message-id="chatStore.pinMessageId"
+        :cap-round-at-top="chatStore.capRoundAtTop"
         :show-quick-list="showQuickList"
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
@@ -949,7 +960,7 @@ onBeforeUnmount(() => {
         @select-toggle="onShareSelectToggle"
         @listen-report="onGoListenReport"
         @scroll-top="onScrollTop"
-        @pinned-change="chatStore.setPinnedToBottom"
+        @pinned-change="onPinnedChange"
       />
       <!-- 一键回到底部：离底时出现，贴底自动隐藏；
            位置 = 输入栏高（含键盘抬起）+ 88rpx 底部导航 + 24rpx 间隙，不压住「听汇报 / 作业指导 / 任务协同」 -->

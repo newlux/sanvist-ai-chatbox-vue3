@@ -124,6 +124,14 @@ const props = defineProps({
     type: String,
     default: "",
   },
+  /**
+   * 本轮跟随的上限：回答照常边写边贴底跟随，但本轮提问顶到头部下沿就停住，
+   * 后面的内容留在屏幕下方（见 alignToReplyEnd）。用户主动点「回到底部」时由页面关掉。
+   */
+  capRoundAtTop: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits([
@@ -247,18 +255,15 @@ let lastScrollTop = 0;
 const scrollTopPx = ref(0);
 
 /**
- * 短回复上翻时垫在内容末尾的空白（px）。
+ * 「把某条消息顶到上方」时垫在内容末尾的空白（px，见 alignMessageToTop）。
  *
- * 内容末尾本身没有多余余量时（回答很短，下面只剩输入栏留白），滚到底也到不了
- * 「提问顶到上方」那个落点 —— 屏幕下部根本挤不出这段距离。垫一段空白进去，
- * 上翻落点才真的可达；回答变长 / 重新发问 / 换会话时自动收回 0。
+ * 内容末尾没有多余余量时（消息下面只剩输入栏留白），滚到底也到不了目标落点，
+ * 垫一段空白进去落点才真的可达；重新定位 / 换会话时收回 0。
  *
  * 不并进 paddingBottom：reservedBottomHeight() 是从 paddingBottom 读可视区的，
  * 混进去会把「被输入栏盖住的高度」算多，落点跟着漂。
  */
 const shortReplySpacerPx = ref(0);
-/** 空白量要按新布局再量一次才收敛（贴底布局的 margin-top: auto 会被吃掉一部分），最多补 3 次 */
-let shortReplySpacerPass = 0;
 /** 本轮提问已经做过「再往上抬一小段」：80ms 补量 / 重复定位时不再抬，免得越抬越高 */
 let pinLiftDone = false;
 
@@ -402,8 +407,8 @@ function lastUserAnchorSelector() {
 
 /**
  * 最后一条回答是否已收尾。
- * 流式期间不做「整轮上翻」，否则回答刚冒出第一行就把页面拽上去，
- * 等真正写长了又得拽回来，来回跳。
+ * 流式期间回复里随时会冒出参考来源、操作栏也还不该估高度，
+ * 只有收尾后的那几次对齐才按「真末尾」贴底。
  */
 function isLastAnswerSettled() {
   const messages = props.messages || [];
@@ -504,39 +509,39 @@ function alignToReplyEnd(forceUp = false) {
         target = baseContentHeight - visibleHeight;
       }
       /**
-       * 短回复不要把气泡单独贴在底边（夹在上一轮内容与底部工具栏之间很难看出是新回答），
-       * 改成把这一轮的提问顶到上方落点，整轮（提问 + 回答）一起露在视野里。
+       * 本轮提问是跟随的上限：内容一直往上走，但提问顶到头部下沿就停住。
        *
-       * 两个落点取更靠下的那个，条件自动等价于「整轮放得下就上翻」：
-       * - 上翻落点（提问顶到上方）> 贴底落点 → 说明整轮在可视高度内放得下，取上翻；
-       * - 回答一长，贴底落点反超 → 退回原来的「回复末尾贴底」，与改动前一致。
+       * 显示位置取「贴底」与「提问顶到上方」两个落点里更靠上的那个：
+       * - 回答短、整轮放得下：贴底更靠上 → 停在贴底，提问自然还在视野里（下方不留大片空白）；
+       * - 回答长到把提问顶出去：提问落点更靠上 → 停在提问贴顶，不再继续往上推。
+       *
+       * 注意别在收尾时强行把提问拉到头部下沿：短回复那样会在下方垫出一大段空白，
+       * 内容被顶到中间，看着像没排满。
        */
-      let nextSpacer = 0;
       // baseContentHeight <= listHeight 说明整段对话本来就不到一屏（首轮短问答）：
-      // 贴底布局已经把它放在输入栏上方，这是正常观感，不往上翻（翻了下面会空一大片）
-      if (!forceUp && isLastAnswerSettled() && baseContentHeight > listHeight + 1) {
+      // 贴底布局已经把它放在输入栏上方，这是正常观感，不往上顶（顶了下面会空一大片）
+      if (!forceUp && props.capRoundAtTop && baseContentHeight > listHeight + 1) {
         const userTop = Number(userRect?.top);
         const topTarget = userTop - innerTop - pinnedTopGapPx();
-        if (Number.isFinite(topTarget) && topTarget > target) {
-          target = topTarget;
+        if (Number.isFinite(topTarget)) {
           /**
-           * 上翻落点能不能滚到，取决于内容末尾还有多少余量：
-           * 现有内容最多滚到 baseContentHeight − 视口高，差多少就在末尾垫多少空白。
-           * 贴底布局的 margin-top: auto 会先被这段空白吃掉一部分，所以下面要按新布局再量一次。
+           * 收尾后按「真末尾」贴底：气泡底部那行操作栏（播报 / 复制 / 反馈 / 分享）是独立于
+           * .ai-content-blocks 的一块，继续用「正文末尾」口径会把它整行留在输入栏下面，
+           * 看着像没排到底 —— 内容够短时这里就是滚到底（clamp 到内容高 − 视口高）。
            */
-          nextSpacer = Math.round(
-            Math.min(listHeight, Math.max(0, topTarget - baseContentHeight + listHeight)),
-          );
+          const bottomTarget = isLastAnswerSettled()
+            ? Math.max(0, Math.round(baseContentHeight - listHeight))
+            : target;
+          const capTarget = Math.max(0, Math.round(topTarget));
+          target = Math.min(bottomTarget, capTarget);
+          /**
+           * 封顶说明下方还有内容露不出来（回答比可视区高）：
+           * 立刻上报「未贴底」，页面那边马上显示「回到底部」，
+           * 不用等用户手滑到底再滑回来才出现。
+           */
+          if (capTarget < bottomTarget - 1) setPinned(false);
         }
       }
-      if (Math.abs(nextSpacer - shortReplySpacerPx.value) > 1 && shortReplySpacerPass < 3) {
-        shortReplySpacerPass += 1;
-        shortReplySpacerPx.value = nextSpacer;
-        // 空白生效、内容高度变了之后重新落位（一般一次就收敛）
-        nextTick(() => alignToReplyEnd(forceUp));
-        return;
-      }
-      shortReplySpacerPass = 0;
       if (!Number.isFinite(target)) return;
 
       const currentScrollTop = Math.max(0, listTop - innerTop);
@@ -625,17 +630,34 @@ function alignMessageToTop(messageId: string) {
 watch(
   () => props.pinMessageToken,
   async () => {
-    const targetId = props.pinMessageId;
-    if (!targetId) return;
-    // 新的一轮：抬升只做一次，上一步为了够到落点垫的空白也按本轮重新算
+    // 新的一轮（或换会话 / 新对话把令牌清零）：抬升只做一次，
+    // 上一步为了够到落点垫的空白也按本轮重新算——清零放在目标判空之前，
+    // 否则换会话时 spacer 会跟着旧的 pinMessageId 一起留在新会话里
     pinLiftDone = false;
     shortReplySpacerPx.value = 0;
+    const targetId = props.pinMessageId;
+    if (!targetId) return;
     await nextTick();
     alignMessageToTop(targetId);
     // 头像、附件、首行文字是渲染后才定高的，补一次
     setTimeout(() => alignMessageToTop(targetId), 80);
   },
   { flush: "post" },
+);
+
+/**
+ * 换会话 / 新对话（消息清空）时把上一轮垫的空白一起收回。
+ * 令牌可能是 0 → 0（这次会话从没顶过消息），上面的 watch 不会触发，
+ * 残留的空白会让新会话底部莫名其妙多出一段。
+ */
+watch(
+  () => (props.messages || []).length,
+  (length) => {
+    if (length) return;
+    pinLiftDone = false;
+    shortReplySpacerPx.value = 0;
+    scrollTopPx.value = 0;
+  },
 );
 
 /**
@@ -1184,7 +1206,7 @@ watch(
             </view>
           </view>
         </view>
-        <!-- 短回复上翻垫的空白：回答很短时内容末尾没有多余余量，滚到底也顶不上去（见 alignToReplyEnd） -->
+        <!-- 顶到上方时垫的空白：内容末尾没有多余余量、滚不到目标落点时补上（见 alignMessageToTop） -->
         <view
           v-if="shortReplySpacerPx > 0"
           class="msg-list__spacer"

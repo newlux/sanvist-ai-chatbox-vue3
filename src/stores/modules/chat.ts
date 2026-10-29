@@ -48,18 +48,15 @@ function defineChatStore(scope: string) {
     const stopAtReplyEnd = ref(false);
     /** 滚动请求令牌：自增一次 = 一次请求，由消息列表量完 DOM 自己按 px 定位 */
     const replyEndToken = ref(0);
-    /**
-     * 「问题顶到上方」模式（首页普通问答开启）：
-     * 发送后把用户消息顶到对话区上方的固定落点，回答从下面一路往下写，不再贴底跟随。
-     *
-     * 一直保留到换会话 / 新对话 / 重新发问才复位 —— **不能**在回答流结束时就关掉：
-     * 图表、表格、图片是正文之后才撑开高度的，那一下的 content-grow 会触发贴底，
-     * 表现就是「长回答写完了，页面突然跳到最后那张表」。
-     */
-    const alignRoundToTop = ref(false);
     /** 顶到上方的请求令牌 + 目标消息 id：自增一次 = 一次请求，由消息列表按 px 定位 */
     const pinMessageToken = ref(0);
     const pinMessageId = ref("");
+    /**
+     * 本轮跟随的上限（首页普通问答开启）：回答照常边写边贴底跟随，
+     * 但一旦本轮提问顶到头部下沿就停住，后面的内容留在屏幕下方 ——
+     * 用户主动点「回到底部」时关掉（见 jumpToBottom），否则会被下一次对齐拽回去。
+     */
+    const capRoundAtTop = ref(false);
     const requestSeq = ref(0);
     const activeRequestSeq = ref(0);
     /** 当前正在生成的那条 AI 消息 id。按 id 而不是下标记录，切会话后不会指错 */
@@ -123,10 +120,10 @@ function defineChatStore(scope: string) {
       aiSessionId.value = null;
       activeMessageId.value = "";
       pinnedToBottom.value = true;
-      alignRoundToTop.value = false;
-      // 新会话从干净状态起步：顶部呼吸位也一起复位
+      // 新会话从干净状态起步：顶部呼吸位与本轮的跟随上限也一起复位
       pinMessageId.value = "";
       pinMessageToken.value = 0;
+      capRoundAtTop.value = false;
     }
 
     function setSubagent(value: string) {
@@ -147,9 +144,6 @@ function defineChatStore(scope: string) {
     function scrollToBottom(force = false) {
       if (force) pinnedToBottom.value = true;
       if (!pinnedToBottom.value) return;
-      // 「问题顶到上方」的本轮里不跟随底部：流式增量、内容撑高、停止生成都不该把页面拽下去。
-      // 强制请求（切会话、发送以外的一次性对齐）除外。
-      if (alignRoundToTop.value && !force) return;
       if (scrollPending) return;
       scrollPending = true;
       nextTick(() => {
@@ -170,9 +164,40 @@ function defineChatStore(scope: string) {
       });
     }
 
-    /** 进入 / 退出「本轮问题顶到上方」模式（回合结束、换会话时复位） */
-    function setAlignRoundToTop(value: boolean) {
-      alignRoundToTop.value = Boolean(value);
+    /**
+     * 直接滚到内容最末：锚点定位，含最后一条消息的操作栏（播报 / 复制 / 反馈 / 分享）
+     * 和参考来源，也就是用户肉眼认知的「到底了」。
+     *
+     * 和 scrollToBottom 的区别只在落点：stopAtReplyEnd 模式下那个落点是「回复正文末尾、
+     * 不含参考来源」，尾部操作栏会留在输入栏下面看不见；用户主动点「回到底部」时要的是真末尾。
+     */
+    function jumpToBottom() {
+      pinnedToBottom.value = true;
+      // 用户要的是真末尾：本轮的「提问题顶到上方就停」上限一起撤掉，
+      // 否则后面图片 / 图表撑高触发的对齐又会把视图拽回提问那边
+      capRoundAtTop.value = false;
+      if (settleTimer) clearTimeout(settleTimer);
+      jumpToAnchor();
+      // 图表 / 表格 / 图片是渲染后才撑开高度的，补一次
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        if (!pinnedToBottom.value) return;
+        jumpToAnchor();
+      }, 120);
+    }
+
+    /**
+     * 只登记「本轮的提问是哪条」，不触发跳转。
+     * 消息列表拿它算顶部呼吸位（发过问之后内容从更靠下的位置起步），
+     * 和 pinMessageToTop 的区别是不动滚动位置。
+     */
+    function setPinMessage(messageId: string) {
+      pinMessageId.value = String(messageId || "").trim();
+    }
+
+    /** 进入 / 退出「提问顶到头部下沿就停」的跟随上限（发问时开，点回到底部 / 换会话时关） */
+    function setCapRoundAtTop(value: boolean) {
+      capRoundAtTop.value = Boolean(value);
     }
 
     /**
@@ -267,13 +292,15 @@ function defineChatStore(scope: string) {
       resetConversation,
       setSubagent,
       scrollToBottom,
+      jumpToBottom,
       setPinnedToBottom,
       setStopAtReplyEnd,
       focusStepBlock,
-      alignRoundToTop,
       pinMessageToken,
       pinMessageId,
-      setAlignRoundToTop,
+      capRoundAtTop,
+      setPinMessage,
+      setCapRoundAtTop,
       pinMessageToTop,
     };
   });

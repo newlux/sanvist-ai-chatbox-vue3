@@ -122,6 +122,44 @@ export function usePlainTts(language = "zh") {
     playing.value = false;
   }
 
+  /**
+   * 直接播一段打包进项目的本地音频（不走 TTS 接口）。
+   * 欢迎页这类固定口播用它：进入页面就能出声，不用等接口合成，
+   * playing / started / stop 的语义与 speak 一致，调用方的「播完再往下走」不受影响。
+   */
+  function playFile(source: string) {
+    const src = String(source || "").trim();
+    if (!src) return;
+
+    // 先清 started 再 stop：stop 会把 playing 打回 false，
+    // 调用方的 watch 若在这一刻读到旧的 started 会误判成「上一段播完了」
+    started.value = false;
+    stop();
+
+    const player = uni.createInnerAudioContext();
+    audio = player;
+    player.src = src;
+    player.onPlay(() => {
+      if (audio !== player) return;
+      started.value = true;
+      playing.value = true;
+    });
+    player.onEnded(() => {
+      if (audio !== player) return;
+      audio = null;
+      player.destroy?.();
+      playing.value = false;
+    });
+    player.onError((error) => {
+      if (audio !== player) return;
+      logger.warn("本地音频播放失败", error);
+      audio = null;
+      player.destroy?.();
+      playing.value = false;
+    });
+    player.autoplay = true;
+  }
+
   /** 播报一段纯文本；重复调用会打断上一次 */
   function speak(text: string) {
     const content = String(text || "").trim();
@@ -152,6 +190,7 @@ export function usePlainTts(language = "zh") {
 
   return {
     speak,
+    playFile,
     stop,
     playing,
     started,

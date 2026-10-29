@@ -252,15 +252,17 @@ export function useChatSend(scope?: string, handlers?: {
 
   /**
    * 消息入列后的定位：
-   * - 首页这类开了 alignSentMessageToTop 的页面：把这条用户消息顶到对话区上方，
-   *   并关掉本轮的贴底跟随，长回答不会再一路把页面拽到底；
+   * - 首页这类开了 alignSentMessageToTop 的页面：只登记本轮的提问 id（消息列表据此加大顶部呼吸位），
+   *   滚动从底部起步、边写边贴底跟随，提问顶到头部下沿就停住（上限在消息列表的 alignToReplyEnd 里）；
    * - 其它页面：保持原来的「发送即强制回底」（作业指导另有 keepScrollOnSend 保留阅读位置）。
    */
   function alignAfterUserMessage(userMsgId: string) {
     if (handlers?.alignSentMessageToTop) {
-      chatStore.setAlignRoundToTop(true);
-      chatStore.setPinnedToBottom(false);
-      chatStore.pinMessageToTop(userMsgId);
+      // 不在这里顶到上方：发送瞬间回答还没开始，跳上去只会让屏幕下半空着
+      chatStore.setPinnedToBottom(true);
+      chatStore.setPinMessage(userMsgId);
+      chatStore.setCapRoundAtTop(true);
+      chatStore.scrollToBottom(true);
       return;
     }
     if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
@@ -750,7 +752,7 @@ export function useChatSend(scope?: string, handlers?: {
       sessionId: chatStore.aiSessionId,
       messageId: null,
     });
-    // 「识别中」这条同样是这一轮的提问气泡：首页直接把它顶到上方，识别结果回填后不再跳位置
+    // 「识别中」这条同样是这一轮的提问气泡：先登记它，识别结果回填后不再跳位置
     alignAfterUserMessage(placeholderId);
   }
 
@@ -762,8 +764,10 @@ export function useChatSend(scope?: string, handlers?: {
       chatStore.showQuickPrompts = true;
       chatStore.showQuickList = true;
     }
-    // 这一轮没发出去：撤掉「顶到上方」模式，恢复原来的贴底
-    chatStore.setAlignRoundToTop(false);
+    // 这一轮没发出去：占位气泡已经撤掉，登记的本轮提问与跟随上限一起清掉，
+    // 否则顶部呼吸位一直按它算，下一次跟随也会卡在「提问顶到上方」的位置
+    chatStore.setPinMessage("");
+    chatStore.setCapRoundAtTop(false);
     if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
   }
 
