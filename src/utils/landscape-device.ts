@@ -1,6 +1,27 @@
 import type { NativePhoneInfo } from "@/utils/platform/mpaas";
 
-import { getPhoneInfo } from "@/utils/platform/mpaas";
+import { createLogger } from "@/utils/logger";
+import { getPhoneInfo, isMpaasReady } from "@/utils/platform/mpaas";
+
+const logger = createLogger("landscape-device");
+
+/**
+ * 是否「网页环境」：不在宿主 App 的 mPaaS 容器里打开（PC / 手机浏览器直接访问、
+ * PC 端以内嵌 iframe 打开等）。
+ *
+ * 网页里没有原生转屏能力（`landscapeFullscreen` 不存在），横屏只能靠把 body 整体
+ * CSS 旋转 90°，在浏览器上会把版面拧歪、鼠标坐标也跟着错位，所以网页环境一律不做横屏转换。
+ *
+ * 判据（任一命中即认为仍在容器内，宁可多转一次也别把真机误判成网页）：
+ * - 已经拿到 AlipayJSBridge；
+ * - UA 带容器标识（AlipayClient / Nebula / mPaaS）—— bridge 是异步注入的，
+ *   页面刚起来那一下可能还没到，这条兜底不能省。
+ */
+export function isWebEnvironment() {
+  if (isMpaasReady()) return false;
+  const ua = typeof navigator === "undefined" ? "" : String(navigator.userAgent || "");
+  return !/alipayclient|nebula|mpaas/i.test(ua);
+}
 
 /**
  * 「本来就是横屏画布」的大屏设备（智慧屏 / 电视 / 大屏一体机）。
@@ -66,12 +87,17 @@ export function peekPhoneInfo() {
 const DEVICE_DECISION_TIMEOUT_MS = 600;
 
 /**
- * 当前设备进入调度视图时是否还需要做横屏处理。
+ * 当前环境 / 设备进入调度视图时是否还需要做横屏处理。
  *
+ * - 网页环境 → false（先判，页面不转、也不旋转，其余机型判断不再执行）
  * - 大屏横屏设备 → false（不申请原生横屏、不旋转）
  * - 普通手机 / 拿不到设备信息 → true（原生转屏 + CSS 旋转兜底，保持原逻辑）
  */
 export async function shouldEnterLandscape(timeoutMs = DEVICE_DECISION_TIMEOUT_MS) {
+  if (isWebEnvironment()) {
+    logger.info("网页环境：跳过横屏转换（不调原生转屏，也不做 CSS 旋转）");
+    return false;
+  }
   const info = await Promise.race([
     warmPhoneInfo(),
     new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs)),

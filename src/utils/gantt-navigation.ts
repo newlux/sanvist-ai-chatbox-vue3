@@ -1,6 +1,6 @@
 import type { GanttViewPayload } from "@/api/chat/types";
 
-import { isNativeLandscapeDevice, peekPhoneInfo } from "@/utils/landscape-device";
+import { isNativeLandscapeDevice, isWebEnvironment, peekPhoneInfo } from "@/utils/landscape-device";
 import { createLogger } from "@/utils/logger";
 import { setLandscapeFullscreen } from "@/utils/platform/mpaas";
 import { navigateToScene } from "@/utils/scene-navigation";
@@ -48,10 +48,13 @@ export function openGanttView(payload?: GanttViewPayload | null) {
     stashPendingScheduleView(view);
     // 横屏页（schedule / pre / replan）：进页面前先让宿主转屏（landscapeFullscreen），
     // 目标页 mounted 时会再调一次兜底；退出横屏页时由 useLandscape 置回 false。
+    // 网页环境（浏览器 / PC 内嵌）没有原生转屏能力，不预转，目标页也不会做 CSS 旋转兜底。
     // 智慧屏 / 电视这类本身是横屏画布的机器不预转屏（见 utils/landscape-device）：
     // 设备信息没回来时也不预转，交给目标页自己判断，避免先转了再撤。
     const cached = peekPhoneInfo();
-    if (cached === undefined) {
+    if (isWebEnvironment()) {
+      logger.info("网页环境：跳转前不做预转屏");
+    } else if (cached === undefined) {
       logger.info("设备信息未就绪，跳转前不做预转屏（由目标页判定）");
     } else if (isNativeLandscapeDevice(cached)) {
       logger.info("该机型本身就是横屏画布，跳过预转屏");

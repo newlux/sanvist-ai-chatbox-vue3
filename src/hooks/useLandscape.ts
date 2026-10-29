@@ -262,12 +262,13 @@ export function useLandscape(onReflow?: () => void) {
   }
 
   async function enterLandscape() {
-    // 先看设备：智慧屏 / 电视这类本身就是横屏画布的机器，直接放弃整套转屏（见 utils/landscape-device）。
+    // 先看环境 / 设备：网页环境（浏览器 / PC 内嵌）不做横屏转换；智慧屏 / 电视这类本身是
+    // 横屏画布的机器同样放弃整套转屏（见 utils/landscape-device）。
     // 设备信息在 App 启动时就预热过，正常情况下这一步几乎是同步的。
     mode = (await shouldEnterLandscape()) ? "on" : "off";
     if (disposed || exiting) return;
     if (mode === "off") {
-      logger.info("该机型本身就是横屏画布：跳过原生转屏与 CSS 旋转兜底");
+      logger.info("网页环境或该机型本身就是横屏画布：跳过原生转屏与 CSS 旋转兜底");
       rotated.value = false;
       applyBodyRotation(false);
       // 不跟方向，但尺寸可能和设计基准不同，仍让页面自己量一次
