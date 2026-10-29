@@ -6,6 +6,7 @@ import { useI18n } from "vue-i18n";
 import type { AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideSuggestionPayload, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
+import { runBlockingWorkflow } from "@/api/chat";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import GanttBlock from "@/components/ai-bubble-v2/blocks/GanttBlock.vue";
@@ -19,6 +20,7 @@ import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
+import AiTaskExceptionCard from "@/components/ai-task-exception-card/index.vue";
 import { pickTaskWelcomeQuestions, TASK_WELCOME_COPY } from "@/config/task-welcome";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
@@ -27,6 +29,7 @@ import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { hasGanttCard } from "@/utils/gantt-card";
 import { openGanttView } from "@/utils/gantt-navigation";
@@ -34,6 +37,8 @@ import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
+import { resolveExceptionCard, TASK_EXCEPTION_MOCK, type TaskExceptionCard } from "@/utils/task-exception";
+import { getTaskIdentity, type TaskIdentity } from "@/utils/task-identity";
 
 /**
  * 任务协同页（基于首页 home 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
@@ -42,7 +47,11 @@ import { consumePendingHistorySession, getSessionId, navigateToSessionScene, pee
  * - 独立会话域 "task"，不与首页主会话互相污染；
  * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=TEST；
  * - 每次进入起一轮干净会话（与作业指导一致），返回再进时重新开一轮；
- * - 初始化静默问一句「今天任务有哪些」，只把回复里的卡片铺进对话区（问题与回复文本都不展示）。
+ * - 初始化静默问一句「今天任务有哪些」，只把回复里的卡片铺进对话区（问题与回复文本都不展示）；
+ * - 例外：在「任务协同初始化页」选过 step 接口下发的身份（如 DISPATCH-02）时，首屏改为调用
+ *   POST /proxy/v1/workflows/run 工作流查异常（inputs.query_type=查异常 / user_id=所选身份 /
+ *   role_id=OWNER），把返回的异常信息渲染成「异常情况摘要」卡（Ardot 350:2199，替代任务入口卡）；
+ *   接口结构目前不稳定，解析不出时用 utils/task-exception 里的 mock 兜底。
  */
 defineOptions({ name: "AiTaskPage" });
 
@@ -52,6 +61,8 @@ const { t } = useI18n();
 const chatScope = provideChatScope("task");
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
+// 注入 --safe-top-px：悬浮头部的高度补偿（--chat-header-height）要按真实状态栏算
+const { safeAreaStyle } = useSafeArea();
 /**
  * 自动滚动的落点：回复内容末尾（不含参考来源）——参考来源不被贴底滚进视野，
  * 以内容块容器高度减去参考来源高度为准（见 ai-message-list 的 alignToReplyEnd）。
@@ -130,6 +141,21 @@ watch(() => chatStore.activeRequestSeq, () => {
   stopSceneTts();
 });
 
+/**
+ * 「正在思考中」：已发起请求，但最后一条 AI 消息还没有 answer 正文。
+ * 这一态要把输入栏下方的底部声纹（氛围渐变）收起来，与首页一致；
+ * 一旦出字进入「回答中」，声纹按原逻辑自动回来。
+ */
+const chatThinking = computed(() => {
+  if (!isLoading.value) return false;
+  const list = messages.value || [];
+  const last = list[list.length - 1];
+  if (!last || last.role !== "ai") return false;
+  return !(last.blocks || []).some(
+    block => block.type === "answer" && String(block.payload?.content || "").trim().length > 0,
+  );
+});
+
 /** 进入页面自动问的初始化问题（跟随当前语言） */
 const initialCardQuery = computed(() => t("task-initial-query"));
 /**
@@ -185,6 +211,48 @@ async function loadInitialCards() {
   });
 }
 
+/** 「查异常」的 inputs.query_type 固定值 */
+const EXCEPTION_QUERY = "查异常";
+/** 「查异常」固定按 OWNER 取数（与网关 guest-role 头一致） */
+const EXCEPTION_ROLE_ID = "OWNER";
+/**
+ * 异常情况摘要卡片（Ardot 350:2151 / 节点 350:2199）：
+ * 有值就铺在待机区（替代甘特图入口卡），数据由工作流 outputs 解析、认不出时用 mock 兜底。
+ */
+const exceptionCard = ref<TaskExceptionCard | null>(null);
+
+/**
+ * 首屏「查异常」：身份来自 /flow/steps?module=TASK 的 IDENTITY 选项（如 DISPATCH-02）时走这里。
+ *
+ * 走 Dify 工作流而不是对话接口（POST /proxy/v1/workflows/run，blocking 一次性返回）：
+ *   inputs = { query_type: 查异常, user_id: 所选身份, role_id: OWNER }
+ *   user   = 当前用户标识（游客态兜底 guest）
+ * 工作流没有 query / conversation，业务结果整包在 data.outputs 里。
+ * 返回结构目前还不稳定，先按设计稿的 mock 顶上（页面不空），拿到能解析的数据再覆盖。
+ */
+async function loadExceptionInfo(identity: TaskIdentity) {
+  initialCardsRequestedAt = Date.now();
+  exceptionCard.value = TASK_EXCEPTION_MOCK;
+  try {
+    const result = await runBlockingWorkflow({
+      inputs: {
+        query_type: EXCEPTION_QUERY,
+        user_id: identity.code,
+        role_id: EXCEPTION_ROLE_ID,
+      },
+      user: String(userStore.userId || "").trim() || "guest",
+      // 网关按 guest-role 头鉴权：与 inputs.role_id 保持一致
+      guestRole: EXCEPTION_ROLE_ID,
+    });
+    exceptionCard.value = resolveExceptionCard(result?.data?.outputs);
+    logger.info("task exception info loaded", { identity: identity.code, outputs: result?.data?.outputs });
+  }
+  catch (error) {
+    // 接口挂了也保留 mock 卡片，不让待机区空着
+    logger.warn("failed to load task exception info", { identity: identity.code, error });
+  }
+}
+
 /**
  * 甘特图（横屏调度视图）右下角输入条发来的问题：回到本页后取出来，直接发在作业协同会话里（发完即清）。
  * 两条返回路径（navigateBack / 关掉场景窗口）都会走 onShow，所以在这里消费；
@@ -198,7 +266,8 @@ function startPendingScheduleAsk() {
   }
   // 没有待发问题：回到本页仍停在欢迎态就重拉一次入口卡（不缓存、不复用旧数据）。
   // 与 onLoad 的请求隔开 800ms：首次进入 onShow 紧跟 onLoad，不该重复请求。
-  if (showSceneWelcome.value && Date.now() - initialCardsRequestedAt > 800) void loadInitialCards();
+  // 选过 step 身份时首屏走的是「查异常」，这里不再补拉甘特图入口卡。
+  if (showSceneWelcome.value && !getTaskIdentity() && Date.now() - initialCardsRequestedAt > 800) void loadInitialCards();
 }
 const {
   iconCopyImage,
@@ -679,8 +748,13 @@ onLoad((options) => {
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
-  // 初始化静默问一句「今天任务有哪些」，只把回复里的 gantt 入口卡铺进对话区（不缓存、每次重新请求）
-  void loadInitialCards();
+  // 身份是 /flow/steps?module=TASK 下发的（task-init 选过，如 DISPATCH-02）：首屏改问「查异常」，
+  // 拿到的异常信息渲染成异常摘要卡（接口结构不稳，解析不出时用 mock 兜底）；
+  // 没选过身份（首页 / 听播异常条目直接进）仍沿用原来的流程，
+  // 静默问一句「今天任务有哪些」，只把回复里的 gantt 入口卡铺进对话区（不缓存、每次重新请求）。
+  const identity = getTaskIdentity();
+  if (identity) void loadExceptionInfo(identity);
+  else void loadInitialCards();
 });
 
 onMounted(() => {
@@ -696,8 +770,8 @@ onShow(() => {
     void openLocalHistory(sessionId, true).then(startPendingScheduleAsk);
     return;
   }
-  // // 从调度视图等页面回到本页：补发甘特图里问的问题；没有就刷新一次入口卡
-  // startPendingScheduleAsk();
+  // 从调度视图等页面回到本页：补发甘特图里问的问题；没有就刷新一次入口卡
+  startPendingScheduleAsk();
 });
 
 onHide(() => {
@@ -713,17 +787,20 @@ onUnload(() => {
 </script>
 
 <template>
-  <view class="ai-page">
+  <view class="ai-page" :style="safeAreaStyle">
     <view class="ai-page__chat" :style="chatViewportStyle">
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
       <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车） -->
       <AiChatBackdrop />
-      <!-- Header -->
+      <!-- 顶部毛玻璃渐隐：与首页对话页同一层，状态栏 / 头部区域半透明，内容滚上来只会被虚化 -->
+      <view class="ai-page__top-fade" />
+      <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
       <AiChatHeader
         ref="chatHeader"
         v-model:sessions="sessions"
         class="ai-page__header"
+        plain-bg
         :load-sessions="getAISessionList"
         :selected-session-id="aiSessionId"
         :generating="isLoading"
@@ -747,8 +824,12 @@ onUnload(() => {
         <text class="task-welcome__desc">
           {{ taskWelcome.content }}
         </text>
+        <!-- 异常情况摘要卡（Ardot 350:2199）：选过 step 身份时首屏「查异常」拿到数据后铺这里，替代任务入口卡 -->
+        <view v-if="exceptionCard" class="task-welcome__entry">
+          <AiTaskExceptionCard :data="exceptionCard" />
+        </view>
         <!-- 任务入口卡（AiGanttEntryCard）：只渲染初始化对话返回的卡片数据，没有就整卡不渲染 -->
-        <view v-if="initialGanttPayload" class="task-welcome__entry">
+        <view v-else-if="initialGanttPayload" class="task-welcome__entry">
           <GanttBlock
             :payload="initialGanttPayload"
             card-only
@@ -773,6 +854,7 @@ onUnload(() => {
       </view>
       <AiMessageList
         :key="chatListKey"
+        top-inset="var(--chat-top-inset, 300rpx)"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
@@ -915,6 +997,7 @@ onUnload(() => {
         :voice-keyboard-height="voiceKeyboardHeight"
         :compact-voice-listening="true"
         :speaking="realtimeTts.playing.value"
+        :hide-bottom-art="chatThinking"
         @send="sendTaskMessage"
         @stop="stopGenerating"
         @voice-start="stopSceneTts"
@@ -988,7 +1071,9 @@ $color-white: #ffffff;
 .task-welcome {
   position: relative;
   z-index: 1;
-  padding: 216rpx 40rpx 0;
+  // 头部改成悬浮后不占布局，这里把它的实际高度补回来，欢迎区仍从头部下方起步
+  // （216rpx 与作业指导页 .guide-welcome 同一档）
+  padding: calc(var(--chat-header-height) + 216rpx) 40rpx 0;
 }
 
 .task-welcome__title {
@@ -1074,12 +1159,45 @@ $color-white: #ffffff;
   /* 形成层叠上下文：机型背景图（AiChatBackdrop）是 z-index: -1，
      不隔离时负层会被本元素的 #fafafa 底色盖住，选了机型也看不到图 */
   isolation: isolate;
+  // 顶部毛玻璃层的高度 = 悬浮头部在内容里的占位（与首页对话页同一个值）
+  --chat-top-inset: calc(constant(safe-area-inset-top) + 300rpx);
+  --chat-top-inset: calc(env(safe-area-inset-top) + 300rpx);
+  // 悬浮头部不占布局，需要给「欢迎区」补回来的实际头部高度：状态栏占位 + 栏高 50px
+  --chat-header-height: calc(max(var(--safe-top-px, 0px), env(safe-area-inset-top)) + 100rpx);
 }
 
-// 头部要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
+// 头部悬浮（与首页对话页一致）：不占布局高度，消息可以滚到它下面，透过 .ai-page__top-fade 的毛玻璃淡出；
+// 同时要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
 // 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）
 .ai-page__chat > .ai-page__header {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
   z-index: 30;
+}
+
+// 顶部毛玻璃渐隐（与首页对话页同一层）：透明 + 背后模糊，状态栏与头部区域是半透明的，
+// 内容滚到头部下面还能看见字，只是被虚化；「渐变」体现在模糊强度上，没有硬边。
+.ai-page__top-fade {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: calc(constant(safe-area-inset-top) + 300rpx);
+  height: calc(env(safe-area-inset-top) + 300rpx);
+  pointer-events: none;
+  backdrop-filter: blur(16rpx); // 8px
+  -webkit-backdrop-filter: blur(16rpx);
+  mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, rgba(0, 0, 0, 0) 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, rgba(0, 0, 0, 0) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(250, 250, 250, 0.34) 0%,
+    rgba(250, 250, 250, 0.18) 48%,
+    rgba(250, 250, 250, 0) 100%
+  );
 }
 
 .ai-chat-glow {

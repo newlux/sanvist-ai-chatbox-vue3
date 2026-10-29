@@ -56,6 +56,40 @@ export interface BlockingChatMessageResponse {
   };
 }
 
+/**
+ * POST /proxy/v1/workflows/run 入参（Dify 工作流，不是对话）。
+ * 任务协同的「查异常」走这条：没有 query / conversation，语义全在 inputs 里。
+ */
+export interface RunWorkflowParams {
+  inputs?: ChatInput;
+  /** 调用方用户的稳定标识（网关要求非空，游客态由调用方兜底） */
+  user?: string;
+  responseMode?: ChatResponseMode;
+  /**
+   * 覆盖本次请求的 guest-role 头（不传就沿用 App 里按身份设置的那份）。
+   * 工作流按 inputs.role_id 取数时，头部要与 role_id 一致，否则网关按另一套身份鉴权。
+   */
+  guestRole?: string;
+}
+
+/** 工作流 blocking 模式的完整结果：业务数据都在 data.outputs 里。 */
+export interface WorkflowRunResponse {
+  workflowRunId?: Identifier;
+  taskId?: Identifier;
+  data?: {
+    id?: Identifier;
+    workflowId?: Identifier;
+    status?: string;
+    outputs?: Record<string, unknown>;
+    error?: string | null;
+    elapsedTime?: number;
+    totalTokens?: number;
+    totalSteps?: number;
+    createdAt?: number;
+    finishedAt?: number;
+  };
+}
+
 export interface MessageStartEvent {
   event: "message_start";
   conversationId: Identifier;

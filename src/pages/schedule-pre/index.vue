@@ -49,6 +49,9 @@ const { rotated, exitLandscape } = useLandscape();
 useScheduleGestures({
   gridId: "schedule-pre-grid",
   isRotated: () => rotated.value,
+  // 双指捏合 → 时间轴缩放：不传 onPinch 时 hook 根本不会接管两指手势，
+  // 表现就是「缩小放大失效」（见 hooks/useScheduleGestures 的 onStart/onMove）
+  onPinch: onTimelinePinch,
   onRowsOffset: () => measureRowTops(),
 });
 
@@ -355,25 +358,36 @@ function formatDate(date: Date) {
 const dateText = String(viewPayload?.businessDate || "").trim() || formatDate(new Date());
 
 /**
- * 左上角按钮：返回对话页面。
- * 先还原屏幕方向（撤掉 CSS 旋转 / 解锁方向 / 退全屏），再走场景返回：
- * 上一页是对话页就直接返回，若是独立场景窗口则关闭 webview 回到对话页。
+ * 退出到对话页（返回按钮 / 输入条发问共用）。
+ *
+ * 顺序：关掉原生横屏（`landscapeFullscreen(false)`）并**等可视区确认回到竖屏**
+ * → 竖屏恢复后再写入待发送问题 → 跳回对话页。
+ * 之前是 `exitLandscape()` 与 `backFromScene()` 同步连着调，原生转屏还没生效就跳页，
+ * 对话页和键盘会落在横屏里；问题也会在错误的视口下发出。
+ *
+ * `ask` 有值才走「发送问答」那一步，返回按钮不传，因此只收横屏不提问。
  *
  * 兜底路由给作业协同对话页：本页都是从作业协同对话里进来的，没有上一页可退时
  * 也要回那个会话（而不是首页），提问才落在原来的对话里。
  */
-function backToChat() {
-  exitLandscape();
+async function leaveToChat(ask?: string) {
+  // 原生横屏置 false 之后要等屏幕真的转回来，再跳页 / 发问
+  await exitLandscape();
+  if (ask) stashPendingScheduleAsk(ask);
   backFromScene("/pages/task/index");
 }
 
+/** 左上角返回按钮（模板直接绑这个，忽略事件参数） */
+function backToChat() {
+  void leaveToChat();
+}
+
 /**
- * 右下角输入条发送：先把问题记到本地（对话页 onShow 取走并发送），
- * 再复用左上角那颗返回按钮的逻辑（收起横屏 → 回到作业协同对话页）。
+ * 右下角输入条发送（键盘 / 语音问完自动返回）：
+ * 问题带着一起走，但仍然等竖屏恢复后才写入（对话页 onShow 取走并发送）。
  */
 function onAskSend(text: string) {
-  stashPendingScheduleAsk(text);
-  backToChat();
+  void leaveToChat(text);
 }
 
 /** 分钟数 → HH:MM */

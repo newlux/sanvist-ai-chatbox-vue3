@@ -4,6 +4,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import AiAttachmentPicker from "@/components/ai-attachment-picker/index.vue";
 import { isNativeAttachmentPickerAvailable, type AttachmentSource } from "@/hooks/useComposerAttachments";
+import { usePlainTts } from "@/hooks/usePlainTts";
 import closeIcon from "@/assets/img/icon-close.svg";
 
 /**
@@ -24,6 +25,9 @@ import closeIcon from "@/assets/img/icon-close.svg";
  *   等弹窗弹出来的这段时间（bridge 判断最长 2 秒）会先盖一层中间蒙层挡住整页；
  * - 末尾输入框：placeholder 取 question_text，输入框右侧带「发送」图标（与原生输入栏 input-bar
  *   同款 icon-send.svg，与键盘回车等效，输入为空时置灰），用户自己写的问题按原样发出去。
+ *
+ * 语音播报：多步骤卡展开 / 切步时，只播当前步骤的 title + action（详情卡渲染的那两行），
+ * 走 usePlainTts（固定文案）；切步打断旧的、播最新一步，收起即停。
  *
  * 视觉：白板贴底 + 向上阴影 + 灰色小标签 + 右上 ×，选项行默认 #f6f6f6；
  * 卡片高度通过 height-change 上报给页面，用于给消息列表让出底部间距。
@@ -87,6 +91,35 @@ const questionText = computed(() => String(currentStep.value?.question_text || "
 /** 输入框有内容，「发送」按钮才是可用态 */
 const canSubmitText = computed(() => Boolean(draftText.value.trim()));
 const photoText = computed(() => String(currentStep.value?.photo_text || "").trim());
+
+/* ---------------- 步骤播报：每一步只读「标题 + 操作」两行 ---------------- */
+
+/**
+ * 多步骤卡播报用的是固定文案（详情卡渲染到页面上的 step.title 与 step.action），
+ * 不是流式答案，所以走 usePlainTts（与 guide-init / task-init 同一套 POST /speech/tts/stream）。
+ * 每切一步 speak 内部会先 stop 再播，天然满足「终止当前语音、播最新一步」。
+ */
+const isEnglish = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));
+const stepTts = usePlainTts(isEnglish.value ? "en" : "zh");
+
+/** 这一步要读的文案：只播 title + action，不读确认问题 / 选项 / 输入框占位 */
+const narrationText = computed(() => {
+  const step = currentStep.value;
+  if (!step) return "";
+  return [String(step.title || "").trim(), String(step.action || "").trim()]
+    .filter(Boolean)
+    .join("\n");
+});
+
+// 展开 / 切步时读当前步，收起即停；speak 重复调用会打断上一次，播最新一步
+watch([() => props.visible, currentStep], ([visible]) => {
+  if (!visible) {
+    stepTts.stop();
+    return;
+  }
+  const text = narrationText.value;
+  if (text) stepTts.speak(text);
+});
 
 /** 外部下标 → 合法步骤下标（夹在 [0, 步数-1]，数据异常时兜底 0） */
 function clampStepIndex(index: number) {
