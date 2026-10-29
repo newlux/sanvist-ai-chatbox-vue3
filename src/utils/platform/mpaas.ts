@@ -646,6 +646,111 @@ export async function startNativeRecord() {
 }
 
 /**
+ * 电平回参：{ success, recording, amplitude(0~32767), db, level(0~1) }
+ * 注意 Number(null) === 0，所以缺字段必须先判 null / undefined / ""，
+ * 否则「宿主没给 level」会被当成真的静音（声纹恒挂在最低位，看起来就是不动）。
+ */
+function readVolumeLevel(result: BridgeResult | undefined): number | null {
+  if (!result) return null;
+  if (result.success === false || String(result.success) === "false") return null;
+
+  const rawLevel = result.level;
+  if (rawLevel != null && rawLevel !== "") {
+    const level = Number(rawLevel);
+    if (Number.isFinite(level)) {
+      // 宿主若给的是 0~100 的百分比，折算成 0~1，避免一律被夹到 1 顶满
+      if (level > 1 && level <= 100) return level / 100;
+      return Math.min(1, Math.max(0, level));
+    }
+  }
+
+  // level 没给时用 amplitude 折算（0~32767 → 0~1）
+  const rawAmplitude = result.amplitude;
+  if (rawAmplitude != null && rawAmplitude !== "") {
+    const amplitude = Number(rawAmplitude);
+    if (Number.isFinite(amplitude)) return Math.min(1, Math.max(0, amplitude / 32767));
+  }
+  return null;
+}
+
+/** 只告警一次，避免 100ms 一次的轮询把控制台刷爆 */
+let volumeWarned = false;
+/** 轮询打点：前 20 次全打（覆盖按住说法的头 2 秒），之后每 10 次打一条 */
+let volumeCallCount = 0;
+/** 首次拿到有效电平时打一条汇总，确认整条链路通了 */
+let volumeFirstLevelLogged = false;
+
+/**
+ * 读取当前录音电平：
+ *   AlipayJSBridge.call("microphoneVolume", {}, (res) => {})
+ *   res = { success, recording, amplitude(0~32767), db, level }
+ *
+ * 只取 level(0~1) 给「按住说话」的声纹律动，level 缺失时用 amplitude / 32767 兜底。
+ * 轮询频率 100ms，所以静默日志 + 短超时（500ms，超过一个采样周期就放弃这一次）。
+ * 返回 null = 这次拿不到（桥不可用 / 宿主未实现 / 超时），返回 0 = 真的静音。
+ *
+ * 日志：debug 级别打印「请求 / 回参」，可在 vConsole 里搜 [voice] 看完整链路；
+ * VITE_LOG_LEVEL=debug 时真机可见（当前 .env.production 即为 debug）。
+ */
+export async function getMicrophoneVolume(): Promise<number | null> {
+  volumeCallCount += 1;
+  const seq = volumeCallCount;
+  const verbose = seq <= 20 || seq % 10 === 0;
+  const startedAt = Date.now();
+
+  if (verbose) {
+    logger.debug("[voice] microphoneVolume 请求", { seq, hasBridge: isMpaasReady() });
+  }
+
+  try {
+    const result = await callNative("microphoneVolume", {}, {
+      waitReadyMs: 500,
+      timeoutMs: 500,
+      silent: true,
+      silentTimeout: true,
+    });
+
+    if (verbose) {
+      logger.debug("[voice] microphoneVolume 回参", {
+        seq,
+        costMs: Date.now() - startedAt,
+        success: result?.success,
+        recording: result?.recording,
+        amplitude: result?.amplitude,
+        db: result?.db,
+        level: result?.level,
+      });
+    }
+
+    const level = readVolumeLevel(result);
+    if (level == null) {
+      if (verbose) logger.warn("[voice] 电平解析失败：level / amplitude 都不可用", result);
+      return null;
+    }
+    if (!volumeFirstLevelLogged) {
+      volumeFirstLevelLogged = true;
+      logger.info("[voice] 首次拿到有效电平", { level, raw: result });
+    }
+    return level;
+  } catch (error) {
+    // 超时/桥不可用时 100ms 一次会刷屏，只打前 3 次和每 10 次
+    if (seq <= 3 || seq % 10 === 0) {
+      logger.error("[voice] microphoneVolume 调用失败", {
+        seq,
+        costMs: Date.now() - startedAt,
+        hasBridge: isMpaasReady(),
+        error,
+      });
+    }
+    if (!volumeWarned) {
+      volumeWarned = true;
+      logger.warn("[mpaas] microphoneVolume 不可用，声纹退回静态基线");
+    }
+    return null;
+  }
+}
+
+/**
  * 停止录音。宿主约定：出参 { success, data }，data 就是音频的 base64。
  * 早期版本回的是上传后的地址（url），这里一并兼容，谁在就用谁。
  */

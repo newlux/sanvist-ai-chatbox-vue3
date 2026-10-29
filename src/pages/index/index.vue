@@ -983,14 +983,19 @@ onBeforeUnmount(() => {
         @pinned-change="onPinnedChange"
       />
       <!-- 一键回到底部：离底时出现，贴底自动隐藏；
-           位置 = 输入栏高（含键盘抬起）+ 88rpx 底部导航 + 24rpx 间隙，不压住「听汇报 / 作业指导 / 任务协同」 -->
+           垂直位置 = 输入栏高（含键盘抬起）+ 88rpx 底部导航 + 24rpx 间隙，不压住「听汇报 / 作业指导 / 任务协同」；
+           水平居中，只放 arrow-down.png（无白底 / 阴影，见 .chat-scroll-bottom） -->
       <view
         v-if="showScrollToBottom && !voicePanelOpen"
         class="chat-scroll-bottom"
         :style="{ bottom: `calc(${composerBottomInset} + 112rpx)` }"
         @tap="onScrollToBottomTap"
       >
-        <view class="chat-scroll-bottom__chevron" />
+        <image
+          class="chat-scroll-bottom__chevron"
+          src="@/assets/img/arrow-down.png"
+          mode="aspectFit"
+        />
       </view>
       <AiSlotDrawer
         :slots="askSlotQueue"
@@ -1250,29 +1255,22 @@ $color-white: #ffffff;
 
 // 一键回到底部：白底圆钮 + 细线下箭头，浮在底部导航（听汇报 / 作业指导 / 任务协同）上方右侧。
 // bottom 由行内样式给：composerBottomInset（输入栏高 + 键盘抬起）+ 88rpx 导航高 + 24rpx 间隙
+/* 一键回到底部：只剩 arrow-down.png 图本身（白底圆钮 / 阴影 / 描边全部去掉），水平居中 */
 .chat-scroll-bottom {
   position: absolute;
-  right: 32rpx;
+  left: 50%;
   z-index: 20;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 76rpx;
-  height: 76rpx;
-  border: 1px solid rgba(51, 51, 51, 0.08);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 4rpx 16rpx rgba(15, 126, 238, 0.12);
-  -webkit-backdrop-filter: blur(20rpx);
-  backdrop-filter: blur(20rpx);
+  transform: translateX(-50%);
 }
 
+/* 箭头：直接用设计给的 arrow-down.png，显示框 64×64px（= 128rpx，1px = 2rpx） */
 .chat-scroll-bottom__chevron {
-  width: 20rpx;
-  height: 20rpx;
-  border-right: 1px solid #333333;
-  border-bottom: 1px solid #333333;
-  transform: translateY(-6rpx) rotate(45deg);
+  display: block;
+  width: 128rpx; // 64px
+  height: 128rpx; // 64px
 }
 
 // 头部悬浮：不占布局高度，消息可以滚到它下面，透过 .ai-page__top-fade 的毛玻璃淡出；

@@ -4,6 +4,7 @@ import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import minimizeIcon from "@/assets/img/min_icon.png";
+import saniLogoGif from "@/assets/img/sani-logo.gif";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { setLocale } from "@/i18n";
@@ -489,13 +490,13 @@ onBeforeUnmount(() => {
                 </svg>
               </view>
               <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），
-                   只换图源，尺寸 / 投影 / 状态环等一律不动 -->
+                   只换图源，尺寸 / 投影 / 状态环等一律不动 */
               <!-- 长按 5 秒回到初始页：只有 restartable（首页对话页）碰触摸事件，
                    其它页面的岛保持纯展示、不抢触摸；热区就是三角图本身（62×62） -->
               <image
                 class="chat-header__island-logo"
                 :class="{ 'chat-header__island-logo--restartable': props.restartable }"
-                src="@/assets/img/sani-logo.gif"
+                :src="saniLogoGif"
                 mode="aspectFit"
                 @touchstart="onIslandPressStart"
                 @touchmove="onIslandPressMove"
