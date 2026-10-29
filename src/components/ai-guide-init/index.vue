@@ -251,6 +251,15 @@ const isMissed = ref(false);
 let voiceInteracted = false;
 /** 长按已进入录音：松手后补出来的 tap 要吞掉，不能当成「跳过唤醒页」 */
 let holdFired = false;
+/**
+ * 口播「待补播」标记：本页在 mPaaS 里是 pushWindow 新开的 webview，窗口里一次用户手势都没有，
+ * 浏览器 / WebView 的自动播放策略会把「进页面就出声」的音频直接拦掉（不出声，playing 一直为 false）。
+ * 发起播报时置 true，真的出声（playing 变 true）或换页时清掉；仍是 true 就说明被拦了，
+ * 等用户第一次触摸 / 点击时补播。
+ */
+let voicePending = false;
+/** 当前这一串手势（touchstart → click）已经用来补播过，click 不要再当成「跳过本帧」 */
+let gestureResumedVoice = false;
 /** 跳转中标记：收尾只执行一次 */
 let navigating = false;
 
@@ -437,6 +446,9 @@ function switchTo(code: string) {
   activeStep.value = code;
   fallbackRound.value = 0;
   selectedKey.value = "";
+  // 上一帧「待补播」的口播与手势占用作废：新一帧的口播由 narration 的 watch 重新发起
+  voicePending = false;
+  gestureResumedVoice = false;
   clearMissed();
 }
 
@@ -574,22 +586,45 @@ const narration = computed(() => {
 });
 
 /**
- * 文案一变就口播：一句新题目自动打断上一句，用户点选后紧跟着念下一步，
- * 与首页「答案一开始渲染就听播」同一套时机（不额外等接口 / 动画）。
- *
- * 自我介绍帧（HEY）改播本地录音 welcome-guide.wav：这段欢迎语音是提前录好的成品，
- * 音色和语气比实时 TTS 稳；播放器复用 usePlainTts 的 play()，playing / 播完推进照旧。
- * 中文以外的语种没有对应录音，仍走 TTS，避免英文界面里冒出中文语音。
+ * 发起一次口播：自我介绍帧（中文）放本地录音 welcome-guide.wav，
+ * 其它步骤 / 其它语种交给 TTS 念这段文案（英文没有对应录音，避免中文界面语音串台）。
+ * 记 voicePending：这句要是被自动播放策略拦了，第一次手势时按同一个函数补播。
  */
-watch(narration, (text) => {
+function playNarration(text: string) {
   const content = String(text || "").trim();
   if (!content) return;
+  voicePending = true;
   if (isWakeStep.value && !isEnglish.value) {
     introTts.play(welcomeVoiceSrc);
     return;
   }
   introTts.speak(content);
-}, { immediate: true });
+}
+
+/**
+ * 首触补播：这一次口播一次都没出声（started 为 false）时，第一次触摸 / 点击先把声音放出来，
+ * 这一下手势不再当成「跳过本帧」或「长按录音」—— 否则语音刚起就被 onPageTap 的 stop() 掐掉，
+ * 听起来还是「没播报」。与首页欢迎页（ai-welcome/visitor.vue 的 armVoiceRetry）同一套思路。
+ */
+function resumeVoiceOnGesture() {
+  if (!voicePending || gestureResumedVoice) return false;
+  if (introTts.playing.value || introTts.started.value) {
+    voicePending = false;
+    return false;
+  }
+  const text = String(narration.value || "").trim();
+  if (!text) return false;
+  gestureResumedVoice = true;
+  logger.info("guide voice blocked by autoplay policy, replay on first gesture");
+  playNarration(text);
+  return true;
+}
+
+/**
+ * 文案一变就口播：一句新题目自动打断上一句，用户点选后紧跟着念下一步，
+ * 与首页「答案一开始渲染就听播」同一套时机（不额外等接口 / 动画）。
+ */
+watch(narration, text => playNarration(text), { immediate: true });
 
 /** 自我介绍露出的时刻：用来保证「播完再进」时画面至少露够 INTRO_MIN_VISIBLE_MS */
 let introShownAt = Date.now();
@@ -612,6 +647,8 @@ function enterIntroFrame() {
   // 唤醒结果已经落地（欢迎帧「你好三一」命中 / 点屏幕跳过）：这一帧回到「播完再进」的默认节奏，
   // 否则 voiceInteracted 还把 speaking 的收尾挡着，自我介绍只能被兜底计时器硬切
   voiceInteracted = false;
+  // 已经在 HEY（switchTo 提前返回）时也要清掉上一次手势的补播占用
+  gestureResumedVoice = false;
   clearIntroAdvance();
   introTimer = setTimeout(advanceToFirstStep, INTRO_FALLBACK_MS);
 }
@@ -633,6 +670,8 @@ function advanceToFirstStep() {
  * - on = false（播完 / 排队清空）：画面露够 INTRO_MIN_VISIBLE_MS 后进下一步。
  */
 watch(speaking, (on) => {
+  // 声音真的出来了：撤掉「待补播」标记（不限于自我介绍帧）
+  if (on) voicePending = false;
   if (!isWakeStep.value) return;
   // 用户已经开口（起录会主动打断播报）/ 正在校验：播报停了也不能把页面推走，
   // 去向由 /speech/wake/validate 的结果决定
@@ -1061,6 +1100,8 @@ function readPoint(e: any) {
 /** 按住 300ms 进入录音态（期间位移过大视为滑动，不起录） */
 function onHoldStart(e: any) {
   if (isRecording.value || isChecking.value) return;
+  // 介绍帧的语音被自动播放策略拦下：这一下只用来补播，不进录音、也不当成跳过本帧
+  if ((isWelcomeStep.value || isWakeStep.value) && resumeVoiceOnGesture()) return;
   holdFired = false;
   voiceInteracted = true;
   // 用户开口了：撤掉「自我介绍播完自动进下一步」的计时器，以及上一次未命中的红
@@ -1133,6 +1174,14 @@ function onPageTap() {
     return;
   }
   if (!isWelcomeStep.value && !isWakeStep.value) return;
+  // 这一下触摸已经在 onHoldStart 里用来补播被拦的介绍语音：不跳过本帧，
+  // 否则语音刚起就被下面的 stop() 掐掉
+  if (gestureResumedVoice) {
+    gestureResumedVoice = false;
+    return;
+  }
+  // 没有 touchstart 的场景（PC 鼠标点击 / 脚本触发）：这里再判一次空补播
+  if (resumeVoiceOnGesture()) return;
   introTts.stop();
   advanceToFirstStep();
 }

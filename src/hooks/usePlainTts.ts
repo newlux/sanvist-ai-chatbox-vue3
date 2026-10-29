@@ -44,6 +44,27 @@ export function usePlainTts(language = "zh") {
   let queue: RealtimeTtsChunk[] = [];
   let audio: ReturnType<typeof uni.createInnerAudioContext> | null = null;
 
+  /**
+   * 补一次显式 play()。
+   *
+   * uni 的 InnerAudioContext 在 H5 上只把 autoplay 透传给 <audio autoplay>，
+   * 个别 WebView 不认这个属性（声音不出来也不报错，onPlay 永远不触发），
+   * 必须显式 play() 才会出声（同 qrcode 页开场视频的处理）。
+   * 没有用户手势时 play() 会被自动播放策略拒绝，这里把拒绝吞掉，
+   * 由调用方按 started 判断要不要在第一次手势里补播。
+   */
+  function startPlayback(player: ReturnType<typeof uni.createInnerAudioContext>) {
+    try {
+      const result = player.play?.() as unknown;
+      if (result && typeof (result as Promise<unknown>).catch === "function") {
+        (result as Promise<unknown>).catch(() => {});
+      }
+    }
+    catch {
+      // 容器不支持显式 play 时忽略，autoplay 属性仍然生效
+    }
+  }
+
   function releaseAudio() {
     if (!audio) return;
     try {
@@ -93,6 +114,7 @@ export function usePlainTts(language = "zh") {
       playNext(id);
     });
     player.autoplay = true;
+    startPlayback(player);
   }
 
   function handleEvent(payload: unknown, id: number) {
@@ -161,6 +183,7 @@ export function usePlainTts(language = "zh") {
       playing.value = false;
     });
     player.autoplay = true;
+    startPlayback(player);
   }
 
   /** 播报一段纯文本；重复调用会打断上一次 */
@@ -213,6 +236,9 @@ export function usePlainTts(language = "zh") {
 
   return {
     speak,
+    // ⚠️ play / playFile 都必须导出：作业指导初始化页的自我介绍帧用 play() 播本地录音，
+    // 漏掉它这句就是个运行期 TypeError（语音直接不响，也没有报错提示）
+    play,
     playFile,
     stop,
     playing,
