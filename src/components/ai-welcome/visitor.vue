@@ -7,6 +7,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl, validateWakeWord } from "@/api/chat";
 import { getFlowSteps } from "@/api/flow";
 import { getRoleOptions, getTodayAwakeningPrompt } from "@/api/user-role";
+// 自我介绍口播用打包进来的固定音频，不走 TTS 接口（文案见 INTRO_LINES）
+import welcomeAskVoice from "@/assets/audio/voice/welcome-ask.wav";
 // 中心 SANI 图标换成动态 GIF（原 header-island-logo.png 的动画版）：
 // 源图 3840×1920 / 156 帧 / 72MB，已裁掉透明留白、缩到 300×267、150 帧 / 40ms，约 2.5MB
 import saniLogo from "@/assets/img/sani-logo.gif";
@@ -400,18 +402,11 @@ const DETAIL_TAG_STAGGER_MS = CHOICE_STAGGER_MS;
 const DETAIL_HOLO_DELAY_MS = CHOICE_HOLO_DELAY_MS;
 
 /**
- * 口播文本：展示文案按行排版，交给 TTS 前按行补句读拼成一段话。
- * 第一行是完整的介绍句，用句号收住 —— TTS 才会在这里做句末停顿，
- * 不会把「欢迎了解日常运营AI助手」和后面的口号一口气连读；
- * 后两行是连读的口号，用逗号衔接，避免读成一字一顿。
+ * 自我介绍口播：固定音频（welcome-ask.wav），不走 TTS 接口。
+ * 三行文案读的什么已经录在音频里，页面上的字只负责展示，两边不用再对稿。
  */
-function buildIntroSpeechText() {
-  const lines = INTRO_LINES
-    .map(line => line.trim().replace(/[，,。.]$/, ""))
-    .filter(Boolean);
-  if (!lines.length) return "";
-  const [head, ...rest] = lines;
-  return rest.length ? `${head}。${rest.join("，")}。` : `${head}。`;
+function playIntroVoice() {
+  introTts.playFile(welcomeAskVoice);
 }
 
 /**
@@ -429,13 +424,13 @@ function disarmVoiceRetry() {
   INTRO_GESTURE_EVENTS.forEach(name => document.removeEventListener(name, handler));
 }
 
-/** 给刚发起的一段口播挂上「首触补播」，text 与本次 speak 的内容一致 */
-function armVoiceRetry(text: string) {
+/** 给刚发起的一段口播挂上「首触补播」，replay 是这次真正出声的那次调用 */
+function armVoiceRetry(replay: () => void) {
   disarmVoiceRetry();
   const handler = () => {
     disarmVoiceRetry();
     if (introTts.started.value) return;
-    introTts.speak(text);
+    replay();
   };
   introGestureRetry = handler;
   INTRO_GESTURE_EVENTS.forEach(name => document.addEventListener(name, handler, { once: true, passive: true }));
@@ -449,9 +444,8 @@ function startIntro() {
   }, INTRO_ENTER_DELAY_MS);
   introSpeakTimer = setTimeout(() => {
     introSpeakTimer = null;
-    const text = buildIntroSpeechText();
-    introTts.speak(text);
-    armVoiceRetry(text);
+    playIntroVoice();
+    armVoiceRetry(playIntroVoice);
   }, INTRO_SPEAK_DELAY_MS);
 }
 
@@ -726,6 +720,16 @@ function isCaptionArea(e: any) {
 }
 
 /**
+ * 自我介绍播报中：点页面任意位置直接进身份选择，不用等口播念完。
+ * 只在收尾态生效 —— 起始页的点击是「文案区进欢迎流程」，选择态 / 详情态的点击各有自己的用途。
+ */
+function onPageClick() {
+  if (!isFinishing.value || isChoosing.value || isRoleDetail.value) return;
+  if (isRecording.value || navigating) return;
+  enterChoosing();
+}
+
+/**
  * GET /flow/steps?module=ASK，取 stepCode = IDENTITY 的 title 作为身份选择页标题、
  * options 作为身份气泡的数据源（label 展示、hitValue 是角色码、sortNo 定顺序）。
  * 口播刚开始就发起，等身份选择页浮出时基本已经回来了；
@@ -916,7 +920,7 @@ function backToChoosing() {
     choiceSpeakTimer = null;
     if (!isChoosing.value || isRoleDetail.value) return;
     introTts.speak(identityTitle.value);
-    armVoiceRetry(identityTitle.value);
+    armVoiceRetry(() => introTts.speak(identityTitle.value));
   }, CHOICE_SPEAK_DELAY_MS);
 }
 
@@ -1162,7 +1166,7 @@ function enterChoosing() {
     choiceSpeakTimer = setTimeout(() => {
       choiceSpeakTimer = null;
       introTts.speak(identityTitle.value);
-      armVoiceRetry(identityTitle.value);
+      armVoiceRetry(() => introTts.speak(identityTitle.value));
     }, CHOICE_SPEAK_DELAY_MS);
   }, CHOICE_ENTER_DELAY_MS);
 }
@@ -1219,7 +1223,7 @@ async function speakDetailTitle(job: Promise<void>) {
     if (seq !== detailSpeakSeq || !isRoleDetail.value) return;
     const text = identityDetailTitle.value;
     introTts.speak(text);
-    armVoiceRetry(text);
+    armVoiceRetry(() => introTts.speak(text));
   }, DETAIL_SPEAK_DELAY_MS);
 }
 
@@ -1356,6 +1360,7 @@ onMounted(async () => {
     @touchcancel="onHoldCancel"
     @mousedown="onHoldStart"
     @mouseup="onHoldEnd"
+    @click="onPageClick"
   >
     <!-- 自我介绍文案：Ardot 306:6467，长按录音松手后三行依次淡入上浮（不跳转，只在本页过渡） -->
     <view class="welcome-visitor__intro" :class="{ 'welcome-visitor__intro--in': introVisible }">
