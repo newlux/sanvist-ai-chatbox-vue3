@@ -10,9 +10,9 @@
  * }
  * ```
  * 里面 `data` 才是卡片内容（title / exceptionObject / description / suggestions）。
- * 后端字段名做过几轮调整，所以这里仍是「宽松解析 + mock 兜底」：
- * 能认出几条就渲染几条，一条都认不出（或接口报错）就用 MOCK 顶上，
- * 保证页面永远有内容、不出现空卡片。
+ * 字段名做过几轮调整，所以这里仍是宽松解析：能认出几条就渲染几条；
+ * 一条都认不出（或接口报错）时返回 null —— 页面只在 run 接口真的给出数据后才铺卡，
+ * 请求中 / 失败时待机区不放任何卡片（不再用设计稿样张顶替）。
  *
  * 卡片只有两块：标题 + 「标签 / 值」两列行（设计稿：异常对象 / 异常情况）；
  * 建议问题随卡片一起下发，页面拿去铺「你还可以这么问」，取不到时回落到本地兜底文案。
@@ -29,13 +29,20 @@ export interface TaskExceptionCard {
   rows: TaskExceptionRow[];
 }
 
-/** 解析结果：卡片本体 + 随卡片下发的建议问题（没有就是空数组） */
+/**
+ * 解析结果：
+ * - `card`：接口真给了可展示内容才有值，认不出时为 null（页面据此决定这张卡渲不渲染）；
+ * - `suggestions`：随卡片下发的建议问题，没有就是空数组。
+ */
 export interface TaskExceptionSummary {
-  card: TaskExceptionCard;
+  card: TaskExceptionCard | null;
   suggestions: string[];
 }
 
-/** 设计稿 350:2199 的原文：接口没数据时直接用它，保证版式与稿子一致 */
+/**
+ * 设计稿 350:2199 的文案口径（「异常情况摘要」+ 行标签）。
+ * 只作为标题缺省值与行标签来源，不再整卡兜底 —— 没有接口数据就不铺卡。
+ */
 export const TASK_EXCEPTION_MOCK: TaskExceptionCard = {
   title: "异常情况摘要",
   rows: [
@@ -137,7 +144,7 @@ function pickSuggestions(source: Record<string, unknown> | null): string[] {
   return [];
 }
 
-/** 从一层对象里读卡片；一条有效行都没有时返回 null（交给下一层 / mock） */
+/** 从一层对象里读卡片；一条有效行都没有时返回 null（交给下一层继续找） */
 function readCard(raw: unknown): TaskExceptionCard | null {
   const source = toRecord(raw);
   if (!source) return null;
@@ -158,17 +165,12 @@ function readCard(raw: unknown): TaskExceptionCard | null {
 
 /**
  * 把工作流返回（data.outputs 或整包）解析成「卡片 + 建议问题」。
- * 逐层往下找：卡片一条都认不出时用 MOCK 兜底，建议问题没下发时返回空数组
- * （页面据此回落到本地兜底文案）。
+ * 逐层往下找：卡片一条都认不出时 `card` 为 null（页面不铺这张卡），
+ * 建议问题没下发时返回空数组（页面据此回落到本地兜底文案）。
  */
 export function resolveExceptionSummary(raw: unknown): TaskExceptionSummary {
   const layers = collectLayers(raw);
-  const card = layers.map(readCard).find((item): item is TaskExceptionCard => Boolean(item)) ?? TASK_EXCEPTION_MOCK;
+  const card = layers.map(readCard).find((item): item is TaskExceptionCard => Boolean(item)) ?? null;
   const suggestions = layers.map(pickSuggestions).find(item => item.length > 0) ?? [];
   return { card, suggestions };
-}
-
-/** 只要卡片本体时用这个（建议问题见 resolveExceptionSummary） */
-export function resolveExceptionCard(raw: unknown): TaskExceptionCard {
-  return resolveExceptionSummary(raw).card;
 }
