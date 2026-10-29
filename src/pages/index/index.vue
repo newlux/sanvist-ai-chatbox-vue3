@@ -2,6 +2,7 @@
 import type {
   AskSlotPayload,
   AskSlotSubmitPayload,
+  AssistantNavigationAction,
   AssistantNavigationPayload,
   GuideStepItem,
   GuideStepPayload,
@@ -215,7 +216,7 @@ const REPAIR_SUMMARY_POLL_INTERVAL_MS = 5_000;
 const REPAIR_SUMMARY_MAX_ATTEMPTS = 30;
 
 function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
-  if (payload.target !== "maintenance_assistant") return;
+  if (payload.target !== "maintenance_assistant" && payload.target !== "parts_assistant") return;
   assistantNavigationPayload.value = payload;
   assistantNavigationVisible.value = true;
 }
@@ -228,7 +229,27 @@ function onAssistantCallbackOpen(conversationId: string) {
   void navigateToScene(`/pages/repair/index?conversationId=${encodeURIComponent(id)}`);
 }
 
-function onAssistantNavigationConfirm(payload: AssistantNavigationPayload) {
+/**
+ * 弹层确认后的去向按 target 分流：
+ * - maintenance_assistant：把上下文落盘 → 另开维修助手页（/pages/repair/index）；
+ * - parts_assistant：配件助手还没独立页，就地切到首页内联智能体（subagent=parts），不跳页；
+ *   其中「启动拍照 / 启动上传」再把对应选择器拉起来，选完挂在输入栏（与步骤卡拍照同一套）。
+ */
+async function onAssistantNavigationConfirm(
+  payload: AssistantNavigationPayload,
+  action?: AssistantNavigationAction,
+) {
+  if (payload.target === "parts_assistant") {
+    enterPartsAssistant();
+    if (action?.key === "camera" || action?.key === "upload") {
+      const picked = await photoPicker.pickAttachmentForSend(action.key === "camera" ? "camera" : "album");
+      if (picked) {
+        chatInputRef.value?.appendAttachments(picked.meta);
+        chatInputRef.value?.focusTextInput();
+      }
+    }
+    return;
+  }
   if (payload.target !== "maintenance_assistant") return;
   stashPendingRepairNavigationContext({
     ...payload.context,
@@ -242,6 +263,13 @@ function onAssistantNavigationConfirm(payload: AssistantNavigationPayload) {
     stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
   }
   void navigateToScene("/pages/repair/index");
+}
+
+/** 确认进入配件助手：与点底部「配件助手」入口同一套切换（高亮 + subagent=parts）。 */
+function enterPartsAssistant() {
+  navActiveKey.value = "parts-master-ai";
+  chatStore.setSubagent("parts");
+  nextTick(() => chatStore.scrollToBottom(true));
 }
 
 function clearRepairSummaryPolling() {

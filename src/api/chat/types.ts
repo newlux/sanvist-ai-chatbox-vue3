@@ -286,12 +286,28 @@ export interface AskSlotSubmitPayload {
   answers?: AskStepAnswer[];
 }
 
+/** 跳转确认弹层能去的业务助手：维修助手（独立页）/ 配件助手（首页内联智能体）。 */
+export type AssistantNavigationTarget = "maintenance_assistant" | "parts_assistant";
+
+/**
+ * 弹层里的一个进入方式（设计稿 1318:1：配件助手给了拍照 / 上传 / 首页 / 暂不进入 四项）。
+ * key 由业务侧约定，页面按 key 决定选择后做什么；style 只影响按钮视觉层级。
+ */
+export interface AssistantNavigationAction {
+  key: string;
+  label: string;
+  /** primary：深色主按钮；muted：次要灰字；缺省为浅灰 */
+  style?: "default" | "primary" | "muted";
+}
+
 /** 首页问答建议跳转到指定业务助手的确认弹层。 */
 export interface AssistantNavigationPayload extends Record<string, unknown> {
-  target: "maintenance_assistant";
+  target: AssistantNavigationTarget;
   title?: string;
   confirm_text?: string;
   cancel_text?: string;
+  /** 多入口进入方式；缺省时按 target 兜底（维修助手=确定/暂不进入，配件助手=拍照/上传/首页/暂不进入） */
+  actions?: AssistantNavigationAction[];
   context?: Record<string, unknown>;
   /** 来源 SSE 的 conversation_id，进入维修助手时映射为 sessionId。 */
   sessionId?: Identifier;
