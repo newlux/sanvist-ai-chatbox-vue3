@@ -48,8 +48,13 @@ export interface ScheduleGesturesOptions {
   threshold?: number;
   /** 页面是否处于 CSS 旋转横屏：决定捏合中心映射到时间轴的哪个屏幕轴，默认 false */
   isRotated?: () => boolean;
-  /** 双指捏合回调（不传则不接管双指手势） */
-  onPinch?: (event: SchedulePinchEvent) => void;
+  /** 双指捏合回调（不传则不接管双指手势）：返回缩放后的目标横向滚动位置（页面维护缩放锚点）；
+   *  不返回（或返回 undefined）则本次缩放不改变滚动位置 */
+  onPinch?: (event: SchedulePinchEvent) => number | void;
+  /** 双指捏合会话开始（第二根手指落下）：页面用它在捏合期间关掉滚动动画 */
+  onPinchStart?: () => void;
+  /** 双指捏合会话结束（抬起至少一根手指）：页面用它恢复滚动动画 */
+  onPinchEnd?: () => void;
   /** 纵向偏移变化回调（页面用它同步「每行箭头」的纵向位置） */
   onRowsOffset?: (offset: number) => void;
 }
@@ -135,6 +140,10 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
     let startRotated = false;
     /** 上一次的双指间距（0 = 当前不在捏合中） */
     let pinchDistance = 0;
+    /** 捏合会话的理论横向滚动位置：缩放中用它算中心锚点，避免连续缩放时 DOM 滚动位置尚未生效导致的漂移 */
+    let pinchScrollLeft = 0;
+    /** 当前是否处于双指捏合会话（用于触发 onPinchStart / onPinchEnd） */
+    let pinching = false;
 
     /**
      * 捏合中心 → 时间轴可视区偏移 / 内容坐标。
@@ -144,13 +153,13 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
     const pinchFocus = (touches: TouchList) => {
       const a = touches[0];
       const b = touches[1];
-      if (!a || !b) return { localX: 0, contentX: grid.scrollLeft };
+      if (!a || !b) return { localX: 0, contentX: pinchScrollLeft };
       const centerX = (a.clientX + b.clientX) / 2;
       const centerY = (a.clientY + b.clientY) / 2;
       const rect = grid.getBoundingClientRect();
       const raw = options.isRotated?.() ? centerY - rect.top : centerX - rect.left;
       const localX = Math.min(Math.max(raw, 0), grid.clientWidth);
-      return { localX, contentX: grid.scrollLeft + localX };
+      return { localX, contentX: pinchScrollLeft + localX };
     };
 
     const onStart = (event: TouchEvent) => {
@@ -158,6 +167,9 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       if (options.onPinch && event.touches.length >= 2) {
         axis = null;
         pinchDistance = touchDistance(event.touches);
+        pinchScrollLeft = grid.scrollLeft;
+        pinching = true;
+        options.onPinchStart?.();
         // 双指一落下就拦掉默认行为：iOS 上浏览器原生的放大镜 / 页面缩放会抢手势
         if (event.cancelable) event.preventDefault();
         log("双指按下", { distance: pinchDistance });
@@ -166,6 +178,7 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       const touch = event.touches?.[0];
       if (!touch) return;
       pinchDistance = 0;
+      pinching = false;
       startX = touch.clientX;
       startY = touch.clientY;
       startLeft = grid.scrollLeft;
@@ -189,6 +202,9 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
         // 第二根手指可能是在拖动途中落下的：以这一刻为新基准，避免比例突变
         if (!pinchDistance) {
           pinchDistance = distance;
+          pinchScrollLeft = grid.scrollLeft;
+          pinching = true;
+          options.onPinchStart?.();
           axis = null;
         }
         if (pinchDistance > 0 && distance > 0) {
@@ -196,7 +212,8 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
           pinchDistance = distance;
           if (Math.abs(scale - 1) > 0.001) {
             const focus = pinchFocus(event.touches);
-            options.onPinch({ scale, ...focus });
+            const next = options.onPinch({ scale, ...focus });
+            if (typeof next === "number") pinchScrollLeft = next;
             if (debug) log("双指缩放", { scale, ...focus });
           }
         }
@@ -235,6 +252,10 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
 
     const onEnd = (event: TouchEvent) => {
       log("touchend", { scrollLeft: grid.scrollLeft, rowsOffset });
+      if (pinching) {
+        pinching = false;
+        options.onPinchEnd?.();
+      }
       pinchDistance = 0;
       axis = null;
       // 双指抬起一根后剩下那根继续单指拖动：以当前位置为新起点，避免画面跳一下

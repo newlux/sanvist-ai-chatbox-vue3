@@ -1112,6 +1112,22 @@ function onPageTap() {
   advanceToFirstStep();
 }
 
+/**
+ * 点击底部提示（gi__hint）：跳过语音命中，直接进入下一步。
+ * 只在异常帧（身份信息帧 IDENTITY_DETAIL）响应 —— 它的提示是「可以和我说“开始体验”」，
+ * 点一下等同「不说直接走」，直接收尾进任务协同；其余帧的提示不承接跳过动作。
+ */
+function onHintTap() {
+  // 长按录音松手后补出来的 tap 不算点击
+  if (holdFired) {
+    holdFired = false;
+    return;
+  }
+  if (isRecording.value || isChecking.value) return;
+  if (normalizeStep(activeStep.value) !== STEP_IDENTITY_DETAIL) return;
+  finish();
+}
+
 /** 选中一项：先亮一下反馈，再按流程链推进到下一步 */
 function onOptionTap(item: FlowStepOption) {
   // 长按录音松手后补出来的 tap 不算点选（否则一次长按既录音又选了选项）
@@ -1122,6 +1138,8 @@ function onOptionTap(item: FlowStepOption) {
   if (isRecording.value || isChecking.value) return;
   const step = currentStep.value;
   if (!step || selectedKey.value) return;
+  // 异常帧（身份信息帧）的胶囊不可点击：只承接语音命中（playHit）与底部提示跳过，点选直接忽略
+  if (normalizeStep(step.stepCode) === STEP_IDENTITY_DETAIL) return;
   // 点选也是一次有效选择：上一次未命中的红提前撤掉
   clearMissed();
   const hit = optionValue(item);
@@ -1144,8 +1162,9 @@ function onOptionTap(item: FlowStepOption) {
  * 点选与语音命中走同一条路；选中身份后进**该身份对应的身份信息帧**
  * （IDENTITY → IDENTITY_DETAIL，标题 / 胶囊由该身份的接口数据决定）。
  *
- * 身份信息帧（异常状况）是「终点前一步」：点选 / 语音命中痛点只记录并保持选中，
- * **不再跳页** —— 进入任务协同只能靠这一帧说「开始体验」（见 isStartCommand）。
+ * 身份信息帧（异常状况）是「终点前一步」：胶囊点选不可用（见 onOptionTap），
+ * 语音命中痛点会点亮并推进进任务协同；「开始体验」语音口令（isStartCommand）与
+ * 点击底部提示（onHintTap）也都能收尾。
  */
 async function applySelection(stepCode: string, hitValue: string, label: string) {
   const code = normalizeStep(stepCode);
@@ -1165,12 +1184,9 @@ async function applySelection(stepCode: string, hitValue: string, label: string)
     ]);
   }
 
-  // 身份信息帧：只记录痛点、保持选中高亮，不推进到 RECOMMEND / 任务协同
-  if (code === STEP_IDENTITY_DETAIL) {
-    selectedKey.value = hitValue;
-    return;
-  }
-
+  // 身份信息帧（异常帧）也是终点前一步：语音命中痛点记录后直接进任务协同
+  // （胶囊点选已在 onOptionTap 里禁用，这里只承接语音命中的推进）；
+  // 「开始体验」语音口令（isStartCommand）与点击底部提示（onHintTap）也都能收尾。
   goToStep(nextStepAfter(code), code);
   // 换页时 switchTo 已经清过；这里兜住「next 仍是当前步」的情况，避免一直亮着、后续点不动
   selectedKey.value = "";
@@ -1204,8 +1220,10 @@ function finish() {
   // 记下这次选的身份（接口下发的身份码，如 DISPATCH-02）：
   // 任务协同页据此判断首屏是问「查异常」还是拉甘特图入口卡，跨页 / 独立窗口都要能取到 → 落本地存储
   setTaskIdentity(roleCode ? { code: roleCode, label: pickedRole.value?.label || roleCode } : null);
-  // 身份信息帧说「开始体验」→ 正式进入任务协同
-  emit("finish", "/pages/task/index");
+  // 身份信息帧说「开始体验」→ 正式进入任务协同。
+  // 带上 from=init：任务协同页靠这个参数区分「引导流程进来」与「新建页面 / 宿主独立窗口直接进」——
+  // 只有前者铺异常摘要卡，后者铺初始化「今天任务有哪些」拉到的甘特图入口卡
+  emit("finish", "/pages/task/index?from=init");
 }
 
 /**
@@ -1402,6 +1420,7 @@ onBeforeUnmount(() => {
         :key="`hint-${activeStep}`"
         class="gi__hint"
         :style="hintStyle"
+        @tap.stop="onHintTap"
       >
         {{ currentHint }}
       </text>

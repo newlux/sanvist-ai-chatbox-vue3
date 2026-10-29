@@ -21,6 +21,7 @@ import AiMessageList from "@/components/ai-message-list/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiTaskExceptionCard from "@/components/ai-task-exception-card/index.vue";
+import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
 import { pickTaskWelcomeQuestions, TASK_WELCOME_COPY } from "@/config/task-welcome";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
@@ -37,7 +38,7 @@ import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
-import { resolveExceptionCard, TASK_EXCEPTION_MOCK, type TaskExceptionCard } from "@/utils/task-exception";
+import { resolveExceptionSummary, TASK_EXCEPTION_MOCK, type TaskExceptionCard } from "@/utils/task-exception";
 import { getTaskIdentity, type TaskIdentity } from "@/utils/task-identity";
 
 /**
@@ -117,6 +118,9 @@ const { sendMessage, sendSilentMessage, sendAskSlotSelection, beginAsrPlaceholde
     if (index < 0) return;
     realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
   },
+  // 与首页同一套滚动：发送时只登记本轮的提问（消息列表据此加大顶部呼吸位），
+  // 回答边写边贴底跟随，本轮提问顶到头部下沿就停住（见 ai-message-list 的 alignToReplyEnd）
+  alignSentMessageToTop: true,
 });
 
 /** 停掉本页两套听播引擎（实时流式 + 历史整段）：换交互 / 离开页面时统一走这里。 */
@@ -201,10 +205,29 @@ const EXCEPTION_QUERY = "查异常";
 /** 「查异常」固定按 OWNER 取数（与网关 guest-role 头一致） */
 const EXCEPTION_ROLE_ID = "OWNER";
 /**
+ * 待机态铺哪一套欢迎内容（卡片 + 建议问题），全页只认这一个状态：
+ *
+ * - `exception`：由「任务协同初始化页（pages/task-init）」的引导流程进来（入口 URL 带 from=init）
+ *   且那次选过身份 —— 首屏问「查异常」，铺异常摘要卡，建议问题用接口随包下发的 suggestions；
+ * - `gantt`：新建页面 / 宿主独立窗口 / 听播异常条目直接进，以及点「新对话」——
+ *   不问异常，静默问「今天任务有哪些」，铺甘特图入口卡，建议问题用本地按身份取的兜底文案。
+ *
+ * 不能凭「有没有身份」判断入口：身份是落本地存储的，选过一次之后就一直在，
+ * 直接进本页也会被误判成引导流程。
+ */
+const welcomeCardKind = ref<"exception" | "gantt">("gantt");
+
+/**
  * 异常情况摘要卡片（Ardot 350:2151 / 节点 350:2199）：
  * 有值就铺在待机区（替代甘特图入口卡），数据由工作流 outputs 解析、认不出时用 mock 兜底。
  */
 const exceptionCard = ref<TaskExceptionCard | null>(null);
+/**
+ * 异常卡片随卡片一起下发的建议问题（outputs 里的 data.suggestions）：
+ * 铺在「你还可以这么问」里，替代本地按身份取的兜底问题。
+ * 没下发（接口挂了 / 老结构）时保持空数组，页面自动回落兜底文案。
+ */
+const exceptionSuggestions = ref<string[]>([]);
 
 /**
  * 首屏「查异常」：身份来自 /flow/steps?module=TASK 的 IDENTITY 选项（如 DISPATCH-02）时走这里。
@@ -212,8 +235,10 @@ const exceptionCard = ref<TaskExceptionCard | null>(null);
  * 走 Dify 工作流而不是对话接口（POST /proxy/v1/workflows/run，blocking 一次性返回）：
  *   inputs = { query_type: 查异常, user_id: 所选身份, role_id: OWNER }
  *   user   = 当前用户标识（游客态兜底 guest）
- * 工作流没有 query / conversation，业务结果整包在 data.outputs 里。
- * 返回结构目前还不稳定，先按设计稿的 mock 顶上（页面不空），拿到能解析的数据再覆盖。
+ * 工作流没有 query / conversation，业务结果整包在 data.outputs 里
+ * （`{ component: '<COMPONENT>{"scene":"task","type":"exception","data":{...}}</COMPONENT>' }`，
+ * 由 utils/task-exception 拆外壳后取 data 里的 title / exceptionObject / description / suggestions）。
+ * 请求期间先铺设计稿的 mock 卡片（页面不空），拿到数据再整体覆盖。
  */
 async function loadExceptionInfo(identity: TaskIdentity) {
   initialCardsRequestedAt = Date.now();
@@ -229,11 +254,13 @@ async function loadExceptionInfo(identity: TaskIdentity) {
       // 网关按 guest-role 头鉴权：与 inputs.role_id 保持一致
       guestRole: EXCEPTION_ROLE_ID,
     });
-    exceptionCard.value = resolveExceptionCard(result?.data?.outputs);
+    const summary = resolveExceptionSummary(result?.data?.outputs);
+    exceptionCard.value = summary.card;
+    exceptionSuggestions.value = summary.suggestions;
     logger.info("task exception info loaded", { identity: identity.code, outputs: result?.data?.outputs });
   }
   catch (error) {
-    // 接口挂了也保留 mock 卡片，不让待机区空着
+    // 接口挂了也保留 mock 卡片，不让待机区空着（建议问题回落到本地兜底文案）
     logger.warn("failed to load task exception info", { identity: identity.code, error });
   }
 }
@@ -251,8 +278,8 @@ function startPendingScheduleAsk() {
   }
   // 没有待发问题：回到本页仍停在欢迎态就重拉一次入口卡（不缓存、不复用旧数据）。
   // 与 onLoad 的请求隔开 800ms：首次进入 onShow 紧跟 onLoad，不该重复请求。
-  // 选过 step 身份时首屏走的是「查异常」，这里不再补拉甘特图入口卡。
-  if (showSceneWelcome.value && !getTaskIdentity() && Date.now() - initialCardsRequestedAt > 800) void loadInitialCards();
+  // 待机态是异常卡时首屏走的是「查异常」，这里不再补拉甘特图入口卡。
+  if (showSceneWelcome.value && welcomeCardKind.value !== "exception" && Date.now() - initialCardsRequestedAt > 800) void loadInitialCards();
 }
 const {
   iconCopyImage,
@@ -549,16 +576,26 @@ function onTtsClick(index: number) {
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
 const showSceneWelcome = computed(() => !messages.value.length && !isSessionSwitching.value);
 /**
- * 待机引导文案（Ardot 350:2151）：问候 + 任务入口卡 +「你还可以这么问」，见 config/task-welcome。
- * 入口卡数据来自初始化静默对话（「今天任务有哪些」）回复里的 gantt 卡片，
- * 见 applyInitialCards；没有卡片数据时 initialGanttPayload 为 null，整卡不渲染。
- * 建议问题按所选身份（调度员 / 操作手）取 key，再按当前语言翻译。
+ * 待机引导文案（Ardot 350:2151）：问候 + 卡片 +「你还可以这么问」，见 config/task-welcome。
+ *
+ * - 卡片：引导流程（task-init）进来铺异常摘要卡（数据见 loadExceptionInfo）；
+ *   其它入口 / 新增对话铺初始化对话（「今天任务有哪些」）回复里的 gantt 入口卡，见 applyInitialCards，
+ *   没有卡片数据时 initialGanttPayload 为 null，整卡不渲染。
+ * - 建议问题：异常卡片随包下发了 suggestions（如「两个工地的泵车需求冲突在哪里？」）就直接用，
+ *   没下发（接口挂了 / 老结构 / 非异常入口）仍按身份（调度员 / 操作手）取本地兜底 key 再翻译。
  */
-const taskWelcome = computed(() => ({
-  title: t(TASK_WELCOME_COPY.titleKey),
-  content: t(TASK_WELCOME_COPY.contentKey),
-  questions: pickTaskWelcomeQuestions(userStore.visitorRole).map(key => t(key)),
-}));
+const taskWelcome = computed(() => {
+  // 建议问题（task-welcome__question）只认当前待机态：
+  // 异常态用接口下发的 suggestions；其余（新建页面 / 新对话）一律走本地按身份的兜底文案
+  const exceptionQuestions = welcomeCardKind.value === "exception" ? exceptionSuggestions.value : [];
+  return {
+    title: t(TASK_WELCOME_COPY.titleKey),
+    content: t(TASK_WELCOME_COPY.contentKey),
+    questions: exceptionQuestions.length
+      ? exceptionQuestions
+      : pickTaskWelcomeQuestions(userStore.visitorRole).map(key => t(key)),
+  };
+});
 
 watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
 
@@ -587,8 +624,12 @@ function startNewConversation() {
   // 正在生成时切走：先掐掉在途请求，否则回包会继续往新会话里写
   cancelActiveStream();
   pendingInitSessionId.value = null;
-  // 新对话不复用上一轮的入口卡，等新数据回来再铺
+  // 新对话不复用上一轮的入口卡，等新数据回来再铺；异常卡片与它下发的建议问题也一起撤掉，
+  // 待机态切回 gantt：甘特图入口卡 + 本地兜底建议问题（不沿用上一轮的接口 suggestions）
   initialGanttPayload.value = null;
+  exceptionCard.value = null;
+  exceptionSuggestions.value = [];
+  welcomeCardKind.value = "gantt";
   chatStore.resetConversation();
   chatListKey.value += 1;
   nextTick(() => chatStore.scrollToBottom(true));
@@ -598,6 +639,20 @@ function startNewConversation() {
 
 function onBack() {
   backFromScene();
+}
+
+/**
+ * 长按顶部三角图标 5 秒：回到首页初始「你好三一」页。
+ * 首页本身是「初始页 / 对话页」两个态（pageStage）：清掉「欢迎页已完成」标记后重载首页，
+ * 首页 onLoad 的 syncPageStage 才会落到 welcome 态（否则会因标记残留 / 旧实例仍停在对话态）。
+ */
+function onRestartToStart() {
+  try {
+    uni.removeStorageSync(AI_ASK_WELCOME_DONE_KEY);
+  } catch (error) {
+    logger.warn("failed to clear welcome flag", error);
+  }
+  uni.redirectTo({ url: "/pages/index/index" });
 }
 
 /**
@@ -712,6 +767,36 @@ async function loadAwakeningPrompt() {
   }
 }
 
+/**
+ * 一键回到底部（与首页一致）：没贴底时出现，回到底部（含发送后强制贴底）自动消失。
+ * 分享选择态、贴底卡片（步骤卡 / 建议卡 / 追问卡）展开时不显示，避免和这些浮层抢位置。
+ */
+const showScrollToBottom = computed(
+  () =>
+    !shareSheetVisible.value
+    && !guideStepSheetVisible.value
+    && !guideSuggestionSheetVisible.value
+    && !askSlotDrawerVisible.value
+    && !pinnedToBottom.value
+    && (messages.value?.length || 0) > 0,
+);
+
+function onScrollToBottomTap() {
+  // 落点是「真末尾」（含最后一条消息的操作栏 / 参考来源），不能用 scrollToBottom：
+  // 本页开着 stopAtReplyEnd，那条落点会把尾部操作栏留在输入栏下面，看起来没到底
+  chatStore.jumpToBottom();
+}
+
+/**
+ * 消息列表上报贴底状态，不能直接绑 setPinnedToBottom：
+ * 用户自己滑回底部时要把本轮的「提问封顶」一起撤掉，
+ * 否则下一帧内容长高，对齐又会把视图拽回提问那边（表现为「滑到底又弹回去」）。
+ */
+function onPinnedChange(pinned: boolean) {
+  chatStore.setPinnedToBottom(pinned);
+  if (pinned) chatStore.setCapRoundAtTop(false);
+}
+
 async function onScrollTop() {
   if (!chatStore.aiSessionId) return;
   try {
@@ -724,6 +809,8 @@ async function onScrollTop() {
 
 onLoad((options) => {
   syncWindowHeight();
+  // 入口来源：只有 task-init 引导流程会带 from=init（见 ai-task-init 的 finish）
+  const fromInit = String(options?.from ?? "").trim() === "init";
   const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("TASK");
   if (sessionId) {
     void openLocalHistory(consumePendingHistorySession("TASK") || sessionId, true);
@@ -733,12 +820,14 @@ onLoad((options) => {
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
-  // 身份是 /flow/steps?module=TASK 下发的（task-init 选过，如 DISPATCH-02）：首屏改问「查异常」，
-  // 拿到的异常信息渲染成异常摘要卡（接口结构不稳，解析不出时用 mock 兜底）；
-  // 没选过身份（首页 / 听播异常条目直接进）仍沿用原来的流程，
-  // 静默问一句「今天任务有哪些」，只把回复里的 gantt 入口卡铺进对话区（不缓存、每次重新请求）。
+  // 引导流程进来且那次选过身份（task-init 下发，如 DISPATCH-02）：首屏问「查异常」，
+  // 拿到的异常信息渲染成异常摘要卡，建议问题用接口随包下发的 suggestions；
+  // 其它入口（新建页面 / 宿主独立窗口 / 听播异常条目直接进）一律走甘特图入口卡 + 本地兜底建议问题，
+  // 静默问一句「今天任务有哪些」，只把回复里的 gantt 卡铺进对话区（不缓存、每次重新请求）。
   const identity = getTaskIdentity();
-  if (identity) void loadExceptionInfo(identity);
+  const usesException = fromInit && Boolean(identity);
+  welcomeCardKind.value = usesException ? "exception" : "gantt";
+  if (usesException && identity) void loadExceptionInfo(identity);
   else void loadInitialCards();
 });
 
@@ -793,7 +882,9 @@ onUnload(() => {
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
         :share-selected-round-count="shareSelectedRoundCount"
+        restartable
         @back="onBack"
+        @restart="onRestartToStart"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"
         @session-delete="onSessionDelete"
@@ -809,8 +900,8 @@ onUnload(() => {
         <text class="task-welcome__desc">
           {{ taskWelcome.content }}
         </text>
-        <!-- 异常情况摘要卡（Ardot 350:2199）：选过 step 身份时首屏「查异常」拿到数据后铺这里，替代任务入口卡 -->
-        <view v-if="exceptionCard" class="task-welcome__entry">
+        <!-- 异常情况摘要卡（Ardot 350:2199）：只有待机态是 exception（task-init 引导流程进来且选过身份）才铺，替代任务入口卡 -->
+        <view v-if="welcomeCardKind === 'exception' && exceptionCard" class="task-welcome__entry">
           <AiTaskExceptionCard :data="exceptionCard" />
         </view>
         <!-- 任务入口卡（AiGanttEntryCard）：只渲染初始化对话返回的卡片数据，没有就整卡不渲染 -->
@@ -846,6 +937,9 @@ onUnload(() => {
         :show-business-overview="false"
         :scroll-into-view="scrollIntoView"
         :reply-end-token="replyEndToken"
+        :pin-message-token="chatStore.pinMessageToken"
+        :pin-message-id="chatStore.pinMessageId"
+        :cap-round-at-top="chatStore.capRoundAtTop"
         :show-quick-list="showQuickList"
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"
@@ -872,8 +966,18 @@ onUnload(() => {
         @copy-click="onCopyMessage"
         @select-toggle="onShareSelectToggle"
         @scroll-top="onScrollTop"
-        @pinned-change="chatStore.setPinnedToBottom"
+        @pinned-change="onPinnedChange"
       />
+      <!-- 一键回到底部（与首页一致）：离底时出现，贴底自动隐藏；
+           位置 = 输入栏高（含键盘抬起）+ 72rpx 底部导航 + 24rpx 间隙，不压住输入栏 -->
+      <view
+        v-if="showScrollToBottom"
+        class="chat-scroll-bottom"
+        :style="{ bottom: `calc(${composerBottomInset} + 96rpx)` }"
+        @tap="onScrollToBottomTap"
+      >
+        <view class="chat-scroll-bottom__chevron" />
+      </view>
       <view v-if="isSessionSwitching" class="session-loading">
         <view class="session-loading__spinner" />
       </view>
@@ -980,6 +1084,7 @@ onUnload(() => {
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
+        bottom-gradient
         :compact-voice-listening="true"
         @send="sendTaskMessage"
         @stop="stopGenerating"
@@ -1213,6 +1318,33 @@ $color-white: #ffffff;
     rgba(254, 0, 0, 0.1) 0%,
     rgba(254, 0, 0, 0) 100%
   );
+}
+
+// 一键回到底部（与首页同一套）：白底圆钮 + 细线下箭头，浮在输入栏上方右侧。
+// bottom 由行内样式给：composerBottomInset（输入栏高 + 键盘抬起）+ 72rpx 导航高 + 24rpx 间隙
+.chat-scroll-bottom {
+  position: absolute;
+  right: 32rpx;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 76rpx;
+  height: 76rpx;
+  border: 1px solid rgba(51, 51, 51, 0.08);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 4rpx 16rpx rgba(15, 126, 238, 0.12);
+  -webkit-backdrop-filter: blur(20rpx);
+  backdrop-filter: blur(20rpx);
+}
+
+.chat-scroll-bottom__chevron {
+  width: 20rpx;
+  height: 20rpx;
+  border-right: 1px solid #333333;
+  border-bottom: 1px solid #333333;
+  transform: translateY(-6rpx) rotate(45deg);
 }
 
 .session-loading {

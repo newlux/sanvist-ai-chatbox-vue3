@@ -27,7 +27,17 @@ function extractAnswerText(message: UiChatMessage): string {
     .filter(block => block.type === "answer")
     .map(block => String(block.payload?.content || ""))
     .join("");
-  return fromBlocks || String(message.content || "");
+  if (fromBlocks) return fromBlocks;
+  // 核对卡（guide-check）场景：气泡正文隐藏 / 为空时，用核对卡的「标题 + 步骤正文」当播报文本，
+  // 否则点播报按钮会因为 answer 为空而「没声音」
+  const fromCheckBlocks = (message.blocks || [])
+    .filter(block => block.type === "guide-check")
+    .map(block => [
+      String(block.payload?.title || "").trim(),
+      String(block.payload?.content || "").trim(),
+    ].filter(Boolean).join("\n"))
+    .join("");
+  return fromCheckBlocks || String(message.content || "");
 }
 
 /**
