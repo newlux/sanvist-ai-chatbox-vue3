@@ -14,6 +14,7 @@ import type {
   RecognizeSpeechByUploadParams,
   RecognizeSpeechByUrlParams,
   RenameConversationParams,
+  RunWorkflowParams,
   SendChatMessageParams,
   SpeechRecognitionResult,
   SubmitFeedbackParams,
@@ -21,6 +22,7 @@ import type {
   UploadChatFileParams,
   WakeValidateParams,
   WakeValidateResult,
+  WorkflowRunResponse,
 } from "./types";
 import { i18n } from "@/i18n";
 import { toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
@@ -168,6 +170,75 @@ export function sendBlockingChatMessage(params: SendChatMessageParams) {
     .then((response) => {
       logger.info("[chat] 对话接口出参(blocking)", response);
       return toBlockingChatMessageResponse(response);
+    });
+}
+
+/** Dify 工作流 blocking 响应（原生 snake_case，在 API 边界转 camelCase）。 */
+interface DifyWorkflowRunResponse {
+  workflow_run_id?: Identifier;
+  task_id?: Identifier;
+  data?: {
+    id?: Identifier;
+    workflow_id?: Identifier;
+    status?: string;
+    outputs?: Record<string, unknown>;
+    error?: string | null;
+    elapsed_time?: number;
+    total_tokens?: number;
+    total_steps?: number;
+    created_at?: number;
+    finished_at?: number;
+  };
+}
+
+function toWorkflowRunResponse(item: DifyWorkflowRunResponse | null | undefined): WorkflowRunResponse {
+  const data = item?.data || {};
+  return {
+    workflowRunId: item?.workflow_run_id,
+    taskId: item?.task_id,
+    data: {
+      id: data.id,
+      workflowId: data.workflow_id,
+      status: data.status,
+      outputs: data.outputs || {},
+      error: data.error ?? null,
+      elapsedTime: Number(data.elapsed_time || 0),
+      totalTokens: Number(data.total_tokens || 0),
+      totalSteps: Number(data.total_steps || 0),
+      createdAt: Number(data.created_at || 0),
+      finishedAt: Number(data.finished_at || 0),
+    },
+  };
+}
+
+/**
+ * Dify 工作流 POST /proxy/v1/workflows/run（blocking 一次性返回）。
+ *
+ * 和 /chat-messages 的区别：工作流没有 query、没有 conversation，也没有 SSE 分片，
+ * 业务结果整包在 data.outputs 里；鉴权与游客身份仍由 request 统一注入
+ * （Authorization + guest-role，后者来自 setGuestRole）。
+ *
+ * 任务协同的「查异常」走这里：
+ *   inputs = { query_type: "查异常", user_id: 所选身份, role_id: "OWNER" }
+ */
+export function runBlockingWorkflow(params: RunWorkflowParams) {
+  const body = {
+    inputs: params.inputs ?? {},
+    response_mode: params.responseMode ?? "blocking",
+    user: String(params.user || "").trim() || "guest",
+  };
+  // guest-role 头按调用方指定的身份覆盖（不指定则用 App 里按 visitorRole 设好的那份）
+  const guestRole = String(params.guestRole || "").trim();
+  const options = guestRole
+    ? { headers: { ...jsonOptions.headers, "guest-role": guestRole } }
+    : jsonOptions;
+  logger.info("[chat] 工作流入参", body);
+  return request
+    .post<DifyWorkflowRunResponse>("/proxy/v1/workflows/run", body, options)
+    .json()
+    .then((response) => {
+      logger.info("[chat] 工作流出参", response);
+      return toWorkflowRunResponse(response);
     });
 }
 

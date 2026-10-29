@@ -21,6 +21,7 @@ import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -42,6 +43,8 @@ const { t } = useI18n();
 const chatScope = provideChatScope("guide");
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
+// 注入 --safe-top-px：悬浮头部的高度补偿（--chat-header-height）要按真实状态栏算
+const { safeAreaStyle } = useSafeArea();
 /**
  * 自动滚动的落点：回复内容末尾（不含参考来源）——参考来源不被贴底滚进视野，
  * 以内容块容器高度减去参考来源高度为准（见 ai-message-list 的 alignToReplyEnd）。
@@ -170,6 +173,21 @@ function stopSceneTtsOnVoiceStart() {
 // activeRequestSeq 在新请求开始和取消/重置时都会变化，一个 watcher 兜底覆盖全部入口。
 watch(() => chatStore.activeRequestSeq, () => {
   stopSceneTts();
+});
+
+/**
+ * 「正在思考中」：已发起请求，但最后一条 AI 消息还没有 answer 正文。
+ * 这一态要把输入栏下方的底部声纹（氛围渐变）收起来，与首页一致；
+ * 一旦出字进入「回答中」，声纹按原逻辑自动回来。
+ */
+const chatThinking = computed(() => {
+  if (!isLoading.value) return false;
+  const list = messages.value || [];
+  const last = list[list.length - 1];
+  if (!last || last.role !== "ai") return false;
+  return !(last.blocks || []).some(
+    block => block.type === "answer" && String(block.payload?.content || "").trim().length > 0,
+  );
 });
 
 /**
@@ -707,15 +725,18 @@ onUnload(() => {
 </script>
 
 <template>
-  <view class="ai-page">
+  <view class="ai-page" :style="safeAreaStyle">
     <view class="ai-page__chat" :style="chatViewportStyle">
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
-      <!-- Header -->
+      <!-- 顶部毛玻璃渐隐：与首页对话页同一层，状态栏 / 头部区域半透明，内容滚上来只会被虚化 -->
+      <view class="ai-page__top-fade" />
+      <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
       <AiChatHeader
         ref="chatHeader"
         v-model:sessions="sessions"
         class="ai-page__header"
+        plain-bg
         :load-sessions="getAISessionList"
         :selected-session-id="aiSessionId"
         :generating="isLoading"
@@ -760,6 +781,7 @@ onUnload(() => {
       </view>
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
+        top-inset="var(--chat-top-inset, 300rpx)"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
@@ -900,6 +922,7 @@ onUnload(() => {
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
         bottom-gradient
+        :hide-bottom-art="chatThinking"
         :compact-voice-listening="true"
         @send="sendMessage"
         @stop="stopGenerating"
@@ -973,12 +996,45 @@ $color-white: #ffffff;
   background: #fafafa;
   overflow: hidden;
   position: relative;
+  // 顶部毛玻璃层的高度 = 悬浮头部在内容里的占位（与首页对话页同一个值）
+  --chat-top-inset: calc(constant(safe-area-inset-top) + 300rpx);
+  --chat-top-inset: calc(env(safe-area-inset-top) + 300rpx);
+  // 悬浮头部不占布局，需要给「欢迎区」补回来的实际头部高度：状态栏占位 + 栏高 50px
+  --chat-header-height: calc(max(var(--safe-top-px, 0px), env(safe-area-inset-top)) + 100rpx);
 }
 
-// 头部要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
+// 头部悬浮（与首页对话页一致）：不占布局高度，消息可以滚到它下面，透过 .ai-page__top-fade 的毛玻璃淡出；
+// 同时要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
 // 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）
 .ai-page__chat > .ai-page__header {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
   z-index: 30;
+}
+
+// 顶部毛玻璃渐隐（与首页对话页同一层）：透明 + 背后模糊，状态栏与头部区域是半透明的，
+// 内容滚到头部下面还能看见字，只是被虚化；「渐变」体现在模糊强度上，没有硬边。
+.ai-page__top-fade {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: calc(constant(safe-area-inset-top) + 300rpx);
+  height: calc(env(safe-area-inset-top) + 300rpx);
+  pointer-events: none;
+  backdrop-filter: blur(16rpx); // 8px
+  -webkit-backdrop-filter: blur(16rpx);
+  mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, rgba(0, 0, 0, 0) 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, rgba(0, 0, 0, 0) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(250, 250, 250, 0.34) 0%,
+    rgba(250, 250, 250, 0.18) 48%,
+    rgba(250, 250, 250, 0) 100%
+  );
 }
 
 .ai-chat-glow {
@@ -1018,14 +1074,16 @@ $color-white: #ffffff;
    左右留白 20（40rpx）。
 
    顶部留白与作业协同页（pages/task/index.vue 的 .task-welcome）对齐：
-   头部是流内元素（状态栏 0 + 栏高 50），灵动岛（92）+ 下方「SANI」胶囊是绝对定位浮在
-   内容之上，换算到内容区岛底 ≈ 84rpx、胶囊底 ≈ 136rpx。设计稿的 148rpx 会让标题顶
-   只比胶囊低 12rpx（6px），视觉上贴着 logo；这里同样抬到 216rpx，
-   标题距胶囊底约 80rpx（40px）。 */
+   头部悬浮在内容之上（状态栏 + 栏高 50px，见 --chat-header-height），灵动岛（92）+ 下方
+   「SANI」胶囊是绝对定位浮在内容之上，换算到内容区岛底 ≈ 84rpx、胶囊底 ≈ 136rpx。
+   设计稿的 148rpx 会让标题顶只比胶囊低 12rpx（6px），视觉上贴着 logo；
+   这里沿用 216rpx（头部高度之外），标题距胶囊底约 80rpx（40px）。 */
 .guide-welcome {
   position: relative;
   z-index: 1;
-  padding: 216rpx 40rpx 0;
+  // 头部改成悬浮后不占布局，这里把它的实际高度补回来，欢迎区仍从头部下方起步
+  // （216rpx 是原来「头部之下」再让出的距离，与作业协同页 .task-welcome 同一档）
+  padding: calc(var(--chat-header-height) + 216rpx) 40rpx 0;
 }
 
 /* 固定问候语（Ardot 347:5392 Greeting Title）：28px Bold #0D0D0D，行高 41 */

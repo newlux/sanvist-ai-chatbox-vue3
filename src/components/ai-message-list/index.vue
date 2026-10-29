@@ -773,12 +773,32 @@ function onShareClick(index, message) {
   });
 }
 
+/**
+ * 核对卡动作区的分享：分享的是这张卡片本身（把卡片根节点交给页面截图），
+ * 不能按「消息正文」拼文案——这一轮气泡正文是隐藏的，也没渲染在海报里。
+ */
+function onGuideCheckShare(index, message, payload) {
+  if (message?.interrupted) return;
+  const element = payload?.element;
+  if (!element) return;
+  emit("share-click", { index, msg: message, element });
+}
+
 function onFeedbackChange(index, message, value) {
   emit("feedback-change", { index, msg: message, value: value || "" });
 }
 
 function onCopyClick(index, message) {
   emit("copy-click", { index, msg: message });
+}
+
+/**
+ * 核对卡动作区的复制：用的是卡片自身文案。
+ * 带核对卡的那一轮气泡正文是隐藏的，按消息正文复制会拿到空串或原始 SSE，
+ * 复制用户眼前这段卡片内容才符合预期；其余动作（分享 / 播报）仍复用气泡那条链路。
+ */
+function onGuideCheckCopy(index, message, payload) {
+  emit("copy-click", { index, msg: message, text: String(payload?.text || "") });
 }
 
 const listenedReport = ref(isListenReportListened(props.listenBroadcast?.bizDate));
@@ -1193,7 +1213,14 @@ watch(
               <AiBlockRenderer
                 :block="block"
                 :dom-id="guideStepCardDomId(msg?.id, block.id)"
+                :show-card-actions="msg?.role === 'ai' && !msg.loading && !msg.interrupted"
+                :tts-enabled="!!msg.ttsEnabled"
+                :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
+                :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
                 @guide-check-step-select="onGuideCheckStepSelect"
+                @tts-click="onTtsClick(index)"
+                @copy-click="onGuideCheckCopy(index, msg, $event)"
+                @share-click="onGuideCheckShare(index, msg, $event)"
               />
             </view>
             <!-- 调度视图入口卡：同样独立于回答气泡，紧跟在气泡下方 -->
