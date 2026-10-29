@@ -35,6 +35,7 @@ import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@
 import { hasGanttCard } from "@/utils/gantt-card";
 import { openGanttView } from "@/utils/gantt-navigation";
 import { createLogger } from "@/utils/logger";
+import { setLandscapeFullscreen } from "@/utils/platform/mpaas";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -550,12 +551,27 @@ function onGanttEntryTap() {
 }
 
 /**
+ * 从本页打开横屏调度视图的时间戳（0 表示没开过）。
+ *
+ * onShow 里要兜底把方向复原成竖屏，但「刚点开、宿主转场还没结束」时也可能收到 onShow：
+ * 这时如果直接发 `landscapeFullscreen(false)`，正好会把刚申请到的横屏关掉
+ * （日志里表现成 true / false 各一次）。所以只在「确实离开超过一段时间后再回来」才复原。
+ */
+let landscapeSceneOpenedAt = 0;
+/** onShow 复原方向的最小间隔：小于这个时长视为「还在开窗过程中」，不动方向 */
+const LANDSCAPE_RETURN_GUARD_MS = 800;
+
+/**
  * 点甘特入口卡（AI 下发的 gantt 积木）：按 viewType 分流（见 utils/gantt-navigation）。
  * - personal → 竖屏个人任务详情页（pages/task-detail），明细挂在整包的 payload 字段里；
  * - schedule / pre / replan → 各自横屏视图；
  * 数据一律先落本地存储、再由目标页 onLoad 取走（目标页可能是独立场景窗口）。
  */
 function onGanttOpen(payload: GanttViewPayload) {
+  // 只有横屏页需要回来时复原方向；personal 是竖屏页，不参与
+  if (String(payload?.viewType || "").trim().toLowerCase() !== "personal") {
+    landscapeSceneOpenedAt = Date.now();
+  }
   openGanttView(payload);
 }
 /** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
@@ -846,6 +862,15 @@ onMounted(() => {
 });
 
 onShow(() => {
+  // 从横屏调度视图返回的兜底复原：正常路径由横屏页的 leaveToChat → exitLandscape 等竖屏恢复，
+  // 但宿主手势关窗 / 系统返回键 / webview 被直接销毁时那段异步流程可能没跑完，
+  // 回到这里就会停在横屏里（键盘弹出后布局全乱）。
+  // 只在本页确实开过横屏页、且已经离开超过 LANDSCAPE_RETURN_GUARD_MS 时才复原：
+  // 开窗转场期间的 onShow 不能动方向，否则会把刚申请到的横屏立刻关掉。
+  if (landscapeSceneOpenedAt && Date.now() - landscapeSceneOpenedAt > LANDSCAPE_RETURN_GUARD_MS) {
+    landscapeSceneOpenedAt = 0;
+    setLandscapeFullscreen(false);
+  }
   syncWindowHeight();
   const sessionId = consumePendingHistorySession("TASK");
   // 有心跳转的会话就先切过去，再补发甘特图里问的问题，避免问错会话

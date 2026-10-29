@@ -12,7 +12,7 @@ import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
 import { backFromScene } from "@/utils/scene-navigation";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
-import { consumePendingScheduleView } from "@/utils/schedule-view";
+import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
 
 /**
  * 横屏调度视图·预排草案（稿子 6464:150）——每个资源一行，行内平铺当班任务。
@@ -30,8 +30,8 @@ import { consumePendingScheduleView } from "@/utils/schedule-view";
  * 双指缩放：与甘特页同一套（useScheduleGestures 接管两指手势），按两指间距比例改「每小时像素宽」
  * （28–168px，基准 56px），捏合中心的时刻保持不动；刻度、任务条、竖网格线、箭头跟着实时重排。
  *
- * 横屏方式与 pages/schedule-gantt 一致：`useLandscape()` 默认把页面整体旋转 90° 模拟横屏
- * （设备竖屏持握、不申请全屏权限），离开页面自动还原；需要真锁方向时传 `{ lock: true }`。
+ * 横屏方式与 pages/schedule-gantt 一致：`useLandscape()` 先让宿主原生转屏（landscapeFullscreen），
+ * 原生不支持时把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
  *
  * 任务条样式（稿子 6464:150）：40 高、白底 + #F2F2F2 描边、圆角 6，
  * 条内两行（标题 11px Medium #1A1A1E + 时段 11px #999）；强调条为红描边 #C8201E（6464:358）。
@@ -39,8 +39,21 @@ import { consumePendingScheduleView } from "@/utils/schedule-view";
 
 defineOptions({ name: "SchedulePrePage" });
 
-/** 进入页面自动横屏（默认旋转模拟），离开时还原 */
-const { rotated, exitLandscape } = useLandscape();
+/**
+ * 进入页面自动横屏（原生优先、CSS 旋转兜底），离开时还原。
+ * 转屏 / 旋转会改变排程区实际宽度，必须把 measureLayout 挂到 onReflow：
+ * 否则箭头落点、滚动位置还是按转屏前的宽度算的（与甘特页保持一致）。
+ */
+const { rotated, exitLandscape } = useLandscape(measureLayout);
+
+/**
+ * 顶部状态栏空白：原生 landscapeFullscreen 转屏成功后 webview 铺满横屏、
+ * 状态栏压在页面顶边，顶栏要给状态栏让出这段高度；
+ * CSS 旋转模拟（rotated）时状态栏在设备的物理顶边（对应页面左侧），不需要留。
+ * 与甘特页 / 重排页同一口径（模板里 schedule__header 用的是这个 headerTopStyle）。
+ */
+const { safeTopPx } = useSafeArea();
+const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
 
 /**
  * 原生手势在真机不生效（旋转页面里浏览器不接管）：自己接管触摸，见 hooks/useScheduleGestures。
@@ -215,6 +228,8 @@ onBeforeUnmount(() => {
   // #ifdef H5
   window.removeEventListener("resize", measureLayout);
   // #endif
+  // 数据留到离开页面才清：页面存活期间（含刷新 / 重建）都能读到同一份
+  clearPendingScheduleView();
 });
 
 /** 预排只有一种任务条样式；highlight 对应稿子里那条红描边的强调条 */
@@ -258,10 +273,11 @@ function barStyle(bar: ScheduleBar) {
  * AI 下发的预排数据（COMPONENT scene=task / type=gantt，viewType=pre → data）
  * ------------------------------------------------------------------ */
 /**
- * 气泡入口卡点进来时写下的整包 data，打开本页取走（取完即清）；
+ * 气泡入口卡点进来时写下的整包 data，打开本页读出来（读不删，卸载时才清：
+ * 刷新 / 宿主重建 webview 后还能渲染同一份）；
  * 没有数据（比如兜底跳转进来、或接口没下发 rows）就渲染空视图。
  */
-const viewPayload = consumePendingScheduleView();
+const viewPayload = readPendingScheduleView();
 
 /** 接口还没排时间的条：每条按 2 小时一节依次排开 */
 const UNSCHEDULED_SLOT_MIN = 2 * 60;

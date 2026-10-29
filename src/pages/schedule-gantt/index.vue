@@ -11,10 +11,10 @@ import { useLandscape } from "@/hooks/useLandscape";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
-import { getPhoneInfo } from "@/utils/platform/mpaas";
+import { warmPhoneInfo } from "@/utils/landscape-device";
 import { backFromScene } from "@/utils/scene-navigation";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
-import { consumePendingScheduleView } from "@/utils/schedule-view";
+import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
 
 /**
  * 横屏调度视图（稿子 6832:13）——每个资源一行，行内平铺当班任务，任务条按状态配色。
@@ -28,8 +28,8 @@ import { consumePendingScheduleView } from "@/utils/schedule-view";
  * - 右下角输入条（components/schedule-ask-bar）：问的问题带回作业协同对话页再发送；
  * - 点击任务条：右侧滑出任务详情面板（6832:292）。
  *
- * 横屏方式与其它调度视图一致：`useLandscape()` 默认把页面整体旋转 90° 模拟横屏
- * （设备竖屏持握、不申请全屏权限），离开页面自动还原；需要真锁方向时传 `{ lock: true }`。
+ * 横屏方式与其它调度视图一致：`useLandscape()` 先让宿主原生转屏（landscapeFullscreen），
+ * 原生不支持时把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
  *
  * 任务条（稿子 6832:13）：40 高、圆角 6、条内两行（任务名 + `[状态]起止`），按状态四态配色：
  * 执行中 #ECF5FF + #FFFFFF 描边 / 已完成 #F0F0F0 / 待执行 #FFFFFF + #F2F2F2 / 已逾期 #FFFFFF + #767676 虚线。
@@ -82,11 +82,12 @@ let DAY_END_MIN = DESIGN_DAY_END_MIN;
  * AI 下发的调度视图数据（COMPONENT scene=task / type=gantt → data）
  * ------------------------------------------------------------------ */
 /**
- * 气泡入口卡点进来时写下的整包 data，打开本页取走（取完即清）；
+ * 气泡入口卡点进来时写下的整包 data，打开本页读出来（读不删，卸载时才清：
+ * 刷新 / 宿主重建 webview 后还能渲染同一份）；
  * 没有数据（比如从作业协同页的入口卡直接进来、或接口没下发 rows）就渲染空视图。
  * 声明放在最前面：下面判断「当前时间虚线要不要画」的 computed 要读 viewType。
  */
-const viewPayload = consumePendingScheduleView();
+const viewPayload = readPendingScheduleView();
 
 /* ---------- 时间线（稿子 6832:208 虚线 / 6832:209 胶囊）----------
    取**系统当前时间**，每 30 秒刷新一次；任务状态优先用数据里的 status，没给才按当前时刻推。 */
@@ -281,13 +282,14 @@ function measureLayout() {
 }
 
 /**
- * 进页面时向宿主取一次设备信息（getPhoneInfo，仅 mPaaS 容器内有值）。
- * 先原样打印出来便于对着真机日志确认机型；后续按 model / manufacturer / sdkInt 做机型适配时读 phoneInfo。
+ * 进页面时取一次设备信息（getPhoneInfo，仅 mPaaS 容器内有值）。
+ * 与横屏判定（useLandscape → utils/landscape-device）共用同一份缓存，不会重复打原生接口；
+ * 先原样打印出来便于对着真机日志确认机型（智慧屏 / 电视这类机型会跳过转屏，见该文件的白名单）。
  */
 const phoneInfo = ref<NativePhoneInfo | null>(null);
 
 async function loadPhoneInfo() {
-  const info = await getPhoneInfo();
+  const info = await warmPhoneInfo();
   phoneInfo.value = info;
   // 用 console.log 而不是 logger.info：产物里 info 会被日志级别过滤掉，真机上就看不到了
   console.log("[schedule-gantt][getPhoneInfo] 设备信息", info);
@@ -315,6 +317,8 @@ onBeforeUnmount(() => {
   // #ifdef H5
   window.removeEventListener("resize", measureLayout);
   // #endif
+  // 数据留到离开页面才清：页面存活期间（含刷新 / 重建）都能读到同一份
+  clearPendingScheduleView();
 });
 
 /** 任务状态（稿子 6832:13 图例四态；「已取消」只出现在重排页，这里用不到） */
