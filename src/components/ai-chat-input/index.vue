@@ -5,6 +5,10 @@ import AiAttachmentPicker from "@/components/ai-attachment-picker/index.vue";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { createLogger } from "@/utils/logger";
+import { getMicrophoneVolume } from "@/utils/platform/mpaas";
+
+const logger = createLogger("chat-input");
 
 const props = defineProps({
   modelValue: { type: String, default: "" },
@@ -138,16 +142,19 @@ const VOICE_WAVE_BARS = [
 ];
 
 /**
- * 声纹动效：设计稿这 40 根是静态高度，这里作为「静止基线」，
- * 录音中让它们像真实电平表一样起伏 —— 逐根错开时长与相位，
- * 避免整排同频齐闪（动画只动 transform: scaleY，不改 height，不会引发重排）。
+ * 声纹动效参数：设计稿这 40 根是静态高度，这里只当「基线」，
+ * 录音中由 JS 逐根算系数（见 tickBarScales），模板再乘回基线高度。
+ *
+ * - gain：这一根对音量的响应强度，0.85~1.34 伪随机打散，避免整排等幅；
+ * - speed / phase：各自的抖动角速度与初相，频率错开后才像真实电平表，
+ *   而不是整排一起呼吸。
  */
 const VOICE_WAVE_BARS_MOTION = VOICE_WAVE_BARS.map((height, index) => ({
   height,
-  /** 0.82 ~ 1.57s：两组步进打散节奏，避免整排「一起呼吸」 */
-  duration: Number((0.82 + (index % 6) * 0.12 + (index % 4) * 0.05).toFixed(2)),
-  /** 负延迟：一出现就各自处在不同相位，不会整排从同一点起跳 */
-  delay: Number((-((index * 0.087) % 1.6)).toFixed(2)),
+  gain: Number((0.85 + ((index * 37) % 50) / 100).toFixed(2)),
+  /** rad/s：约 4~7Hz，接近说话时声纹的抖动手感 */
+  speed: Number((24 + (index % 7) * 2.4).toFixed(1)),
+  phase: Number((index * 0.73).toFixed(2)),
 }));
 
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
@@ -290,6 +297,133 @@ const isVoicePanelOpen = computed(
 );
 
 watch(isVoicePanelOpen, open => emit("voice-panel-open", open));
+
+/**
+ * 按住说话的实时音量：录音期间每 100ms 调一次
+ * AlipayJSBridge.call("microphoneVolume", {}, (res) => {})，
+ * 用 res.level(0~1) 驱动底部 40 根声纹（豆包那种「声音越大跳得越高」）。
+ * - level 缺失时用 amplitude / 32767 兜底；
+ * - 桥不可用 / 宿主没实现时返回 null，声纹保留轻幅呼吸，录制本身完全不受影响。
+ */
+const micLevel = ref<number | null>(null);
+let micLevelPolling = false;
+let micLevelTimer: ReturnType<typeof setTimeout> | undefined;
+/** 连续拿不到电平的次数：宿主没实现这个 API 时，别每 100ms 都去等一次超时 */
+let micLevelMisses = 0;
+
+async function pollMicLevel() {
+  if (!micLevelPolling) return;
+  const level = await getMicrophoneVolume();
+  if (!micLevelPolling) return;
+
+  if (level == null) {
+    micLevelMisses += 1;
+    if (micLevelMisses >= 3) {
+      stopMicLevelPolling();
+      return;
+    }
+    micLevelTimer = setTimeout(pollMicLevel, 300);
+    return;
+  }
+
+  micLevelMisses = 0;
+  micLevel.value = level;
+  micLevelTimer = setTimeout(pollMicLevel, 100);
+}
+
+/**
+ * 逐根声纹的起伏系数，rAF 里每帧算一次（模板里乘到每根的设计高度上）：
+ *   幅度 = f(平滑后的电平)          —— 音量决定整体跳多高，跟着声音走
+ *        × sin(t·speed + phase)      —— 决定这一根此刻在起还是在落
+ *        × gain                      —— 逐根强弱错开，避免整排等幅齐闪
+ * level = 0（静音）时仍有 0.4~0.74 的轻幅呼吸；level = 1 时最高约 2.2 倍基线。
+ *
+ * 走「高度」而不是 transform：高度是内联样式里最稳的一路，
+ * 不会被上层 CSS animation 覆盖、也不依赖自定义属性；
+ * 40 根小竖条每帧改高度的布局开销可以忽略，而 transform 一旦被覆盖就是彻底不动且不报错。
+ */
+const barScales = ref<number[]>(
+  VOICE_WAVE_BARS_MOTION.map(() => 1),
+);
+/** 平滑后的电平（0~1）：声纹幅度、水面起伏都读它 */
+const barLevel = ref(0);
+let smoothedLevel = 0;
+let barFrameId = 0;
+let lastBarFrameAt = 0;
+/** ~30fps：看着够顺滑，又不用每帧都去算 40 个节点（低端 WebView 也能扛） */
+const BAR_FRAME_MS = 33;
+
+function tickBarScales(now: number) {
+  barFrameId = requestAnimationFrame(tickBarScales);
+  if (now - lastBarFrameAt < BAR_FRAME_MS) return;
+  lastBarFrameAt = now;
+
+  const target = micLevel.value ?? 0;
+  smoothedLevel += (target - smoothedLevel) * 0.35;
+  if (Math.abs(target - smoothedLevel) < 0.003) smoothedLevel = target;
+  barLevel.value = Number(smoothedLevel.toFixed(3));
+
+  const t = now / 1000;
+  barScales.value = VOICE_WAVE_BARS_MOTION.map((bar) => {
+    // 0.3~1 的抖动：留一点底，静音时不会整排僵住
+    const wave = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * bar.speed + bar.phase));
+    const scale = 0.4 + bar.gain * (0.25 + smoothedLevel * 1.45) * wave;
+    return Number(Math.min(2.2, scale).toFixed(3));
+  });
+}
+
+function startMicLevelAnimation() {
+  // 个别内核没有 rAF 时保持设计稿静态基线，别抛错。
+  // 注意：这是功能性反馈（音量表），系统开了「减少动态效果」也照样要动 ——
+  // 早先按 prefers-reduced-motion 一刀切停掉，表现就是「数据在跳、声纹不动」。
+  if (barFrameId || typeof requestAnimationFrame !== "function") return;
+  lastBarFrameAt = 0;
+  barFrameId = requestAnimationFrame(tickBarScales);
+  logger.debug("[voice] 声纹动效启动", {
+    reducedMotion: typeof window !== "undefined"
+      && typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  });
+}
+
+function stopMicLevelAnimation() {
+  if (barFrameId) {
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(barFrameId);
+    barFrameId = 0;
+  }
+  smoothedLevel = 0;
+  barLevel.value = 0;
+  barScales.value = VOICE_WAVE_BARS_MOTION.map(() => 1);
+}
+
+function startMicLevelPolling() {
+  startMicLevelAnimation();
+  if (micLevelPolling) return;
+  micLevelPolling = true;
+  micLevelMisses = 0;
+  void pollMicLevel();
+}
+
+function stopMicLevelPolling() {
+  micLevelPolling = false;
+  micLevelMisses = 0;
+  if (micLevelTimer) {
+    clearTimeout(micLevelTimer);
+    micLevelTimer = undefined;
+  }
+  micLevel.value = null;
+  stopMicLevelAnimation();
+}
+
+watch(
+  () => inputMode.value === "voice" && voicePhase.value === "recording",
+  (recording) => {
+    if (recording) startMicLevelPolling();
+    else stopMicLevelPolling();
+  },
+);
+
+onBeforeUnmount(stopMicLevelPolling);
 
 function onDraftInput(e: { detail: { value: string } }) {
   draft.value = e.detail.value;
@@ -505,6 +639,7 @@ onBeforeUnmount(() => {
             <view
               class="voice-panel__wave"
               :class="{ 'voice-panel__wave--paused': voice.cancelling }"
+              :style="{ transform: `scaleY(${(1 + barLevel * 0.08).toFixed(3)})` }"
               aria-hidden="true"
             />
 
@@ -515,16 +650,15 @@ onBeforeUnmount(() => {
             </text>
 
             <!-- ④ 1291:1 Frame 114（195×20.76 @91,733）：40 根声纹，正常白、取消态红。
-                 高度取设计稿静态值做基线，录音中按 scaleY 起伏（时长 / 相位逐根错开） -->
+                 设计稿高度只做基线，录音中逐根乘 barScales 起伏（改的是 height，
+                 不是 transform：声音大 → 整排变高，每根按自己的 speed / phase 起落） -->
             <view class="voice-panel__bars" aria-hidden="true">
               <view
                 v-for="(bar, index) in VOICE_WAVE_BARS_MOTION"
                 :key="index"
                 class="voice-panel__bar"
                 :style="{
-                  height: `${bar.height}rpx`,
-                  animationDuration: `${bar.duration}s`,
-                  animationDelay: `${bar.delay}s`,
+                  height: `${(bar.height * (barScales[index] ?? 1)).toFixed(2)}rpx`,
                 }"
               />
             </view>
@@ -973,7 +1107,9 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, rgb(239 239 238 / 0%) 2.9%, #0f7eee 46%);
   filter: blur(24rpx); /* σ = 12px（设计稿图层模糊 37 的等效值） */
   animation: voice-water-breathe 5.6s ease-in-out infinite alternate;
-  will-change: opacity;
+  /* 音量大时整片水面从底边往上"涨"一点（模板内联 scaleY，最高约 +8%） */
+  transform-origin: bottom center;
+  will-change: opacity, transform;
   pointer-events: none;
 }
 
@@ -989,18 +1125,6 @@ onBeforeUnmount(() => {
   }
   to {
     opacity: 1;
-  }
-}
-
-/* 系统偏好减少动效时，水面与声纹都回到设计稿静态基线 */
-@media (prefers-reduced-motion: reduce) {
-  .voice-panel__wave {
-    animation: none;
-  }
-
-  .voice-panel__bar {
-    animation: none;
-    transform: none;
   }
 }
 
@@ -1035,51 +1159,22 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 6rpx; /* 3px */
+  /* 起伏交给每根自己（模板按实时电平内联高度），容器只管布局；
+     整排一起缩放就成了「整体放大缩小」，不是豆包那种逐根跳动。 */
   pointer-events: none;
 }
 
-/* 声纹条：设计稿是 40 根静态白线，这里只给它加上「电平起伏」——
-   以每根的设计高度为基线做 scaleY（0.45 ~ 1.14，围绕中线上下伸缩），
-   时长与相位由模板按 index 内联，整排像真实麦克风电平一样错相跳动；
-   只动 transform，不触发重排，也不改变设计稿那条 741.6 的中线。
-   最高一根 33.5rpx × 1.14 ≈ 38rpx，仍在 41.5rpx 的容器内，不会溢出。 */
+/* 声纹条：设计稿是 40 根静态白线，这里的高度只做基线，
+   录音中由模板逐根乘 barScales 改成实际高度（JS 逐帧算，~30fps）。
+   别再挂 CSS animation —— 动画会盖掉内联样式，电平就白算了。
+   最高一根 33.5rpx × 2.2 ≈ 74rpx，会溢出 41.5rpx 的容器，
+   容器不设 overflow: hidden，让它照常画出去就行。 */
 .voice-panel__bar {
   flex: 0 0 auto;
   width: 4rpx; /* 2px */
+  min-height: 2rpx; /* 缩放到底也别彻底消失 */
   border-radius: 4rpx;
   background: #ffffff;
-  transform-origin: center;
-  animation: voice-bar-pulse 1.06s ease-in-out infinite;
-}
-
-@keyframes voice-bar-pulse {
-  0% {
-    transform: scaleY(0.45);
-  }
-
-  16% {
-    transform: scaleY(1);
-  }
-
-  34% {
-    transform: scaleY(0.62);
-  }
-
-  52% {
-    transform: scaleY(1.14);
-  }
-
-  70% {
-    transform: scaleY(0.78);
-  }
-
-  86% {
-    transform: scaleY(1.06);
-  }
-
-  100% {
-    transform: scaleY(0.45);
-  }
 }
 
 /* ---------- 取消态（1204:740）：提示行 + 声纹 + 水面三处同时转红 ---------- */
