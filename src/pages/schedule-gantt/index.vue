@@ -190,18 +190,15 @@ function onTimelineScroll(event: { detail?: { scrollLeft?: number } }) {
 function onTimelinePinch({ scale, contentX, localX }: SchedulePinchEvent) {
   const prev = hourWidth.value;
   const next = Math.min(Math.max(prev * scale, HOUR_WIDTH_MIN), HOUR_WIDTH_MAX);
-  if (next === prev) return;
+  if (next === prev) return Math.round(contentX - localX);
   hourWidth.value = next;
   const ratio = next / prev;
-  // 内容宽随缩放变化：等新宽度生效后再补滚动位置，否则会被旧宽度夹住
-  nextTick(() => {
-    const max = Math.max(0, timelineWidth.value - gridWidth.value);
-    smoothScroll.value = false;
-    applyScroll(Math.min(Math.max(contentX * ratio - localX, 0), max));
-    nextTick(() => {
-      smoothScroll.value = true;
-    });
-  });
+  const max = Math.max(0, timelineWidth.value - gridWidth.value);
+  const target = Math.min(Math.max(contentX * ratio - localX, 0), max);
+  // 内容宽随缩放变化：等新宽度渲染后再补滚动位置，否则会被旧宽度夹住；
+  // 目标值先同步返回给手势层维护缩放锚点，连续缩放时中心不漂移
+  nextTick(() => applyScroll(target));
+  return Math.round(target);
 }
 
 function measureGrid() {
@@ -265,6 +262,13 @@ useScheduleGestures({
   // 双指捏合 → 时间轴缩放：不传 onPinch 时 hook 根本不会接管两指手势，
   // 表现就是「缩小放大失效」（见 hooks/useScheduleGestures 的 onStart/onMove）
   onPinch: onTimelinePinch,
+  // 捏合期间关掉滚动动画，松手再恢复：避免连续缩放时滚动动画反复起停造成闪烁
+  onPinchStart: () => {
+    smoothScroll.value = false;
+  },
+  onPinchEnd: () => {
+    smoothScroll.value = true;
+  },
   onRowsOffset: (offset) => {
     rowsOffsetY.value = offset;
     syncRowTops();
@@ -1135,6 +1139,8 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 /* 刻度条：固定在排程区上沿（在滚动容器外），滚动时标签溢出部分直接裁掉 */
 .schedule__ruler {
   position: relative;
+  /* 高于左右隐藏箭头（z-index 5）：上下滑动时箭头会随行上移到刻度条区域，抬高这里让时间轴始终压在箭头之上 */
+  z-index: 6;
   flex-shrink: 0;
   box-sizing: border-box;
   height: 45px;

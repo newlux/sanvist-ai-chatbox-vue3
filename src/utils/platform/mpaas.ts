@@ -210,6 +210,24 @@ export function notifyTokenExpiration() {
 }
 
 /**
+ * 场景窗口（pushWindow）的容器参数：关掉宿主原生标题栏 / 右上角菜单。
+ *
+ * 任务协同 / 作业指导 / 听汇报 / 维修助手这些页面都是从首页 pushWindow 出来的独立窗口，
+ * 头部一律由 H5 自己画（悬浮头部 + 顶部毛玻璃渐隐），不需要宿主再叠一条原生导航栏。
+ * iOS 容器默认会给窗口加一条白色原生导航栏（没有标题，只有左上角返回箭头），
+ * 表现就是页面顶部多出一条白带 + 一个返回按钮，还把页面整体往下压，
+ * 和页面自己按 `statusBarHeight` 留的状态栏空白叠成两层。
+ *
+ * 参数按 mPaaS H5 容器启动参数的口径传（YES / NO 字符串）；宿主没实现时会被忽略，
+ * 需要原生侧配合（push 出来的 H5 页面隐藏导航栏 / navigationBarHidden）。
+ */
+const SCENE_WINDOW_CONTAINER_PARAMS = {
+  showTitleBar: "NO",
+  readTitle: "NO",
+  showOptionMenu: "NO",
+} as const;
+
+/**
  * pushWindow 成功时不保证回调；仅在明确失败时降级，避免超时后二次跳转。
  * 不记录 URL（其中可能含宿主下发的鉴权参数）。
  */
@@ -226,7 +244,7 @@ export async function openWebview(url: string, onFailure: () => void) {
     onFailure();
   };
   try {
-    bridge.call('pushWindow', { url }, (result) => {
+    bridge.call('pushWindow', { url, param: { ...SCENE_WINDOW_CONTAINER_PARAMS } }, (result) => {
       if (Number(result?.error ?? result?.errorCode ?? 0) || result?.success === false) fallback();
     });
   } catch {
