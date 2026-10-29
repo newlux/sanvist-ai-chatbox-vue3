@@ -32,8 +32,6 @@ const props = defineProps({
   voiceKeyboardHeight: { type: Number, default: 0 },
   /** 顶部安全区像素值，header 定位用。 */
   safeTopPx: { type: Number, default: 0 },
-  /** 语音播报中：底部换成与听播页 / 起始页一致的三色带波纹。 */
-  speaking: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -123,7 +121,6 @@ const headerTopStyle = computed(() => ({ top: `calc(${props.safeTopPx}px + 8rpx)
         :model-value="inputText"
         :attachment-disabled="true"
         :compact-voice-listening="true"
-        :speaking="speaking"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"

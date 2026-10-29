@@ -21,16 +21,6 @@ const props = defineProps({
    */
   compactVoiceListening: { type: Boolean, default: false },
   /**
-   * 输入栏下方是否铺设计稿的底部氛围图形（326:1336 Frame 45）。
-   * 只在首页问答页开启，其它复用本组件的页面保持原样。
-   */
-  bottomGradient: { type: Boolean, default: false },
-  /**
-   * 临时收掉底部氛围图形（首页「正在思考中」用）：
-   * 发起提问后、还没出字的这段时间渐变不出现，出字进入「回答中」再按原逻辑显示。
-   */
-  hideBottomArt: { type: Boolean, default: false },
-  /**
    * 语音播报（TTS）进行中：底部换成「请选择你的身份吧」页同一套三色带波纹。
    * 播报期间常态那条淡蓝波浪让位，避免两种底纹叠在一起。
    */
@@ -53,6 +43,7 @@ const emit = defineEmits([
   "dock-height-change",
   "recognize-begin",
   "recognize-fail",
+  "voice-panel-open",
 ]);
 
 const { t } = useI18n();
@@ -97,6 +88,67 @@ const {
  */
 const canSend = computed(() => Boolean(draft.value.trim() || attachments.value.length));
 const showSendButton = computed(() => !props.isLoading && canSend.value);
+
+/**
+ * 录音态底部的 40 根声纹（设计稿 1291:1 Frame 114）：
+ * 每根 2px 宽、间距 2px，高度逐根取自设计稿（px × 2 = rpx），中间高两端低。
+ * 顺序与原节点一致，不做对称重排。
+ */
+const VOICE_WAVE_BARS = [
+  5.6,
+  20.5,
+  15.6,
+  11.2,
+  6.7,
+  20.5,
+  8.9,
+  11.2,
+  8.9,
+  11.2,
+  20.5,
+  4.5,
+  4.5,
+  20.5,
+  26.8,
+  8.9,
+  20.5,
+  4.5,
+  4.5,
+  4.5,
+  20.5,
+  4.5,
+  20.5,
+  4.5,
+  20.5,
+  4.5,
+  4.5,
+  20.5,
+  8.9,
+  8.9,
+  8.9,
+  20.5,
+  33.5,
+  13,
+  24.2,
+  5.6,
+  5.6,
+  20.5,
+  15.6,
+  26.8,
+];
+
+/**
+ * 声纹动效：设计稿这 40 根是静态高度，这里作为「静止基线」，
+ * 录音中让它们像真实电平表一样起伏 —— 逐根错开时长与相位，
+ * 避免整排同频齐闪（动画只动 transform: scaleY，不改 height，不会引发重排）。
+ */
+const VOICE_WAVE_BARS_MOTION = VOICE_WAVE_BARS.map((height, index) => ({
+  height,
+  /** 0.82 ~ 1.57s：两组步进打散节奏，避免整排「一起呼吸」 */
+  duration: Number((0.82 + (index % 6) * 0.12 + (index % 4) * 0.05).toFixed(2)),
+  /** 负延迟：一出现就各自处在不同相位，不会整排从同一点起跳 */
+  delay: Number((-((index * 0.087) % 1.6)).toFixed(2)),
+}));
 
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
 const voiceKeyboardOpen = computed(() => props.voiceKeyboardHeight > 0);
@@ -224,6 +276,21 @@ const {
   emitVoiceEvent: (event, payload) => emit(event, payload),
 });
 
+/**
+ * 紧凑录音态底部面板（设计稿 1204:467 录动态）是否展开。
+ * 设计稿这一屏底部只有「水面 + 提示行 + 声纹」，面板一出现，
+ * 底部导航（听汇报 / 作业指导…）、输入栏、免责文案都要让位，
+ * 所以把开合状态同步给页面，由页面决定哪些贴底元素要收起。
+ */
+const isVoicePanelOpen = computed(
+  () =>
+    props.compactVoiceListening &&
+    inputMode.value === "voice" &&
+    voicePhase.value === "recording",
+);
+
+watch(isVoicePanelOpen, open => emit("voice-panel-open", open));
+
 function onDraftInput(e: { detail: { value: string } }) {
   draft.value = e.detail.value;
   emit("update:modelValue", draft.value);
@@ -278,25 +345,6 @@ function onToggleInputModeUi() {
   emit("input-blur");
   resetVoiceKeyboardState();
   onToggleInputMode();
-}
-
-/**
- * 语音胶囊左侧键盘段的点击：先让右侧白色语音段往右滑出（纯视觉过渡），
- * 滑完再切到文本输入 —— 直接切换会显得整块胶囊"啪"地消失。
- */
-const VOICE_PILL_SLIDE_MS = 180;
-const voicePillSlidingOut = ref(false);
-let voicePillSlideTimer: ReturnType<typeof setTimeout> | null = null;
-
-function onVoicePillKeyboardTap() {
-  // 手势进行中或正在滑出时不重复触发
-  if (voicePillSlidingOut.value || voice.gesture.active) return;
-  voicePillSlidingOut.value = true;
-  voicePillSlideTimer = setTimeout(() => {
-    voicePillSlideTimer = null;
-    voicePillSlidingOut.value = false;
-    onToggleInputModeUi();
-  }, VOICE_PILL_SLIDE_MS);
 }
 
 function onTrySend() {
@@ -402,8 +450,6 @@ onMounted(() => nextTick(observeComposer));
 
 onBeforeUnmount(() => {
   if (maskLingerTimer) clearTimeout(maskLingerTimer);
-  if (voicePillSlideTimer) clearTimeout(voicePillSlideTimer);
-  voicePillSlideTimer = null;
   composerResizeObserver?.disconnect();
   composerResizeObserver = null;
 });
@@ -414,7 +460,7 @@ onBeforeUnmount(() => {
     class="chat-input"
     :class="{
       'chat-input--keyboard-open': keyboardOpen || voiceKeyboardOpen,
-      'chat-input--voice-panel-open': compactVoiceListening && inputMode === 'voice' && voicePhase === 'recording',
+      'chat-input--voice-panel-open': isVoicePanelOpen,
     }"
     :style="inputLiftStyle"
   >
@@ -437,24 +483,50 @@ onBeforeUnmount(() => {
         class="voice-sheet"
         :class="compactVoiceListening ? 'voice-sheet--listening-compact' : 'voice-sheet--listening'"
       >
-        <view class="voice-listening" :class="{ 'voice-listening--compact': compactVoiceListening }">
-          <!-- ===== 紧凑态（首页）：只保留底部淡入白 + 水面波纹两层装饰，
-                 与「Hey,SANI」起始页按住时的底部视觉完全一致；
-                 提示行（11101:689）、麦克风盘（11101:698）、粉色柔光（11332:104）都不再展示 ===== -->
+        <view
+          class="voice-listening"
+          :class="{
+            'voice-listening--compact': compactVoiceListening,
+            'voice-listening--cancelling': voice.cancelling,
+          }"
+        >
+          <!-- ===== 紧凑态（首页 / 听播 / 异常列表追问）：设计稿 1204:467 录动态底部 ===== -->
           <template v-if="compactVoiceListening">
-            <!-- 11332:38 Rectangle 103（373×280 @ (2,532)）：#FAFAFA 渐隐遮罩，页面内容向上淡入白色 -->
+            <!-- ① 1204:725 Rectangle 105（375×250 @562）+ 1204:609 Rectangle 103（375×166 @646）：
+                两层同色 #FAFAFA 渐隐，页面内容向上淡入白色（见 .voice-panel__fade） -->
             <view class="voice-panel__fade" aria-hidden="true" />
 
-            <!-- 11332:91 Frame 45（375×118 @ y694）：底部柔光波浪。
-                 11332:97 Rectangle 106 的水面色带被 11332:94 Vector 87 波形作 alpha 遮罩裁出软边。
-                 后层同轮廓、更低透明度、更慢反向涨落，叠出液面层次 -->
+            <!-- ② 录音态 1204:715 Frame 85（375×166 @646）→ Mask group：
+                 遮罩 1204:719 Vector 87（449×195 @ −38,655，图层模糊 50）只裁形、不绘制；
+                 真正上色的是 1302:3 Ellipse 75（434×341 @ −31,655），
+                 #EFEFEE(α0) → #0F7EEE 纵向渐变 + 图层模糊 37（详见 .voice-panel__wave）。
+                 取消态 1204:740 同结构，但蓝色填充被关掉、换成 #E02E2A 淡水红（434×365），
+                 见 .voice-listening--cancelling .voice-panel__wave -->
             <view
               class="voice-panel__wave"
               :class="{ 'voice-panel__wave--paused': voice.cancelling }"
               aria-hidden="true"
-            >
-              <view class="voice-panel__wave-band voice-panel__wave-band--back" />
-              <view class="voice-panel__wave-band" />
+            />
+
+            <!-- ③ 录音态 1204:722（119×20 @128,695，14px / #6D8AA6，左对齐于居中框内）；
+                 取消态 1291:65（56×20 @159,695，14px / #C8201E，居中，文案「松手取消」） -->
+            <text class="voice-panel__hint">
+              {{ voice.cancelling ? t("input-voice-panel-cancel") : t("input-voice-tip") }}
+            </text>
+
+            <!-- ④ 1291:1 Frame 114（195×20.76 @91,733）：40 根声纹，正常白、取消态红。
+                 高度取设计稿静态值做基线，录音中按 scaleY 起伏（时长 / 相位逐根错开） -->
+            <view class="voice-panel__bars" aria-hidden="true">
+              <view
+                v-for="(bar, index) in VOICE_WAVE_BARS_MOTION"
+                :key="index"
+                class="voice-panel__bar"
+                :style="{
+                  height: `${bar.height}rpx`,
+                  animationDuration: `${bar.duration}s`,
+                  animationDelay: `${bar.delay}s`,
+                }"
+              />
             </view>
           </template>
 
@@ -603,29 +675,6 @@ onBeforeUnmount(() => {
         </view>
       </view>
     </view>
-    <!-- 底部氛围图形：设计稿 326:1336 Frame 45（375×118），压在输入栏下面。
-         语音播报期间让位给三色带波纹，录音期间让位给录音面板自带的同一张底部波浪，
-         思考中（hideBottomArt）同样先收起来，出字后自动回来 -->
-    <view
-      v-if="bottomGradient && !speaking && !keyboardOpen && !voiceKeyboardOpen && voicePhase !== 'recording' && !hideBottomArt"
-      class="chat-input__bottom-art"
-      aria-hidden="true"
-    />
-
-    <!-- 语音播报态底部：与「请选择你的身份吧」页（welcome-visitor__glow-voice）同一套
-         三色带 + 波形遮罩 + 起伏动效，播报一停就消失、常态氛围交给 bottomGradient。
-         不依赖 bottomGradient：听播页只开播报态、不铺常态波浪 -->
-    <view
-      v-if="speaking && !keyboardOpen && !voiceKeyboardOpen"
-      class="chat-input__speaking-art"
-      aria-hidden="true"
-    >
-      <view class="chat-input__speaking-wave">
-        <view class="chat-input__speaking-band chat-input__speaking-band--back" />
-        <view class="chat-input__speaking-band" />
-      </view>
-    </view>
-
     <!-- 始终 fixed 贴底；键盘弹起时用 bottom 抬到键盘上方 -->
     <view v-if="!voiceKeyboardOpen" ref="dockRef" class="chat-input__dock">
       <!-- 页面自定义的贴底区域，会一起计入输入栏高度 -->
@@ -643,75 +692,53 @@ onBeforeUnmount(() => {
         底部输入栏：默认语音、键盘文本、发送三种状态。
         文本态空闲（input-bar--plain）走灰色胶囊样式：无文字时右侧是声波（切语音），
         有文字时右侧是黑圆上箭头（发送）。
-        回答生成中整条输入栏（含模式切换的键盘图标、停止图标）整体隐藏，不再显示任何提示。
+        回答生成中（思考中）整条输入栏照常展示，只把右侧的键盘/发送换成黑色停止按钮，
+        「按住说话」置灰并暂时禁用；点停止或生成结束即恢复。
       -->
       <view
-        v-if="!isLoading"
         class="input-bar"
         :class="{
           'input-bar--text': inputMode === 'text',
           'input-bar--plain': inputMode === 'text' && !isLoading && !voice.isRecognizing,
-          'input-bar--voice-idle': inputMode === 'voice' && !showSendButton && !isLoading,
         }"
       >
-        <!-- 左侧：附件入口 -->
+        <!-- 左侧：附件入口（思考中同样展示） -->
         <view
-          v-if="!(attachmentDisabled || isLoading || voice.isRecognizing)"
+          v-if="!(attachmentDisabled || voice.isRecognizing)"
           class="input-bar__plus"
           @tap="onOpenAttachmentPicker"
         >
           <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
         </view>
 
-        <!-- 语音态：设计稿 326:1335;85:191 语音胶囊（126×44，左键盘段 + 右白色语音段） -->
+        <!--
+          语音态：设计稿 1204:337 Toolbar（375×64，padding 8 / 20，gap 10）
+          加号（左 44×44） + 按住说话框（中 219×44，r45，#0D0D0D 3.61%） + 键盘（右 44×44）
+          录音手势直接挂在「按住说话」这块框上，不再用原来的小语音段图标
+        -->
         <view
           v-if="inputMode === 'voice'"
-          class="input-bar__voice-pill"
-          :class="{ 'input-bar__voice-pill--status': isLoading || voice.isRecognizing }"
+          class="input-bar__hold"
+          :class="{ 'input-bar__hold--disabled': isLoading }"
+          @touchstart.prevent="onVoicePillTouchStart"
+          @touchmove.prevent="updateVoiceGesture"
+          @touchend.prevent="onVoicePillTouchEnd"
+          @touchcancel.prevent="onVoicePillTouchCancel"
+          @mousedown.prevent="onVoicePillTouchStart"
+          @mousemove.prevent="updateVoiceGesture"
+          @mouseup.prevent="onVoicePillTouchEnd"
         >
-          <template v-if="isLoading || voice.isRecognizing">
-            <!-- 生成中不再重复一行「回答生成中...」：状态已由顶部灵动岛胶囊承担，
-                 这里只保留语音识别中的必要反馈 -->
-            <text v-if="voice.isRecognizing" class="input-bar__voice-hint">
-              {{ t("input-recognizing") }}
-            </text>
-          </template>
-          <template v-else>
-            <!-- 键盘段：设计稿 48×36 / #F3F3F3，切到文字输入 -->
-            <view
-              v-if="!showSendButton"
-              class="input-bar__voice-keyboard"
-              :class="{ 'input-bar__voice-keyboard--disabled': voice.gesture.active }"
-              @tap="onVoicePillKeyboardTap"
-            >
-              <image src="@/assets/img/icon-keyboard-dark.svg" mode="aspectFit" />
-            </view>
-            <!-- 语音段：设计稿 48×36 / #FFFFFF，按住说话 -->
-            <view
-              class="input-bar__voice-hold"
-              :class="{ 'input-bar__voice-hold--leaving': voicePillSlidingOut }"
-              @touchstart.prevent="onVoicePillTouchStart"
-              @touchmove.prevent="updateVoiceGesture"
-              @touchend.prevent="onVoicePillTouchEnd"
-              @touchcancel.prevent="onVoicePillTouchCancel"
-              @mousedown.prevent="onVoicePillTouchStart"
-              @mousemove.prevent="updateVoiceGesture"
-              @mouseup.prevent="onVoicePillTouchEnd"
-            >
-              <image
-                class="input-bar__voice-wave"
-                src="@/assets/img/icon-voice-wave.svg"
-                mode="aspectFit"
-              />
-            </view>
-          </template>
+          <!-- 识别中占用同一块框，文案换成识别态 -->
+          <text v-if="voice.isRecognizing" class="input-bar__hold-hint">
+            {{ t("input-recognizing") }}
+          </text>
+          <text v-else class="input-bar__hold-label">{{ t("input-hold-to-talk") }}</text>
         </view>
         <view
           v-else
           class="input-bar__text-field"
           :class="{
-            'input-bar__text-field--padding':
-              attachmentDisabled || isLoading || voice.isRecognizing,
+            'input-bar__text-field--padding': attachmentDisabled || voice.isRecognizing,
           }"
         >
           <textarea
@@ -735,36 +762,27 @@ onBeforeUnmount(() => {
           />
         </view>
 
-        <!-- 文本态 / 语音生成中的切换入口（空闲语音态的键盘入口已收进胶囊左侧，见设计稿 85:191） -->
+        <!-- 右侧：生成中只有一个黑色停止按钮（#0D0D0D 圆 + 白色圆角方块），
+             其余时间才是「键盘 / 声波」切换钮或发送钮 -->
+        <view v-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
+          <image src="@/assets/img/icon-stop-circle.svg" mode="aspectFit" />
+        </view>
+        <!-- 右侧切换入口：设计稿 1204:337 键盘按钮（44×44 圆形，同一行最右）
+             语音态 = 键盘（切到文字输入）；文本态 = 声波（切回语音） -->
         <view
-          v-if="!showSendButton && (inputMode === 'text' || isLoading || voice.isRecognizing)"
+          v-else-if="!showSendButton"
           class="input-bar__mode"
           :class="{ 'input-bar__mode--disabled': voice.gesture.active || voice.isRecognizing }"
           @tap="onToggleInputModeUi"
         >
-          <!-- 文本态空闲：深色声波（切到语音输入）；生成中沿用原语音图标 -->
           <image
-            v-if="inputMode === 'text' && !isLoading"
-            src="@/assets/img/icon-voice-wave-dark.svg"
+            v-if="inputMode === 'voice'"
+            src="@/assets/img/icon-keyboard-dark.svg"
             mode="aspectFit"
           />
-          <image
-            v-else-if="inputMode === 'text'"
-            src="@/assets/img/icon-voice.svg"
-            mode="aspectFit"
-          />
-          <image v-else src="@/assets/img/icon-keyboard-dark.svg" mode="aspectFit" />
+          <image v-else src="@/assets/img/icon-voice-wave-dark.svg" mode="aspectFit" />
         </view>
-
-        <!-- 生成中只给停止按钮，不给发送 -->
-        <view v-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
-          <image src="@/assets/img/icon-stop.svg" mode="aspectFit" />
-        </view>
-        <view
-          v-else-if="showSendButton"
-          class="input-bar__send"
-          @touchstart.stop.prevent="onTrySend"
-        >
+        <view v-else class="input-bar__send" @touchstart.stop.prevent="onTrySend">
           <!-- 文本态：黑圆上箭头；语音态保持原红色发送 -->
           <image
             v-if="inputMode === 'text'"
@@ -816,79 +834,13 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
-// 底部氛围图形：设计稿 326:1336 Frame 45（375×118）
-// 资源内含 40px 模糊的波浪蒙版 + rgba(239,239,238,0) → #0F7EEE 竖向渐变
-.chat-input__bottom-art {
-  position: absolute;
-  z-index: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 236rpx;
-  background-image: url("@/assets/img/chat-bottom-wave.svg");
-  background-position: center bottom;
-  background-repeat: no-repeat;
-  background-size: 100% 100%;
-  pointer-events: none;
-}
-
-/* 语音播报态底部：与「请选择你的身份吧」页（welcome-visitor__glow-voice）同一套视觉 ——
-   11332:91 Frame 45 容器（375×118）、11332:97 Rectangle 106 三色带（#EBB4E9 → #56ABFA → #9795E8），
-   用 voice-listening-wave-blur-mask.svg 波形遮罩裁出软边；
-   动效也照抄那一页：色带镜像周期横向流动 + 遮罩左右摆动，后层更慢且反向 */
-.chat-input__speaking-art {
-  position: absolute;
-  z-index: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 236rpx; // 118px：波形容器高度
-  pointer-events: none;
-}
-
-.chat-input__speaking-wave {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 236rpx;
-}
-
-.chat-input__speaking-band {
-  position: absolute;
-  top: 130rpx; // y759 − y694 = 65px
-  left: 0;
-  width: 750rpx; // 375px
-  height: 106rpx; // 53px
-  background: linear-gradient(
-    90deg,
-    #ebb4e9 0%,
-    #56abfa 24.36%,
-    #9795e8 50%,
-    #56abfa 75.64%, // 后半为镜像，位移一个周期即可无缝循环
-    #ebb4e9 100%
-  );
-  background-size: 1500rpx 100%;
-  -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
-  mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: 990rpx 286rpx;
-  mask-size: 990rpx 286rpx;
-  -webkit-mask-position: -121rpx -14rpx;
-  mask-position: -121rpx -14rpx;
-  animation:
-    voice-wave-color-flow 5.6s linear infinite,
-    voice-wave-sway 4.8s ease-in-out infinite alternate;
-  will-change: background-position, mask-position;
-}
-
-.chat-input__speaking-band--back {
-  opacity: 0.4;
-  transform: translateY(8rpx);
-  animation:
-    voice-wave-color-flow 7.6s linear infinite reverse,
-    voice-wave-sway 6s ease-in-out infinite alternate;
+/* 3) 设计稿 1204:467 的录音态底部只有「提示行 + 声纹 + 水面」：
+   输入栏（加号 / 按住说话 / 键盘）与「内容由 AI 生成」提示在这一屏让位。
+   只降透明度不摘 DOM —— 手指还按在 .input-bar__hold 上，元素一旦移除手势就断了 */
+.chat-input--voice-panel-open .input-bar,
+.chat-input--voice-panel-open .chat-input__footer {
+  opacity: 0;
+  transition: opacity 0.16s ease;
 }
 
 .voice-sheet {
@@ -921,11 +873,12 @@ onBeforeUnmount(() => {
 }
 
 /* ==========================================================================
-   底部语音面板（首页紧凑态）
-   面板范围：设计稿 y532 → y812，高 280px = 560rpx
-   现在只保留两层装饰：11332:38（内容渐隐遮罩）+ 11332:91（水面波浪），
-   与「Hey,SANI」起始页按住时的底部视觉一致；
-   11332:2 提示行、11332:71 麦克风盘、11332:104 粉色柔光都不再展示。
+   底部语音面板（首页紧凑态）：设计稿 1204:467 录动态底部
+   面板范围：y532 → y812，高 280px = 560rpx，四层自下而上依次是
+   ① 1204:725 + 1204:609 两层 #FAFAFA 渐隐（.voice-panel__fade）
+   ② 1204:715 → Mask group 内绘制的 1302:3 Ellipse 75（.voice-panel__wave）
+   ③ 1204:722 提示行「松手发送  上滑取消」（.voice-panel__hint）
+   ④ 1291:1 40 根白色声纹（.voice-panel__bars）
    ========================================================================== */
 .voice-sheet--listening-compact {
   position: fixed;
@@ -958,14 +911,16 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
-/* 11332:38 Rectangle 103：373×280 @ (2,532)，#FAFAFA 自上而下 0 → 80%(21.16%) → 100%(35.86%)，
-   让页面内容在接近面板处逐渐隐入白色，消除面板顶缘的生硬分界 */
+/* 1204:725 Rectangle 105（375×250 @562）+ 1204:609 Rectangle 103（375×166 @646）：
+   两层同色 #FAFAFA 渐隐，都是 0 → 80%(21.16%) → 100%(35.86%)；
+   第二层从 y646 重新起坡，两层叠加让面板下半段更实。
+   面板顶 = y532，故第一层落在 30px(=60rpx)，第二层落在 (646−562)=84px(=168rpx) 处 */
 .voice-panel__fade {
   position: absolute;
-  top: 0;
-  left: 4rpx; /* x 2px */
-  width: 746rpx; /* 373px */
-  height: 560rpx; /* 280px */
+  top: 60rpx; /* y562 − y532 = 30px */
+  left: 0;
+  width: 750rpx; /* 375px */
+  height: 500rpx; /* 250px */
   background: linear-gradient(
     180deg,
     rgb(250 250 250 / 0%) 0%,
@@ -975,94 +930,183 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-/* 11332:91 Frame 45：375×118 @ (0,694)，波浪装饰容器 */
+/* 第二层渐隐（1204:609）：与第一层同色同参数，只错开起点 */
+.voice-panel__fade::after {
+  content: "";
+  position: absolute;
+  top: 168rpx; /* 646 − 562 = 84px */
+  left: 0;
+  width: 100%;
+  height: 332rpx; /* 166px */
+  background: linear-gradient(
+    180deg,
+    rgb(250 250 250 / 0%) 0%,
+    rgb(250 250 250 / 80%) 21.16%,
+    #fafafa 35.86%
+  );
+}
+
+/* 1204:715 Frame 85（375×166 @646）→ Mask group 里唯一上色的一层：
+   1302:3 Ellipse 75 —— 椭圆 434×341，左上角 (x −31, y 655)，
+   圆心 (186, 825.5) 落在屏幕底边（y812）下方 13.5px，所以底边两角同样吃到饱和蓝；
+   上半部越靠边越早「出界」，顶部自然收成一条圆弧，而不是通栏直角。
+   Mask group 的首子节点 1204:719 Vector 87（449×195 @ −38,655，图层模糊 50）是遮罩、
+   只裁形不上色 —— 设计稿渲染里合成色恒为 #0F7EEE（按 R/G 双通道反解 α 一致），
+   若把 Vector 87 的 #295DC3 → #0D7ABA 也画上去，蓝通道会被拉低、与设计稿不符。
+
+   填充 = #EFEFEE(α0) → #0F7EEE 的纵向渐变，起止位置按设计稿渲染像素反解：
+   渐变 0 点取 y665（元素内 2.9%）、1 点取 y812（元素内 46%），
+   实测剖面 y700≈0.21、y733≈0.40、y760≈0.62、y800≈0.92、y811≈0.93。
+   （设计稿 Ellipse 75 的 gradientTransform 是 90° 旋转矩阵，按矩阵推算的坡道与
+     实际渲染不符 —— 拷贝节点常见的绑定失效，故以渲染像素为准。）
+   设计稿的图层模糊 37 在该尺寸下等价于 CSS 高斯 σ≈12px，同样由渲染像素拟合得到。
+
+   整层只做 opacity 呼吸：一旦改用 background-position 位移，元素顶端会露出硬边。 */
 .voice-panel__wave {
   position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 236rpx; /* 118px */
+  z-index: 1; /* 水面压在渐隐层之上，但在提示行 / 声纹之下 */
+  top: 246rpx; /* y655 − y532 = 123px */
+  left: -62rpx; /* x = −31px */
+  width: 868rpx; /* 434px */
+  height: 682rpx; /* 341px */
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgb(239 239 238 / 0%) 2.9%, #0f7eee 46%);
+  filter: blur(24rpx); /* σ = 12px（设计稿图层模糊 37 的等效值） */
+  animation: voice-water-breathe 5.6s ease-in-out infinite alternate;
+  will-change: opacity;
   pointer-events: none;
 }
 
-/* 11332:97 Rectangle 106：375×53 @ (0,759)，录音态的水面。
-   与起始页「按住说话」（welcome-visitor__glow-voice-band）保持完全一致：
-   竖向 #EFEFEE 0% → #0F7EEE 100%，色带没有横向色差，流动改成「色彩上下涨落」（背景高出 60% 来回位移），
-   波形遮罩（11332:94 Vector 87，内建 feGaussianBlur 9 柔边）继续缓慢起伏，两层错速叠出液面层次。 */
-.voice-panel__wave-band {
-  position: absolute;
-  top: 130rpx; /* y759 − y694 = 65px */
-  left: 0;
-  width: 750rpx; /* 375px */
-  height: 106rpx; /* 53px */
-  background-image: linear-gradient(180deg, #efefee 0%, #0f7eee 100%);
-  background-size: 100% 160%; /* 背景比容器高 60%，上下位移时水色在浅灰与深蓝之间呼吸 */
-  -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
-  mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: 990rpx 286rpx; /* 遮罩画布 495×143（波形 449×100 四周留 blur 出血）@2x */
-  mask-size: 990rpx 286rpx;
-  -webkit-mask-position: -121rpx -14rpx; /* 画布原点对齐页面 (−60.5, 752) */
-  mask-position: -121rpx -14rpx;
-  animation:
-    voice-wave-drift 4.8s ease-in-out infinite alternate,
-    voice-wave-sway 4.8s ease-in-out infinite alternate;
-  will-change: background-position, mask-position;
-}
-
-/* 后层波浪：轮廓相同、透明度更低、涨落更慢且反向，叠出液面的层次感 */
-.voice-panel__wave-band--back {
-  opacity: 0.4;
-  transform: translateY(8rpx);
-  animation:
-    voice-wave-drift 6s ease-in-out infinite alternate-reverse,
-    voice-wave-sway 6s ease-in-out infinite alternate;
-}
-
-/* 取消态：波浪停止流动（与声纹条暂停逻辑一致） */
-.voice-panel__wave--paused .voice-panel__wave-band {
+/* 取消态：水面停止呼吸（与声纹条暂停逻辑一致） */
+.voice-panel__wave--paused {
   animation-play-state: paused;
 }
 
-/* 竖向渐变的涨落：背景比容器高 60%，上下移动时水色在「浅灰」和「深蓝」之间呼吸 */
-@keyframes voice-wave-drift {
+/* 水面的呼吸：只改整层不透明度（幅度 ±3%，几乎不扰动设计稿的坡道） */
+@keyframes voice-water-breathe {
   from {
-    background-position: 0 0;
+    opacity: 0.94;
   }
   to {
-    background-position: 0 100%;
+    opacity: 1;
   }
 }
 
-/* 色带横向流动：位移一个背景周期（1500rpx），首尾同色，循环无缝 */
-@keyframes voice-wave-color-flow {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 1500rpx 0;
-  }
-}
-
-/* 波形轮廓缓慢起伏：基准 mask-position 为 (−121rpx, −14rpx)，±20rpx 摆动 */
-@keyframes voice-wave-sway {
-  from {
-    -webkit-mask-position: -141rpx -14rpx;
-    mask-position: -141rpx -14rpx;
-  }
-  to {
-    -webkit-mask-position: -101rpx -14rpx;
-    mask-position: -101rpx -14rpx;
-  }
-}
-
-/* 系统偏好减少动效时，波浪回到设计稿静态基线 */
+/* 系统偏好减少动效时，水面与声纹都回到设计稿静态基线 */
 @media (prefers-reduced-motion: reduce) {
-  .voice-panel__wave-band {
+  .voice-panel__wave {
+    animation: none;
+  }
+
+  .voice-panel__bar {
     animation: none;
     transform: none;
   }
+}
+
+/* 1204:722（119×20 @128,695）：提示行，14px / #6D8AA6，取消态换成「松手取消」并转红 */
+.voice-panel__hint {
+  position: absolute;
+  z-index: 3; /* 明确压在水面上，杜绝任何内核下的遮挡 */
+  top: 326rpx; /* y695 − y532 = 163px */
+  right: 0;
+  left: 0;
+  font-size: 28rpx; /* 14px */
+  font-weight: 400;
+  line-height: 40rpx; /* 20px */
+  color: #6d8aa6;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* 1291:1 Frame 114（195×20.76 @91,733）：40 根白色声纹。
+   设计稿每根是「0 宽矢量 + 2px 白色描边」，节点间距 5px；
+   等价到 CSS 就是 2px 宽的竖条 + 3px gap：40×2 + 39×3 = 197px
+   = 设计稿 195px + 左右各 1px 描边出血，整体仍居中。
+   每根高度由模板内联（设计稿 px × 2 = rpx），竖向居中对齐 */
+.voice-panel__bars {
+  position: absolute;
+  z-index: 3; /* 明确压在水面上 */
+  top: 402rpx; /* y733 − y532 = 201px */
+  right: 0;
+  left: 0;
+  display: flex;
+  height: 41.5rpx; /* 20.76px */
+  align-items: center;
+  justify-content: center;
+  gap: 6rpx; /* 3px */
+  pointer-events: none;
+}
+
+/* 声纹条：设计稿是 40 根静态白线，这里只给它加上「电平起伏」——
+   以每根的设计高度为基线做 scaleY（0.45 ~ 1.14，围绕中线上下伸缩），
+   时长与相位由模板按 index 内联，整排像真实麦克风电平一样错相跳动；
+   只动 transform，不触发重排，也不改变设计稿那条 741.6 的中线。
+   最高一根 33.5rpx × 1.14 ≈ 38rpx，仍在 41.5rpx 的容器内，不会溢出。 */
+.voice-panel__bar {
+  flex: 0 0 auto;
+  width: 4rpx; /* 2px */
+  border-radius: 4rpx;
+  background: #ffffff;
+  transform-origin: center;
+  animation: voice-bar-pulse 1.06s ease-in-out infinite;
+}
+
+@keyframes voice-bar-pulse {
+  0% {
+    transform: scaleY(0.45);
+  }
+
+  16% {
+    transform: scaleY(1);
+  }
+
+  34% {
+    transform: scaleY(0.62);
+  }
+
+  52% {
+    transform: scaleY(1.14);
+  }
+
+  70% {
+    transform: scaleY(0.78);
+  }
+
+  86% {
+    transform: scaleY(1.06);
+  }
+
+  100% {
+    transform: scaleY(0.45);
+  }
+}
+
+/* ---------- 取消态（1204:740）：提示行 + 声纹 + 水面三处同时转红 ---------- */
+
+/* 1291:65（56×20 @159,695）：14px / #C8201E / 居中，文案「松手取消」
+   （设计稿该行 56px 宽 = 4 字 × 14px，居中于 x=187，与录音态同一基线 y695） */
+.voice-listening--cancelling .voice-panel__hint {
+  color: #c8201e;
+}
+
+/* 1291:24 Frame 114 内 40 根声纹：描边由 #FFFFFF 改为 #C8201E，粗细仍为 2px。
+   设计稿取消态的声纹容器 y=731.23（比录音态 733 高 1.77px），属副本漂移，
+   这里沿用录音态的 402rpx，避免上滑进入取消态时声纹整体跳动 */
+.voice-listening--cancelling .voice-panel__bar {
+  background: #c8201e;
+}
+
+/* 1204:740 → 1291:17 Mask group：设计稿把 Ellipse 75 的蓝色填充关掉（元素级 visible:false），
+   换成 #E02E2A 的淡水红 —— 椭圆 434×365（比录音态高 24px，顶边同为 y655）。
+   填充标注为 #E02E2A α0 → α0.244，但经 Mask group（449×171 @ −38,679，模糊 50）衰减后，
+   设计稿渲染实测中轴透明度为：y660≈0.005、y690≈0.049、y760≈0.142、y800≈0.181、屏幕底≈0.181
+   （即「淡红雾」，不是实心红面，与蓝水底边 0.93 完全不同）。
+   按实测剖面拟合：线性坡道 0 → 18.1%（y790 处到达顶点，元素内 37%），其后保持 18.1%，
+   与 17 个采样点的平均误差 0.0045；模糊仍沿用 24rpx（σ≈12px，拟合中 8~12 无差别）。 */
+.voice-listening--cancelling .voice-panel__wave {
+  height: 730rpx; /* 365px：设计稿取消态 Ellipse 75 的高度 */
+  background: linear-gradient(180deg, rgb(224 46 42 / 0%) 0%, rgb(224 46 42 / 18.1%) 37%);
 }
 
 /* ---------- 监听态 ---------- */
@@ -1386,20 +1430,16 @@ onBeforeUnmount(() => {
   box-shadow: 0 8rpx 28rpx rgba(32, 42, 60, 0.08);
 }
 
-// 语音态输入栏：设计稿 326:1335;85:183 Input Bar（375×64，上 8 / 下 12 / 左右 20，透明底）
+/* 语音态输入栏：设计稿 1204:337 Toolbar（375×64）
+   上下 8 / 左右 20，三项横排、间距 10 → 16rpx 40rpx，gap 20rpx，透明底 */
 .input-bar:not(.input-bar--text) {
   gap: 20rpx;
   min-height: 128rpx;
   margin: 0;
-  padding: 16rpx 40rpx 24rpx;
+  padding: 16rpx 40rpx;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-}
-
-// 空闲语音态：加号 + 胶囊作为一组水平居中（设计稿：加号 x=99.5）
-.input-bar--voice-idle {
-  justify-content: center;
 }
 
 .input-bar__mode {
@@ -1413,97 +1453,76 @@ onBeforeUnmount(() => {
   opacity: 0.4;
 }
 
-.input-bar__voice-pill,
 .input-bar__text-field {
   flex: 1;
   min-width: 0;
   min-height: 76rpx;
-  // 背景交给外层胶囊，这里只负责排版
   background: transparent;
   box-sizing: border-box;
 }
 
-// 语音胶囊：设计稿 326:1335;85:191（126×44，r22，底 #0D0D0D 3.61%）
-// 左右内边距 6 + 键盘段 48 + 间距 18 + 语音段 48 + 左右内边距 6 = 126
-.input-bar__voice-pill {
+/* ==========================================================================
+   「按住说话」框：设计稿 1204:337 Toolbar
+   375×44 → 750×88rpx；圆角 45 → 90rpx；底 rgba(13,13,13,0.0361)；
+   文案 14px / 行高 20px / #5E5E5E / Regular；
+   整块就是录音手势区（按下即录、上滑取消、松手识别）
+   ========================================================================== */
+.input-bar__hold {
   display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 36rpx; // 18px
+  flex: 1;
+  min-width: 0;
   height: 88rpx; // 44px
-  padding: 8rpx 12rpx; // 上下 4px、左右 6px
+  align-items: center;
+  justify-content: center;
   box-sizing: border-box;
-  border-radius: 44rpx; // 22px
+  border-radius: 90rpx; // 45px
+  background: rgba(13, 13, 13, 0.0361);
+  touch-action: none; /* 长按时禁用滚动/缩放，pointer 事件不被默认手势劫持 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.input-bar__hold-label {
+  font-size: 28rpx; // 14px
+  font-weight: 400;
+  line-height: 40rpx; // 20px
+  color: #0d0d0d;
+  text-align: center;
+}
+
+/* 生成中（思考中）：整块「按住说话」暂时禁用 —— 不吃手势、文案转 #5E5E5E，
+   与参考图里思考中的置灰态一致；生成结束（isLoading 变 false）即恢复 */
+.input-bar__hold--disabled {
+  pointer-events: none;
+}
+
+.input-bar__hold--disabled .input-bar__hold-label {
+  color: #5e5e5e;
+}
+
+/* 识别中：同一块框内换文案，沿用原来的提示色 */
+.input-bar__hold-hint {
+  font-size: 24rpx; // 12px
+  font-weight: 400;
+  line-height: 34rpx;
+  color: #999999;
+  text-align: center;
+}
+
+/* 语音态右侧键盘按钮：设计稿 44×44 圆形，与加号同一底色 */
+.input-bar:not(.input-bar--text) .input-bar__mode {
+  width: 88rpx;
+  height: 88rpx;
+  flex: 0 0 88rpx;
+  padding: 0;
+  border-radius: 50%;
   background: rgba(13, 13, 13, 0.0361);
 }
 
-// 生成中 / 识别中：沿用原来的整条提示，不再套设计稿的胶囊
-.input-bar__voice-pill--status {
-  flex: 1;
-  min-width: 0;
-  justify-content: center;
-  padding: 0;
-  background: transparent;
-}
-
-// 键盘段：设计稿 326:1335;85:192（48×36，#F3F3F3，r18）
-.input-bar__voice-keyboard {
-  display: flex;
-  width: 96rpx;
-  height: 72rpx;
-  flex: 0 0 96rpx;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  border-radius: 36rpx;
-  background: #f3f3f3;
-}
-
-.input-bar__voice-keyboard--disabled {
-  opacity: 0.45;
-}
-
-// 语音段：设计稿 326:1335;85:197（48×36，#FFFFFF，r18）
-.input-bar__voice-hold {
-  display: flex;
-  width: 96rpx;
-  height: 72rpx;
-  flex: 0 0 96rpx;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  border-radius: 36rpx;
-  background: #ffffff;
-  touch-action: none; /* 桌面/触屏长按时禁用滚动/缩放，pointer 事件不被默认手势劫持 */
-  -webkit-user-select: none;
-  user-select: none;
-  transition: transform 180ms ease, opacity 180ms ease;
-}
-
-// 点胶囊左侧键盘段：语音段往左滑出（朝键盘段方向），滑完再切到文本输入
-// （见 onVoicePillKeyboardTap）
-.input-bar__voice-hold--leaving {
-  transform: translateX(-64rpx);
-  opacity: 0;
-}
-
-// 段内图标：设计稿 20px 画布（声纹 18.33×16.67、键盘 18.33×15）
-.chat-input .input-bar__voice-keyboard image,
-.chat-input .input-bar__voice-hold image {
+/* 键盘图标：设计稿 20×20 → 40rpx */
+.input-bar:not(.input-bar--text) .input-bar__mode image {
   width: 40rpx;
   height: 40rpx;
-}
-
-.input-bar__voice-pill .input-bar__voice-wave {
-  width: 40rpx;
-  height: 40rpx;
-}
-
-.input-bar__voice-hint {
-  font-size: 24rpx; // 12px
-  font-weight: 400;
-  color: #999999;
-  line-height: 34rpx;
 }
 
 .input-bar__text-field {
@@ -1548,11 +1567,11 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
-// 加号：设计稿 326:1335;85:188 Frame 74 —— 40×40 点击区，图标自带 44 圆底
+// 加号：设计稿 1204:337 左侧加号 44×44（图标 icon-plus.svg 自带 3.61% 圆底与 #0D0D0D 十字）
 .input-bar__plus {
-  width: 80rpx;
-  height: 80rpx;
-  flex: 0 0 80rpx;
+  width: 88rpx;
+  height: 88rpx;
+  flex: 0 0 88rpx;
   background: transparent;
 }
 
@@ -1581,26 +1600,26 @@ onBeforeUnmount(() => {
   height: 68rpx;
 }
 
+/* 停止按钮：参考图是「#0D0D0D 实心圆 35px + 白色 12px 圆角方块」，由 icon-stop-circle.svg 自带，
+   这里只给 35px 的方形落位，与语音态 44px 的键盘钮共用同一行的 10px 间距 */
 .input-bar__stop {
-  width: 58rpx;
-  height: 58rpx;
-  margin-right: 8rpx;
+  flex: 0 0 70rpx;
+  width: 70rpx; /* 35px */
+  height: 70rpx;
+  margin-right: 0;
+}
+
+.input-bar__stop image {
+  width: 70rpx;
+  height: 70rpx;
 }
 
 .input-bar__mode:active,
-.input-bar__voice-keyboard:active,
-.input-bar__voice-hold:active,
+.input-bar__hold:active,
 .input-bar__plus:active,
-.input-bar__send:active {
+.input-bar__send:active,
+.input-bar__stop:active {
   opacity: 0.7;
-}
-
-.chat-input__hold {
-  flex: 1;
-  font-size: 32rpx; // 16px
-  line-height: 44rpx;
-  color: #232323;
-  text-align: center;
 }
 
 .chat-input__icon-mic {
@@ -1626,19 +1645,20 @@ onBeforeUnmount(() => {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-// 输入栏下方提示（Figma: 41116:6071）：内容由AI生成，请核实重要信息
+// 输入栏下方提示：内容由AI生成，请核实重要信息
+// 设计稿 1204:292：Toolbar 底 775 → 文字 top 783（8px = 16rpx），文字 12px #BABABA
 .chat-input__footer {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 8rpx;
+  padding-top: 16rpx;
 }
 
 .chat-input__footer-text {
   width: 100%;
-  margin-bottom: 12px;
+  margin-bottom: 30rpx; // 文字底到页面底边 15px
   color: #bababa;
-  font-size: 24rpx;
+  font-size: 24rpx; // 12px
   line-height: 30rpx;
   text-align: center;
 }
@@ -1672,12 +1692,16 @@ onBeforeUnmount(() => {
    只在 .input-bar--plain 下生效，生成中 / 语音态维持原样。
    换算：1px = 2rpx。胶囊高 44、加号 44（与首次一致）、切换图标 20（同语音态键盘图标）、
    发送黑圆 35、左右内边距 16。
+
+   外层盒模型必须与语音态（1204:337 Toolbar）逐项对齐 —— margin 0、padding 16/40、gap 20、
+   min-height 128，否则切到键盘的那一帧整行会变宽变高，看着像抖一下。
    ========================================================================== */
 .input-bar.input-bar--plain {
   position: relative;
-  gap: 16rpx; // 8px
-  min-height: 112rpx; // 视觉 44px，外层仍留 56px 触达高度
-  padding: 0;
+  gap: 20rpx; // 10px，与语音态一致
+  min-height: 128rpx; // 64px，与语音态一致（内容 88 + 上下 16*2，撑到 128）
+  margin: 0;
+  padding: 16rpx 40rpx;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -1695,10 +1719,11 @@ onBeforeUnmount(() => {
   height: 88rpx;
 }
 
-/* 灰色胶囊本体：#F3F3F3，高 44，r22，左内边距 16，右侧给切换钮留位 */
+/* 灰色胶囊本体：#F3F3F3，高 44，r22，左内边距 16
+   右侧留出切换钮的位置（钮画在胶囊内部，不再单独占一列） */
 .chat-input .input-bar--plain .input-bar__text-field {
   min-height: 88rpx;
-  padding: 0 116rpx 0 32rpx;
+  padding: 0 130rpx 0 32rpx;
   border-radius: 44rpx;
   background: #f3f3f3;
   box-sizing: border-box;
@@ -1715,12 +1740,14 @@ onBeforeUnmount(() => {
   color: #8e8e8e;
 }
 
-/* 右侧切换钮：贴在胶囊内右侧，无底色（图标自带造型） */
+/* 右侧切换钮：画在灰色胶囊内部右侧，不额外占列
+   外层 padding 与语音态一致（40rpx = 20px），胶囊右边缘就在 40rpx 处，
+   钮再内缩 20rpx → right 60rpx，与胶囊右边缘留 10px 呼吸位 */
 .chat-input .input-bar--plain .input-bar__mode,
 .chat-input .input-bar--plain .input-bar__send {
   position: absolute;
   top: 50%;
-  right: 32rpx; // 16px，与胶囊右内边距对齐
+  right: 60rpx; // 30px = 胶囊右边缘 20px + 内缩 10px
   width: 70rpx; // 35px
   height: 70rpx;
   flex: 0 0 70rpx;

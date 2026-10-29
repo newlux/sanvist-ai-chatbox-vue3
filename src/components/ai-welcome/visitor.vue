@@ -474,7 +474,7 @@ const isFinishing = ref(false);
  * 视觉上不挂波纹 —— 手一松底部就释放回常态淡蓝，接口回来后再由 --finishing / --missed 接管。
  */
 const isChecking = ref(false);
-/** 唤醒未命中：底部渐变换成 331:147「唤醒失败」的红，停在起始页等用户重试 */
+/** 唤醒未命中：底部换成 331:147「唤醒失败」1321:9 那块淡粉柔光，停在起始页等用户重试 */
 const isWakeMissed = ref(false);
 /** 口播收尾后的身份选择态：标题 + 身份气泡 + 底部提示，仍在同一页内 */
 const isChoosing = ref(false);
@@ -1103,7 +1103,7 @@ function onHoldMove(e: any) {
 /**
  * 松手：停录并送一次识别 + 唤醒校验，**结果回来才决定去向**。
  * - 轻点 / 上划取消：直接丢掉这段录音，不识别也不闪红（页面上还有身份球等可点区域）；
- * - 校验中：底部立刻回到常态淡蓝，命中后由 --finishing 接管；
+ * - 校验中：底部立刻收回常态底色，命中后由 --finishing 接管；
  * - 命中 → enterWelcome()：标题淡出、自我介绍浮出并口播，播完过渡到身份选择态；
  * - 未命中 → enterWakeMissed()：底部渐变切红（331:147），留在起始页。
  */
@@ -1409,17 +1409,11 @@ onMounted(async () => {
       <text class="welcome-visitor__detail-hint" @tap.stop="onStartExperienceTap">{{ ROLE_DETAIL_HINT }}</text>
     </view>
 
-    <!-- 底部光效：常态贴底一缕淡蓝渐变（约 62px）；
-         按住 / 播报身份 / 身份选择 / 老板详情都沿用首页「按住说话」面板那套
-         粉蓝渐变波浪（双层波形色带），整页只保留这一套底部观感 -->
+    <!-- 底部光效：常态不铺任何底色，整条与页面同色（#FAFAFA）；
+         按住「唤醒中」1321:1 蓝白弧形柔光、未命中 1321:9 淡粉柔光、播报身份 1321:17 紫蓝粉柔光，
+         三张图共用同一块几何，见下面 --recording / --missed / --finishing 规则；口播播完即淡回常态 -->
     <view class="welcome-visitor__glow">
-      <view class="welcome-visitor__glow-fade" />
-      <view class="welcome-visitor__glow-voice">
-        <view class="welcome-visitor__glow-voice-wave">
-          <view class="welcome-visitor__glow-voice-band welcome-visitor__glow-voice-band--back" />
-          <view class="welcome-visitor__glow-voice-band" />
-        </view>
-      </view>
+      <view class="welcome-visitor__glow-voice" />
     </view>
 
     <view class="welcome-visitor__content">
@@ -1539,11 +1533,11 @@ onMounted(async () => {
   -webkit-touch-callout: none;
 }
 
-/* 身份选择稿的画板底色不做单独处理：维持和起始页同一块 #FAFAFA，
-   这样底部那层常态渐变（#FAFAFA → #BFDAF4）接得上，不会在渐变起点出现一条硬边 */
+/* 身份选择稿的画板底色不做单独处理：维持和起始页同一块 #FAFAFA */
 
-/* ===== 底部光效：常态贴底一缕淡蓝（62px）；
-   按住 / 收尾态换成首页「按住说话」面板那套粉蓝渐变波浪（118px），各层自己贴底定位 ===== */
+/* ===== 底部光效：常态不铺任何底色（整条与页面同为 #FAFAFA）；
+   按住「唤醒中」1321:1 蓝白弧形柔光、未命中 1321:9 淡粉柔光、播报身份 1321:17 紫蓝粉柔光，
+   三者都是设计稿 Frame 85 里同一块 375×166 的几何，只是各自的渐变与模糊不同 ===== */
 .welcome-visitor__glow {
   /* 贴的是「视口底边」而不是父容器底边：
      iOS / 小米的 WebView 里页面容器高度有时会比屏幕少掉一条安全区，
@@ -1553,47 +1547,21 @@ onMounted(async () => {
   bottom: 0;
   left: 0;
   z-index: 0;
-  // 按波形容器高度（118px）取值，多留一点余量给遮罩模糊的出血
-  height: 240rpx; // 120px
+  // 光效层可见高度是 136px（166 − 屏幕下的 30），留到 150px 足够
+  height: 300rpx; // 150px
   overflow: hidden;
   pointer-events: none;
 }
 
-/* 主渐变：#FAFAFA → #BFDAF4，曲线按反馈图逐段采样，避免上半段过早显色 */
-.welcome-visitor__glow-fade {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 124rpx; // 62px
-  background-image: linear-gradient(
-    180deg,
-    #fafafa 0%,
-    #f7f8f9 38%,
-    #f0f4f8 52%,
-    #e7eff6 65%,
-    #d9e8f6 77%,
-    #c8def4 90%,
-    #bfdaf4 100%
-  );
-  // 唤醒 / 收尾时这缕淡蓝要让位给波浪，过渡压短，切换更跟手
-  transition: opacity 200ms ease;
-}
-
-/*
- * 按住 / 收尾态：复用首页「按住说话」弹出面板的底部渐变（ai-chat-input 的 voice-panel__wave），
- * 只取波形色带本身，面板上方那块粉色柔光（11332:104 Rectangle 104）不要：
- * - band：11332:97 Rectangle 106，375×53 的三色带（#EBB4E9 → #56ABFA → #9795E8），
- *   被 voice-listening-wave-blur-mask.svg 的波形遮罩裁出软边
- * - 动效：色带镜像周期横向流动 + 遮罩左右摆动（轮廓起伏），后层更慢且反向
- * 外层只负责淡入淡出，避免 opacity 过渡和 keyframes 抢同一个属性。
- */
+/* 光效层：三种状态共用同一块几何——设计稿里都是 Frame 85（375×166 @ y=676），
+   而屏幕只到 812，所以层底要再往下让出 30px。这一层只负责淡入淡出，
+   具体色值 / 弧度由下面各 state 类铺对应的位图。 */
 .welcome-visitor__glow-voice {
   position: absolute;
   right: 0;
-  bottom: 0;
+  bottom: -60rpx; // 30px：设计稿里光效比屏幕底多出来的那一截
   left: 0;
-  height: 236rpx; // 118px：波形容器高度
+  height: 332rpx; // 166px
   opacity: 0;
   // 唤醒（按下 / 松手）/ 校验 / 未命中都靠这条过渡切换，压短让渐变色立刻到位
   transition: opacity 140ms ease;
@@ -1601,8 +1569,8 @@ onMounted(async () => {
   will-change: opacity;
 }
 
-/* 按住 / 收尾态 / 未命中：底部换成这套波纹色带。
-   校验中（松手后等接口那一段）不再参与 —— 手一松波纹立即释放，底部回到常态淡蓝，
+/* 按住 / 收尾（播报）/ 未命中：把对应那张光效淡入。
+   校验中（松手后等接口那一段）不参与 —— 手一松光效立即释放，底部回到页面底色，
    接口返回后再由 --finishing / --missed 接管 */
 .welcome-visitor--recording .welcome-visitor__glow-voice,
 .welcome-visitor--missed .welcome-visitor__glow-voice,
@@ -1610,152 +1578,39 @@ onMounted(async () => {
   opacity: 1;
 }
 
-/* 常态那缕淡蓝在按住后让位，换成面板里的粉白底色 */
-.welcome-visitor--recording .welcome-visitor__glow-fade,
-.welcome-visitor--missed .welcome-visitor__glow-fade,
-.welcome-visitor--finishing .welcome-visitor__glow-fade {
-  opacity: 0;
-}
-
-/* 身份选择态口播播完：底部淡回常态——波纹色带淡出、常态那缕淡蓝淡回。
+/* 口播播完（身份选择 / 老板详情）：底部淡回常态，整条与页面同色、不铺任何底色。
    与上面的 --finishing 规则特异度相同，靠源码顺序覆盖，必须放在它们之后 */
 .welcome-visitor--glow-idle .welcome-visitor__glow-voice {
   opacity: 0;
 }
 
-.welcome-visitor--glow-idle .welcome-visitor__glow-fade {
-  opacity: 1;
+/* 三张图叠在同一个元素上，靠源码顺序定优先级：按住 > 未命中 > 播报。
+   身份选择 / 老板详情页是「就地录音」，按住时 --finishing 仍然挂着，
+   所以 --recording 必须写在最后，才能压过播报那层粉蓝、和起始页「hey, sani」的按住效果一致 */
+
+/* 播报身份（SANI 自我介绍）：1321:17 Frame 85。
+   1321:22 Ellipse 75 是 434×325 的椭圆，铺一条横向四段渐变
+   #3D21CD → #1999FE（48.7%）→ #C067FA（76%）→ #FD90C4，再模糊 37；
+   下层 1321:23 Vector 87 用的还是那套蓝渐变（#295DC3 → #0D7ABA，透明度 80%，模糊 74）。
+   两者叠出「左紫—中蓝—右粉」的椭圆柔光，上沿同样是一道弧 */
+.welcome-visitor--finishing .welcome-visitor__glow-voice {
+  background: url("@/assets/img/welcome-bottom-glow-speaking.png") 0 0 / 100% 100% no-repeat;
 }
 
-/* 已经看不见了，别让三色带的无限动画继续占合成线程 */
-.welcome-visitor--glow-idle .welcome-visitor__glow-voice-band {
-  animation-play-state: paused;
+/* 唤醒未命中：1321:9 Frame 85，几何与按住态一致。红光来自 1321:11 Ellipse 75，
+   它是 rgba(224,46,42,0) → rgba(224,46,42,.24) 的半透明红，叠在下层弧形色块上再模糊 37，
+   所以呈现出来是很淡的粉红而不是纯 #E02E2A——同样用设计稿导出的 2x 位图，不做色值替换 */
+.welcome-visitor--missed .welcome-visitor__glow-voice {
+  background: url("@/assets/img/welcome-bottom-glow-missed.png") 0 0 / 100% 100% no-repeat;
 }
 
-/* 11332:91 Frame 45：波浪容器，贴底 118px */
-.welcome-visitor__glow-voice-wave {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 236rpx; // 118px
-}
-
-/* 11332:97 Rectangle 106：三色带本体。
-   为了「横向流动不露边、不跳色」，把色带做成镜像周期——0 → 50% 是设计稿色带，
-   50% → 100% 是它的镜像，首尾同为 #EBB4E9；背景宽取两个窗口宽，位移一个周期即无缝循环 */
-.welcome-visitor__glow-voice-band {
-  position: absolute;
-  top: 130rpx; // y759 − y694 = 65px
-  left: 0;
-  width: 750rpx; // 375px
-  height: 106rpx; // 53px
-  background: linear-gradient(
-    90deg,
-    #ebb4e9 0%,
-    #56abfa 24.36%, // 设计稿 #56ABFA 在色带 48.72% → 半周期 24.36%
-    #9795e8 50%, // 设计稿色带末端 #9795E8 → 半周期端点
-    #56abfa 75.64%, // 后半为镜像
-    #ebb4e9 100%
-  );
-  background-size: 1500rpx 100%; // 两个窗口宽，配合镜像渐变实现无缝循环
-  -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
-  mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: 990rpx 286rpx; // 遮罩画布 495×143 @2x
-  mask-size: 990rpx 286rpx;
-  -webkit-mask-position: -121rpx -14rpx; // 画布原点对齐页面 (−60.5, 752)
-  mask-position: -121rpx -14rpx;
-  will-change: background-position, mask-position;
-}
-
-/* 后层波浪：轮廓相同、透明度更低、流动更慢且反向，叠出液面的层次感 */
-.welcome-visitor__glow-voice-band--back {
-  opacity: 0.4;
-  transform: translateY(8rpx);
-}
-
-/* 动画只在按住 / 收尾态跑：常态下不占合成线程。
-   收尾态（松手后播报身份）用三色带横向流动 + 波形摆动 */
-.welcome-visitor--finishing .welcome-visitor__glow-voice-band {
-  animation:
-    welcome-voice-wave-color-flow 5.6s linear infinite,
-    welcome-voice-wave-sway 4.8s ease-in-out infinite alternate;
-}
-
-.welcome-visitor--finishing .welcome-visitor__glow-voice-band--back {
-  animation:
-    welcome-voice-wave-color-flow 7.6s linear infinite reverse,
-    welcome-voice-wave-sway 6s ease-in-out infinite alternate;
-}
-
-/* 按住：竖向 #EFEFEE → #0F7EEE 的水面。色带没有横向色差了，
-   流动改成「色彩上下涨落」——同一个波形遮罩继续摆动，观感与收尾态一致 */
-.welcome-visitor--recording .welcome-visitor__glow-voice-band {
-  background-image: linear-gradient(180deg, #efefee 0%, #0f7eee 100%);
-  background-size: 100% 160%;
-  animation:
-    welcome-voice-wave-drift 4.8s ease-in-out infinite alternate,
-    welcome-voice-wave-sway 4.8s ease-in-out infinite alternate;
-}
-
-.welcome-visitor--recording .welcome-visitor__glow-voice-band--back {
-  background-image: linear-gradient(180deg, #efefee 0%, #0f7eee 100%);
-  background-size: 100% 160%;
-  animation:
-    welcome-voice-wave-drift 6s ease-in-out infinite alternate-reverse,
-    welcome-voice-wave-sway 6s ease-in-out infinite alternate;
-}
-
-/* 唤醒未命中：底部渐变换成 331:147「唤醒失败」的红
-   （Rectangle 106 375×107：竖向 rgba(239,239,238,0) 0% → #E02E2A 100%）。
-   波纹形态与按住态一致，颜色不做上下涨落，保证红色一直压在最底下 */
-.welcome-visitor--missed .welcome-visitor__glow-voice-band {
-  background-image: linear-gradient(180deg, rgba(239, 239, 238, 0) 0%, #e02e2a 100%);
-  background-size: 100% 100%;
-  animation: welcome-voice-wave-sway 4.8s ease-in-out infinite alternate;
-}
-
-.welcome-visitor--missed .welcome-visitor__glow-voice-band--back {
-  background-image: linear-gradient(180deg, rgba(239, 239, 238, 0) 0%, #e02e2a 100%);
-  background-size: 100% 100%;
-  animation: welcome-voice-wave-sway 6s ease-in-out infinite alternate;
-}
-
-/* 色带横向流动：位移一个背景周期（1500rpx），首尾同色，循环无缝 */
-@keyframes welcome-voice-wave-color-flow {
-  from {
-    background-position: 0 0;
-  }
-
-  to {
-    background-position: 1500rpx 0;
-  }
-}
-
-/* 竖向渐变的涨落：背景比容器高 60%，上下移动时水色在「浅灰」和「深蓝」之间呼吸 */
-@keyframes welcome-voice-wave-drift {
-  from {
-    background-position: 0 0;
-  }
-
-  to {
-    background-position: 0 100%;
-  }
-}
-
-/* 波形轮廓缓慢起伏：基准 mask-position 为 (−121rpx, −14rpx)，±20rpx 摆动 */
-@keyframes welcome-voice-wave-sway {
-  from {
-    -webkit-mask-position: -141rpx -14rpx;
-    mask-position: -141rpx -14rpx;
-  }
-
-  to {
-    -webkit-mask-position: -101rpx -14rpx;
-    mask-position: -101rpx -14rpx;
-  }
+/* 按住「唤醒中」：1321:1 Frame 85 那块蓝白弧形柔光，直接用设计稿导出的 2x 位图。
+   它的上沿不是一条直线，而是两层带 LAYER_BLUR 的图形叠出的弧：
+   - 1321:7 Vector 87：449×195 的弧形色块，横向渐变 #295DC3 → #0D7ABA，模糊 50
+   - 1321:8 Ellipse 75：434×341 的椭圆，竖向渐变 rgba(239,239,238,0) → #0F7EEE，模糊 37
+   必须放在最后：选择态 / 详情页按住时要盖掉 --finishing 的粉蓝 */
+.welcome-visitor--recording .welcome-visitor__glow-voice {
+  background: url("@/assets/img/welcome-bottom-glow.png") 0 0 / 100% 100% no-repeat;
 }
 
 /* 306:6467 主文案：20px Medium / 行高 29px（设计稿 AUTO 行高，三行共 87px）/ #0D0D0D；

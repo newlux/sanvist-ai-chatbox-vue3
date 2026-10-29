@@ -141,21 +141,6 @@ watch(() => chatStore.activeRequestSeq, () => {
   stopSceneTts();
 });
 
-/**
- * 「正在思考中」：已发起请求，但最后一条 AI 消息还没有 answer 正文。
- * 这一态要把输入栏下方的底部声纹（氛围渐变）收起来，与首页一致；
- * 一旦出字进入「回答中」，声纹按原逻辑自动回来。
- */
-const chatThinking = computed(() => {
-  if (!isLoading.value) return false;
-  const list = messages.value || [];
-  const last = list[list.length - 1];
-  if (!last || last.role !== "ai") return false;
-  return !(last.blocks || []).some(
-    block => block.type === "answer" && String(block.payload?.content || "").trim().length > 0,
-  );
-});
-
 /** 进入页面自动问的初始化问题（跟随当前语言） */
 const initialCardQuery = computed(() => t("task-initial-query"));
 /**
@@ -996,8 +981,6 @@ onUnload(() => {
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
         :compact-voice-listening="true"
-        :speaking="realtimeTts.playing.value"
-        :hide-bottom-art="chatThinking"
         @send="sendTaskMessage"
         @stop="stopGenerating"
         @voice-start="stopSceneTts"

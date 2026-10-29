@@ -196,21 +196,13 @@ const messageBottomInset = computed(() => {
   // 导航与输入栏始终固定在底部；无论是否显示首页快捷问题，都预留导航实际高度。
   return `calc(${composerBottomInset.value} + 88rpx)`;
 });
-/**
- * 「正在思考中」：已发起请求，但最后一条 AI 消息还没有 answer 正文。
- * 这一态要把输入栏下方的氛围渐变收起来（与头部灵动岛的状态判定一致），
- * 一旦出字进入「回答中」，渐变按原逻辑自动回来。
- */
-const chatThinking = computed(() => {
-  if (!isLoading.value) return false;
-  const list = messages.value || [];
-  const last = list[list.length - 1];
-  if (!last || last.role !== "ai") return false;
-  return !(last.blocks || []).some(
-    block => block.type === "answer" && String(block.payload?.content || "").trim().length > 0,
-  );
-});
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
+/**
+ * 录音态底部面板（设计稿 1204:467 录动态）是否展开。
+ * 设计稿这一屏底部只有「水面 + 提示行 + 声纹」，底部导航与「一键回到底部」都要让位，
+ * 否则它们会盖在水面上（AiChatNav / .chat-scroll-bottom 的层级都在面板之上）。
+ */
+const voicePanelOpen = ref(false);
 const askSlotQueue = ref<AskSlotPayload[]>([]);
 const askSlotDrawerVisible = ref(false);
 /** 追问卡实时高度（px）：卡片弹出时给消息列表加底部间距，最后一条内容不会被盖住 */
@@ -965,7 +957,7 @@ onBeforeUnmount(() => {
       <!-- 一键回到底部：离底时出现，贴底自动隐藏；
            位置 = 输入栏高（含键盘抬起）+ 88rpx 底部导航 + 24rpx 间隙，不压住「听汇报 / 作业指导 / 任务协同」 -->
       <view
-        v-if="showScrollToBottom"
+        v-if="showScrollToBottom && !voicePanelOpen"
         class="chat-scroll-bottom"
         :style="{ bottom: `calc(${composerBottomInset} + 112rpx)` }"
         @tap="onScrollToBottomTap"
@@ -1002,7 +994,10 @@ onBeforeUnmount(() => {
         @submit="onGuideSuggestionSubmit"
         @height-change="onGuideSuggestionHeightChange"
       />
+      <!-- 录音态（设计稿 1204:467）底部只有水面 + 提示行 + 声纹，导航整条让位。
+           用透明 + 不吃事件而不是 v-if：卸载再挂载会让 swiper 跳回第一屏 -->
       <AiChatNav
+        :class="{ 'ai-chat-nav--voice-hidden': voicePanelOpen }"
         :active-key="navActiveKey"
         :style="navOffsetStyle"
         @item-click="onNavItemClick"
@@ -1114,10 +1109,7 @@ onBeforeUnmount(() => {
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
-        bottom-gradient
-        :hide-bottom-art="chatThinking"
         :compact-voice-listening="true"
-        :speaking="realtimeTts.playing.value"
         @send="sendMessage"
         @stop="stopGenerating"
         @voice-start="stopRealtimeTtsOnVoiceStart"
@@ -1129,6 +1121,7 @@ onBeforeUnmount(() => {
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
+        @voice-panel-open="voicePanelOpen = $event"
         @dock-height-change="setInputDockHeight"
       />
 
@@ -1218,6 +1211,13 @@ $color-white: #ffffff;
   // 两者共用一个值，消息正好从渐隐的下沿起步，往上滚就被模糊掉
   --chat-top-inset: calc(constant(safe-area-inset-top) + 300rpx);
   --chat-top-inset: calc(env(safe-area-inset-top) + 300rpx);
+}
+
+// 录音态：底部导航整条让位给水面对（设计稿 1204:467 录动态底部只有水面 + 提示行 + 声纹）。
+// 导航是 fixed 定位，透明化不影响任何布局；不吃事件，避免录音时误触入口。
+.ai-chat-nav--voice-hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 
 // 一键回到底部：白底圆钮 + 细线下箭头，浮在底部导航（听汇报 / 作业指导 / 任务协同）上方右侧。

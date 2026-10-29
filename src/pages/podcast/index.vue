@@ -863,6 +863,30 @@ function confirmReportQaOverlay() {
   reportQaNavigation.value = null;
 }
 
+/**
+ * 问答进行中点击输入栏的停止按钮（思考中 / 正在朗读答案都算）。
+ * 原来只调 stopGenerating()：它仅在流式回答还没结束时生效，一旦答案已经到达、
+ * TTS 正在朗读，它就是空操作 —— 页面因此停在问答态：播报一直暂停、
+ * 字幕还挂在上一轮答案上。这里补齐后半段收尾：
+ * 掐断本轮回答 → 停朗读 → 清问答态 → 回到异常列表（列表发起的）
+ * 或把字幕还原成播报文字，并从暂停处继续播报。
+ */
+function stopPodcastAnswer() {
+  stopGenerating();
+  if (reportQaFromInsight.value) {
+    // 异常列表发起的问答：与覆盖层「←」返回同一套收尾，原地停在列表上
+    confirmReportQaOverlay();
+    return;
+  }
+  stopAnswerTts();
+  voiceRecording.value = false;
+  reportQaLoading.value = false;
+  reportQaAnswer.value = "";
+  reportQaSubtitle.value = "";
+  // 从暂停处继续播报；本轮播报若已读完，resume 不会动作，字幕仍回到播报文字
+  reportBroadcastPlayerRef.value?.resume();
+}
+
 function enterReportQaLoading() {
   // 本轮从哪发起就从哪回去：answer 里继续说“确认/取消”时来源保持不变。
   reportQaFromInsight.value = reportQaFromInsight.value || insightVisible.value;
@@ -1050,13 +1074,12 @@ onBeforeUnmount(() => {
         v-model="inputText"
         :attachment-disabled="true"
         :compact-voice-listening="true"
-        :speaking="broadcastPlaying || answerTtsPlaying"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
         @send="sendPodcastMessage"
         @voice-restart="onVoiceStart"
-        @stop="stopGenerating"
+        @stop="stopPodcastAnswer"
         @voice-start="onVoiceStart"
         @recognize-begin="onRecognizeBegin"
         @recognize-fail="onRecognizeFail"
@@ -1112,10 +1135,9 @@ onBeforeUnmount(() => {
       :keyboard-height="keyboardHeight"
       :voice-keyboard-height="voiceKeyboardHeight"
       :safe-top-px="safeTopPx"
-      :speaking="broadcastPlaying || answerTtsPlaying"
       @confirm="confirmReportQaOverlay"
       @send="sendPodcastMessage"
-      @stop="stopGenerating"
+      @stop="stopPodcastAnswer"
       @voice-start="onVoiceStart"
       @voice-restart="onVoiceStart"
       @voice-cancel="onRecognizeFail"
@@ -1305,18 +1327,12 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 键盘弹起时输入栏要抬到播报层之上：播报层 z-index 为 2 且是不透明白底 */
+/* 键盘弹起时输入栏要抬到播报层之上：播报层 z-index 为 2 且是不透明白底。
+   底色保持不透明白 —— 播报字幕从输入栏上方经过时不能透出来；
+   底部不再叠「浅蓝向上淡出」的氛围渐变，整条与页面同色 */
 :deep(.chat-input) {
   z-index: 3;
-  /* 底部氛围：底部浅蓝向上淡出到白（设计稿渐变色），仅听播页使用。
-     起色用不透明白，避免播报字幕从输入栏上方透出来 */
-  background: linear-gradient(
-    180deg,
-    #ffffff 0%,
-    #ffffff 32%,
-    #e6efff 76%,
-    #d7e5ff 100%
-  );
+  background: #ffffff;
 }
 
 /* —— 折叠屏适配 (小米 Mix Fold 18) ——
