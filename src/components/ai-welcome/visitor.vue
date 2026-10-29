@@ -1997,12 +1997,12 @@ onMounted(async () => {
      Figma 给的六段色标（#3D21CD → #C1E4FF → #7B9CFF → #C067FA → #F7CFFF → #FD90C4）
      是按 0.16 的低透明度写的，落到 #FAFAFA 上几乎看不出渐变，整颗胶囊发灰。
      现在按设计稿截图的观感改成「紫 → 蓝紫 → 透白 → 青」的色带，浓度抬到 0.4 左右；
-     渐变画在 ::before 上并做高斯模糊，边缘化开（见下）
-   - 描边：不加。设计稿里胶囊只有虹彩填充 + 外圈柔光，边缘是虚的，
-     没有 1px 实线环；之前的 mask 挖空环在真机上会显出明显的「边线」，
-     与设计稿的柔和边缘相悖，已移除
-   - 投影：DROP_SHADOW rgba(0,159,235,0.1272) offset 0 / 3、radius 16（另一道黑色投影 visible:false），
-     另加一圈彩色柔光还原设计稿里胶囊外的辉光
+     渐变画在 ::before 上、贴合本体只做 4rpx 轻模糊（不外扩），边界清楚但不硬
+   - 描边：不用实线。边缘加 ::after 的 1rpx 半透明白色高光，
+     看得清圆角形状，对比度又低到不会读成「描边线」；
+     更早的 mask 挖空环会显出明显边线，已移除
+   - 投影：设计稿的 DROP_SHADOW rgba(0,159,235,0.1272)（offset 0 / 3、radius 16）与那圈彩色辉光
+     在真机上会被读成一块脏阴影，按需求整道去掉（box-shadow: none）
    - 背景模糊：BACKGROUND_BLUR 29 → 标准差 14.5 → blur(29rpx)（CSS blur() 参数就是标准差，
      之前误写 blur(58rpx) 糊了一倍，玻璃感被冲淡）
    - 圆角 38（76rpx，高度 32 → 药丸）、14px / 行高 20px / Medium / #0D0D0D，
@@ -2015,12 +2015,10 @@ onMounted(async () => {
   justify-content: center;
   box-sizing: border-box;
   height: 64rpx; // 32px
-  /* 填充不放元素本身：设计稿的胶囊没有硬边，颜色是「化开」的，
-     直接把渐变裁在圆角里会截出一条硬轮廓。填充改由 ::before 承载并做高斯模糊（见下） */
+  /* 填充仍由 ::before 承载（便于单独控模糊），本体保持透明；
+     投影按需求整道去掉，轮廓靠 ::after 的 1rpx 白色高光收住 */
   border-radius: 76rpx; // 38px
-  box-shadow:
-    0 6rpx 32rpx rgba(0, 159, 235, 0.127), // 0 3 16
-    0 0 22rpx rgba(150, 175, 255, 0.42); // 外圈柔光：设计稿里胶囊边缘有一层彩色辉光
+  box-shadow: none;
   -webkit-backdrop-filter: blur(29rpx); // stdDev 14.5px
   backdrop-filter: blur(29rpx);
   color: #0d0d0d;
@@ -2034,18 +2032,15 @@ onMounted(async () => {
   will-change: transform, opacity;
 }
 
-/* 填充层：原来 0.16 的浓度压在 #FAFAFA 上根本看不出渐变，整颗胶囊发灰发白。
-   这里按设计稿截图的观感取「左下紫 → 中段透白 → 右上青」，浓度 0.3 ~ 0.4。
-   渐变画在这层上并整体高斯模糊（σ = 10rpx ≈ 5px），边缘自然化开，
-   像设计稿那样没有一条能看出来的轮廓线。这层比胶囊外扩 8rpx 再模糊：
-   模糊会把边缘往里外各抹一圈，外扩后原本的胶囊边界仍接近满浓度，
-   只是外面多出一圈渐隐的辉光 —— 尺寸观感不变，边线消失。
-   文案是元素自己的子节点，不受这层模糊影响（见 .detail-tag-text） */
+/* 填充层：按设计稿观感取「左下紫 → 中段透白 → 右上青」，浓度 0.3 ~ 0.4。
+   之前外扩 8rpx 再糊 10rpx，颜色会溢到胶囊外面，轮廓整个散掉（真机上看着发虚）。
+   现在填充严格贴合本体、只留 4rpx 轻模糊把边缘化开一点点：
+   形是清楚的，边界又不至于切出一条硬边。文案不受影响（见 .detail-tag-text） */
 .welcome-visitor__detail-tag::before {
   position: absolute;
   z-index: 0;
-  inset: -8rpx;
-  border-radius: 84rpx; // 76 + 8，与外扩后的盒形保持同心
+  inset: 0;
+  border-radius: 76rpx; // 与本体同形，不再外扩
   background-image: linear-gradient(
     47.05deg,
     rgba(98, 72, 232, 0.4) 0%,
@@ -2055,7 +2050,20 @@ onMounted(async () => {
     rgba(150, 214, 250, 0.29) 78%,
     rgba(118, 206, 246, 0.42) 100%
   );
-  filter: blur(10rpx);
+  filter: blur(4rpx);
+  content: "";
+  pointer-events: none;
+}
+
+/* 轮廓线：1rpx 半透明白色高光，只在胶囊边缘薄薄压一条，
+   看得出圆角形状，但对比度低、不是一条实打实的描边线。
+   写在 ::before 之后且同为 z-index 0，压住填充、仍在文案之下 */
+.welcome-visitor__detail-tag::after {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  border: 1rpx solid rgba(255, 255, 255, 0.66);
+  border-radius: 76rpx;
   content: "";
   pointer-events: none;
 }

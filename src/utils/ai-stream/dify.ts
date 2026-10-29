@@ -357,11 +357,18 @@ function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockD
     if (!slots.length) return null;
     return { type: "ask-slot", payload: { ...slots[0], slots } };
   }
-  if (type === "navigation" && data.target === "maintenance_assistant") {
+  /**
+   * 跳转确认：navigation 卡片统一走 assistant-navigation 块，弹框由页面按 target 决定去向。
+   * - maintenance_assistant：维修助手（独立页 /pages/repair/index）
+   * - parts_assistant：配件助手（首页内联智能体，切换 subagent=parts）
+   * 其它 target 不认，别把无关卡片也弹成确认框。
+   */
+  const navigationTarget = String(data.target || "").trim();
+  if (type === "navigation" && (navigationTarget === "maintenance_assistant" || navigationTarget === "parts_assistant")) {
     return {
       type: "assistant-navigation",
       payload: {
-        target: "maintenance_assistant",
+        target: navigationTarget,
         title: String(data.title || "").trim() || undefined,
         confirm_text: String(data.confirm_text || "").trim() || undefined,
         cancel_text: String(data.cancel_text || "").trim() || undefined,
