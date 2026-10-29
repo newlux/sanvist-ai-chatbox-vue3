@@ -34,6 +34,7 @@ import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
 import { hasGanttCard } from "@/utils/gantt-card";
 import { openGanttView } from "@/utils/gantt-navigation";
+import { isWebEnvironment } from "@/utils/landscape-device";
 import { createLogger } from "@/utils/logger";
 import { setLandscapeFullscreen } from "@/utils/platform/mpaas";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -568,8 +569,9 @@ const LANDSCAPE_RETURN_GUARD_MS = 800;
  * 数据一律先落本地存储、再由目标页 onLoad 取走（目标页可能是独立场景窗口）。
  */
 function onGanttOpen(payload: GanttViewPayload) {
-  // 只有横屏页需要回来时复原方向；personal 是竖屏页，不参与
-  if (String(payload?.viewType || "").trim().toLowerCase() !== "personal") {
+  // 只有横屏页需要回来时复原方向；personal 是竖屏页，不参与。
+  // 网页环境不做横屏转换（见 utils/landscape-device），也就没有「回来要复原的方向」。
+  if (String(payload?.viewType || "").trim().toLowerCase() !== "personal" && !isWebEnvironment()) {
     landscapeSceneOpenedAt = Date.now();
   }
   openGanttView(payload);
