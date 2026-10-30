@@ -115,10 +115,17 @@ const { sendMessage, sendSilentMessage, sendAskSlotSelection, beginAsrPlaceholde
   scene: "TASK",
   // 同首页 / 作业指导：问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
   // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
+  // 多步骤卡（guide-step）的回答与作业指导页同一套处理：正文不渲染也不播报（见 ai-bubble-v2 的 contentBlocks）。
   onAiAnswerDelta({ aiMsgId, delta, ended }) {
     const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
     if (index < 0) return;
-    realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
+    const message = chatStore.messages[index];
+    if ((message.blocks || []).some(block => block?.type === "guide-step")) {
+      const key = String(message.messageId ?? message.id);
+      if (String(realtimeTts.playingMessageKey.value ?? "") === key) realtimeTts.stop();
+      return;
+    }
+    realtimeTts.feedAnswerDelta(message, delta, ended);
   },
   // 与首页同一套滚动：发送时只登记本轮的提问（消息列表据此加大顶部呼吸位），
   // 回答边写边贴底跟随，本轮提问顶到头部下沿就停住（见 ai-message-list 的 alignToReplyEnd）
@@ -418,9 +425,19 @@ function armAutoOpenTimer() {
   }, AUTO_OPEN_DELAY_MS);
 }
 
-/** 自动弹层：生成中先挂起，等 loading 变 false 后再计时 5s */
+/**
+ * 自动弹层：生成中先挂起，等 loading 变 false 后再计时 5s。
+ *
+ * 排期时记下当前请求序号：这一轮被「停止生成 / 重新发送 / 切会话」作废后
+ * （activeRequestSeq 会变，见 stores/modules/chat 的 nextRequestSeq / invalidateActiveRequest），
+ * 到点也不再弹 —— 否则旧卡片会在新一轮对话上盖出来。只丢弃这一张卡片，不影响请求本身。
+ */
 function scheduleAutoOpen(open: () => void) {
-  pendingAutoOpen = open;
+  const requestSeq = chatStore.activeRequestSeq;
+  pendingAutoOpen = () => {
+    if (chatStore.activeRequestSeq !== requestSeq) return;
+    open();
+  };
   if (isLoading.value) return;
   armAutoOpenTimer();
 }
@@ -436,6 +453,15 @@ function clearAutoOpenTimer() {
   }
   pendingAutoOpen = null;
 }
+
+/**
+ * 用户中断 / 重新发送 / 切换会话时立刻作废待弹的选项卡片：
+ * activeRequestSeq 在新请求开始、取消（停止生成）、重置会话时都会变，
+ * 一个 watcher 覆盖全部入口；只清「延时弹卡」的定时器，不碰在途请求。
+ */
+watch(() => chatStore.activeRequestSeq, () => {
+  clearAutoOpenTimer();
+});
 
 /** 步骤卡片：单步是多轮追问（点一下直接发），多步选好后确认，统一按普通问题发送。 */
 function onGuideStepOpen(payload: GuideStepPayload, auto = false) {
@@ -456,6 +482,28 @@ function openGuideStepSheet(payload: GuideStepPayload) {
   // 步骤卡弹出：把这一步的核对卡滚到对话区顶部
   nextTick(() => focusGuideStepCardAtTop());
 }
+
+/**
+ * 多步骤卡的回答不渲染气泡（见 ai-bubble-v2 的 hideBody），卡片组件因此不会挂载，
+ * 自动弹起改在这里盯最后一条 AI 消息的 guide-step 块：出现即排期（生成结束后再等 5s），
+ * 同一张卡只弹一次；历史消息的块不带 auto_open，不会触发。
+ */
+const autoOpenedStepCardIds = new Set<string>();
+watch(
+  () => {
+    const list = chatStore.messages;
+    const last = list[list.length - 1];
+    if (!last || last.role !== "ai") return null;
+    const block = (last.blocks || []).find(item => item?.type === "guide-step" && item.payload?.auto_open === true);
+    if (!block) return null;
+    return { id: String(block.id || ""), payload: block.payload as GuideStepPayload };
+  },
+  (current) => {
+    if (!current || !current.id || autoOpenedStepCardIds.has(current.id)) return;
+    autoOpenedStepCardIds.add(current.id);
+    scheduleAutoOpen(() => openGuideStepSheet(current.payload));
+  },
+);
 
 function onGuideStepSubmit(query: string) {
   guideStepSheetVisible.value = false;

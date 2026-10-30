@@ -96,7 +96,8 @@ const photoText = computed(() => String(currentStep.value?.photo_text || "").tri
 
 /**
  * 多步骤卡播报用的是固定文案（详情卡渲染到页面上的 step.action），
- * 不是流式答案，所以走 usePlainTts（与 guide-init / task-init 同一套 POST /speech/tts/stream）。
+ * 不是流式答案，所以走 usePlainTts（与 guide-init / task-init 同一套：
+ * 文本按句号切分，每句单独 POST /speech/tts/v2/stream，再顺序拼接播放）。
  * 每切一步 speak 内部会先 stop 再播，天然满足「终止当前语音、播最新一步」。
  */
 const isEnglish = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));

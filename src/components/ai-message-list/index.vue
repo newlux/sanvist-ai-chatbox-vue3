@@ -815,12 +815,12 @@ function onListenReport() {
   emit("listen-report", listenedReport.value);
 }
 /**
- * 与气泡的 hideBody 同一个判断（见 ai-bubble-v2）：带步骤卡的回答正文（含参考来源）不展示。
+ * 与气泡的 hideBody 同一个判断（见 ai-bubble-v2）：带步骤卡的回答正文（含参考来源）不展示，
+ * 流式过程中也一样（不再按 loading 判断）。
  * 正文没被隐藏时，参考来源留在气泡里，不能再往卡片里塞一份。
  */
 function hidesBody(message: UiChatMessage) {
   return message?.role === "ai"
-    && !message?.loading
     && (message?.blocks || []).some(block => block?.type === "guide-step");
 }
 

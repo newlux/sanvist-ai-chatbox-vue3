@@ -39,6 +39,9 @@ import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/sched
  * 双指缩放：旋转页面里浏览器原生 pinch 不生效，由 useScheduleGestures 接管两指手势，
  * 按两指间距的变化比例改「每小时像素宽」（28–168px，基准 56px），捏合中心的时刻保持不动；
  * 刻度、任务条、竖网格线、左右提示箭头都跟着缩放实时重排。
+ *
+ * 鼠标拖动（H5 / PC 网页）：网页环境不转屏（见 utils/landscape-device），
+ * 排程区的上下左右平移由 useScheduleGestures 的左键拖动接管，鼠标按住即可拉动。
  */
 
 defineOptions({ name: "ScheduleGanttPage" });
@@ -871,30 +874,41 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   opacity: 0;
 }
 
-/* ---------- 顶部栏 ---------- */
+/* ---------- 顶部栏 ----------
+   H5 网页（不转屏）的视口通常比设计稿 812 窄：标题 / 日期 / 图例文案一律「按文案自适应宽度」，
+   禁止折行、也不参与 flex 压缩；真放不下时让「图例 + 返回」整块落到第二行，
+   而不是把「调度视图」「2026-10-29」「已完成」拆成两行。 */
 .schedule__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
-  height: 49px;
+  min-height: 49px;
   padding: 0 28px;
+  /* 行间距只给换行时用（一行时由 min-height + 居中维持设计稿 49 高） */
+  gap: 4px 16px;
 }
 
 .schedule__title-group {
   display: flex;
   align-items: center;
+  flex: none;
   gap: 8px;
 }
 
 .schedule__title {
+  flex: none;
   font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
   color: #000000;
 }
 
 .schedule__date {
+  flex: none;
   font-size: 11px;
+  white-space: nowrap;
   color: #999999;
 }
 
@@ -902,12 +916,14 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 .schedule__legend {
   display: flex;
   align-items: center;
+  flex: none;
   gap: 16px;
 }
 
 .schedule__legend-item {
   display: flex;
   align-items: center;
+  flex: none;
   gap: 5px;
 }
 
@@ -935,15 +951,39 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   background: #ffffff;
 }
 
+/* 宽度按文案自适应：不压缩、不折行（网页窄屏时靠整块换行保版面，而不是拆字） */
 .schedule__legend-text {
+  flex: none;
   font-size: 11px;
+  white-space: nowrap;
   color: #000000;
 }
 
 .schedule__tools {
   display: flex;
   align-items: center;
+  flex: none;
+  /* 窄视口里整块换到第二行时仍然靠右 */
+  margin-left: auto;
   gap: 16px;
+}
+
+/* 窄视口（H5 网页 / 小尺寸窗口）：收紧顶部栏间距，尽量维持「一行标题 + 图例」；
+   放在基础样式之后，同特异度才能覆盖上面的 16px / 28px。
+   限定 :not(.schedule--rotated)：CSS 旋转模拟横屏时视口本身也是窄的，
+   但页面按设计稿 812 宽铺开，留白不能跟着收 */
+@media (max-width: 780px) {
+  .schedule:not(.schedule--rotated) .schedule__header {
+    padding: 0 16px;
+  }
+
+  .schedule:not(.schedule--rotated) .schedule__tools {
+    gap: 12px;
+  }
+
+  .schedule:not(.schedule--rotated) .schedule__legend {
+    gap: 12px;
+  }
 }
 
 /* 返回对话页（稿子 10474:16：底 #FBFBFB + 描边 #F2F2F2、圆角 6）——与预排 / 重排调度视图同款 28×28 纯图标按钮 */
