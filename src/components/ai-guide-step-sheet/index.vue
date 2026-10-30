@@ -65,6 +65,16 @@ const emit = defineEmits<{
 const { t, locale } = useI18n();
 
 const currentIndex = ref(0);
+/**
+ * 当前步骤下标（0 起）。
+ *
+ * 每张多步骤卡都从自己的第 1 步开始：换卡（payload 引用变化）时立刻归零，
+ * 不继承上一张卡翻到的步数、也不做跨卡进度记忆——新卡与之前的步骤完全无关。
+ * 用 flush: sync 在子组件因 props 更新而重渲染前归零，第一帧就直接渲染第 1 步。
+ */
+watch(() => props.payload, () => {
+  currentIndex.value = 0;
+}, { flush: "sync" });
 /** 末尾输入框：用户自己写的追问 */
 const draftText = ref("");
 /** 附件来源弹窗开关（前端三选项；容器内原生弹窗由原生自己弹） */
@@ -129,10 +139,9 @@ function clampStepIndex(index: number) {
   return Math.min(Math.max(Math.round(value), 0), total - 1);
 }
 
+// 展开时收起来源弹窗：新卡重新打开时，选附件弹窗不该还开着
 watch(() => props.visible, (visible) => {
-  // 展开时定位到外部指定的步（默认第 1 步）
-  if (visible) currentIndex.value = clampStepIndex(props.stepIndex);
-  isSourcePickerOpen.value = false;
+  if (visible) isSourcePickerOpen.value = false;
 });
 
 // 外部指定步骤变化（点核对卡步骤条、但白板已展开）：切过去
@@ -244,7 +253,9 @@ async function measureHeight() {
     .exec();
 }
 
-watch(() => [props.visible, currentIndex.value], () => {
+// 依赖 currentStep（而不是只依赖下标）：换卡时即使下标没变，currentStep 引用也会变，
+// 这里照常触发，把新卡这一步对应的核对卡滚到对话区顶部。
+watch([() => props.visible, currentStep], () => {
   // 翻页后上一步的输入内容不该跟过来
   draftText.value = "";
   void measureHeight();
