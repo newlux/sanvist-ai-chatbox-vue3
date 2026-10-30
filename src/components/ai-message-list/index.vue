@@ -525,21 +525,21 @@ function alignToReplyEnd(forceUp = false) {
         const topTarget = userTop - innerTop - pinnedTopGapPx();
         if (Number.isFinite(topTarget)) {
           /**
-           * 收尾后按「真末尾」贴底：气泡底部那行操作栏（播报 / 复制 / 反馈 / 分享）是独立于
-           * .ai-content-blocks 的一块，继续用「正文末尾」口径会把它整行留在输入栏下面，
-           * 看着像没排到底 —— 内容够短时这里就是滚到底（clamp 到内容高 − 视口高）。
+           * 一律按「真末尾」贴底（思考中 / 流式作答也一样）：气泡底部那行操作栏
+           * （播报 / 复制 / 反馈 / 分享）是独立于 .ai-content-blocks 的一块，
+           * 用「正文末尾」口径会把它整行留在输入栏下面，表现就是「气泡只露一半、
+           * 回复完才整块出现」。内容够短时这里就是滚到底（clamp 到内容高 − 视口高）。
            */
-          const bottomTarget = isLastAnswerSettled()
-            ? Math.max(0, Math.round(baseContentHeight - listHeight))
-            : target;
+          const bottomTarget = Math.max(0, Math.round(baseContentHeight - listHeight));
           const capTarget = Math.max(0, Math.round(topTarget));
           target = Math.min(bottomTarget, capTarget);
           /**
-           * 封顶说明下方还有内容露不出来（回答比可视区高）：
-           * 立刻上报「未贴底」，页面那边马上显示「回到底部」，
-           * 不用等用户手滑到底再滑回来才出现。
+           * 封顶说明下方还有内容露不出来（回答比可视区高）：收尾后上报「未贴底」，
+           * 页面那边才显示「回到底部」。
+           * 流式期间**不能**上报 —— 一旦 setPinned(false)，content-grow 不再触发，
+           * 后面长出来的内容就完全不跟随了，正好是「回答时气泡憋在下面、结束才跳出来」。
            */
-          if (capTarget < bottomTarget - 1) setPinned(false);
+          if (isLastAnswerSettled() && capTarget < bottomTarget - 1) setPinned(false);
         }
       }
       if (!Number.isFinite(target)) return;
@@ -1171,7 +1171,7 @@ watch(
               :tts-enabled="!!msg.ttsEnabled"
               :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
               :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
-              :show-actions="msg.role === 'ai' && !msg.loading && !msg.interrupted && !msg.assistantCallbackTitle && !msg.hideActions"
+              :show-actions="msg.role === 'ai' && !msg.interrupted && !msg.assistantCallbackTitle && !msg.hideActions"
               :waiting-text="msg.waitingText"
               :assistant-callback-title="msg.assistantCallbackTitle"
               :assistant-callback-status="msg.assistantCallbackStatus || ''"

@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import AiAttachmentPicker from "@/components/ai-attachment-picker/index.vue";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
+import { usePressDelay } from "@/hooks/usePressDelay";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { createLogger } from "@/utils/logger";
 import { getMicrophoneVolume } from "@/utils/platform/mpaas";
@@ -147,13 +148,15 @@ const VOICE_WAVE_BARS = [
  *
  * - gain：这一根对音量的响应强度，0.85~1.34 伪随机打散，避免整排等幅；
  * - speed / phase：各自的抖动角速度与初相，频率错开后才像真实电平表，
- *   而不是整排一起呼吸。
+ *   而不是整排一起呼吸。频率必须压在 1~3Hz：30fps 采样下，
+ *   4~6Hz 的抖动只会被采成一片高频噪点，看起来就是「等幅乱颤」，
+ *   声音大小完全读不出来。
  */
 const VOICE_WAVE_BARS_MOTION = VOICE_WAVE_BARS.map((height, index) => ({
   height,
   gain: Number((0.85 + ((index * 37) % 50) / 100).toFixed(2)),
-  /** rad/s：约 4~7Hz，接近说话时声纹的抖动手感 */
-  speed: Number((24 + (index % 7) * 2.4).toFixed(1)),
+  /** rad/s：约 1.3~2.8Hz，说话时声纹上下「甩」得出来，又不是乱抖 */
+  speed: Number((8 + (index % 7) * 1.5).toFixed(1)),
   phase: Number((index * 0.73).toFixed(2)),
 }));
 
@@ -284,16 +287,45 @@ const {
 });
 
 /**
+ * 紧凑态面板的防误触：真机上手一碰就抬起，也会立刻挂载整块底部渐变，
+ * 底部导航 / 输入栏跟着让位，看起来很闪。所以按住满 500ms 才挂载面板，
+ * 不足 500ms 的快速点按从头到尾都不出现任何变化。
+ * 整屏态（非 compact）不吃这个延迟 —— 那里的「按住说话」按钮本身就藏在整屏遮罩里，
+ * 延迟会出现 500ms 空窗。
+ */
+const VOICE_PANEL_DELAY_MS = 500;
+const {
+  active: voicePanelReady,
+  press: beginVoicePanelDelay,
+  release: cancelVoicePanelDelay,
+} = usePressDelay(VOICE_PANEL_DELAY_MS);
+
+/** 底部录音面板是否该挂载（模板 v-if 用这个，而不是直接看 voicePhase） */
+const showVoiceSheet = computed(() => {
+  const recording = inputMode.value === "voice" && voicePhase.value === "recording";
+  if (!recording) return false;
+  return props.compactVoiceListening ? voicePanelReady.value : true;
+});
+
+watch(
+  () => inputMode.value === "voice" && voicePhase.value === "recording",
+  (recording) => {
+    if (recording && props.compactVoiceListening) beginVoicePanelDelay();
+    else cancelVoicePanelDelay();
+  },
+  { immediate: true },
+);
+
+/**
  * 紧凑录音态底部面板（设计稿 1204:467 录动态）是否展开。
  * 设计稿这一屏底部只有「水面 + 提示行 + 声纹」，面板一出现，
  * 底部导航（听汇报 / 作业指导…）、输入栏、免责文案都要让位，
  * 所以把开合状态同步给页面，由页面决定哪些贴底元素要收起。
+ * 用 showVoiceSheet 而不是直接看 voicePhase：让位时机与面板挂载严格同步，
+ * 快速点按（<500ms）既不出面板也不让位。
  */
 const isVoicePanelOpen = computed(
-  () =>
-    props.compactVoiceListening &&
-    inputMode.value === "voice" &&
-    voicePhase.value === "recording",
+  () => props.compactVoiceListening && showVoiceSheet.value,
 );
 
 watch(isVoicePanelOpen, open => emit("voice-panel-open", open));
@@ -304,12 +336,18 @@ watch(isVoicePanelOpen, open => emit("voice-panel-open", open));
  * 用 res.level(0~1) 驱动底部 40 根声纹（豆包那种「声音越大跳得越高」）。
  * - level 缺失时用 amplitude / 32767 兜底；
  * - 桥不可用 / 宿主没实现时返回 null，声纹保留轻幅呼吸，录制本身完全不受影响。
+ *
+ * 注意：宿主对 microphoneVolume 的回调本来就「时有时无」（见 callNative 的注释），
+ * 所以这里拿到 null 只降频重试，绝不停止轮询、更不能顺手停掉声纹动效 ——
+ * 一旦停了，barScales 会归位到静态基线，真机表现就是「录着音但声纹一动不动」。
  */
 const micLevel = ref<number | null>(null);
 let micLevelPolling = false;
 let micLevelTimer: ReturnType<typeof setTimeout> | undefined;
-/** 连续拿不到电平的次数：宿主没实现这个 API 时，别每 100ms 都去等一次超时 */
+/** 连续拿不到电平的次数：只用于退避，不代表放弃 */
 let micLevelMisses = 0;
+/** 退避上限：宿主偶发不回调时仍保持 1s 一次，别把声纹的呼吸也一起掐掉 */
+const MIC_LEVEL_MAX_BACKOFF_MS = 1000;
 
 async function pollMicLevel() {
   if (!micLevelPolling) return;
@@ -318,11 +356,8 @@ async function pollMicLevel() {
 
   if (level == null) {
     micLevelMisses += 1;
-    if (micLevelMisses >= 3) {
-      stopMicLevelPolling();
-      return;
-    }
-    micLevelTimer = setTimeout(pollMicLevel, 300);
+    const delay = Math.min(MIC_LEVEL_MAX_BACKOFF_MS, 100 * 2 ** Math.min(micLevelMisses, 4));
+    micLevelTimer = setTimeout(pollMicLevel, delay);
     return;
   }
 
@@ -332,44 +367,106 @@ async function pollMicLevel() {
 }
 
 /**
- * 逐根声纹的起伏系数，rAF 里每帧算一次（模板里乘到每根的设计高度上）：
- *   幅度 = f(平滑后的电平)          —— 音量决定整体跳多高，跟着声音走
+ * 逐根声纹的起伏系数，rAF 里每帧算一次：
+ *   幅度 = f(平滑后的电平)          —— 音量决定这一根能跳多高，跟着声音走
  *        × sin(t·speed + phase)      —— 决定这一根此刻在起还是在落
  *        × gain                      —— 逐根强弱错开，避免整排等幅齐闪
- * level = 0（静音）时仍有 0.4~0.74 的轻幅呼吸；level = 1 时最高约 2.2 倍基线。
+ * 静音（level≈0）时约 0.28~0.40 倍的轻呼吸；说话时随电平逐根甩到 1~3 倍基线（上限 3.4）。
  *
- * 走「高度」而不是 transform：高度是内联样式里最稳的一路，
- * 不会被上层 CSS animation 覆盖、也不依赖自定义属性；
- * 40 根小竖条每帧改高度的布局开销可以忽略，而 transform 一旦被覆盖就是彻底不动且不报错。
+ * 关键：不再把系数交给模板重新渲染，而是直接写 DOM 的 `transform: scaleY()`。
+ * 之前是 `:style="{ height: …rpx }"`，30fps 下每秒要重渲染 40 个节点、还要过
+ * rpx→rem 归一化那一层；真机上出现了「采样日志在跳、声纹却不动」的情况，
+ * 说明卡在渲染这一环。直接改 transform 绕开 vnode diff，也走合成层，不掉帧。
  */
-const barScales = ref<number[]>(
-  VOICE_WAVE_BARS_MOTION.map(() => 1),
-);
+const voiceBarsRef = ref<unknown>(null);
+/** 40 根声纹的真实节点，容器子树重建时按数量重新取 */
+let barNodes: HTMLElement[] = [];
 /** 平滑后的电平（0~1）：声纹幅度、水面起伏都读它 */
 const barLevel = ref(0);
 let smoothedLevel = 0;
 let barFrameId = 0;
 let lastBarFrameAt = 0;
+let barSampleLogAt = 0;
 /** ~30fps：看着够顺滑，又不用每帧都去算 40 个节点（低端 WebView 也能扛） */
 const BAR_FRAME_MS = 33;
 
+/** 取 40 根声纹节点：容器重建（v-if 开关）后按数量重新收集一次 */
+function getBarNodes(): HTMLElement[] {
+  const host = readEl(voiceBarsRef.value);
+  if (!host) {
+    barNodes = [];
+    return barNodes;
+  }
+  if (barNodes.length !== host.children.length) {
+    barNodes = Array.from(host.children) as HTMLElement[];
+  }
+  return barNodes;
+}
+
+/**
+ * 拿不到电平时的兜底「呼吸」：约 3Hz 的轻幅起伏。
+ * 宿主这一次没回调（null）不等于静音，声纹不该僵成一条直线，
+ * 所以用一段合成电平顶住，等真电平回来再被平滑接管。
+ */
+function idleBreathLevel(now: number) {
+  const t = now / 1000;
+  return 0.14 + 0.1 * (0.5 + 0.5 * Math.sin(t * Math.PI * 2 * 3.2));
+}
+
+/**
+ * 电平 → 视觉幅度：
+ * 早先是「固定 0.4 底座 + 每根自己 0.3~1 的抖动」× 电平的线性系数，
+ * 抖动本身占了大头，音量只把整排等比放大一点；再叠上 4~6Hz 的抖频，
+ * 30fps 采出来就是一片等幅乱颤，肉眼读不出「声音变大」。
+ * 现在反过来：电平决定「这一根能甩多高」，静音贴着基线轻呼吸，
+ * 说话时逐根甩开，动态对比才出得来。
+ */
 function tickBarScales(now: number) {
   barFrameId = requestAnimationFrame(tickBarScales);
   if (now - lastBarFrameAt < BAR_FRAME_MS) return;
   lastBarFrameAt = now;
 
-  const target = micLevel.value ?? 0;
-  smoothedLevel += (target - smoothedLevel) * 0.35;
+  const target = micLevel.value ?? idleBreathLevel(now);
+  // attack 快、release 慢：音节进来立刻起，收尾慢慢落，才像人在说话
+  const follow = target > smoothedLevel ? 0.6 : 0.2;
+  smoothedLevel += (target - smoothedLevel) * follow;
   if (Math.abs(target - smoothedLevel) < 0.003) smoothedLevel = target;
   barLevel.value = Number(smoothedLevel.toFixed(3));
 
+  // 0.6 次幂：宿主给的电平常年偏小（实测安静时 0.1 上下、说话 0.4~1），
+  // 指数越小于 1，中低音量被抬得越高，起伏更明显
+  const shaped = Math.min(1, Math.max(0, smoothedLevel)) ** 0.6;
+  // 0.1 是静音底：始终留一点呼吸，不至于变成一条死线
+  const amp = 0.1 + 2.3 * shaped;
+
   const t = now / 1000;
-  barScales.value = VOICE_WAVE_BARS_MOTION.map((bar) => {
-    // 0.3~1 的抖动：留一点底，静音时不会整排僵住
-    const wave = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * bar.speed + bar.phase));
-    const scale = 0.4 + bar.gain * (0.25 + smoothedLevel * 1.45) * wave;
-    return Number(Math.min(2.2, scale).toFixed(3));
+  // 整排共享的慢摆动（约 0.7Hz）：40 根一起上下起伏才有「声浪」的观感；
+  // 只留逐根相位差的话，看上去是「抖」而不是「跳」
+  const sway = 0.5 + 0.5 * Math.sin(t * 4.6);
+  const scales = VOICE_WAVE_BARS_MOTION.map((bar) => {
+    const flutter = 0.5 + 0.5 * Math.sin(t * bar.speed + bar.phase);
+    // 0.15~1 的波形：抖幅尽量大，声音大时整根甩开才够劲
+    const wave = 0.15 + 0.85 * (0.62 * flutter + 0.38 * sway);
+    const scale = 0.22 + amp * bar.gain * wave;
+    return Number(Math.min(3.4, scale).toFixed(3));
   });
+
+  const nodes = getBarNodes();
+  for (let i = 0; i < nodes.length; i++) {
+    nodes[i].style.transform = `scaleY(${scales[i] ?? 1})`;
+  }
+
+  // 每秒打一条采样，真机上可以直接对照「电平多大 → 声纹多高」
+  if (now - barSampleLogAt >= 1000) {
+    barSampleLogAt = now;
+    logger.debug("[voice] 声纹采样", {
+      level: micLevel.value,
+      smoothed: barLevel.value,
+      amp: Number(amp.toFixed(3)),
+      scale0: scales[0],
+      peak: Math.max(...scales),
+    });
+  }
 }
 
 function startMicLevelAnimation() {
@@ -393,7 +490,9 @@ function stopMicLevelAnimation() {
   }
   smoothedLevel = 0;
   barLevel.value = 0;
-  barScales.value = VOICE_WAVE_BARS_MOTION.map(() => 1);
+  // 直接改过的 transform 得自己还原，否则下一轮录音会停在上一帧的形态
+  for (const node of barNodes) node.style.transform = "";
+  barSampleLogAt = 0;
 }
 
 function startMicLevelPolling() {
@@ -404,6 +503,7 @@ function startMicLevelPolling() {
   void pollMicLevel();
 }
 
+/** 结束录音时整体收尾：停轮询 + 停动效（轮询失败不会走到这里） */
 function stopMicLevelPolling() {
   micLevelPolling = false;
   micLevelMisses = 0;
@@ -415,13 +515,11 @@ function stopMicLevelPolling() {
   stopMicLevelAnimation();
 }
 
-watch(
-  () => inputMode.value === "voice" && voicePhase.value === "recording",
-  (recording) => {
-    if (recording) startMicLevelPolling();
-    else stopMicLevelPolling();
-  },
-);
+// 跟着面板挂载一起起停：紧凑态防误触等待期间不去空转轮询
+watch(showVoiceSheet, (open) => {
+  if (open) startMicLevelPolling();
+  else stopMicLevelPolling();
+});
 
 onBeforeUnmount(stopMicLevelPolling);
 
@@ -613,7 +711,7 @@ onBeforeUnmount(() => {
          时候不会被浮层背景整块遮住，视觉态和首页一致 -->
     <Teleport to="body" :disabled="compactVoiceListening">
       <view
-        v-if="inputMode === 'voice' && voicePhase === 'recording'"
+        v-if="showVoiceSheet"
         class="voice-sheet"
         :class="compactVoiceListening ? 'voice-sheet--listening-compact' : 'voice-sheet--listening'"
       >
@@ -639,7 +737,7 @@ onBeforeUnmount(() => {
             <view
               class="voice-panel__wave"
               :class="{ 'voice-panel__wave--paused': voice.cancelling }"
-              :style="{ transform: `scaleY(${(1 + barLevel * 0.08).toFixed(3)})` }"
+              :style="{ transform: `scaleY(${(1 + barLevel * 0.12).toFixed(3)})` }"
               aria-hidden="true"
             />
 
@@ -650,16 +748,14 @@ onBeforeUnmount(() => {
             </text>
 
             <!-- ④ 1291:1 Frame 114（195×20.76 @91,733）：40 根声纹，正常白、取消态红。
-                 设计稿高度只做基线，录音中逐根乘 barScales 起伏（改的是 height，
-                 不是 transform：声音大 → 整排变高，每根按自己的 speed / phase 起落） -->
-            <view class="voice-panel__bars" aria-hidden="true">
+                 设计稿高度只做基线，录音中由 tickBarScales 直接写每根的 transform: scaleY()
+                 （绕开逐帧 vnode diff，声音大 → 整排变高，每根按自己的 speed / phase 起落） -->
+            <view ref="voiceBarsRef" class="voice-panel__bars" aria-hidden="true">
               <view
                 v-for="(bar, index) in VOICE_WAVE_BARS_MOTION"
                 :key="index"
                 class="voice-panel__bar"
-                :style="{
-                  height: `${(bar.height * (barScales[index] ?? 1)).toFixed(2)}rpx`,
-                }"
+                :style="{ height: `${bar.height}rpx` }"
               />
             </view>
           </template>
@@ -1043,6 +1139,20 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   flex-direction: column;
   align-items: center;
+  /* 挂载即可见那一档：整块底部渐变 220ms 淡入 + 上托。
+     500ms 的防误触在 JS 里（showVoiceSheet），不到点这段 DOM 根本不会挂载 */
+  animation: voice-panel-enter 0.22s ease-out both;
+}
+
+@keyframes voice-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(24rpx);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 1204:725 Rectangle 105（375×250 @562）+ 1204:609 Rectangle 103（375×166 @646）：
@@ -1165,9 +1275,12 @@ onBeforeUnmount(() => {
 }
 
 /* 声纹条：设计稿是 40 根静态白线，这里的高度只做基线，
-   录音中由模板逐根乘 barScales 改成实际高度（JS 逐帧算，~30fps）。
-   别再挂 CSS animation —— 动画会盖掉内联样式，电平就白算了。
-   最高一根 33.5rpx × 2.2 ≈ 74rpx，会溢出 41.5rpx 的容器，
+   录音中由 tickBarScales 逐帧写 transform: scaleY()（JS 逐帧算，~30fps）。
+   注意两点：
+   1. 别再挂 CSS animation —— 动画会盖掉内联样式，电平就白算了；
+   2. transform-origin 必须在中心，父级是 align-items: center，
+      这样缩放才是「上下同时长」而不是单向往上顶。
+   最高一根 33.5rpx × 3.4 ≈ 114rpx，会溢出 41.5rpx 的容器，
    容器不设 overflow: hidden，让它照常画出去就行。 */
 .voice-panel__bar {
   flex: 0 0 auto;
@@ -1175,6 +1288,8 @@ onBeforeUnmount(() => {
   min-height: 2rpx; /* 缩放到底也别彻底消失 */
   border-radius: 4rpx;
   background: #ffffff;
+  transform-origin: center center;
+  will-change: transform;
 }
 
 /* ---------- 取消态（1204:740）：提示行 + 声纹 + 水面三处同时转红 ---------- */

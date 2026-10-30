@@ -233,7 +233,12 @@ const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceh
   },
   /** 思考态小标题跟随接口 subtitle 事件（如「目标 Dify 工作流已开始。」）实时刷新。 */
   onProcessSubtitle(subtitle) {
-    reportQaSubtitle.value = subtitle ? String(subtitle) : "";
+    // 空白一律跳过、沿用上一句：快收尾时接口会补一条空文案，
+    // 那一拍回答气泡还没渲染出来，置空会让思考态下面这行字突然空白。
+    // 新一轮开始时 enterReportQaLoading 会主动清空，不会串到下一轮。
+    const text = subtitle == null ? "" : String(subtitle).trim();
+    if (!text) return;
+    reportQaSubtitle.value = text;
   },
   onReportQa(answer) {
     qaAnswerShown = true;

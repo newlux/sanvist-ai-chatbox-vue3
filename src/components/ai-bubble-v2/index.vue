@@ -602,8 +602,14 @@ function onNegativeFeedback() {
             {{ t("ai-busy-retry-later") }}
           </text>
         </view>
-        <!-- 底部安全提示已还原到输入栏下方（ai-chat-input），此处不再重复 -->
-        <view v-if="props.showActions && !props.loading" class="ai-bubble-v2__actions">
+        <!-- 底部安全提示已还原到输入栏下方（ai-chat-input），此处不再重复。
+             生成中先把动作栏按最终高度占好位（只弱化、不吃事件），
+             回答结束不会突然多出一行，点击也不会在流式期间误触发 -->
+        <view
+          v-if="props.showActions"
+          class="ai-bubble-v2__actions"
+          :class="{ 'ai-bubble-v2__actions--pending': props.loading }"
+        >
           <view
             v-if="props.ttsEnabled"
             class="ai-bubble-v2__action-btn"
@@ -1175,6 +1181,12 @@ function onNegativeFeedback() {
   gap: 16rpx;
   padding-top: 24rpx;
   border-top: 1px solid #e8e8e8;
+}
+/* 生成中的占位态：位置/高度与完成态完全一致（所以不会跳），
+   只做弱化 + 不吃事件 —— 流式期间点不到，回答落地后自动恢复 */
+.ai-bubble-v2__actions--pending {
+  opacity: 0.35;
+  pointer-events: none;
 }
 /* ===== 空回答兜底提示 =====
    （设计稿无此状态，沿用回答正文的字号/行高规范：14px / 20px / #1A1A1E） */

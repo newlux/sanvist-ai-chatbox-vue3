@@ -268,6 +268,19 @@ export function useChatSend(scope?: string, handlers?: {
     if (!handlers?.keepScrollOnSend) chatStore.scrollToBottom(true);
   }
 
+  /**
+   * 过程小标题的「空白不覆盖」策略。
+   *
+   * 快收尾时接口会补一条空 subtitle（message_end 清场），而那一拍回答气泡往往还没渲染出来：
+   * 用空文案顶掉上一句，思考态下面那行字就会突然空白一下。所以空白一律跳过、沿用上一句，
+   * 等这一轮真正收尾（finishRequest）再统一清掉。
+   */
+  function keepLastProcessSubtitle(next: string | null | undefined, previous: string | null | undefined) {
+    if (next === undefined) return previous;
+    const text = typeof next === "string" ? next.trim() : "";
+    return text || previous;
+  }
+
   function applySnapshot(
     aiMsgId: string,
     userMsgId: string,
@@ -296,9 +309,9 @@ export function useChatSend(scope?: string, handlers?: {
       taskId: snapshot.taskId ?? aiMessage.taskId,
       durationMs: snapshot.metadata?.duration_ms ?? aiMessage.durationMs,
       processStatus: preserveProcessStatus ? aiMessage.processStatus : snapshot.processStatus ?? aiMessage.processStatus,
-      processSubtitle: preserveProcessStatus || snapshot.processSubtitle === undefined
+      processSubtitle: preserveProcessStatus
         ? aiMessage.processSubtitle
-        : snapshot.processSubtitle,
+        : keepLastProcessSubtitle(snapshot.processSubtitle, aiMessage.processSubtitle),
       loading: !snapshot.ended,
       interrupted: snapshot.metadata?.status === "stopped",
       ttsEnabled: Boolean(
@@ -366,7 +379,9 @@ export function useChatSend(scope?: string, handlers?: {
 
   function finishRequest(aiMsgId: string, hadSessionId: boolean, requestSeq: number) {
     if (requestSeq !== chatStore.activeRequestSeq) return;
-    chatStore.patchMessageById(aiMsgId, { loading: false });
+    // 收尾这一拍才把过程小标题清掉：气泡已经渲染出来，思考态正要退场，
+    // 中间那些空 subtitle（message_end 清场）不覆盖上一句，避免思考态闪一下空白
+    chatStore.patchMessageById(aiMsgId, { loading: false, processSubtitle: null });
     chatStore.isLoading = false;
     chatStore.activeMessageId = "";
     // 这一下在「顶到上方」模式下会被跳过（不主动跳底）。
@@ -476,7 +491,12 @@ export function useChatSend(scope?: string, handlers?: {
           }
 
           // 过程小标题：接口 subtitle 事件（如「目标 Dify 工作流已开始。」），听播思考态直接展示它。
-          if (snapshot.processSubtitle !== undefined) handlers?.onProcessSubtitle?.(snapshot.processSubtitle);
+          // 空白（收尾时的清场事件）不往页面传：页面那边用它直接覆盖自己的 ref，
+          // 传空就会让思考态那行字闪一下空白，得等回答气泡彻底渲染出来才能收。
+          if (snapshot.processSubtitle !== undefined) {
+            const subtitle = typeof snapshot.processSubtitle === "string" ? snapshot.processSubtitle.trim() : "";
+            if (subtitle) handlers?.onProcessSubtitle?.(subtitle);
+          }
 
           // 听播问答：与首页共用同一条流式接口（/proxy/v1/chat-messages + streaming），
           // 这里只聚合答案正文，流结束后按汇报交互协议解析后交给播报页（自己的 TTS 出口）。
