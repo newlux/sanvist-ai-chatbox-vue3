@@ -33,7 +33,7 @@ import { request } from "@/utils/request";
 const logger = createLogger("chat-api");
 
 /**
- * ASR 服务侧失败（如 `/speech/asr/upload` 返回 code=500「系统繁忙」）对用户没有意义，
+ * ASR 服务侧失败（如 `/speech/asr/upload/v2` 返回 code=500「系统繁忙」）对用户没有意义，
  * 在 API 层就把报错信息改写成「没有识别到内容，请重试」，上层直接用 error.message 即可，
  * 不必每个入口各判一次。其它错误（网络、401、录音失败）原样抛出。
  */
@@ -344,7 +344,7 @@ export function recognizeSpeechByUrl(params: RecognizeSpeechByUrlParams) {
  * 纯 base64 必须带 mimeType，Data URL 形式则可省略。
  */
 export function recognizeSpeechByBase64(params: RecognizeSpeechByBase64Params) {
-  return request.post<SpeechRecognitionResult>("/speech/asr/base64", {
+  return request.post<SpeechRecognitionResult>("/speech/asr/base64/v2", {
     audioBase64: params.audioBase64,
     ...(params.mimeType ? { mimeType: params.mimeType } : {}),
     ...(params.language ? { language: params.language } : {}),
@@ -353,7 +353,7 @@ export function recognizeSpeechByBase64(params: RecognizeSpeechByBase64Params) {
 
 export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {
   const query = params.language ? `?language=${encodeURIComponent(params.language)}` : "";
-  return request.upload<SpeechRecognitionResult>(`/speech/asr/upload${query}`, {
+  return request.upload<SpeechRecognitionResult>(`/speech/asr/upload/v2${query}`, {
     filePath: params.filePath,
     name: "file",
     fileType: "audio",
