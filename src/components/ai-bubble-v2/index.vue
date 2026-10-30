@@ -243,11 +243,16 @@ const isBareBody = computed(() =>
 );
 
 /**
- * 作业指导的步骤卡回答：思考结束、步骤卡出现后气泡正文（含空的答复与操作栏）不再展示。
- * 内容都在气泡外的独立卡片里（步骤详情卡 / 参考图 / 参考来源），避免留一个空白气泡。
+ * 多步骤卡（guide-step）的回答：整块不渲染 `.ai-bubble-v2__body`（过程状态 + 步骤卡入口 + 参考来源 + 正文全在里面），
+ * 界面上只留气泡外的多步骤卡（底部白板）、步骤详情卡与底部选项。
+ * 参考来源由消息列表移进步骤详情卡（见 ai-message-list 的 hidesBody），不会跟着一起消失。
+ *
+ * 判定不看「是否生成结束」（原来的 `!props.loading`）：多步骤卡随流式事件到达即生效，
+ * 否则流式过程中正文会先冒出来、收尾时又整块消失，用户看到一段随后被撤掉的正文。
+ * 白板的自动弹起不再依赖步骤卡组件挂载，改由页面盯 guide-step 块触发（见 pages/guide、pages/task）。
  */
 const hasGuideStepCard = computed(() => visibleBlocks.value.some(block => block?.type === "guide-step"));
-const hideBody = computed(() => !isUser.value && !props.loading && hasGuideStepCard.value);
+const hideBody = computed(() => !isUser.value && hasGuideStepCard.value);
 
 /**
  * 消息里带独立卡片（核对卡 / 调度视图入口卡）时，气泡正文为空属于正常情况，

@@ -20,6 +20,11 @@ import { onBeforeUnmount, onMounted } from "vue";
  * **双指捏合**：旋转页面里浏览器原生双指缩放同样不生效，这里自己算两指间距的变化比例，
  * 通过 `onPinch` 交给页面缩时间轴（页面把「每小时像素宽」按比例调大 / 调小，捏合中心的时刻保持不动）。
  *
+ * **鼠标拖动（H5 / PC 网页）**：网页里没有触摸，鼠标也拖不动 scroll-view，
+ * 所以补一套左键拖动 —— 水平方向滚时间轴、竖直方向平移内容区，**两个方向同时生效**，
+ * 拖到哪跟到哪；拖动越过阈值后吞掉松手补出来的 click，点任务条仍然照常打开详情。
+ * 方向映射与触摸共用同一套（旋转模拟横屏时屏幕竖向 = 时间轴）。
+ *
  * 每一步都打 `[schedule-gesture]` 日志（debug 关掉即静音），真机上可看：
  * 有没有绑上、方向判定成哪一路、容器尺寸、上限（max）与滚动前后位置。
  */
@@ -268,12 +273,96 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       }
     };
 
+    /* ---------- 鼠标拖动：H5 / PC 网页里按住左键拖动 = 上下左右平移 ----------
+       网页环境没有触摸手势，鼠标也拖不动 scroll-view（原生只认滚轮 / 滚动条），
+       所以这里补一套鼠标拖动：水平方向滚时间轴、竖直方向平移内容区，
+       一次拖动**两个方向同时生效**（不再像触摸那样先锁定单一方向）。
+       旋转模拟横屏时与触摸同一套方向映射（屏幕竖向 = 时间轴）。 */
+    let mouseDragging = false;
+    /** 本次拖动是否已越过阈值：越过才吞掉松手后补出来的 click，避免顺带打开任务详情 */
+    let mouseMoved = false;
+    /** 拖动期间恢复 body 的 user-select（防止拖拽时整页选中文字） */
+    let restoreUserSelect = "";
+
+    /** 拖动结束后浏览器还会补一个 click：捕获阶段一次性吞掉，晚到没有就超时自动撤 */
+    const guardClick = () => {
+      let timer = 0;
+      const swallow = (event: Event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        remove();
+      };
+      const remove = () => {
+        document.removeEventListener("click", swallow, true);
+        window.clearTimeout(timer);
+      };
+      document.addEventListener("click", swallow, true);
+      timer = window.setTimeout(remove, 300);
+    };
+
+    const onMouseDown = (event: MouseEvent) => {
+      // 只认左键；正在双指捏合 / 触摸拖动时不抢
+      if (event.button !== 0 || pinching || mouseDragging) return;
+      mouseDragging = true;
+      mouseMoved = false;
+      startX = event.clientX;
+      startY = event.clientY;
+      startLeft = grid.scrollLeft;
+      startTop = rowsOffset;
+      axis = null;
+      startRotated = options.isRotated?.() ?? false;
+      // 阻止文字选中 / 原生图片拖拽；不影响随后的 click（点任务条仍然能打开详情）
+      event.preventDefault();
+      if (document.body) {
+        restoreUserSelect = document.body.style.userSelect;
+        document.body.style.userSelect = "none";
+      }
+      gridRoot.style.cursor = "grabbing";
+      log("mousedown", { x: startX, y: startY, scrollLeft: startLeft, rowsOffset: startTop, rotated: startRotated });
+    };
+
+    const onMouseMove = (event: MouseEvent) => {
+      if (!mouseDragging) return;
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      if (!mouseMoved) {
+        if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
+        mouseMoved = true;
+        log("鼠标拖动开始", { dx, dy, rotated: startRotated });
+      }
+      // 与触摸同一套映射：旋转模拟横屏时屏幕方向与内容方向互换
+      const timeDelta = startRotated ? dy : dx;
+      const rowsDelta = startRotated ? dx : -dy;
+      const max = Math.max(0, grid.scrollWidth - grid.clientWidth);
+      grid.scrollLeft = Math.min(Math.max(0, startLeft - timeDelta), max);
+      applyRowsOffset(startTop + rowsDelta);
+    };
+
+    const onMouseUp = () => {
+      if (!mouseDragging) return;
+      mouseDragging = false;
+      gridRoot.style.cursor = "grab";
+      if (document.body) document.body.style.userSelect = restoreUserSelect;
+      if (mouseMoved) guardClick();
+      mouseMoved = false;
+      log("mouseup", { scrollLeft: grid.scrollLeft, rowsOffset });
+    };
+
     // 挂在外层容器上：横向滚动容器可能被拆成「固定刻度条 + 滚动区」两层，
     // 绑在滚动区里的话，手指落在刻度条上起手就收不到事件（事件从内部冒泡上来，绑外层都能接住）
     gridRoot.addEventListener("touchstart", onStart, { passive: false });
     gridRoot.addEventListener("touchmove", onMove, { passive: false });
     gridRoot.addEventListener("touchend", onEnd, { passive: true });
     gridRoot.addEventListener("touchcancel", onEnd, { passive: true });
+
+    // 鼠标：按下绑在容器上，移动 / 松手绑在 window 上（拖出容器再松手也能正常收尾）；
+    // 窗口失焦（松手落在浏览器外）同样按结束处理，避免拖动状态卡住
+    gridRoot.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("blur", onMouseUp);
+    // 抓手光标：告诉 PC 用户这块可以按住拖
+    gridRoot.style.cursor = "grab";
 
     // 内容区与左列在窗口尺寸变化后重新按上限归位
     const onResize = () => applyRowsOffset(rowsOffset);
@@ -284,6 +373,16 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       gridRoot.removeEventListener("touchend", onEnd);
       gridRoot.removeEventListener("touchcancel", onEnd);
       // #ifdef H5
+      gridRoot.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("blur", onMouseUp);
+      gridRoot.style.cursor = "";
+      // 拖动中被卸载：把临时关掉的选中一并恢复，别让整页一直选不中文字
+      if (mouseDragging && document.body) {
+        document.body.style.userSelect = restoreUserSelect;
+        mouseDragging = false;
+      }
       window.removeEventListener("resize", onResize);
       // #endif
     };

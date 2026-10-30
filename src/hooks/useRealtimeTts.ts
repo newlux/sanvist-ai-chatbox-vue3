@@ -23,21 +23,28 @@ function guessAudioMime(base64: string) {
 }
 
 function extractAnswerText(message: UiChatMessage): string {
-  const fromBlocks = (message.blocks || [])
-    .filter(block => block.type === "answer")
-    .map(block => String(block.payload?.content || ""))
-    .join("");
+  const blocks = message.blocks || [];
+  /**
+   * 多步骤卡（guide-step）的回答：正文既不渲染也不播报（见 ai-bubble-v2 的 hideBody），
+   * 播报文本直接取核对卡（标题 + 步骤正文），别把隐藏起来的正文念出来。
+   */
+  const hasStepCard = blocks.some(block => block?.type === "guide-step");
+  const fromBlocks = hasStepCard
+    ? ""
+    : blocks.filter(block => block.type === "answer").map(block => String(block.payload?.content || "")).join("");
   if (fromBlocks) return fromBlocks;
   // 核对卡（guide-check）场景：气泡正文隐藏 / 为空时，用核对卡的「标题 + 步骤正文」当播报文本，
   // 否则点播报按钮会因为 answer 为空而「没声音」
-  const fromCheckBlocks = (message.blocks || [])
+  const fromCheckBlocks = blocks
     .filter(block => block.type === "guide-check")
     .map(block => [
       String(block.payload?.title || "").trim(),
       String(block.payload?.content || "").trim(),
     ].filter(Boolean).join("\n"))
     .join("");
-  return fromCheckBlocks || String(message.content || "");
+  if (fromCheckBlocks) return fromCheckBlocks;
+  // 带多步骤卡的回答不再回落到 message.content（那通常就是被隐藏的正文）
+  return hasStepCard ? "" : String(message.content || "");
 }
 
 /**

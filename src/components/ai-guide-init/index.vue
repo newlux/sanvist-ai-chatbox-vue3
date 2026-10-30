@@ -274,11 +274,11 @@ let missTimer: ReturnType<typeof setTimeout> | null = null;
 const isEnglish = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));
 
 /**
- * 语音播报：与首页 / 欢迎页共用同一套（usePlainTts → POST /speech/tts/stream），
- * 每一步出现时口播标题；播报期间底部三色带波浪流动，播完回到设计稿的静态基线。
+ * 语音播报：与首页 / 欢迎页共用同一套（usePlainTts → 按句号切分后逐句 POST /speech/tts/v2/stream），
+ * 每一步出现时口播标题；播报期间底部淡入「播报」那张弧形柔光，播完淡回常态（常态不铺底色）。
  */
 const introTts = usePlainTts(isEnglish.value ? "en" : "zh");
-/** 模板里直接用：true 时底部波浪进入流动 + 摆动（与首页 speaking-wave 一致） */
+/** 模板里直接用：true 时底部换成播报态柔光（与首页 welcome-visitor__glow 一致） */
 const speaking = introTts.playing;
 
 /** 第三态标题里的称呼：游客态没有昵称时用设计稿的占位名 */
@@ -1376,17 +1376,11 @@ onBeforeUnmount(() => {
     <!-- 背景：设计稿 #F5FCFF → #FFF 的冷色渐变 -->
     <view class="gi__bg" />
 
-    <!-- 底部光效：与「Hey,SANI」欢迎页（welcome-visitor__glow）同一套结构与切换时机 ——
-         常态贴底一缕淡蓝（62px）；播报 / 按住说话 / 校验中换成三色带波纹（118px），
-         色带 + 波形遮罩横向流动 / 轮廓摆动，停下后淡回常态 -->
+    <!-- 底部光效：与「Hey,SANI」欢迎页（welcome-visitor__glow）同一套实现 ——
+         常态不铺任何底色（整条与页面同色）；播报 / 按住说话 / 校验中 / 未命中
+         才淡入对应的那张弧形柔光位图，停下后淡回常态 -->
     <view class="gi__glow" aria-hidden="true">
-      <view class="gi__glow-fade" />
-      <view class="gi__glow-voice">
-        <view class="gi__glow-voice-wave">
-          <view class="gi__wave-band gi__wave-band--back" />
-          <view class="gi__wave-band" />
-        </view>
-      </view>
+      <view class="gi__glow-voice" />
     </view>
 
     <view class="gi__content">
@@ -1517,246 +1511,67 @@ onBeforeUnmount(() => {
     linear-gradient(120deg, rgba(239, 239, 255, 0.55) 0%, rgba(241, 248, 255, 0.45) 52%, rgba(250, 228, 243, 0.4) 100%);
 }
 
-/* 唤醒帧与首页欢迎态一致：整页纯 #FAFAFA，底部只留那缕淡蓝光晕，不要步骤态那层冷色渐变 */
+/* 唤醒帧与首页欢迎态一致：整页纯 #FAFAFA，不要步骤态那层冷色渐变
+   （底部常态也不铺声纹，见下面的 .gi__glow） */
 .gi--welcome .gi__bg {
   background: #fafafa;
 }
 
-/* ===== 底部光效：常态淡蓝水面，播报 / 按住说话换成波纹色带 =====
-   参考首页 index 的底部语音波纹（ai-chat-input 的 voice-panel__wave / welcome-visitor__glow）：
-   - __glow：贴底 120px 容器（比波形容器多留 2px 给遮罩模糊的出血），overflow hidden；
-   - __glow-fade：**常态也是波形** —— 与 .gi__wave-band 同一套几何（top 130rpx / 106rpx 高）
-     和同一张 voice-listening-wave-blur-mask.svg 波形遮罩，只把色带换成最淡的冷蓝，
-     顶部透明接页面背景、底部 #BFDAF4，缓慢起伏；原来那条 62px 直边渐变已去掉
-     （它起点是 #FAFAFA，落在步骤态冷色背景上会露一条硬边）；
-   - __glow-voice：118px 波形容器，只靠外层 opacity 淡入淡出（避免 transition 和 keyframes 抢属性）；
-   - __wave-band：11332:97 Rectangle 106 的水面，播报三色带、按住 / 校验竖直蓝水面。
-   状态类是根节点上的 gi--speaking / gi--recording / gi--checking。 */
+/* ===== 底部光效：与首页（ai-welcome/visitor.vue 的 .welcome-visitor__glow）同一套实现 =====
+   常态**不铺任何底色** —— 整条与页面同色，底部没有声纹；
+   播报 / 按住说话 / 校验中 / 未命中才淡入对应的那张弧形柔光（设计稿导出的 2x 位图），
+   三张图共用同一块几何：Frame 85（375×166 @ y=676），屏幕只到 812，
+   所以层底再往下让出 30px。
+   状态类是根节点上的 gi--speaking / gi--recording / gi--checking / gi--missed。 */
 .gi__glow {
   position: absolute;
   right: 0;
   bottom: 0;
   left: 0;
   z-index: 0;
-  height: 240rpx; // 120px
+  /* 光效层可见高度是 136px（166 − 屏幕下的 30），留到 150px 足够 */
+  height: 300rpx; // 150px
   overflow: hidden;
   pointer-events: none;
 }
 
-.gi__glow-fade {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 236rpx; // 与波形容器同高，::before 才能沿用同一套遮罩坐标
-  opacity: 1;
-  transition: opacity 240ms ease;
-  pointer-events: none;
-}
-
-/* 常态水面：几何 / 遮罩参数与 .gi__wave-band 完全一致，只换渐变——
-   顶部透明（贴着页面背景消失，没有硬边）→ 底部 #BFDAF4，7s 极缓起伏 */
-.gi__glow-fade::before {
-  position: absolute;
-  top: 130rpx; // y759 − y694 = 65px，与语音色带同一条基准线
-  left: 0;
-  width: 750rpx; // 375px
-  height: 106rpx; // 53px
-  background-image: linear-gradient(
-    180deg,
-    rgba(250, 250, 250, 0) 0%,
-    rgba(240, 245, 251, 0.55) 36%,
-    #dfeaf7 64%,
-    #cfe0f5 84%,
-    #bfdaf4 100%
-  );
-  -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
-  mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: 990rpx 286rpx; // 遮罩画布 495×143 @2x
-  mask-size: 990rpx 286rpx;
-  -webkit-mask-position: -121rpx -14rpx; // 画布原点对齐页面 (−60.5, 752)
-  mask-position: -121rpx -14rpx;
-  animation: gi-wave-sway 7s ease-in-out infinite alternate;
-  content: "";
-  pointer-events: none;
-  will-change: mask-position;
-}
-
+/* 只负责淡入淡出，具体色值 / 弧度由下面各 state 规则铺对应的位图 */
 .gi__glow-voice {
   position: absolute;
   right: 0;
-  bottom: 0;
+  bottom: -60rpx; // 30px：设计稿里光效比屏幕底多出来的那一截
   left: 0;
-  height: 236rpx; // 118px：波形容器高度
+  height: 332rpx; // 166px
   opacity: 0;
-  transition: opacity 0.24s ease;
+  // 各种状态都靠这一条过渡切换，压短让颜色立刻到位
+  transition: opacity 140ms ease;
   pointer-events: none;
   will-change: opacity;
 }
 
-/* 播报 / 按住说话 / 校验中：波纹色带上场，常态那缕淡蓝让位 */
+/* 播报 / 按住说话 / 校验中 / 未命中：把对应那张光效淡入 */
 .gi--speaking .gi__glow-voice,
 .gi--recording .gi__glow-voice,
-.gi--checking .gi__glow-voice {
-  opacity: 1;
-}
-
-.gi--speaking .gi__glow-fade,
-.gi--recording .gi__glow-fade,
-.gi--checking .gi__glow-fade {
-  opacity: 0;
-}
-
-/* 已经看不见了，常态水面的起伏动画没必要继续占合成线程 */
-.gi--speaking .gi__glow-fade::before,
-.gi--recording .gi__glow-fade::before,
-.gi--checking .gi__glow-fade::before {
-  animation-play-state: paused;
-}
-
-/* 11332:91 Frame 45：波浪容器，贴底 118px */
-.gi__glow-voice-wave {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 236rpx; // 118px
-}
-
-/* 11332:97 Rectangle 106：三色带本体。
-   为了「横向流动不露边、不跳色」，色带做成镜像周期 —— 0 → 50% 是设计稿色带，
-   50% → 100% 是它的镜像，首尾同为 #EBB4E9；背景宽取两个窗口宽，位移一个周期即无缝循环 */
-.gi__wave-band {
-  position: absolute;
-  top: 130rpx; // y759 − y694 = 65px
-  left: 0;
-  width: 750rpx; // 375px
-  height: 106rpx; // 53px
-  background: linear-gradient(
-    90deg,
-    #ebb4e9 0%,
-    #56abfa 24.36%, // 设计稿 #56ABFA 在色带 48.72% → 半周期 24.36%
-    #9795e8 50%, // 设计稿色带末端 #9795E8 → 半周期端点
-    #56abfa 75.64%, // 后半为镜像
-    #ebb4e9 100%
-  );
-  background-size: 1500rpx 100%; // 两个窗口宽，配合镜像渐变实现无缝循环
-  -webkit-mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
-  mask-image: url("@/assets/img/voice-listening-wave-blur-mask.svg");
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: 990rpx 286rpx; // 遮罩画布 495×143 @2x
-  mask-size: 990rpx 286rpx;
-  -webkit-mask-position: -121rpx -14rpx; // 画布原点对齐页面 (−60.5, 752)
-  mask-position: -121rpx -14rpx;
-  will-change: background-position, mask-position;
-}
-
-/* 后层波浪：轮廓相同、透明度更低，叠出液面的层次感 */
-.gi__wave-band--back {
-  opacity: 0.4;
-  transform: translateY(8rpx);
-}
-
-/* 播报态（同欢迎页 --finishing）：三色带横向流动 + 遮罩左右摆动，后层更慢且反向；
-   常态下不挂动画，不占合成线程 */
-.gi--speaking .gi__wave-band {
-  animation:
-    gi-wave-color-flow 5.6s linear infinite,
-    gi-wave-sway 4.8s ease-in-out infinite alternate;
-}
-
-.gi--speaking .gi__wave-band--back {
-  animation:
-    gi-wave-color-flow 7.6s linear infinite reverse,
-    gi-wave-sway 6s ease-in-out infinite alternate;
-}
-
-/* 按住说话 / 校验中：与首页「按住说话」面板（voice-panel__wave-band）一致 ——
-   竖向 #EFEFEE → #0F7EEE 的水面，没有横向色差，改用「色彩上下涨落」+ 波形摆动。
-   放在三色带规则之后，同特异度覆盖播报态那套 */
-.gi--recording .gi__wave-band,
-.gi--checking .gi__wave-band {
-  background-image: linear-gradient(180deg, #efefee 0%, #0f7eee 100%);
-  background-size: 100% 160%;
-  animation:
-    gi-wave-drift 4.8s ease-in-out infinite alternate,
-    gi-wave-sway 4.8s ease-in-out infinite alternate;
-}
-
-.gi--recording .gi__wave-band--back,
-.gi--checking .gi__wave-band--back {
-  background-image: linear-gradient(180deg, #efefee 0%, #0f7eee 100%);
-  background-size: 100% 160%;
-  animation:
-    gi-wave-drift 6s ease-in-out infinite alternate-reverse,
-    gi-wave-sway 6s ease-in-out infinite alternate;
-}
-
-/* 竖向渐变的涨落：背景比容器高 60%，上下位移时水色在浅灰与深蓝之间呼吸 */
-@keyframes gi-wave-drift {
-  from {
-    background-position: 0 0;
-  }
-
-  to {
-    background-position: 0 100%;
-  }
-}
-
-/* 语音未命中：底部声纹切红 —— 与首页 331:147「唤醒失败」同一条色带
-   （Rectangle 106 375×107：竖向 rgba(239,239,238,0) 0% → #E02E2A 100%）。
-   红期间不做色带横向流动 / 上下涨落，只保留波形摆动，保证红色一直压在最底下；
-   规则放在播报 / 录音那几套之后，同特异度靠源码顺序覆盖。
-   2s 后 isMissed 自动复位，色带靠 opacity 过渡淡回常态 */
+.gi--checking .gi__glow-voice,
 .gi--missed .gi__glow-voice {
   opacity: 1;
 }
 
-.gi--missed .gi__glow-fade {
-  opacity: 0;
+/* 播报（首页「播报身份」1321:17）：左紫—中蓝—右粉的椭圆柔光 */
+.gi--speaking .gi__glow-voice {
+  background: url("@/assets/img/welcome-bottom-glow-speaking.png") 0 0 / 100% 100% no-repeat;
 }
 
-.gi--missed .gi__glow-fade::before {
-  animation-play-state: paused;
+/* 语音未命中（首页 1321:9）：很淡的粉红柔光；2s 后 isMissed 自动复位，靠 opacity 淡回常态 */
+.gi--missed .gi__glow-voice {
+  background: url("@/assets/img/welcome-bottom-glow-missed.png") 0 0 / 100% 100% no-repeat;
 }
 
-.gi--missed .gi__wave-band {
-  background-image: linear-gradient(180deg, rgba(239, 239, 238, 0) 0%, #e02e2a 100%);
-  background-size: 100% 100%;
-  animation: gi-wave-sway 4.8s ease-in-out infinite alternate;
-}
-
-.gi--missed .gi__wave-band--back {
-  background-image: linear-gradient(180deg, rgba(239, 239, 238, 0) 0%, #e02e2a 100%);
-  background-size: 100% 100%;
-  animation: gi-wave-sway 6s ease-in-out infinite alternate;
-}
-
-/* 色带横向流动：位移一个背景周期（1500rpx），首尾同色，循环无缝 */
-@keyframes gi-wave-color-flow {
-  from {
-    background-position: 0 0;
-  }
-
-  to {
-    background-position: 1500rpx 0;
-  }
-}
-
-/* 波形轮廓缓慢起伏：基准 mask-position 为 (−121rpx, −14rpx)，±20rpx 摆动 */
-@keyframes gi-wave-sway {
-  from {
-    -webkit-mask-position: -141rpx -14rpx;
-    mask-position: -141rpx -14rpx;
-  }
-
-  to {
-    -webkit-mask-position: -101rpx -14rpx;
-    mask-position: -101rpx -14rpx;
-  }
+/* 按住说话 / 校验中（首页 1321:1 按住「唤醒中」）：蓝白弧形柔光。
+   放在最后：按住时播报态可能还挂着，蓝色要压过那层粉蓝 */
+.gi--recording .gi__glow-voice,
+.gi--checking .gi__glow-voice {
+  background: url("@/assets/img/welcome-bottom-glow.png") 0 0 / 100% 100% no-repeat;
 }
 
 .gi__content {

@@ -916,36 +916,49 @@ function toggleShowAll() {
   height: 100vw;
 }
 
-/* ---------- 顶部栏：高 49，左右内边距 28（设计稿 6832:764 状态栏之下的导航区） ---------- */
+/* ---------- 顶部栏：设计高 49，左右内边距 28（设计稿 6832:764 状态栏之下的导航区） ----------
+   H5 网页（不转屏）的视口通常比设计稿 812 窄：标题 / 日期 / 图例文案一律「按文案自适应宽度」，
+   禁止折行、也不参与 flex 压缩；真放不下时让「图例 + 按钮」整块落到第二行，而不是拆字。 */
 .schedule__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
-  height: 49px;
+  min-height: 49px;
   padding: 0 28px;
+  /* 行间距只给换行时用（一行时由 min-height + 居中维持设计稿 49 高） */
+  gap: 4px 16px;
 }
 
 .schedule__title-group {
   display: flex;
   align-items: center;
+  flex: none;
   gap: 8px;
 }
 
 .schedule__title {
+  flex: none;
   font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
   color: #000000;
 }
 
 .schedule__date {
+  flex: none;
   font-size: 11px;
+  white-space: nowrap;
   color: #999999;
 }
 
 .schedule__tools {
   display: flex;
   align-items: center;
+  flex: none;
+  /* 窄视口里整块换到第二行时仍然靠右 */
+  margin-left: auto;
   gap: 16px;
 }
 
@@ -953,12 +966,14 @@ function toggleShowAll() {
 .schedule__legend {
   display: flex;
   align-items: center;
+  flex: none;
   gap: 16px;
 }
 
 .schedule__legend-item {
   display: flex;
   align-items: center;
+  flex: none;
   gap: 5px;
 }
 
@@ -984,8 +999,11 @@ function toggleShowAll() {
   background: #f4f4f4;
 }
 
+/* 宽度按文案自适应：不压缩、不折行（网页窄屏时靠整块换行保版面，而不是拆字） */
 .schedule__legend-text {
+  flex: none;
   font-size: 11px;
+  white-space: nowrap;
   color: #000000;
 }
 
@@ -993,7 +1011,26 @@ function toggleShowAll() {
 .schedule__toggle-all {
   display: flex;
   align-items: center;
+  flex: none;
   gap: 5px;
+}
+
+/* 窄视口（H5 网页 / 小尺寸窗口）：收紧顶部栏间距，尽量维持一行；
+   放在基础样式之后，同特异度才能覆盖上面的 16px / 28px。
+   限定 :not(.schedule--rotated)：CSS 旋转模拟横屏时视口本身也是窄的，
+   但页面按设计稿 812 宽铺开，留白不能跟着收 */
+@media (max-width: 780px) {
+  .schedule:not(.schedule--rotated) .schedule__header {
+    padding: 0 16px;
+  }
+
+  .schedule:not(.schedule--rotated) .schedule__tools {
+    gap: 12px;
+  }
+
+  .schedule:not(.schedule--rotated) .schedule__legend {
+    gap: 12px;
+  }
 }
 
 .schedule__checkbox {
