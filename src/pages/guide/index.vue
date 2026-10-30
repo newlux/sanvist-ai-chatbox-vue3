@@ -337,6 +337,10 @@ function openGuideStepSheet(payload: GuideStepPayload) {
  * 它自己 onMounted 里的自动弹起不会触发 —— 自动弹起改在这里盯最后一条 AI 消息的 guide-step 块：
  * 出现即排期（生成结束后再等 5s，见 scheduleAutoOpen），同一张卡只弹一次。
  * 历史消息的块不带 auto_open，不会触发，也不会把历史卡片弹出来。
+ *
+ * 去重键必须是「消息 + 块」：块 id 是按内容生成的（guide-step-<标题>），
+ * 同一个问题问两次会拿到一模一样的块 id，只用块 id 会把第二次的卡当成「已经弹过」，
+ * 结果白板还停在上一次那张卡翻到的步骤上（下标、语音、滚动全错位）。
  */
 const autoOpenedStepCardIds = new Set<string>();
 watch(
@@ -346,11 +350,22 @@ watch(
     if (!last || last.role !== "ai") return null;
     const block = (last.blocks || []).find(item => item?.type === "guide-step" && item.payload?.auto_open === true);
     if (!block) return null;
-    return { id: String(block.id || ""), payload: block.payload as GuideStepPayload };
+    // 优先本地 id（消息一创建就有、不会中途变），服务端 messageId 兜底
+    const messageKey = String(last.id || last.messageId || "");
+    const blockKey = String(block.id || "");
+    return { key: `${messageKey}::${blockKey}`, payload: block.payload as GuideStepPayload };
   },
   (current) => {
-    if (!current || !current.id || autoOpenedStepCardIds.has(current.id)) return;
-    autoOpenedStepCardIds.add(current.id);
+    if (!current || !current.key) return;
+    // 键里带消息身份：块 id 撞车（同一个问题问两次）也不能被当成弹过
+    if (autoOpenedStepCardIds.has(current.key)) return;
+    autoOpenedStepCardIds.add(current.key);
+    // 白板还开着：新卡一出现就立刻切到它（换内容 + 归零下标 + 滚动），
+    // 别干等 5 秒还停在上一张卡的步骤上；白板本来就盖着，切内容不会影响「刚生成的答案」。
+    if (guideStepSheetVisible.value) {
+      openGuideStepSheet(current.payload);
+      return;
+    }
     scheduleAutoOpen(() => openGuideStepSheet(current.payload));
   },
 );
