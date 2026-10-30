@@ -487,6 +487,10 @@ function openGuideStepSheet(payload: GuideStepPayload) {
  * 多步骤卡的回答不渲染气泡（见 ai-bubble-v2 的 hideBody），卡片组件因此不会挂载，
  * 自动弹起改在这里盯最后一条 AI 消息的 guide-step 块：出现即排期（生成结束后再等 5s），
  * 同一张卡只弹一次；历史消息的块不带 auto_open，不会触发。
+ *
+ * 去重键必须是「消息 + 块」：块 id 按内容生成（guide-step-<标题>），
+ * 同一个问题问两次块 id 完全相同，只用块 id 会把第二次的卡误判成「弹过了」，
+ * 白板就仍停在上一次那张卡翻到的步骤上（下标、语音、滚动全错位）。
  */
 const autoOpenedStepCardIds = new Set<string>();
 watch(
@@ -496,11 +500,21 @@ watch(
     if (!last || last.role !== "ai") return null;
     const block = (last.blocks || []).find(item => item?.type === "guide-step" && item.payload?.auto_open === true);
     if (!block) return null;
-    return { id: String(block.id || ""), payload: block.payload as GuideStepPayload };
+    // 优先本地 id（消息一创建就有、不会中途变），服务端 messageId 兜底
+    const messageKey = String(last.id || last.messageId || "");
+    const blockKey = String(block.id || "");
+    return { key: `${messageKey}::${blockKey}`, payload: block.payload as GuideStepPayload };
   },
   (current) => {
-    if (!current || !current.id || autoOpenedStepCardIds.has(current.id)) return;
-    autoOpenedStepCardIds.add(current.id);
+    if (!current || !current.key) return;
+    if (autoOpenedStepCardIds.has(current.key)) return;
+    autoOpenedStepCardIds.add(current.key);
+    // 白板还开着：新卡一出现就立刻切到它（换内容 + 归零下标 + 滚动），
+    // 别干等 5 秒还停在上一张卡的步骤上。
+    if (guideStepSheetVisible.value) {
+      openGuideStepSheet(current.payload);
+      return;
+    }
     scheduleAutoOpen(() => openGuideStepSheet(current.payload));
   },
 );
