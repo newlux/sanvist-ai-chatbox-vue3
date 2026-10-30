@@ -680,6 +680,36 @@ let volumeCallCount = 0;
 /** 首次拿到有效电平时打一条汇总，确认整条链路通了 */
 let volumeFirstLevelLogged = false;
 
+/* ------------------- 「按住说话」声纹电平 mock ------------------- */
+/**
+ * 宿主没实现 microphoneVolume（或本地浏览器里没有 AlipayJSBridge）时，
+ * 用合成电平把底部声纹的动效跑起来：
+ * 约 3.2Hz 的音节起伏 + 17Hz 高频颤动 + 采样噪声，每 4 秒停 1.2 秒模拟换气。
+ *
+ * 开关：.env.* 里的 VITE_MOCK_MIC_VOLUME=true（构建期内联，改完必须重新打包）；
+ * 改成 false 或删掉这一行就回到只认真实桥。
+ */
+const MOCK_MIC_VOLUME = String(import.meta.env.VITE_MOCK_MIC_VOLUME ?? "").trim().toLowerCase() === "true";
+
+let mockVolumeStartAt = 0;
+let mockVolumeLastAt = 0;
+
+/** 合成一段听感接近说话的 0~1 电平（100ms 采样一次，取值随采样时刻变化） */
+function mockMicrophoneVolume(): number {
+  const now = Date.now();
+  // 距上次采样超过 1 秒，说明是新的一次「按住说话」，从头开始
+  if (now - mockVolumeLastAt > 1000) mockVolumeStartAt = now;
+  mockVolumeLastAt = now;
+  const t = (now - mockVolumeStartAt) / 1000;
+
+  const syllable = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 * 3.2);
+  const flutter = 0.1 * Math.sin(t * Math.PI * 2 * 17);
+  const noise = (Math.random() - 0.5) * 0.06;
+  const pause = t % 4 > 2.8 ? 0.08 : 1;
+  const level = (0.18 + syllable * 0.62 + flutter + noise) * pause;
+  return Number(Math.min(1, Math.max(0, level)).toFixed(3));
+}
+
 /**
  * 读取当前录音电平：
  *   AlipayJSBridge.call("microphoneVolume", {}, (res) => {})
@@ -697,6 +727,15 @@ export async function getMicrophoneVolume(): Promise<number | null> {
   const seq = volumeCallCount;
   const verbose = seq <= 20 || seq % 10 === 0;
   const startedAt = Date.now();
+
+  // mock：直接喂合成电平，不碰宿主（VITE_MOCK_MIC_VOLUME=true 时生效）
+  if (MOCK_MIC_VOLUME) {
+    const level = mockMicrophoneVolume();
+    if (verbose) {
+      logger.debug("[voice] microphoneVolume mock 电平", { seq, level });
+    }
+    return level;
+  }
 
   if (verbose) {
     logger.debug("[voice] microphoneVolume 请求", { seq, hasBridge: isMpaasReady() });
