@@ -16,6 +16,7 @@ import { LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY, VISITOR_ROLE_OP
 import { REPORT_STYLE_STORAGE_KEY } from "@/config/report-styles";
 import { REPORT_VOICE_STORAGE_KEY } from "@/config/report-voices";
 import { usePlainTts } from "@/hooks/usePlainTts";
+import { usePressDelay } from "@/hooks/usePressDelay";
 import { DEFAULT_CHAT_SCOPE, useChatStore, useUserStore, VISITOR_ROLE_ACCOUNTS } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission } from "@/utils/platform/mpaas";
@@ -465,8 +466,19 @@ const ASR_TIMEOUT_MS = 30_000;
  */
 const INTRO_SPEECH_FAILSAFE_MS = 5000;
 
-/** 按住中：底部渐变切到录音态配色 */
+/** 按住中：起录 / 松手取消 / 短按判定都看它（逻辑态，按下瞬间就为 true） */
 const isRecording = ref(false);
+/**
+ * 按住满 500ms 才切底部渐变（纯视觉态）。
+ * 整页任意位置一碰就会走到 onHoldStart，真机上点一下、滑动、手抖都会让底部
+ * 蓝光闪一下再消失；这里延迟 500ms，不到点的快速点按看不到任何变化。
+ * 录音本身不延迟（isRecording 立刻为 true），否则会切掉用户开口的头几百毫秒。
+ */
+const {
+  active: pressGlow,
+  press: beginPressGlow,
+  release: releasePressGlow,
+} = usePressDelay(500);
 /** 松手后的收尾态：底部沿用录音态的蓝渐变 + 波浪，文案换成本次自我介绍 */
 const isFinishing = ref(false);
 /**
@@ -484,9 +496,10 @@ const isChoosing = ref(false);
  * 校验中（isChecking）不参与判定：它只挡重复长按 / 点选，波纹只在按住或真正出声时出现，
  * 松手、命中停留那 900ms 都不该挂着波纹。
  * 身份选择页与身份信息页共用同一套判定：详情页没有播报、没有长按时同样是常态视觉。
+ * 按住这一项用 pressGlow 而不是 isRecording，保证和 --recording 色带同进同出。
  */
 const isGlowIdle = computed(
-  () => isFinishing.value && !isRecording.value && !isWakeMissed.value && !introTts.playing.value,
+  () => isFinishing.value && !pressGlow.value && !isWakeMissed.value && !introTts.playing.value,
 );
 /** 身份选择内容是否已浮出（控制淡入上浮） */
 const choiceVisible = ref(false);
@@ -1067,8 +1080,9 @@ function cancelRecording() {
 }
 
 /**
- * 按住：整页任意位置**一按下**就进录音态并开录（起始页 / 身份选择页 / 身份信息页共用同一套录音管线）。
- * 与首页输入栏「按住说话」同速：不再等 280ms 长按判定，视觉与麦克风立刻到位；
+ * 按住：整页任意位置**一按下**就开录（起始页 / 身份选择页 / 身份信息页共用同一套录音管线）。
+ * 麦克风立刻到位（不切掉开口的头几百毫秒），但底部的蓝色渐变要按住满 500ms 才切，
+ * 与首页输入栏的防误触口径一致：快速点按不闪光效。
  * 身份选择页与身份信息页是「就地录音」——标题 / 气泡 / 胶囊 / 提示一律不动，
  * 只让底部换成与起始页完全一致的按住态蓝渐变；松手后照旧走识别 + 唤醒校验（接口不变）。
  */
@@ -1084,8 +1098,10 @@ function onHoldStart(e: any) {
   holdStartY = point.y;
   pressStartedAt = Date.now();
   pressCancelling = false;
-  // 按下即置录音态：底部从常态切成录音蓝渐变（见 isGlowIdle），录音同时开录
+  // 按下即开录（逻辑态），但底部蓝渐变要按住满 500ms 才切（pressGlow），
+  // 这样整页任意位置的快速点按 / 手抖不会闪一下底部光效
   isRecording.value = true;
+  beginPressGlow();
   isChecking.value = false;
   // 开录前先掐掉正在播的口播，别让「请选择你的身份吧」/ 身份信息标题盖住录音
   introTts.stop();
@@ -1111,6 +1127,7 @@ function onHoldEnd() {
   if (!isRecording.value) return;
   const pressDuration = Date.now() - pressStartedAt;
   isRecording.value = false;
+  releasePressGlow();
   if (pressCancelling || pressDuration < TAP_CANCEL_MS) {
     // 与首页输入栏一致的短按语义：按一下就松手视为误触，不进识别、不进校验
     pressCancelling = false;
@@ -1301,6 +1318,7 @@ function onHoldCancel() {
   pressCancelling = false;
   cancelRecording();
   isRecording.value = false;
+  releasePressGlow();
   isFinishing.value = false;
   resetIntro();
 }
@@ -1308,6 +1326,7 @@ function onHoldCancel() {
 onBeforeUnmount(() => {
   clearSpeechFailsafe();
   cancelRecording();
+  releasePressGlow();
   if (introEnterTimer) clearTimeout(introEnterTimer);
   if (introSpeakTimer) clearTimeout(introSpeakTimer);
   if (choiceEnterTimer) clearTimeout(choiceEnterTimer);
@@ -1351,7 +1370,7 @@ onMounted(async () => {
   <view
     class="welcome-visitor"
     :class="{
-      'welcome-visitor--recording': isRecording,
+      'welcome-visitor--recording': pressGlow,
       'welcome-visitor--missed': isWakeMissed,
       'welcome-visitor--finishing': isFinishing,
       'welcome-visitor--glow-idle': isGlowIdle,
