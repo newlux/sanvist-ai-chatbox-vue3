@@ -155,8 +155,8 @@ const VOICE_WAVE_BARS = [
 const VOICE_WAVE_BARS_MOTION = VOICE_WAVE_BARS.map((height, index) => ({
   height,
   gain: Number((0.85 + ((index * 37) % 50) / 100).toFixed(2)),
-  /** rad/s：约 1.3~2.8Hz，说话时声纹上下「甩」得出来，又不是乱抖 */
-  speed: Number((8 + (index % 7) * 1.5).toFixed(1)),
+  /** rad/s：约 1.6~3.1Hz，说话时声纹上下「甩」得出来，又不至于抖成高频噪点 */
+  speed: Number((10 + (index % 7) * 1.6).toFixed(1)),
   phase: Number((index * 0.73).toFixed(2)),
 }));
 
@@ -428,26 +428,28 @@ function tickBarScales(now: number) {
 
   const target = micLevel.value ?? idleBreathLevel(now);
   // attack 快、release 慢：音节进来立刻起，收尾慢慢落，才像人在说话
-  const follow = target > smoothedLevel ? 0.6 : 0.2;
+  const follow = target > smoothedLevel ? 0.75 : 0.2;
   smoothedLevel += (target - smoothedLevel) * follow;
   if (Math.abs(target - smoothedLevel) < 0.003) smoothedLevel = target;
   barLevel.value = Number(smoothedLevel.toFixed(3));
 
-  // 0.6 次幂：宿主给的电平常年偏小（实测安静时 0.1 上下、说话 0.4~1），
-  // 指数越小于 1，中低音量被抬得越高，起伏更明显
-  const shaped = Math.min(1, Math.max(0, smoothedLevel)) ** 0.6;
-  // 0.1 是静音底：始终留一点呼吸，不至于变成一条死线
-  const amp = 0.1 + 2.3 * shaped;
+  // 0.45 次幂：宿主给的电平常年偏小（实测安静时 0.1 上下、说话 0.4~1），
+  // 指数越小于 1，中低音量被抬得越高；0.45 相当于把 0.5 当成 0.73 用，
+  // 平常说话就能把整排甩满，不用等到喊出来
+  const shaped = Math.min(1, Math.max(0, smoothedLevel)) ** 0.45;
+  // 0.08 是静音底：始终留一点呼吸，不至于变成一条死线
+  const amp = 0.08 + 2.6 * shaped;
 
   const t = now / 1000;
-  // 整排共享的慢摆动（约 0.7Hz）：40 根一起上下起伏才有「声浪」的观感；
+  // 整排共享的慢摆动（约 1Hz）：40 根一起上下起伏才有「声浪」的观感；
   // 只留逐根相位差的话，看上去是「抖」而不是「跳」
-  const sway = 0.5 + 0.5 * Math.sin(t * 4.6);
+  const sway = 0.5 + 0.5 * Math.sin(t * 6.2);
   const scales = VOICE_WAVE_BARS_MOTION.map((bar) => {
     const flutter = 0.5 + 0.5 * Math.sin(t * bar.speed + bar.phase);
-    // 0.15~1 的波形：抖幅尽量大，声音大时整根甩开才够劲
-    const wave = 0.15 + 0.85 * (0.62 * flutter + 0.38 * sway);
-    const scale = 0.22 + amp * bar.gain * wave;
+    // 0.05~1 的波形：谷压到近乎贴线、峰整根甩开，落差越大抖动越明显
+    const wave = 0.05 + 0.95 * (0.62 * flutter + 0.38 * sway);
+    // 0.12 的静态底比原来的 0.22 更低：低谷更接近一条线，视觉落差再放大一档
+    const scale = 0.12 + amp * bar.gain * wave;
     return Number(Math.min(3.4, scale).toFixed(3));
   });
 
@@ -737,7 +739,7 @@ onBeforeUnmount(() => {
             <view
               class="voice-panel__wave"
               :class="{ 'voice-panel__wave--paused': voice.cancelling }"
-              :style="{ transform: `scaleY(${(1 + barLevel * 0.12).toFixed(3)})` }"
+              :style="{ transform: `scaleY(${(1 + barLevel * 0.3).toFixed(3)})` }"
               aria-hidden="true"
             />
 
@@ -1217,7 +1219,9 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, rgb(239 239 238 / 0%) 2.9%, #0f7eee 46%);
   filter: blur(24rpx); /* σ = 12px（设计稿图层模糊 37 的等效值） */
   animation: voice-water-breathe 5.6s ease-in-out infinite alternate;
-  /* 音量大时整片水面从底边往上"涨"一点（模板内联 scaleY，最高约 +8%） */
+  /* 音量驱动整片水面从底边往上"涨"：模板内联 scaleY(1 + 电平 × 0.3)，
+     电平满格时涨三成（682rpx → 约 887rpx，顶端仍在面板内，不会露硬边）。
+     这一层只管蓝色渐变，中间那 40 根声纹不受影响。 */
   transform-origin: bottom center;
   will-change: opacity, transform;
   pointer-events: none;
