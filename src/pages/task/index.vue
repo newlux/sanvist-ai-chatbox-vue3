@@ -5,7 +5,6 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideSuggestionPayload, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
-import type { AiBlock } from "@/utils/ai-stream";
 import { runBlockingWorkflow } from "@/api/chat";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
@@ -32,7 +31,6 @@ import { useComposerAttachments, type AttachmentSource } from "@/hooks/useCompos
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { hasGanttCard } from "@/utils/gantt-card";
 import { openGanttView } from "@/utils/gantt-navigation";
 import { isWebEnvironment } from "@/utils/landscape-device";
 import { createLogger } from "@/utils/logger";
@@ -41,6 +39,7 @@ import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 import { resolveExceptionSummary, type TaskExceptionCard } from "@/utils/task-exception";
+import { resolveTaskGanttPayload } from "@/utils/task-gantt";
 import { getTaskIdentity, type TaskIdentity } from "@/utils/task-identity";
 
 /**
@@ -50,11 +49,14 @@ import { getTaskIdentity, type TaskIdentity } from "@/utils/task-identity";
  * - 独立会话域 "task"，不与首页主会话互相污染；
  * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=TEST；
  * - 每次进入起一轮干净会话（与作业指导一致），返回再进时重新开一轮；
- * - 初始化静默问一句「今天任务有哪些」，只把回复里的卡片铺进对话区（问题与回复文本都不展示）；
- * - 例外：在「任务协同初始化页」选过 step 接口下发的身份（如 DISPATCH-02）时，首屏改为调用
- *   POST /proxy/v1/workflows/run 工作流查异常（inputs.query_type=查异常 / user_id=所选身份 /
- *   role_id=OWNER），把返回的异常信息渲染成「异常情况摘要」卡（Ardot 350:2199，替代任务入口卡）；
- *   接口结构目前不稳定，解析不出时用 utils/task-exception 里的 mock 兜底。
+ * - 首屏卡片不再走对话接口，改为调 Dify 工作流 POST /proxy/v1/workflows/run：
+ *   · 默认（新建对话 / 新建页面 / 独立窗口直接进）：inputs.query_type=查今日进展，
+ *     把返回的 gantt 整包渲染成「个人任务甘特图」入口卡；
+ *   · 例外：在「任务协同初始化页」选过 step 接口下发的身份（如 DISPATCH-02）时，
+ *     首屏改为 query_type=查异常 / user_id=所选身份 / role_id=OWNER，
+ *     把返回的异常信息渲染成「异常情况摘要」卡（Ardot 350:2199，替代任务入口卡）；
+ *     接口结构目前不稳定，解析不出时用 utils/task-exception 里的 mock 兜底。
+ *   两条都只取卡片，不进消息列表、不建会话。
  */
 defineOptions({ name: "AiTaskPage" });
 
@@ -110,7 +112,7 @@ const {
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用实时 TTS 做流式听播（与作业指导页一致）。
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
 const realtimeTts = useRealtimeTts(chatScope);
-const { sendMessage, sendSilentMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   // 任务协同下发的场景标识：TASK（早期下发过 TEST，两者在历史会话里都按任务协同归类，见 utils/session-scene）
   scene: "TASK",
   // 同首页 / 作业指导：问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
@@ -154,12 +156,9 @@ watch(() => chatStore.activeRequestSeq, () => {
   stopSceneTts();
 });
 
-/** 进入页面自动问的初始化问题（跟随当前语言） */
-const initialCardQuery = computed(() => t("task-initial-query"));
 /**
  * 初始化那一轮在服务端建的会话 id：先暂存，等用户真正提问时再写回 store 续上。
- * 初始化请求本身不改会话态（不写 aiSessionId、不刷新会话列表、不重建消息列表），
- * 页面就停在原地等卡片，不会像发了一轮对话那样跳走。
+ * （新建对话改走工作流后不再产生初始化会话，这里只是保留兼容逻辑，恒为 null。）
  */
 const pendingInitSessionId = ref<Identifier | null>(null);
 /**
@@ -180,46 +179,60 @@ const initialGanttPayload = ref<GanttViewPayload | null>(null);
 /** 上次初始化请求的时间：onShow 与 onLoad 挨着触发，用它隔开，避免首次进入重复请求 */
 let initialCardsRequestedAt = 0;
 
-/**
- * 初始化卡片：静默调一次对话接口，只取回复里的 gantt 入口卡（card 数据）。
- *
- * 其它数据（回答正文 / 思考过程 / 表格 / 追问 / 建议等）一律丢弃：
- * 不写 messages、不碰 showQuickPrompts、不触发滚动，页面结构与 showSceneWelcome 都不变，
- * 卡片只是欢迎态里多铺一张入口卡。
- *
- * 只认卡片数据：整包里没有可展示的 card（或 card.visible === false）就置空，欢迎态整卡不渲染。
- */
-function applyInitialCards(blocks: AiBlock[] = []) {
-  // 取最后一个 gantt 块：快照按流式逐步补齐，越靠后越完整
-  const ganttList = (blocks || []).filter(block => block?.type === "gantt");
-  const payload = ganttList[ganttList.length - 1]?.payload as GanttViewPayload | undefined;
-  initialGanttPayload.value = hasGanttCard(payload) ? (payload as GanttViewPayload) : null;
-}
+/** 「查今日进展」的 inputs.query_type 固定值：新建对话时个人任务甘特图走工作流取卡 */
+const GANTT_PROGRESS_QUERY = "查今日进展";
+/** 没选过身份时的兜底 user_id（工作流要求非空，值同查询样张） */
+const GANTT_FALLBACK_USER_ID = "DISPATCH-01";
 
+/**
+ * 初始化卡片：走 Dify 工作流（POST /proxy/v1/workflows/run，query_type=查今日进展）
+ * 取「个人任务甘特图」入口卡，不再走对话接口（chat-messages）。
+ *
+ *   inputs = { query_type: 查今日进展, user_id: 所选身份, role_id: OWNER, language: zh-CN / en-US }
+ *   user   = 当前用户标识（游客态兜底 guest）
+ *
+ * 工作流 blocking 一次性返回，业务包在 data.outputs 里
+ * （`{ component: '<COMPONENT>{"scene":"task","type":"gantt","data":{...}}</COMPONENT>' }`，
+ * 由 utils/task-gantt 拆外壳后取 gantt 整包）。
+ * 不建会话、不写 messages、不碰 showQuickPrompts、不触发滚动，页面结构与欢迎态都不变；
+ * 解析不出卡片（接口失败 / 老结构 / 没有 card 字段）就置空，欢迎态整卡不渲染。
+ */
 async function loadInitialCards() {
   initialCardsRequestedAt = Date.now();
-  await sendSilentMessage({
-    text: initialCardQuery.value,
-    // 后台拉卡片：不改会话态，页面停在原处等数据
-    keepSession: true,
-    onSessionId: (conversationId) => {
-      pendingInitSessionId.value = conversationId;
-    },
-    onBlocks: blocks => applyInitialCards(blocks),
-  });
+  const identity = getTaskIdentity();
+  try {
+    const result = await runBlockingWorkflow({
+      inputs: {
+        query_type: GANTT_PROGRESS_QUERY,
+        user_id: identity?.code || GANTT_FALLBACK_USER_ID,
+        role_id: EXCEPTION_ROLE_ID,
+        language: runLanguage(),
+      },
+      user: String(userStore.userId || "").trim() || "guest",
+      // 网关按 guest-role 头鉴权：与 inputs.role_id 保持一致
+      guestRole: EXCEPTION_ROLE_ID,
+    });
+    initialGanttPayload.value = resolveTaskGanttPayload(result?.data?.outputs);
+    logger.info("task gantt progress loaded", { identity: identity?.code, outputs: result?.data?.outputs });
+  }
+  catch (error) {
+    // 接口挂了就保持空态：不铺卡片，也不回落到对话接口
+    initialGanttPayload.value = null;
+    logger.warn("failed to load task gantt progress", { identity: identity?.code, error });
+  }
 }
 
 /** 「查异常」的 inputs.query_type 固定值 */
 const EXCEPTION_QUERY = "查异常";
-/** 「查异常」固定按 OWNER 取数（与网关 guest-role 头一致） */
+/** 工作流的 role_id：固定 OWNER（查异常 / 查今日进展共用，与网关 guest-role 头一致） */
 const EXCEPTION_ROLE_ID = "OWNER";
 /**
  * 待机态铺哪一套欢迎内容（卡片 + 建议问题），全页只认这一个状态：
  *
  * - `exception`：由「任务协同初始化页（pages/task-init）」的引导流程进来（入口 URL 带 from=init）
- *   且那次选过身份 —— 首屏问「查异常」，铺异常摘要卡，建议问题用接口随包下发的 suggestions；
+ *   且那次选过身份 —— 首屏走工作流问「查异常」，铺异常摘要卡，建议问题用接口随包下发的 suggestions；
  * - `gantt`：新建页面 / 宿主独立窗口 / 听播异常条目直接进，以及点「新对话」——
- *   不问异常，静默问「今天任务有哪些」，铺甘特图入口卡，建议问题用本地按身份取的兜底文案。
+ *   走工作流查「今日进展」取个人任务甘特图入口卡，建议问题用本地按身份取的兜底文案。
  *
  * 不能凭「有没有身份」判断入口：身份是落本地存储的，选过一次之后就一直在，
  * 直接进本页也会被误判成引导流程。
@@ -668,7 +681,7 @@ const showSceneWelcome = computed(() => !messages.value.length && !isSessionSwit
  * 待机引导文案（Ardot 350:2151）：问候 + 卡片 +「你还可以这么问」，见 config/task-welcome。
  *
  * - 卡片：引导流程（task-init）进来铺异常摘要卡（数据见 loadExceptionInfo）；
- *   其它入口 / 新增对话铺初始化对话（「今天任务有哪些」）回复里的 gantt 入口卡，见 applyInitialCards，
+ *   其它入口 / 新增对话铺工作流「查今日进展」返回的 gantt 入口卡，见 loadInitialCards，
  *   没有卡片数据时 initialGanttPayload 为 null，整卡不渲染。
  * - 建议问题：异常卡片随包下发了 suggestions（如「两个工地的泵车需求冲突在哪里？」）就直接用，
  *   没下发（接口挂了 / 老结构 / 非异常入口）仍按身份（调度员 / 操作手）取本地兜底 key 再翻译。
@@ -722,7 +735,7 @@ function startNewConversation() {
   chatStore.resetConversation();
   chatListKey.value += 1;
   nextTick(() => chatStore.scrollToBottom(true));
-  // 新对话同样是「打开就铺卡片」：重新静默拉一次
+  // 新对话同样是「打开就铺卡片」：重新调工作流查一次今日进展（不走对话接口）
   void loadInitialCards();
 }
 
@@ -909,10 +922,10 @@ onLoad((options) => {
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
-  // 引导流程进来且那次选过身份（task-init 下发，如 DISPATCH-02）：首屏问「查异常」，
+  // 引导流程进来且那次选过身份（task-init 下发，如 DISPATCH-02）：首屏走工作流问「查异常」，
   // 拿到的异常信息渲染成异常摘要卡，建议问题用接口随包下发的 suggestions；
   // 其它入口（新建页面 / 宿主独立窗口 / 听播异常条目直接进）一律走甘特图入口卡 + 本地兜底建议问题，
-  // 静默问一句「今天任务有哪些」，只把回复里的 gantt 卡铺进对话区（不缓存、每次重新请求）。
+  // 调工作流查「今日进展」只取 gantt 整包铺进欢迎态（不缓存、每次重新请求）。
   const identity = getTaskIdentity();
   const usesException = fromInit && Boolean(identity);
   welcomeCardKind.value = usesException ? "exception" : "gantt";
