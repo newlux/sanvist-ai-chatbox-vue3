@@ -15,6 +15,7 @@ import saniLogo from "@/assets/img/sani-logo.gif";
 import { LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY, VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
 import { REPORT_STYLE_STORAGE_KEY } from "@/config/report-styles";
 import { REPORT_VOICE_STORAGE_KEY } from "@/config/report-voices";
+import { useMicLevel } from "@/hooks/useMicLevel";
 import { usePlainTts } from "@/hooks/usePlainTts";
 import { usePressDelay } from "@/hooks/usePressDelay";
 import { DEFAULT_CHAT_SCOPE, useChatStore, useUserStore, VISITOR_ROLE_ACCOUNTS } from "@/stores";
@@ -479,6 +480,36 @@ const {
   press: beginPressGlow,
   release: releasePressGlow,
 } = usePressDelay(500);
+/**
+ * 按住说话时底部蓝渐变跟着音量抖：光效真正亮起（pressGlow）后才开始取电平，
+ * 松手即停，不按压时完全不轮询麦克风。
+ * 播报口播那种「没人对着麦说话」的场景不用这个电平，走 CSS 的固定节奏抖动。
+ */
+const glowVoiceRef = ref<unknown>(null);
+let glowVoiceNode: HTMLElement | null = null;
+
+function resolveGlowVoiceNode() {
+  const el = glowVoiceRef.value as HTMLElement & { $el?: HTMLElement } | null;
+  return el?.$el ?? el ?? null;
+}
+
+const { start: startMicLevel, stop: stopMicLevel } = useMicLevel({
+  // 直接改 DOM 的 transform：visitor 模板很大，把电平绑进 :style 会每帧重渲染整页
+  onLevel: (value) => {
+    if (glowVoiceNode) glowVoiceNode.style.transform = `scaleY(${(1 + value * 0.2).toFixed(3)})`;
+  },
+});
+
+watch(pressGlow, (on) => {
+  if (on) {
+    glowVoiceNode = resolveGlowVoiceNode();
+    startMicLevel();
+    return;
+  }
+  stopMicLevel();
+  if (glowVoiceNode) glowVoiceNode.style.transform = "";
+  glowVoiceNode = null;
+});
 /** 松手后的收尾态：底部沿用录音态的蓝渐变 + 波浪，文案换成本次自我介绍 */
 const isFinishing = ref(false);
 /**
@@ -1432,7 +1463,9 @@ onMounted(async () => {
          按住「唤醒中」1321:1 蓝白弧形柔光、未命中 1321:9 淡粉柔光、播报身份 1321:17 紫蓝粉柔光，
          三张图共用同一块几何，见下面 --recording / --missed / --finishing 规则；口播播完即淡回常态 -->
     <view class="welcome-visitor__glow">
-      <view class="welcome-visitor__glow-voice" />
+      <!-- 按住说话：整块蓝渐变按麦克风电平往上"涨"（JS 直接写 transform，见 useMicLevel）；
+           播报口播：没有电平可跟，由 CSS 跑固定节奏的抖动 -->
+      <view ref="glowVoiceRef" class="welcome-visitor__glow-voice" />
     </view>
 
     <view class="welcome-visitor__content">
@@ -1614,6 +1647,21 @@ onMounted(async () => {
    两者叠出「左紫—中蓝—右粉」的椭圆柔光，上沿同样是一道弧 */
 .welcome-visitor--finishing .welcome-visitor__glow-voice {
   background: url("@/assets/img/welcome-bottom-glow-speaking.png") 0 0 / 100% 100% no-repeat;
+  /* 口播期间没有人在对着麦说话，没有电平可跟：跑一条固定节奏的呼吸抖动，
+     幅度控制在 +6%（再大顶部弧线会被 .welcome-visitor__glow 的 overflow: hidden 切平） */
+  animation: welcome-glow-pulse 2.4s ease-in-out infinite;
+  transform-origin: bottom center;
+  will-change: transform;
+}
+
+@keyframes welcome-glow-pulse {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.06);
+  }
 }
 
 /* 唤醒未命中：1321:9 Frame 85，几何与按住态一致。红光来自 1321:11 Ellipse 75，
@@ -1621,6 +1669,9 @@ onMounted(async () => {
    所以呈现出来是很淡的粉红而不是纯 #E02E2A——同样用设计稿导出的 2x 位图，不做色值替换 */
 .welcome-visitor--missed .welcome-visitor__glow-voice {
   background: url("@/assets/img/welcome-bottom-glow-missed.png") 0 0 / 100% 100% no-repeat;
+  /* 未命中只做静态淡粉柔光，不抖：这条同时压掉上面 --finishing 的呼吸动画
+     （两者可能同时挂着，源码顺序必须在它之后） */
+  animation: none;
 }
 
 /* 按住「唤醒中」：1321:1 Frame 85 那块蓝白弧形柔光，直接用设计稿导出的 2x 位图。
@@ -1630,6 +1681,11 @@ onMounted(async () => {
    必须放在最后：选择态 / 详情页按住时要盖掉 --finishing 的粉蓝 */
 .welcome-visitor--recording .welcome-visitor__glow-voice {
   background: url("@/assets/img/welcome-bottom-glow.png") 0 0 / 100% 100% no-repeat;
+  /* 按住时交给内联 scaleY（跟麦克风电平走），CSS 动画必须让位 ——
+     动画的 transform 优先级高于内联样式，不禁掉的话音量驱动完全不起作用 */
+  animation: none;
+  transform-origin: bottom center;
+  will-change: transform;
 }
 
 /* 306:6467 主文案：20px Medium / 行高 29px（设计稿 AUTO 行高，三行共 87px）/ #0D0D0D；
