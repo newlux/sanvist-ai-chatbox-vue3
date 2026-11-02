@@ -79,7 +79,6 @@ const {
   hasIncompleteAttachments,
   hasFailedAttachments,
   openAttachmentPicker,
-  isNativePickerAvailable,
   chooseImages,
   chooseFilesFromNative,
   removeAttachment,
@@ -636,7 +635,7 @@ defineExpose({
   cancelGlobalVoiceHold,
 });
 
-/** 附件来源弹窗：拍照 / 相册 / 文件 三选一（强制 H5 上传期间为唯一入口） */
+/** 附件来源弹窗：设计稿 1321:39 底部面板（拍照识配件 / 上传识配件） */
 const isAttachmentPickerOpen = ref(false);
 
 async function onOpenAttachmentPicker() {
@@ -646,15 +645,11 @@ async function onOpenAttachmentPicker() {
     return;
   }
 
-  // FORCE_H5_UPLOAD 期间 isNativePickerAvailable 恒为 false，走前端三选项弹窗：
-  // 拍照/相册 → uni.chooseImage，文件 → uni.chooseFile（均走 /files/upload）
-  const nativeReady = await isNativePickerAvailable();
-  if (nativeReady) {
-    void chooseFilesFromNative();
-    return;
-  }
-
-  // 原生不可用（Web/H5 等）时用前端三选项弹窗
+  // 统一先弹设计稿面板，不再直接唤起原生选择器：
+  // 原生弹窗（imageChoose）会立刻盖住面板，用户点「+」看到的就不是这一屏了。
+  // 具体选择器在面板选项里再按环境分流 —— mPaaS 走原生 imageChoose，浏览器走 uni.chooseImage。
+  // 面板贴在屏幕底部，键盘还开着会被整块挡住，先收键盘（遮罩层级低于面板，不挡点击）
+  if (keyboardOpen.value || voiceKeyboardOpen.value) onDismissKeyboard();
   isAttachmentPickerOpen.value = true;
 }
 
@@ -1033,9 +1028,11 @@ onBeforeUnmount(() => {
       </view>
     </view>
 
-    <!-- 附件来源弹窗：拍照 / 从相册选择 / 选择文件；步骤卡复用同一个组件 -->
+    <!-- 附件来源弹窗：设计稿 1321:39 底部面板（拍照识配件 / 上传识配件）；
+         步骤卡仍用该组件的居中弹窗（variant 默认 legacy） -->
     <AiAttachmentPicker
       v-model:visible="isAttachmentPickerOpen"
+      variant="design"
       @pick="onPickAttachmentSource"
     />
   </view>
@@ -1980,6 +1977,45 @@ onBeforeUnmount(() => {
 .chat-input .input-bar--plain .input-bar__send image {
   width: 70rpx; // 35px，与按钮同大
   height: 70rpx;
+}
+
+/* ==========================================================================
+   键盘态 ⇄ 录音态的切换动效：新出现的那一块从左侧滑入
+   - 中间区域：「按住说话」框 ⇄ 灰色输入胶囊（v-if 切换，节点重建即重播动画）
+   - 右侧切换钮：键盘图标 ⇄ 声波图标（同一颗按钮，只换里面的图）
+   用 animation 而不是 transition：v-if/v-else 是节点替换，没有过渡的起止两帧。
+   ========================================================================== */
+.input-bar__hold,
+.input-bar__text-field {
+  animation: input-bar-swap-in 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.input-bar__mode image {
+  animation: input-bar-icon-swap-in 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes input-bar-swap-in {
+  from {
+    opacity: 0;
+    transform: translateX(-60rpx);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes input-bar-icon-swap-in {
+  from {
+    opacity: 0;
+    transform: translateX(-24rpx);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 /* 附件来源弹窗样式随组件走：src/components/ai-attachment-picker/index.vue */

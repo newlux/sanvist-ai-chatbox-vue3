@@ -333,7 +333,7 @@ export function uploadChatFile(params: UploadChatFileParams) {
  * 这时候没有本地文件可传，走这个接口。
  */
 export function recognizeSpeechByUrl(params: RecognizeSpeechByUrlParams) {
-  return request.post<SpeechRecognitionResult>("/speech/asr", {
+  return request.post<SpeechRecognitionResult>("/speech/asr/url/v2", {
     audioUrl: params.audioUrl,
     ...(params.language ? { language: params.language } : {}),
   }, jsonOptions).json().catch(rethrowAsrError);
