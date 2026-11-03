@@ -207,6 +207,11 @@ const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
  * 否则它们会盖在水面上（AiChatNav / .chat-scroll-bottom 的层级都在面板之上）。
  */
 const voicePanelOpen = ref(false);
+/**
+ * 「按住说话」录音中：输入栏把录音态透出来，顶部灵动岛据此把常态动图换成 listen.gif。
+ * 只在录音期间为 true（松手进识别 / 取消 / 发送都会回落），思考中的 think.gif 逻辑不受影响。
+ */
+const voiceListening = ref(false);
 const askSlotQueue = ref<AskSlotPayload[]>([]);
 const askSlotDrawerVisible = ref(false);
 /** 追问卡实时高度（px）：卡片弹出时给消息列表加底部间距，最后一条内容不会被盖住 */
@@ -926,10 +931,12 @@ onBeforeUnmount(() => {
         :load-sessions="getAISessionList"
         :selected-session-id="aiSessionId"
         :generating="isLoading"
+        :realtime-tts-playing="realtimeTts.playing.value"
         :share-mode="shareSheetVisible"
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
         :share-selected-round-count="shareSelectedRoundCount"
+        :voice-listening="voiceListening"
         restartable
         @back="backToWelcome"
         @restart="onRestartToStart"
@@ -1033,7 +1040,7 @@ onBeforeUnmount(() => {
         @height-change="onGuideSuggestionHeightChange"
       />
       <!-- 录音态（设计稿 1204:467）底部只有水面 + 提示行 + 声纹，导航整条让位。
-           用透明 + 不吃事件而不是 v-if：卸载再挂载会让 swiper 跳回第一屏 -->
+           用透明 + 不吃事件而不是 v-if：卸载再挂载会让横向滚动位置回到开头 -->
       <AiChatNav
         :class="{ 'ai-chat-nav--voice-hidden': voicePanelOpen }"
         :dark="isDark"
@@ -1154,6 +1161,7 @@ onBeforeUnmount(() => {
         @stop="stopGenerating"
         @voice-start="stopRealtimeTtsOnVoiceStart"
         @voice-restart="stopRealtimeTtsOnVoiceStart"
+        @voice-listening="voiceListening = $event"
         @recognize-begin="beginAsrPlaceholder"
         @recognize-fail="discardAsrPlaceholder"
         @toggle-quick-list="toggleQuickList"

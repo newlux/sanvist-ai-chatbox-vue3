@@ -152,6 +152,9 @@ onLaunch(async (options) => {
   const query = getLaunchQuery(options);
   const baseInfo = initializeSystem(query);
   initializeIframeBridge(query);
+  // 系统深浅色只认宿主 getColorScheme：进应用先问一次（拿不到就按浅色）。
+  // 不 await：bridge 未就绪时内部最多等 3s，不能把启动流程卡在这里。
+  void systemStore.syncSystemColorScheme();
   // 语言只有一个入口：i18n 全局 locale 与 header 的 Lang 一起写
   await systemStore.setLanguage(baseInfo.lang);
   watchLateStartupParams();
