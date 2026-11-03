@@ -487,8 +487,9 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 键盘按钮（稿子 6694:98 / 6694:109）：34×34 圆形，白底 + #C8201E 描边 + 阴影 0 3px 5px -1px rgba(0,0,0,.086)；
-   内部 20×20 键盘图形（#6B6B6B），控制输入框显隐 */
+/* 键盘按钮（稿子 1522:665 外圈 / 1522:662 键盘图形）：34×34 圆形、白底 +
+   1px #1166D6 描边（original INSIDE，border-box 的 border 正好画在内侧）+ 阴影 0 3px 5px -1px rgba(0,0,0,.086)；
+   内部 20×20 键盘图形，控制输入框显隐 */
 .schedule-ask__keyboard {
   display: flex;
   align-items: center;
@@ -497,7 +498,7 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   width: 34px;
   height: 34px;
-  border: 1px solid #c8201e;
+  border: 1px solid #1166d6;
   border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 3px 5px -1px rgba(0, 0, 0, 0.086);

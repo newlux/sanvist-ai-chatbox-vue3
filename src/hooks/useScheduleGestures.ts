@@ -19,6 +19,8 @@ import { onBeforeUnmount, onMounted } from "vue";
  *
  * **双指捏合**：旋转页面里浏览器原生双指缩放同样不生效，这里自己算两指间距的变化比例，
  * 通过 `onPinch` 交给页面缩时间轴（页面把「每小时像素宽」按比例调大 / 调小，捏合中心的时刻保持不动）。
+ * 间距与中心点都只取「时间轴方向」的一根屏幕轴（旋转模拟横屏取纵向、未旋转取横向），
+ * 垂直于时间轴的左右开合不会被误判成缩放，缩放锚点也就不会跟着手指乱跳。
  *
  * **鼠标拖动（H5 / PC 网页）**：网页里没有触摸，鼠标也拖不动 scroll-view，
  * 所以补一套左键拖动 —— 水平方向滚时间轴、竖直方向平移内容区，**两个方向同时生效**，
@@ -51,7 +53,7 @@ export interface ScheduleGesturesOptions {
   debug?: boolean;
   /** 判定成拖动所需的最小位移（px），默认 6 */
   threshold?: number;
-  /** 页面是否处于 CSS 旋转横屏：决定捏合中心映射到时间轴的哪个屏幕轴，默认 false */
+  /** 页面是否处于 CSS 旋转横屏：决定双指间距与捏合中心映射到时间轴的哪个屏幕轴，默认 false */
   isRotated?: () => boolean;
   /** 双指捏合回调（不传则不接管双指手势）：返回缩放后的目标横向滚动位置（页面维护缩放锚点）；
    *  不返回（或返回 undefined）则本次缩放不改变滚动位置 */
@@ -64,12 +66,22 @@ export interface ScheduleGesturesOptions {
   onRowsOffset?: (offset: number) => void;
 }
 
-/** 两指在屏幕上的直线距离（旋转不改变长度，直接按屏幕坐标算即可） */
-function touchDistance(touches: TouchList) {
+/**
+ * 双指间距：只量「时间轴方向」上的投影。
+ *
+ * 旋转模拟横屏时页面整体转了 90°，时间轴沿屏幕竖向；宿主原生转屏 / 竖屏网页时沿屏幕横向。
+ * 不能直接用两指的直线距离 —— 那样在旋转页面里左右开合也会被当成缩放时间轴，
+ * 而捏合中心的时间轴坐标几乎不动，表现出来就是「缩放位置乱跳」。
+ */
+function pinchSpan(touches: TouchList, rotated: boolean) {
   const [a, b] = [touches[0], touches[1]];
   if (!a || !b) return 0;
-  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  return Math.abs(rotated ? a.clientY - b.clientY : a.clientX - b.clientX);
 }
+
+/** 时间轴方向上两指至少要拉开这么多才认作「在捏合时间轴」，
+ *  否则垂直于时间轴开合时投影接近 0，缩放比例会乱跳 */
+const MIN_PINCH_SPAN = 12;
 
 export function useScheduleGestures(options: ScheduleGesturesOptions) {
   const rowsSelector = options.rowsSelector || ".schedule__rows";
@@ -145,6 +157,8 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
     let startRotated = false;
     /** 上一次的双指间距（0 = 当前不在捏合中） */
     let pinchDistance = 0;
+    /** 本次捏合会话开始时的旋转状态：决定双指间距与捏合中心取屏幕哪个轴（两者必须同一套映射） */
+    let pinchRotated = false;
     /** 捏合会话的理论横向滚动位置：缩放中用它算中心锚点，避免连续缩放时 DOM 滚动位置尚未生效导致的漂移 */
     let pinchScrollLeft = 0;
     /** 当前是否处于双指捏合会话（用于触发 onPinchStart / onPinchEnd） */
@@ -153,7 +167,7 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
     /**
      * 捏合中心 → 时间轴可视区偏移 / 内容坐标。
      * 旋转 90° 后屏幕竖向才是时间轴方向（layout x = screen y），所以取中心点的 Y；
-     * 未旋转（宿主真转屏）时直接取 X。两种情况下 rect 的对应边都是可视区左缘。
+     * 未旋转（宿主真转屏 / 竖屏网页）时直接取 X。两种情况下 rect 的对应边都是可视区左缘。
      */
     const pinchFocus = (touches: TouchList) => {
       const a = touches[0];
@@ -162,7 +176,7 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       const centerX = (a.clientX + b.clientX) / 2;
       const centerY = (a.clientY + b.clientY) / 2;
       const rect = grid.getBoundingClientRect();
-      const raw = options.isRotated?.() ? centerY - rect.top : centerX - rect.left;
+      const raw = pinchRotated ? centerY - rect.top : centerX - rect.left;
       const localX = Math.min(Math.max(raw, 0), grid.clientWidth);
       return { localX, contentX: pinchScrollLeft + localX };
     };
@@ -171,7 +185,10 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       // 双指按下：进入捏合，先把单指拖动的方向状态清掉
       if (options.onPinch && event.touches.length >= 2) {
         axis = null;
-        pinchDistance = touchDistance(event.touches);
+        pinchRotated = options.isRotated?.() ?? false;
+        const span = pinchSpan(event.touches, pinchRotated);
+        // 垂直于时间轴按下（如旋转横屏里的左右双指）：先不取基准，等真正沿时间轴张开时再取
+        pinchDistance = span >= MIN_PINCH_SPAN ? span : 0;
         pinchScrollLeft = grid.scrollLeft;
         pinching = true;
         options.onPinchStart?.();
@@ -203,8 +220,18 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
     const onMove = (event: TouchEvent) => {
       // 双指捏合：按两指间距的变化比例缩放时间轴（页面自己改每小时像素宽）
       if (options.onPinch && event.touches.length >= 2) {
-        const distance = touchDistance(event.touches);
-        // 第二根手指可能是在拖动途中落下的：以这一刻为新基准，避免比例突变
+        // 第二根手指可能是在单指拖动途中落下的（onStart 没走到捏合分支）：这里补一次旋转状态，
+        // 保证间距取的轴与 pinchFocus 用的轴始终一致
+        if (!pinchDistance) pinchRotated = options.isRotated?.() ?? false;
+        const distance = pinchSpan(event.touches, pinchRotated);
+        if (distance < MIN_PINCH_SPAN) {
+          // 两指在时间轴方向上没张开（旋转横屏里左右开合就是这种）：这次不算缩放。
+          // 清掉基准，等真正沿时间轴张开时重新取，避免用接近 0 的间距算比例导致突变。
+          pinchDistance = 0;
+          if (event.cancelable) event.preventDefault();
+          return;
+        }
+        // 第二根手指可能是在拖动途中落下的，或刚从「垂直于时间轴」转过来：以这一刻为新基准，避免比例突变
         if (!pinchDistance) {
           pinchDistance = distance;
           pinchScrollLeft = grid.scrollLeft;
@@ -212,15 +239,13 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
           options.onPinchStart?.();
           axis = null;
         }
-        if (pinchDistance > 0 && distance > 0) {
-          const scale = distance / pinchDistance;
-          pinchDistance = distance;
-          if (Math.abs(scale - 1) > 0.001) {
-            const focus = pinchFocus(event.touches);
-            const next = options.onPinch({ scale, ...focus });
-            if (typeof next === "number") pinchScrollLeft = next;
-            if (debug) log("双指缩放", { scale, ...focus });
-          }
+        const scale = distance / pinchDistance;
+        pinchDistance = distance;
+        if (Math.abs(scale - 1) > 0.001) {
+          const focus = pinchFocus(event.touches);
+          const next = options.onPinch({ scale, ...focus });
+          if (typeof next === "number") pinchScrollLeft = next;
+          if (debug) log("双指缩放", { scale, ...focus });
         }
         if (event.cancelable) event.preventDefault();
         return;

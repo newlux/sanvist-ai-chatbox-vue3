@@ -5,13 +5,15 @@ import type { SchedulePinchEvent } from "@/hooks/useScheduleGestures";
 import type { NativePhoneInfo } from "@/utils/platform/mpaas";
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import arrowNextIcon from "@/assets/img/schedule-arrow-next.svg";
+import arrowPrevIcon from "@/assets/img/schedule-arrow-prev.svg";
 import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
 import { useLandscape } from "@/hooks/useLandscape";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
-import { warmPhoneInfo } from "@/utils/landscape-device";
+import { isWebEnvironment, warmPhoneInfo } from "@/utils/landscape-device";
 import { backFromScene } from "@/utils/scene-navigation";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
@@ -51,6 +53,16 @@ defineOptions({ name: "ScheduleGanttPage" });
  * 旋转会改变排程区的实际宽度：必须重排一次再量（否则用的是旋转前的竖屏宽度，箭头会判错、跳偏）。
  */
 const { rotated, exitLandscape } = useLandscape(measureLayout);
+
+/**
+ * 返回图标要不要顺时针补 90°。
+ *
+ * 图标本体画的是「托盘 + 向上箭头」，设计稿里是横置的（箭头朝右），所以竖着看时必须补 90°：
+ * - 网页版（浏览器 / PC 内嵌）：版面永远不转，一律要补；
+ * - 容器内只有 CSS 旋转模拟横屏（设备竖着拿、页面整体转了 90°）时才要补；
+ *   宿主原生转屏成功、天猫精灵智慧屏 / 酷开大屏这类横屏画布机型，版面本身已经是横的，补了反而歪 90°。
+ */
+const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
 
 /**
  * 顶部状态栏空白：调原生 landscapeFullscreen 转屏成功后，webview 铺满横屏、
@@ -121,8 +133,8 @@ const nowText = computed(() => minutesToTime(nowMinutes.value));
 let nowTimer: ReturnType<typeof setInterval> | null = null;
 
 /* ---------- 跨天分界（24:00 / 次日 00:00）----------
-   轴扩过零点时（有跨天任务 / 当前时间在零点后），在 24:00 处画一条红色细实线，
-   位置与长度跟当前时间虚线一致（都从刻度条下沿拉到排程区底部），顶部标「+1天」。
+   轴扩过零点时（有跨天任务 / 当前时间在零点后），在 24:00 处画一条红色细虚线，
+   虚线段长、位置与长度都跟当前时间虚线一致（都从刻度条下沿拉到排程区底部），顶部标「+1天」。
    稿子 6694:277：文本 12px Inter Italic #C8201E、无胶囊底，压在线顶并水平居中。 */
 const NEXT_DAY_BOUNDARY_MIN = 24 * 60;
 const nextDayVisible = computed(
@@ -463,16 +475,6 @@ const { rowHints, jumpToRow } = useTimelineEdgeHint({
   },
 });
 
-/** 顶部栏日期：取系统当天，与时间线一致 */
-function formatDate(date: Date) {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
-/** 顶部栏日期：有接口给的业务日期就用它，否则取系统当天 */
-const dateText = String(viewPayload?.businessDate || "").trim() || formatDate(new Date());
-
 /** 返回对话页的退场动画时长（ms）：与 .schedule 的 transition 保持一致 */
 const LEAVE_ANIM_MS = 300;
 /** 正在退场：缩小动画期间不再响应返回，避免重复收横屏 / 重复联网返回 */
@@ -672,21 +674,12 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 <template>
   <view
     class="schedule"
-    :class="{ 'schedule--rotated': rotated, 'schedule--leaving': leaving }"
+    :class="{ 'schedule--rotated': rotated, 'schedule--leaving': leaving, 'schedule--exit-rotate': exitIconRotated }"
     :style="{ transformOrigin: leaveOrigin }"
   >
-    <!-- 顶部栏（稿子 6832:15 标题 / 6832:186 日期 / 6832:275 图例 / 10474:18 返回）；
+    <!-- 顶部栏（6832:275 图例 / 10474:18 返回）：按产品要求去掉左侧标题与日期；
          原生横屏全屏时顶部留出状态栏高度（见 headerTopStyle） -->
     <view class="schedule__header" :style="headerTopStyle">
-      <view class="schedule__title-group">
-        <text class="schedule__title">
-          调度视图
-        </text>
-        <text class="schedule__date">
-          {{ dateText }}
-        </text>
-      </view>
-
       <view class="schedule__tools">
         <!-- 任务状态图例（稿子 6832:275；色块 10×10 圆角 3），贴着返回按钮放 -->
         <view class="schedule__legend">
@@ -820,14 +813,14 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
           class="schedule__scroll-btn schedule__scroll-btn--prev"
           @tap="jumpToRow(-1, rowIndex)"
         >
-          <view class="schedule__scroll-icon schedule__scroll-icon--prev" />
+          <image class="schedule__scroll-icon schedule__scroll-icon--prev" :src="arrowPrevIcon" mode="aspectFit" />
         </view>
         <view
           v-if="rowHints[rowIndex] && rowHints[rowIndex].right"
           class="schedule__scroll-btn schedule__scroll-btn--next"
           @tap="jumpToRow(1, rowIndex)"
         >
-          <view class="schedule__scroll-icon schedule__scroll-icon--next" />
+          <image class="schedule__scroll-icon schedule__scroll-icon--next" :src="arrowNextIcon" mode="aspectFit" />
         </view>
       </view>
     </view>
@@ -888,28 +881,6 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   padding: 0 28px;
   /* 行间距只给换行时用（一行时由 min-height + 居中维持设计稿 49 高） */
   gap: 4px 16px;
-}
-
-.schedule__title-group {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: 8px;
-}
-
-.schedule__title {
-  flex: none;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  color: #000000;
-}
-
-.schedule__date {
-  flex: none;
-  font-size: 11px;
-  white-space: nowrap;
-  color: #999999;
 }
 
 /* 图例（稿子 6832:13）：色块 10×10 圆角 3 + 11px 标签；放在右侧工具区、贴返回按钮 */
@@ -1008,7 +979,12 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   position: relative;
   width: 13px;
   height: 14px;
-  rotate: 90deg;
+}
+
+/* 补 90°（页面没转的场景）：见脚本里的 exitIconRotated。
+   用 transform 而不是 rotate 独立属性：天猫精灵智慧屏 / 酷开大屏的 WebView 内核较老，不认 `rotate`。 */
+.schedule--exit-rotate .schedule__exit-icon {
+  transform: rotate(90deg);
 }
 
 .schedule__exit-icon::before {
@@ -1314,20 +1290,12 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   opacity: 0.7;
 }
 
-/* 箭头：9×9 的直角旋转 45°（稿子 6832:719 / 10633:140，色 #1A1A1A） */
+/* 箭头：图片图标（稿子 6832:719 / 10633:140，1.5px 描边 #1A1A1A）。
+   原来是 9×9 直角 + rotate 45° 的 CSS 画法：旋转会把图形推出盒子（视觉中心偏右约 3px），
+   换成整块 svg 后宽高就是图形本身，交给按钮的 flex 居中即可真正居中。 */
 .schedule__scroll-icon {
-  width: 9px;
-  height: 9px;
-  border-top: 1.5px solid #1a1a1a;
-  border-right: 1.5px solid #1a1a1a;
-}
-
-.schedule__scroll-icon--prev {
-  transform: rotate(-135deg);
-}
-
-.schedule__scroll-icon--next {
-  transform: rotate(45deg);
+  width: 8px;
+  height: 14px;
 }
 
 /* ---------- 布局：外层横向滚动（时间轴方向）套「刻度 + 内容区」，内容区纵向滚动 ---------- */
@@ -1370,43 +1338,59 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   will-change: transform;
 }
 
-/* ---------- 时间线（稿子 6832:208 虚线 + 6832:209 胶囊）：取系统当前时间 ---------- */
-/* 虚线：从刻度条下沿（= 排程区顶）一直拉到排程区底部；z-index 低于任务条，不挡内容 */
+/* ---------- 时间线（稿子 1522:681 虚线 + 1522:680 胶囊）：取系统当前时间 ---------- */
+/* 虚线：1px、#1166D6 30%、实 2 / 空 2（稿子 dashPattern [2,2]）。
+   CSS 的 dashed 段长由浏览器自己定（约 3/3），对不上稿子，所以用 repeating-linear-gradient 精确画。
+   从刻度条下沿（= 排程区顶）一直拉到排程区底部；z-index 低于任务条，不挡内容 */
 .schedule__now {
   position: absolute;
   top: 0;
   bottom: 0;
   z-index: 3;
-  width: 0;
-  border-left: 1px dashed rgba(200, 32, 30, 0.3);
+  width: 1px;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(17, 102, 214, 0.3) 0,
+    rgba(17, 102, 214, 0.3) 2px,
+    transparent 2px,
+    transparent 4px
+  );
   pointer-events: none;
 }
 
-/* 时间胶囊：贴刻度条下沿、以时间线为中心 */
+/* 时间胶囊（稿子 1522:680 / 1522:679）：32×14、圆角 7、#1166D6 底、Inter 10/12 白字居中；
+   贴刻度条下沿、以时间线为中心（padding 1×4 让「11:45」24 宽 + 8 = 稿子的 32） */
 .schedule__now-capsule {
   position: absolute;
   top: 2px;
   left: 0;
-  padding: 1px 3px;
+  padding: 1px 4px;
   border-radius: 7px;
-  background: #c8201e;
+  background: #1166d6;
   color: #ffffff;
+  font-family: Inter, "PingFang SC", sans-serif;
   font-size: 10px;
   line-height: 12px;
   white-space: nowrap;
   transform: translateX(-50%);
 }
 
-/* ---------- 跨天分界（24:00 / 次日 00:00）：红色细实线 + 顶部「+1天」 ---------- */
-/* 与当前时间虚线同起点、同长度：从刻度条下沿一直拉到排程区底部；z-index 低于任务条，不挡内容。
-   稿子 6694:278：红色 30% 细线（实线，区别于当前时间的虚线） */
+/* ---------- 跨天分界（24:00 / 次日 00:00）：红色细虚线 + 顶部「+1天」 ---------- */
+/* 与当前时间虚线同起点、同长度、同段长（1px、实 2 / 空 2）：从刻度条下沿一直拉到排程区底部；
+   z-index 低于任务条，不挡内容。颜色仍取跨天分界的红 30%，与当前时间线的蓝区分开 */
 .schedule__day-end {
   position: absolute;
   top: 0;
   bottom: 0;
   z-index: 3;
-  width: 0;
-  border-left: 1px solid rgba(200, 32, 30, 0.3);
+  width: 1px;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(200, 32, 30, 0.3) 0,
+    rgba(200, 32, 30, 0.3) 2px,
+    transparent 2px,
+    transparent 4px
+  );
   pointer-events: none;
 }
 
