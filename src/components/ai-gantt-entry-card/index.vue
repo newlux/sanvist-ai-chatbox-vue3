@@ -135,8 +135,8 @@ const titleText = computed(() => props.title.trim() || t("task-entry-gantt-title
   flex-shrink: 0;
   width: 14rpx;
   height: 14rpx;
-  border-top: 1.5px solid #e01313;
-  border-right: 1.5px solid #e01313;
+  border-top: 1.5px solid #131313;
+  border-right: 1.5px solid #131313;
   transform: rotate(45deg);
 }
 
