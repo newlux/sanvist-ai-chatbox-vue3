@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, inject } from "vue";
 
 defineOptions({ name: "TableBlock" });
 
 const props = defineProps({
   payload: { type: Object, default: () => ({}) },
 });
+/**
+ * 是否渲染在深色 AI 气泡里（Ardot 1193:5104）：由 AiBubbleV2 provide。
+ * 表格不是 markdown 的 HTML 表格，而是结构化 table 块，配色走这个组件的样式表，
+ * 没有 provide 的场景（浅色稿）默认 false。
+ */
+const darkContainer = inject("ai-bubble-dark", computed(() => false));
 
 const rawColumns = computed(() =>
   Array.isArray(props.payload?.columns) ? props.payload.columns : [],
@@ -30,7 +36,13 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
 </script>
 
 <template>
-  <scroll-view class="table-block" scroll-x :show-scrollbar="false" enhanced>
+  <scroll-view
+    class="table-block"
+    :class="{ 'table-block--dark': darkContainer }"
+    scroll-x
+    :show-scrollbar="false"
+    enhanced
+  >
     <view class="table-block__table" :style="{ minWidth: tableWidth }">
       <view class="table-block__row table-block__row--head">
         <text
@@ -84,5 +96,22 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
   font-size: 24rpx;
   line-height: 36rpx;
   word-break: break-word;
+}
+
+/* ===== 深色主题：结构化表格块（Ardot 1193:5104 → 回复卡 1193:5116）=====
+   单元格文字与表格外的正文同色（1193:5140 = #FFFFFF 80%），
+   描边换成分隔线同值 #303030；尺寸 / 间距 / 字号不动 */
+.table-block--dark {
+  border-color: #303030;
+
+  .table-block__row {
+    border-top-color: #303030;
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  // 表头只靠字重区分，颜色与正文完全一致
+  .table-block__row--head {
+    color: rgba(255, 255, 255, 0.8);
+  }
 }
 </style>

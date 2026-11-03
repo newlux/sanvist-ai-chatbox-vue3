@@ -40,6 +40,15 @@ const props = defineProps({
     type: String,
     default: "",
   },
+  /**
+   * 深色主题（首页问答态 Ardot 1193:2097）：容器 722:341 用页面底 #1A1A1A，
+   * 入口胶囊换 #212121 + 1px #303030（与早报卡 1193:2101 同一套材质）。
+   * 默认关 —— 任务协同页也复用这条导航，那边还是浅色稿。
+   */
+  dark: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(["item-click"]);
@@ -134,7 +143,7 @@ function onSwiperChange(event: { detail?: { current?: number } }) {
 </script>
 
 <template>
-  <view v-if="visible" class="ai-chat-nav">
+  <view v-if="visible" class="ai-chat-nav" :class="{ 'ai-chat-nav--dark': dark }">
     <view class="ai-chat-nav__track">
       <swiper
         class="ai-chat-nav__swiper"
@@ -240,5 +249,42 @@ function onSwiperChange(event: { detail?: { current?: number } }) {
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ===== 深色主题：底部入口菜单（Ardot 1193:2097） =====
+   深色稿没有单独画这条导航，按同一套暗色梯度推：
+   容器跟页面底 #1A1A1A，入口胶囊与早报卡 1193:2101 同材质（#212121 + 1px #303030），
+   高亮态沿用品牌红（描边红 + 8% 红底）。尺寸 / 间距不动 */
+.ai-chat-nav--dark {
+  background: #1a1a1a;
+
+  .ai-chat-nav__chip {
+    border-color: #303030;
+    background: #212121;
+  }
+
+  .ai-chat-nav__title {
+    color: #ffffff;
+  }
+
+  // 入口图标都是深色线条，深底下反相成白
+  .ai-chat-nav__icon {
+    filter: invert(1);
+  }
+
+  // 高亮态：红色描边 + 暗红底，图标用回浅色稿那颗红色 filter（见上）
+  .ai-chat-nav__chip--active {
+    border-color: #fe0000;
+    background: rgba(254, 0, 0, 0.12);
+  }
+
+  .ai-chat-nav__chip--active .ai-chat-nav__title {
+    color: #fe0000;
+  }
+
+  // 高亮图标要在反相之后覆盖回来，否则白底红字的入口配一颗白图标
+  .ai-chat-nav__chip--active .ai-chat-nav__icon {
+    filter: brightness(0) saturate(100%) invert(11%) sepia(99%) saturate(6668%) hue-rotate(358deg) brightness(105%) contrast(113%);
+  }
 }
 </style>

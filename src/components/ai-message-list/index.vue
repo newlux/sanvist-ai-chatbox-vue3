@@ -5,6 +5,9 @@ import moment from "moment";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import iconWaveForm from "@/assets/img/icon-waveform.svg";
+// 深色版声波：底层改回设计稿 1193:2106 的 #1A1A1A（浅色稿为在白底上可见用了 #FFF）
+import iconWaveFormDark from "@/assets/img/icon-waveform-dark.svg";
+import { useSystemStore } from "@/stores";
 import { guideStepCardDomId } from "@/utils/guide-content";
 import { chatMessageAnchorDomId } from "@/stores/modules/chat";
 import { isListenReportListened } from "@/utils/listen-report";
@@ -37,6 +40,14 @@ const props = defineProps({
   showBusinessOverview: {
     type: Boolean,
     default: true,
+  },
+  /**
+   * 发问 / 回复气泡的深色材质（Ardot 1193:5104）。
+   * 由页面显式传：首页问答态跟随外观设置变深；作业指导 / 任务协同仍是浅色稿，不传即浅色。
+   */
+  dark: {
+    type: Boolean,
+    default: false,
   },
   showQuickList: {
     type: Boolean,
@@ -159,6 +170,9 @@ const emit = defineEmits([
 ]);
 
 const { t } = useI18n();
+/** 外观（设置弹层 → 深色）：首页发起问答区走 C 方案暗色 1193:2097 的配色 */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 /** 经营概览卡片的兜底文案走词库；接口有姓名/摘要时用接口文案（摘要是后端生成的自然语言，无词条可映射） */
 const overview = computed(() => {
@@ -1051,7 +1065,7 @@ watch(
 </script>
 
 <template>
-  <view class="ai-message-list">
+  <view class="ai-message-list" :class="{ 'ai-message-list--dark': isDark }">
     <scroll-view
       class="msg-list"
       scroll-y
@@ -1118,7 +1132,7 @@ watch(
               class="business-overview__report"
             >
               <view class="business-overview__sound" aria-hidden="true">
-                <image :src="iconWaveForm" mode="aspectFit" />
+                <image :src="isDark ? iconWaveFormDark : iconWaveForm" mode="aspectFit" />
               </view>
               <view class="business-overview__report-info">
                 <text class="business-overview__report-title">
@@ -1165,6 +1179,7 @@ watch(
           >
             <AiBubbleV2
               :role="msg.role"
+              :dark="props.dark"
               :content="msg.content"
               :blocks="msg.blocks || []"
               :loading="msg.loading"
@@ -1548,5 +1563,60 @@ watch(
 .business-overview__report:active,
 .business-overview__question:active {
   opacity: 0.72;
+}
+
+/* ===== 深色主题：首页发起问答区（Ardot 1193:2097「日常运营助手-老板-个性觉醒」） =====
+   浅色稿（326:1353 问候 / 326:1333 摘要 / 326:1347 早报卡 / 326:1344 问题列表）全部保留，
+   深色只换字色与卡片材质，间距 / 圆角 / 字号 / 行高两稿一致，不做改动：
+   - 问候标题 1193:2109：28px Bold #FFFFFF（浅色稿 #0D0D0D）；人名不再单独染红，整句纯白
+   - 摘要 1193:2098：14px / 行高 22px / #6B6B6B —— 两稿同值
+   - 早报卡 1193:2101：底 #0D0D0D、描边 1px #303030；
+     圆角 16 / 高 60 / 内边距 16 / 阴影 0 2px 8px rgba(0,0,0,.04) 与浅色稿一致
+   - 早报标题 1193:2102：16px Bold #FFFFFF；日期 1193:2107：14px #5D5D5D
+   - 去收听 1193:2103：70×32 / r16 / #3E64F8 → #56ABFA —— 两稿同值
+   - 分区标题 1193:2111：14px Medium #8F8F8F —— 两稿同值
+   - 问题行 1193:2119 / 2114：14px #FFFFFF，上下分隔线 #303030 */
+.ai-message-list--dark {
+  .business-overview__title {
+    color: #ffffff;
+  }
+
+  .business-overview__title-name {
+    color: #ffffff;
+  }
+
+  .business-overview__report {
+    background: #0d0d0d;
+    border-color: #303030;
+    box-shadow: 0 4rpx 16rpx 0 rgba(0, 0, 0, 0.04);
+  }
+
+  .business-overview__report-title {
+    color: #ffffff;
+  }
+
+  .business-overview__report-date {
+    color: #5d5d5d;
+  }
+
+  // 已收听态设计稿未给深色值：沿用同一套暗色，避免浅灰底在白字旁边发亮
+  .business-overview__listen--listened {
+    color: #8f8f8f;
+    background: #303030;
+  }
+
+  .business-overview__question {
+    color: #ffffff;
+    border-top-color: #303030;
+  }
+
+  .business-overview__question:last-child {
+    border-bottom-color: #303030;
+  }
+
+  // 骨架块：浅色 #F2F3F5 在深底上会整片发亮，压到 #2A2A2A
+  .business-overview__skeleton-block {
+    background: #2a2a2a;
+  }
 }
 </style>

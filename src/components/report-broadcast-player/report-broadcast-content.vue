@@ -6,6 +6,7 @@ import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
+import { useSystemStore } from "@/stores";
 
 const props = defineProps<{
   portrait: string;
@@ -28,6 +29,12 @@ const props = defineProps<{
 
 const emit = defineEmits<{ "play-pause": []; seek: [seq: number] }>();
 const { t } = useI18n();
+/**
+ * 外观：深色走 C 方案暗色稿 1193:2708「听播-正在播放」与 1193:3357「听播-正在回答」。
+ * 声波在暗色稿里是纯白柱（浅色稿才是品牌渐变），字幕 / 进度条 / 播放按钮 / 答案卡换暗色材质。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 const instance = getCurrentInstance();
 const transcriptScrollTop = ref(0);
 /**
@@ -243,14 +250,15 @@ function onProgressTouchEnd() {
 
 <template>
   <!-- Broadcast Content -->
-  <view class="report-broadcast-content">
+  <view class="report-broadcast-content" :class="{ 'report-broadcast-content--dark': isDark }">
     <view class="report-broadcast-content__portrait-gap" />
     <view class="report-broadcast-content__portrait-stage">
       <view class="report-broadcast-content__wave report-broadcast-content__wave--left">
         <ReportWaveform
           :active="playing"
           :bars="leftWaveBars"
-          :gradient="waveGradient"
+          :gradient="isDark ? undefined : waveGradient"
+          :color="isDark ? '#FFFFFF' : '#C8201E'"
           :box-width="70"
           :box-height="70"
           :bar-width="2"
@@ -267,7 +275,8 @@ function onProgressTouchEnd() {
         <ReportWaveform
           :active="playing"
           :bars="rightWaveBars"
-          :gradient="waveGradient"
+          :gradient="isDark ? undefined : waveGradient"
+          :color="isDark ? '#FFFFFF' : '#C8201E'"
           :box-width="70"
           :box-height="70"
           :bar-width="2"
@@ -709,6 +718,82 @@ function onProgressTouchEnd() {
   }
   100% {
     background-position: -100% 0;
+  }
+}
+
+/* ===== 深色主题：播报内容区（Ardot 1193:2708 正在播放 / 1193:3357 正在回答 / 1193:1864 中途提问）=====
+   暗色稿与浅色稿的坐标、字号、行高、层级一一对应，这里只换材质：
+   - 字幕后景 1193:1903 / 1193:2814：竖向由 #0D0D0D 47.7% 渐到 #0D0D0D，压住上下滚动的字幕
+   - 段落 1193:1977：#FFFFFF；淡化段 1193:1997 / 1193:1865：rgba(255,255,255,0.2)
+   - 进度条轨道 1193:1953 / 1193:2810：#303030；拖拽点 1193:1954 / 1193:2812：描边 #303030
+   - 播放按钮 1193:1905 / 1193:2800：底 #1A1A1A + 1px #303030 描边（品牌渐变图标保留）
+   - 答案卡 1193:3413：底 #1A1A1A + 1px #303030 描边，正文 #FFFFFF；标题 #FFFFFF、过程说明 #8F8F8F
+   - 骨架屏：浅色 #F2F3F5→#E5E7EB 的流光换成 #212121→#303030 */
+.report-broadcast-content--dark {
+  .report-broadcast-content__glow--blue {
+    background: rgb(17 102 214 / 35%);
+  }
+
+  .report-broadcast-content__play-control {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .report-broadcast-content__progress-rail {
+    background: #303030;
+  }
+
+  .report-broadcast-content__progress-thumb {
+    border-color: #303030;
+  }
+
+  .report-broadcast-content__segment {
+    color: rgb(255 255 255 / 20%);
+  }
+
+  .report-broadcast-content__segment--current {
+    color: #ffffff;
+  }
+
+  .report-broadcast-content__skeleton-line {
+    background: linear-gradient(90deg, #212121 25%, #303030 50%, #212121 75%);
+    background-size: 200% 100%;
+  }
+
+  .report-broadcast-content__top-fade {
+    background: linear-gradient(
+      180deg,
+      #0d0d0d 0%,
+      rgb(13 13 13 / 86%) 52%,
+      rgb(13 13 13 / 0%) 100%
+    );
+  }
+
+  .report-broadcast-content__bottom-fade {
+    background: linear-gradient(
+      180deg,
+      rgb(13 13 13 / 0%) 0%,
+      rgb(13 13 13 / 86%) 58%,
+      #0d0d0d 100%
+    );
+  }
+
+  .report-broadcast-content__qa-title {
+    color: #ffffff;
+  }
+
+  .report-broadcast-content__qa-subtitle {
+    color: #8f8f8f;
+  }
+
+  .report-broadcast-content__qa-scroll {
+    border-color: #303030;
+    background: #1a1a1a;
+    box-shadow: 0 6rpx 20rpx rgb(0 0 0 / 20%);
+  }
+
+  .report-broadcast-content__qa-answer :deep(p) {
+    color: #ffffff !important;
   }
 }
 </style>

@@ -38,7 +38,7 @@ import { useChatShare } from "@/hooks/useChatShare";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
-import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useSystemStore, useUserStore } from "@/stores";
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
@@ -60,6 +60,9 @@ const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
  */
 chatStore.setStopAtReplyEnd(true);
 const sessionStore = useSessionStore();
+/** 外观（设置弹层 → 深色）：首页问答态走 C 方案暗色 1193:2097 的底色与顶部渐隐 */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 const sharePosterWrap = ref<unknown>(null);
 /** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送 */
 const chatInputRef = ref<{
@@ -899,7 +902,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <view class="ai-page">
+  <view class="ai-page" :class="{ 'ai-page--dark': isDark }">
     <!-- 欢迎页 -->
     <AiWelcome v-if="pageStage === 'welcome'" @start-chat="goToChat" />
 
@@ -911,8 +914,8 @@ onBeforeUnmount(() => {
     >
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
-      <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车） -->
-      <AiChatBackdrop />
+      <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车）；深色下隐藏（见 .ai-page--dark） -->
+      <AiChatBackdrop class="ai-page__backdrop" />
       <!-- 顶部白色渐变：页面上沿由白向下渐隐，压住线稿背景与滚上来的内容 -->
       <view class="ai-page__top-fade" />
       <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
@@ -940,6 +943,7 @@ onBeforeUnmount(() => {
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
         top-inset="var(--chat-top-inset, 300rpx)"
+        :dark="isDark"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
@@ -1000,6 +1004,7 @@ onBeforeUnmount(() => {
       <AiSlotDrawer
         :slots="askSlotQueue"
         :visible="askSlotDrawerVisible"
+        :dark="isDark"
         @close="closeAskSlotDrawer"
         @submit="onAskSlotSubmit"
         @height-change="onAskSlotDrawerHeightChange"
@@ -1031,6 +1036,7 @@ onBeforeUnmount(() => {
            用透明 + 不吃事件而不是 v-if：卸载再挂载会让 swiper 跳回第一屏 -->
       <AiChatNav
         :class="{ 'ai-chat-nav--voice-hidden': voicePanelOpen }"
+        :dark="isDark"
         :active-key="navActiveKey"
         :style="navOffsetStyle"
         @item-click="onNavItemClick"
@@ -1139,6 +1145,7 @@ onBeforeUnmount(() => {
         v-else
         ref="chatInputRef"
         v-model="inputText"
+        :dark="isDark"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
@@ -1664,5 +1671,38 @@ $color-white: #ffffff;
   top: 0;
   left: -9999px;
   pointer-events: none;
+}
+
+/* ===== 深色主题：首页问答态（Ardot 1193:2097「日常运营助手-老板-个性觉醒」） =====
+   只替换底色与材质，间距 / 圆角 / 字号两稿一致，不做改动：
+   - 页面底 1193:2122：#1A1A1A（不是纯黑，浅色稿的 #FAFAFA 一一对应）
+   - 顶部渐隐 1193:2129;722:341 Rectangle 152：#1A1A1A 100% → 0% 竖向渐变
+   - 角落光晕 1193:2123 Blue Glow TL / 1193:2124 Red Glow TR：深色稿 visible = false
+   - 设备线稿 1193:2125 Frame 85：深色稿 visible = false */
+.ai-page--dark {
+  background: #1a1a1a;
+
+  .ai-page__chat {
+    background: #1a1a1a;
+  }
+
+  // 渐隐材质换成深色页面底：上沿完全盖住滚上来的内容，往下渐透
+  .ai-page__top-fade {
+    background: linear-gradient(
+      180deg,
+      #1a1a1a 0%,
+      rgba(26, 26, 26, 0.7) 45%,
+      rgba(26, 26, 26, 0) 100%
+    );
+  }
+
+  // 浅色底上的彩色雾放到深底上会泛白，深色稿里这两个光晕本身就是关掉的
+  .ai-chat-glow {
+    display: none;
+  }
+
+  .ai-page__backdrop {
+    display: none;
+  }
 }
 </style>

@@ -66,6 +66,13 @@ const emit = defineEmits([
  */
 const chatStore = useChatStore();
 const systemStore = useSystemStore();
+/**
+ * 深色只有一个作用域：首页对话页的悬浮头部（plainBg）。
+ * 作业指导 / 任务协同也复用这个头部，但那些页面还是浅色稿，
+ * 跟着外观偏好一起变深会变成「深色头 + 浅色页」，所以这里再限一层 plainBg。
+ * 分享选择态是白底文字条，同理先不跟深色走。
+ */
+const darkPlain = computed(() => props.plainBg && !props.shareMode && systemStore.isDark);
 const answering = computed(() => {
   if (!props.generating) return false;
   const list = chatStore.messages;
@@ -461,7 +468,13 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- 分享选择态是「文字 + 勾选」条，保留原来的实底渐隐，避免文字压在滚动内容上看不清 -->
-  <view class="ai-chat-header" :class="{ 'ai-chat-header--plain': plainBg && !shareMode }">
+  <view
+    class="ai-chat-header"
+    :class="{
+      'ai-chat-header--plain': plainBg && !shareMode,
+      'ai-chat-header--dark': darkPlain,
+    }"
+  >
     <view class="chat-header">
       <!-- 状态栏占位：动态读取真实机型状态栏高度 -->
       <view class="chat-header__statusbar" :style="statusbarStyle" />
@@ -613,8 +626,8 @@ onBeforeUnmount(() => {
         ref="historyPopup"
         type="left"
         :animation="true"
-        background-color="#ffffff"
-        mask-background-color="rgba(0, 0, 0, 0.4)"
+        :background-color="darkPlain ? '#0D0D0D' : '#ffffff'"
+        :mask-background-color="darkPlain ? 'rgba(13, 13, 13, 0.4)' : 'rgba(0, 0, 0, 0.4)'"
         :safe-area="false"
         :is-mask-click="true"
         @change="onHistoryPopupChange"
@@ -853,6 +866,7 @@ onBeforeUnmount(() => {
       <AiSettingsSheet
         v-model:visible="isSettingsSheetOpen"
         v-model:language="settingsLanguage"
+        :dark="darkPlain"
       />
     </view>
   </view>
@@ -880,6 +894,42 @@ onBeforeUnmount(() => {
    这里完全透明，滚上来的消息才能透到图标下面，而不是被一层实底挡住 */
 .ai-chat-header--plain {
   background: linear-gradient(180deg, #fafafa 0%, rgba(250, 250, 250, 0.92) 10%, rgba(250, 250, 250, 0) 100%);
+}
+
+/* ===== 深色主题：首页问答态头部（Ardot 1193:2097 → 1193:2129 Component 2） =====
+   渐隐底色 722:341 换成页面底 #1A1A1A；左右图标 722:342 / 722:345 在深色稿里是白线，
+   svg / 位图统一 filter 反白：不新增资源，也不影响浅色稿（浅色下不加这个类） */
+.ai-chat-header--plain.ai-chat-header--dark {
+  background: linear-gradient(
+    180deg,
+    #1a1a1a 0%,
+    rgba(26, 26, 26, 0.92) 10%,
+    rgba(26, 26, 26, 0) 100%
+  );
+
+  .chat-header__icon-history-img,
+  .chat-header__icon-atlas-img,
+  .chat-header__icon-back-img {
+    filter: brightness(0) invert(1);
+  }
+
+  /* ===== 灵动岛「思考中」状态胶囊（Ardot 722:408「深色-思考中」→ Frame 96）=====
+     底 #303030 / 圆角 20 / 内边距 10·13 / 总高 40px（20 + 行高 20 + 20）/
+     阴影 0 2px 8px rgba(0,0,0,0.04)，文案 14px Medium #FFFFFF（.chat-header__status-text 已同值）；
+     深色稿里胶囊没有浅色稿那圈 1px 白描边，直接关掉 */
+  .chat-header__status-pill {
+    padding: 20rpx 26rpx; // 10 / 13
+    background: #303030;
+    box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04); // 0 2px 8px
+  }
+
+  .chat-header__status-pill-border {
+    background: transparent;
+  }
+
+  .chat-header__status-text {
+    color: #ffffff;
+  }
 }
 
 :deep(.uni-popup) {
@@ -1786,5 +1836,140 @@ onBeforeUnmount(() => {
 
 .history-delete-confirm__btn-text--ghost {
   color: #0D0D0D;
+}
+
+/* ===== 深色主题：历史记录抽屉（Ardot 1193:3855「历史对话」）=====
+   只换材质与文字色，抽屉宽 322、搜索框 223×44、列表行 46 高、底部按钮 136×44、
+   头像 44×44 与全部间距都和浅色稿（309:3052）一致，一律不动：
+   - 抽屉底板 1193:3856：#0D0D0D（uni-popup 的 background-color 同步换掉）
+   - 遮罩 1193:3902：rgba(13,13,13,0.4)
+   - 搜索框 1193:3878：底 #0D0D0D + 1px #303030 描边；占位文字 1193:3874 #8F8F8F
+   - 放大镜 1193:3875：描边 #8E8E8E
+   - 小节标题 1193:3885：#5D5D5D（两稿同值，显式写一遍）
+   - 列表文字 1193:3868：#FFFFFF；当前 / 选中条 1193:3869：286×46 / r8 / #212121
+   - 新建对话 1193:3858：底 #0D0D0D + 1px #303030，文案 16px #FFFFFF，图标 #FFFFFF
+   - 齿轮 1193:3879：32×32，#FFFFFF
+   批量删除 / 长按菜单 / 二次确认设计稿没画，按同一暗色体系推（卡 #212121、描边 #303030、
+   主按钮黑白反转），已在下面标注 */
+.ai-chat-header--plain.ai-chat-header--dark {
+  .history-drawer {
+    background: #0d0d0d;
+  }
+
+  // 搜索框：底 #0D0D0D + 1px（2rpx）#303030 描边（浅色稿是 #E0E0E0，宽度不变）
+  .history-drawer__search {
+    border-color: #303030;
+    background: #0d0d0d;
+  }
+
+  .history-drawer__search-input {
+    color: #ffffff;
+  }
+
+  .history-drawer__search-input::placeholder {
+    color: #8f8f8f;
+  }
+
+  // 放大镜 1193:3875 描边 #8E8E8E（原图标 #999）：压黑再反相到 0.557 ≈ #8E8E8E
+  .history-drawer__search-icon {
+    filter: brightness(0) invert(0.557);
+  }
+
+  .history-drawer__session-history-label {
+    color: #5d5d5d;
+  }
+
+  // 列表文字 1193:3868 / 14px / #FFFFFF
+  .history-drawer_item-label,
+  .history-drawer_item_active .history-drawer_item-label {
+    color: #ffffff;
+  }
+
+  // 当前会话 + 批量选中条 1193:3869：#212121
+  .history-drawer_item_current,
+  .history-drawer_item_active,
+  .history-drawer__row--editing {
+    background: #212121;
+  }
+
+  .history-drawer__rename-input {
+    color: #ffffff;
+    background: #212121;
+  }
+
+  // 新建对话 1193:3858：底 #0D0D0D + 1px #303030
+  .history-drawer__new-conversation-item {
+    border-color: #303030;
+    background: #0d0d0d;
+  }
+
+  .history-drawer__new-conversation-item-label {
+    color: #ffffff;
+  }
+
+  // 加号 / 齿轮图标都是深色线条，深底反相成白（1193:3859 / 1193:3879）
+  .history-drawer__new-conversation-item-icon,
+  .history-drawer__settings {
+    filter: brightness(0) invert(1);
+  }
+
+  .history-drawer__loading,
+  .history-drawer__empty-text {
+    color: #8f8f8f;
+  }
+
+  .history-drawer__loading-spinner {
+    border-color: #303030;
+    border-top-color: #8f8f8f;
+  }
+
+  // ---- 批量删除态（设计稿未画）：勾选框与主题一起反转 ----
+  .history-drawer__check--on {
+    border-color: #ffffff;
+    background: #ffffff;
+  }
+
+  .history-drawer__check-mark {
+    color: #0d0d0d;
+  }
+
+  .history-drawer__multi-btn-text {
+    color: #ffffff;
+  }
+
+  // ---- 长按菜单（设计稿未画）：#212121 卡 + 白字，删除保留品牌红 ----
+  .history-action-menu {
+    background: #212121;
+    box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.6);
+  }
+
+  .history-action-menu__text {
+    color: #ffffff;
+  }
+
+  // ---- 二次确认弹窗（设计稿未画）：卡 #212121，主按钮白底黑字，次按钮 #303030 ----
+  .history-delete-confirm__card {
+    background: #212121;
+  }
+
+  .history-delete-confirm__title {
+    color: #ffffff;
+  }
+
+  .history-delete-confirm__btn {
+    background: #ffffff;
+  }
+
+  .history-delete-confirm__btn-text {
+    color: #1a1a1a;
+  }
+
+  .history-delete-confirm__btn--ghost {
+    background: #303030;
+  }
+
+  .history-delete-confirm__btn-text--ghost {
+    color: #ffffff;
+  }
 }
 </style>

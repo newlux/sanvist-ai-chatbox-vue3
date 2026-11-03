@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AppearanceMode } from "@/stores";
 import type { PropType } from "vue";
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -7,6 +8,7 @@ import iconChevron from "@/assets/img/icon-settings-chevron.svg";
 import iconLanguage from "@/assets/img/icon-settings-language.svg";
 import iconMemory from "@/assets/img/icon-settings-memory.svg";
 import iconTimbre from "@/assets/img/icon-settings-timbre.svg";
+import { useSystemStore } from "@/stores";
 
 /**
  * 设置弹层（设计稿 722:2800「设置」）。
@@ -17,17 +19,23 @@ import iconTimbre from "@/assets/img/icon-settings-timbre.svg";
  * - 722:2867 四行设置项（记忆 / 语言 / 外观 / 音色），行间 28px；
  * - 857:118 底部《个人信息清单》《三方信息共享清单》链接。
  *
- * 「记忆」「外观」「音色」目前只有 UI 状态：memoryEnabled / appearance 为本地交互态，
- * 音色二级页尚未提供，所以音色行只做展示；语言切换接的是全局 i18n。
+ * 「记忆」「音色」目前只有 UI 状态：memoryEnabled 为本地交互态，
+ * 音色二级页尚未提供，所以音色行只做展示；语言接全局 i18n，外观接 system store（决定深色主题）。
  */
 defineOptions({ name: "AiSettingsSheet" });
 
 type AppLanguage = "zh_CN" | "en_US";
-type AppearanceMode = "system" | "light" | "dark";
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
   language: { type: String as PropType<AppLanguage>, default: "zh_CN" },
+  /**
+   * 深色主题（首页问答态）：弹层底色 / 文字 / 分段控件换深色材质。
+   * 设计稿 722:2800 只有浅色稿，深色按历史抽屉（Ardot 1193:3855）同一套暗色梯度推：
+   * 弹层 #1A1A1A、分段轨道 #212121、选中项白底黑字、文案白、黑色图标反相，
+   * 尺寸 / 间距 / 圆角 / 遮罩（本就是 rgba(13,13,13,0.4)）一律不动。
+   */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{
@@ -36,11 +44,10 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const systemStore = useSystemStore();
 
 /** 设计稿 722:2873 是开启态；本地交互态，暂不落存储、不接接口 */
 const memoryEnabled = ref(true);
-/** 设计稿 722:2999 选中「系统」；主题能力未接入，这里只维护选中态 */
-const appearance = ref<AppearanceMode>("system");
 
 const appearanceOptions: Array<{ value: AppearanceMode; label: string }> = [
   { value: "system", label: "settings-appearance-system" },
@@ -59,7 +66,7 @@ function selectLanguage(value: AppLanguage) {
 </script>
 
 <template>
-  <view v-if="visible" class="settings-sheet__mask" @tap.stop="close">
+  <view v-if="visible" class="settings-sheet__mask" :class="{ 'settings-sheet__mask--dark': dark }" @tap.stop="close">
     <!-- 设计稿 722:2804 Rectangle 144：底部弹层，顶角 20px（40rpx）圆角，纯白，无阴影 -->
     <view class="settings-sheet" @tap.stop>
       <!-- 设计稿 722:2867 Frame 98：四行设置项，垂直排列，行间 28px（56rpx） -->
@@ -108,8 +115,8 @@ function selectLanguage(value: AppLanguage) {
               v-for="option in appearanceOptions"
               :key="option.value"
               class="settings-sheet__segment-item"
-              :class="{ 'settings-sheet__segment-item--active': appearance === option.value }"
-              @tap.stop="appearance = option.value"
+              :class="{ 'settings-sheet__segment-item--active': systemStore.appearance === option.value }"
+              @tap.stop="systemStore.setAppearance(option.value)"
             >
               {{ t(option.label) }}
             </view>
@@ -264,5 +271,49 @@ function selectLanguage(value: AppLanguage) {
   font-size: 28rpx;
   font-weight: 500;
   line-height: 40rpx;
+}
+
+/* ===== 深色主题：设置弹层（首页问答态）=====
+   设计稿 722:2800 只有浅色稿，深色按历史抽屉 Ardot 1193:3855 的同一套材质推，
+   尺寸 / 间距 / 圆角 / 动效不动：
+   - 弹层 722:2804：底 #212121（与回复卡同材质），顶角 40rpx 圆角、无投影不变
+   - 遮罩 722:2803：rgba(13,13,13,0.4)，两稿同值，不改
+   - 四行文案 722:2824 等：#0D0D0D → #FFFFFF；黑色图标反相为白
+   - 分段 722:2998 / 722:2999：轨道 #F3F3F3 → #303030（比弹层亮一阶才看得出分段），
+     未选中文字 #8F8F8F，选中项黑白反转（#FFFFFF 底 + #0D0D0D 字）
+   - 开关 722:2873：开启仍是品牌蓝 #1166D6，关闭态 #D9D9D9 → #303030
+   - 底部链接 857:118：保留品牌蓝 #1166D6（设计稿未给深色值，不臆造） */
+.settings-sheet__mask--dark {
+  .settings-sheet {
+    background: #212121;
+  }
+
+  .settings-sheet__label {
+    color: #ffffff;
+  }
+
+  // 记忆 / 语言 / 外观 / 音色 / 箭头都是纯黑矢量，深底下反相成白
+  .settings-sheet__icon,
+  .settings-sheet__chevron {
+    filter: brightness(0) invert(1);
+  }
+
+  .settings-sheet__switch--off {
+    background: #303030;
+  }
+
+  .settings-sheet__segment {
+    background: #303030;
+  }
+
+  .settings-sheet__segment-item {
+    background: transparent;
+    color: #8f8f8f;
+  }
+
+  .settings-sheet__segment-item--active {
+    background: #ffffff;
+    color: #0d0d0d;
+  }
 }
 </style>

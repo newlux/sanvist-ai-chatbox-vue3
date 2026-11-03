@@ -2,6 +2,12 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { setLocale } from "@/i18n";
 
+/** 外观偏好：system 跟随系统深浅色，light / dark 为手动指定（对应设置弹层 722:2999 三段） */
+export type AppearanceMode = "system" | "light" | "dark";
+
+/** 外观是纯本地偏好，重启后要保留；与 Lang 不同，后者每次以宿主注入为准 */
+const APPEARANCE_STORAGE_KEY = "appAppearance";
+
 export const useSystemStore = defineStore("system", () => {
   const baseUrl = ref(import.meta.env.VITE_AI_QUESTION_BASE_URL);
   const header = ref<Record<string, unknown>>({});
@@ -47,6 +53,44 @@ export const useSystemStore = defineStore("system", () => {
     return typeof region === "string" ? region.toUpperCase() : "";
   });
 
+  /** 外观偏好：设置弹层里选的那一段，落 storage */
+  const appearance = ref<AppearanceMode>(readAppearance());
+  /** 系统当前是否深色，只在 appearance === "system" 时参与判定 */
+  const systemDark = ref(readSystemDark());
+  /** 当前是否按深色渲染：手动选深色，或跟随系统且系统是深色 */
+  const isDark = computed(
+    () => appearance.value === "dark" || (appearance.value === "system" && systemDark.value),
+  );
+
+  function readAppearance(): AppearanceMode {
+    try {
+      const raw = String(uni.getStorageSync(APPEARANCE_STORAGE_KEY) || "");
+      if (raw === "light" || raw === "dark" || raw === "system") return raw;
+    }
+    catch {}
+    return "system";
+  }
+
+  /** 取系统深浅色：H5 用 matchMedia，兜底读 uni 的 theme 字段 */
+  function readSystemDark() {
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    }
+    try {
+      return String(uni.getSystemInfoSync().theme || "").toLowerCase() === "dark";
+    }
+    catch {
+      return false;
+    }
+  }
+
+  try {
+    uni.onThemeChange?.((res) => {
+      systemDark.value = String(res?.theme || "").toLowerCase() === "dark";
+    });
+  }
+  catch {}
+
   function setAppVersion(value: string) {
     appVersion.value = value;
   }
@@ -90,6 +134,16 @@ export const useSystemStore = defineStore("system", () => {
 
   function setGridCountry(value: string) {
     gridCountry.value = value;
+  }
+
+  /** 设置弹层「外观」分段：选中即生效，同时落 storage 供下次启动读取 */
+  function setAppearance(value: AppearanceMode) {
+    const next: AppearanceMode = value === "light" || value === "dark" ? value : "system";
+    appearance.value = next;
+    try {
+      uni.setStorageSync(APPEARANCE_STORAGE_KEY, next);
+    }
+    catch {}
   }
 
   function setStatusBarHeight(value: number) {
@@ -149,9 +203,12 @@ export const useSystemStore = defineStore("system", () => {
     tabbarHeight,
     keyHeight,
     from,
+    appearance,
+    isDark,
     mapLang,
     finalMapLanguage,
     finalMapRegion,
+    setAppearance,
     setAppVersion,
     setDeviceCount,
     setBaseUrl,

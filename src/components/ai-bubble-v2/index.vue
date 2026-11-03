@@ -2,7 +2,7 @@
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, provide, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
@@ -60,6 +60,12 @@ const props = defineProps({
   },
   /** 维修助手侧会话 ID，有值时摘要卡可跳转到详情。 */
   assistantCallbackConversationId: { type: String, default: "" },
+  /**
+   * 深色主题（首页问答态 Ardot 1193:5104）：
+   * 只换发问 / 回复的材质色，尺寸、间距、圆角、字号、动效两稿一致。
+   * 默认关 —— 智能体页 / 分享海报仍走浅色稿。
+   */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -78,6 +84,13 @@ const emit = defineEmits([
   "guide-check-step-select",
   "gantt-open",
 ]);
+
+/**
+ * 回答正文由 MarkdownRenderer 走 mp-html 行内样式渲染，scoped 样式压不住，
+ * 深色只能由它自己按主题换色。这里把深色标记往下传一程：
+ * 未 provide 的场景（听播 / 报告 / 分享海报）自动回落浅色稿。
+ */
+provide("ai-bubble-dark", computed(() => props.dark));
 
 /** 工作流结束事件的 elapsed_time 已在流层换算为毫秒；展示时统一转换为秒。 */
 const durationSeconds = computed(() => {
@@ -386,6 +399,7 @@ function onNegativeFeedback() {
       'ai-bubble-v2--user': isUser,
       'ai-bubble-v2--no-answer-group': props.noAnswerGroup,
       'ai-bubble-v2--with-suggestions': !isUser && suggestionBlocks.length,
+      'ai-bubble-v2--dark': props.dark,
     }"
     @tap="onSelectTap"
   >
@@ -1297,6 +1311,91 @@ function onNegativeFeedback() {
   40% {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* ===== 深色主题：发问 / 回复（Ardot 1193:5104「日常运营助手-语音输入中」） =====
+   1px = 2rpx。两稿的尺寸 / 间距 / 圆角 / 字号完全一致，这里只替换材质与文字颜色：
+   - 发问 1193:5110 / 5111 User Bubble：底 #1A1A1A、描边 1px #303030、圆角 24、
+     内边距 12·18；正文 1193:5112：14 / 22 / #FFFFFF
+   - 回复 1193:5116 AI Answer Card：底 #212121、描边 1px #303030、圆角 20、
+     内边距 20、纵向 gap 12、阴影 0 2px 8px rgba(0,0,0,0.04)
+   - 卡片内：步骤态 1193:5141、分区标签 1193:5118 = #5D5D5D；
+     正文 1193:5140 = 14 / 24 / #FFFFFF 80%；
+     分隔线 1193:5139 / 5117 = 1px #303030；
+     操作栏图标 1193:5120 = #8F8F8F 线框 */
+.ai-bubble-v2--dark {
+  // ---- 发问：气泡 1193:5111 ----
+  &.ai-bubble-v2--user .ai-bubble-v2__body {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  &.ai-bubble-v2--user .ai-bubble-v2__user-content,
+  &.ai-bubble-v2--user .ai-bubble-v2__asr {
+    color: #ffffff;
+  }
+
+  // 分享选中的高亮：深底上 6% 红几乎看不见，抬到 16%（设计稿无选中态，按同一红加不透明度）
+  .ai-bubble-v2__body--highlighted {
+    background: rgba(254, 0, 0, 0.16);
+  }
+
+  // ---- 回复：卡片 1193:5116 ----
+  &:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
+    border-color: #303030;
+    background: #212121;
+    box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04); // 0 2px 8px rgba(0,0,0,.04)
+  }
+
+  // 无正文 / 回流卡 / 分享海报：本来就不画卡片外壳，深色下同样保持透明
+  &.ai-bubble-v2--no-answer-group:not(.ai-bubble-v2--user) .ai-bubble-v2__body,
+  .ai-bubble-v2__body--bare,
+  .ai-bubble-v2__body--assistant-callback {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  // 步骤态 / 分区标签：#5D5D5D（与设计稿同值，显式写一遍，避免被深底吃掉）
+  .ai-bubble-v2__process-status,
+  .ai-bubble-v2__process-icon {
+    color: #5d5d5d;
+  }
+
+  // 操作栏分隔线 1193:5117（Divider 2）#303030
+  .ai-bubble-v2__actions {
+    border-top-color: #303030;
+  }
+
+  // 操作栏图标 1193:5120：全部 #8F8F8F 线框。
+  // 图标是自带颜色的 svg，先压成纯黑再反相到 #8F8F8F；点赞 / 点踩选中的那两颗保留品牌色
+  .ai-bubble-v2__action-btn:not(.ai-bubble-v2__action-btn--liked):not(.ai-bubble-v2__action-btn--disliked) .ai-bubble-v2__action-icon {
+    filter: brightness(0) invert(0.56); // 0.56 × 255 ≈ #8F8F8F
+  }
+
+  // ---- 发问侧附件（设计稿无此态）：白卡换成回复卡同一材质 ----
+  &.ai-bubble-v2--user .ai-bubble-v2__file-card {
+    border-color: #303030;
+    background: #212121;
+    box-shadow: none;
+  }
+
+  .ai-bubble-v2__file-name {
+    color: #ffffff;
+  }
+
+  .ai-bubble-v2__file-image {
+    background: #303030;
+  }
+
+  // 空回答兜底（设计稿无此态）：底压到 #1A1A1A，文字跟随正文
+  .ai-bubble-v2__busy-hint {
+    background: #1a1a1a;
+  }
+
+  .ai-bubble-v2__busy-hint-text {
+    color: rgba(255, 255, 255, 0.8);
   }
 }
 </style>

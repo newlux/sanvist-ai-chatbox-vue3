@@ -1,18 +1,27 @@
 <script setup lang="ts">
 import type { ListenBroadcastHistoryItem } from "@/api/listen-broadcast/types";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import closeIcon from "@/assets/img/voice-assistant/voice-close.svg";
 import { useSafeArea } from "@/hooks/useSafeArea";
+import { useSystemStore } from "@/stores";
 
 defineProps<{ loading: boolean; items: ListenBroadcastHistoryItem[]; activeBizDate: string }>();
 const emit = defineEmits<{ close: []; select: [item: ListenBroadcastHistoryItem] }>();
 const { safeBottomPx } = useSafeArea();
 const { t } = useI18n();
+/**
+ * 外观：深色沿用与首页历史抽屉（Ardot 1193:3855）同一套暗色梯度——
+ * 底板 #1A1A1A、遮罩 rgba(13,13,13,0.4)、分段轨道 #212121、
+ * 选中项黑白反转（#FFFFFF 底 + #0D0D0D 字），尺寸与滚动行为不动。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 </script>
 
 <template>
   <!-- History Sheet -->
-  <view class="report-broadcast-history">
+  <view class="report-broadcast-history" :class="{ 'report-broadcast-history--dark': isDark }">
     <view class="report-broadcast-history__mask" @tap="emit('close')" /><view
       class="report-broadcast-history__sheet"
     >
@@ -177,5 +186,52 @@ const { t } = useI18n();
 }
 .report-broadcast-history__safe-area {
   flex: 0 0 auto;
+}
+
+/* ===== 深色主题：播报历史抽屉（设计稿未出暗色稿，按首页历史抽屉 1193:3855 同一套梯度推）=====
+   - 底板 1193:3856：#1A1A1A；遮罩 1193:3902：rgba(13,13,13,0.4)
+   - 标题 #FFFFFF，日期 / 空态 #8F8F8F，关闭图标反相
+   - 分段：轨道 #212121 + 未选中 #8F8F8F，选中项黑白反转（#FFFFFF 底 + #0D0D0D 字）
+   - 列表选中行 1193:3869：#212121；NEW 保留品牌红在深底上仍可读 */
+.report-broadcast-history--dark {
+  .report-broadcast-history__mask {
+    background: rgb(13 13 13 / 40%);
+  }
+
+  .report-broadcast-history__sheet {
+    background: #1a1a1a;
+    box-shadow: 0 -8rpx 24rpx rgb(0 0 0 / 40%);
+  }
+
+  .report-broadcast-history__title {
+    color: #ffffff;
+  }
+
+  .report-broadcast-history__close {
+    filter: brightness(0) invert(1);
+  }
+
+  .report-broadcast-history__tab {
+    background: #212121;
+    color: #8f8f8f;
+  }
+
+  .report-broadcast-history__tab--active {
+    background: #ffffff;
+    color: #0d0d0d;
+  }
+
+  .report-broadcast-history__item--selected {
+    background: #212121;
+  }
+
+  .report-broadcast-history__title-row {
+    color: #ffffff;
+  }
+
+  .report-broadcast-history__date,
+  .report-broadcast-history__empty {
+    color: #8f8f8f;
+  }
 }
 </style>

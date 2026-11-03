@@ -5,18 +5,25 @@ import { useI18n } from "vue-i18n";
 import { getListenBroadcastConfig, saveListenBroadcastPreference } from "@/api/listen-broadcast";
 // 顶部工作胶囊里的三角图标：换成动态 GIF（原 header-status-logo.png 的动画版），
 // 与听播播放页头部用同一张小图（22×22 展示）
-import headerStatusLogo from "@/assets/img/sani-logo-sm.gif";
 import minimizeIcon from "@/assets/img/min_icon.png";
+import headerStatusLogo from "@/assets/img/sani-logo-sm.gif";
+import arrowLeftDarkIcon from "@/assets/img/voice-assistant/voice-arrow-left-dark.svg";
 import arrowLeftIcon from "@/assets/img/voice-assistant/voice-arrow-left.svg";
+import arrowRightDarkIcon from "@/assets/img/voice-assistant/voice-arrow-right-dark.svg";
 import arrowRightIcon from "@/assets/img/voice-assistant/voice-arrow-right.svg";
+import closeDarkIcon from "@/assets/img/voice-assistant/voice-back-dark.svg";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
+import bubbleGlowDarkIcon from "@/assets/img/voice-assistant/voice-bubble-glow-dark.svg";
 import bubbleGlowIcon from "@/assets/img/voice-assistant/voice-bubble-glow.svg";
 import checkOffIcon from "@/assets/img/voice-assistant/voice-check-off.svg";
+import checkOnDarkIcon from "@/assets/img/voice-assistant/voice-check-on-dark.svg";
 import checkOnIcon from "@/assets/img/voice-assistant/voice-check-on.svg";
+import chevronDownDarkIcon from "@/assets/img/voice-assistant/voice-chevron-down-dark.svg";
 import chevronDownIcon from "@/assets/img/voice-assistant/voice-chevron-down.svg";
 import { REPORT_STYLE_OPTIONS } from "@/config/report-styles";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useReportStyle } from "@/hooks/useReportStyle";
+import { useSystemStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 
 const props = defineProps<{
@@ -33,6 +40,12 @@ const { t } = useI18n();
 const { saveReportStyle, loadReportStyle } = useReportStyle();
 /** PC 端内嵌时顶栏右侧露出「最小化」，替换原来的等宽占位 */
 const { canMinimize, onMinimize } = useIframeMinimize();
+/**
+ * 外观：深色走 Ardot 1193:1657「日常运营助手-听播-选择风格」深色稿。
+ * 只换材质与字色，排布 / 间距 / 骨架屏 / 选择与提交逻辑 / 所有动效一律不动。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 const config = ref<ListenBroadcastConfig | null>(null);
 const loading = ref(true);
 const submitting = ref(false);
@@ -150,11 +163,16 @@ onMounted(() => {
 </script>
 
 <template>
-  <view class="report-style-selector">
-    <!-- ② 顶部导航 Top Nav(309:2262)：关闭 + 工作胶囊（不与 Home 重名） -->
+  <view class="report-style-selector" :class="{ 'report-style-selector--dark': isDark }">
+    <!-- ② 顶部导航 Top Nav(309:2262)：关闭 + 工作胶囊（不与 Home 重名）；深色稿 1193:1669 -->
     <view class="report-style-selector__topbar">
       <view class="report-style-selector__close" @tap="emit('close')">
-        <image class="report-style-selector__close-icon" :src="closeIcon" mode="aspectFit" />
+        <!-- 返回箭头：浅色描边 #0D0D0D，深色 1193:1675 描边 #FFFFFF -->
+        <image
+          class="report-style-selector__close-icon"
+          :src="isDark ? closeDarkIcon : closeIcon"
+          mode="aspectFit"
+        />
       </view>
       <!-- 工作胶囊(309:2273)：与偏好设置页一致 —— 22×22 图标 + 14px 文案，白 90%，r18 -->
       <view class="report-style-selector__working">
@@ -196,10 +214,11 @@ onMounted(() => {
         <text class="report-style-selector__time-text">
           {{ reportTime }}
         </text>
+        <!-- 时间箭头：深色稿 1193:1763 内部描边 #FFFFFF -->
         <image
           class="report-style-selector__time-chevron"
           :class="{ 'report-style-selector__time-chevron--open': reportTimePickerOpen }"
-          :src="chevronDownIcon"
+          :src="isDark ? chevronDownDarkIcon : chevronDownIcon"
           mode="aspectFit"
         />
       </view>
@@ -207,18 +226,23 @@ onMounted(() => {
 
     <!-- ⑤ 主体光晕 Bubble(309:2207 / 309:2278)：风格名 + 说明 + 左右切换 -->
     <view class="report-style-selector__stage">
-      <!-- 左切换箭头(940:192 24×24px 图) -->
+      <!-- 左切换箭头(940:192 24×24px 图)；深色稿 1193:1765：#0D0D0D 盘 + #F2E6E6 描边 + 白色箭头 -->
       <image
         v-if="showStyleSwitch"
         class="report-style-selector__switch"
-        :src="arrowLeftIcon"
+        :src="isDark ? arrowLeftDarkIcon : arrowLeftIcon"
         mode="aspectFit"
         @tap="prevStyle"
       />
       <!-- 外层渐变描边(1004:69 主风格红色光晕)：纵向线性渐变 #F9FDFF→#FFFFFF→#FFEBEB -->
       <view class="report-style-selector__bubble">
         <!-- 内层白底 + 径向光晕(1004:72 设计稿矢量) -->
-        <image class="report-style-selector__bubble-glow" :src="bubbleGlowIcon" mode="aspectFill" />
+        <!-- 内层光晕：浅色 1004:72（#2E66F8 径向），深色 1193:1760/1759/1771（#789DFF + #63A7F8） -->
+        <image
+          class="report-style-selector__bubble-glow"
+          :src="isDark ? bubbleGlowDarkIcon : bubbleGlowIcon"
+          mode="aspectFill"
+        />
         <template v-if="loading">
           <view class="report-style-selector__skeleton report-style-selector__skeleton--style-label" />
           <view class="report-style-selector__skeleton report-style-selector__skeleton--style-name" />
@@ -249,7 +273,7 @@ onMounted(() => {
       <image
         v-if="showStyleSwitch"
         class="report-style-selector__switch report-style-selector__switch--right"
-        :src="arrowRightIcon"
+        :src="isDark ? arrowRightDarkIcon : arrowRightIcon"
         mode="aspectFit"
         @tap="nextStyle"
       />
@@ -283,7 +307,7 @@ onMounted(() => {
         >
           <image
             class="report-style-selector__capsule-check"
-            :src="checkedIds.includes(module.code) ? checkOnIcon : checkOffIcon"
+            :src="checkedIds.includes(module.code) ? (isDark ? checkOnDarkIcon : checkOnIcon) : checkOffIcon"
             mode="aspectFit"
           />
           <text class="report-style-selector__capsule-text">
@@ -758,5 +782,146 @@ onMounted(() => {
   pointer-events: none;
   color: #999;
   opacity: 0.6;
+}
+
+/* ==========================================================================
+ * 深色主题 —— Ardot 1193:1657「日常运营助手-听播-选择风格」（画布 375×812 / 底 #0D0D0D）
+ * 浅色稿（309:2xxx / 940:xx / 1004:xx）的排布、间距、层级、骨架屏、选择与提交逻辑、
+ * 全部动效一律不动，本段只换材质与字色。1px = 2rpx。
+ *   · 画布 1193:1657：填充 #0D0D0D
+ *   · 标题 1193:1741 / 汇报风格标签 1193:1767 / 风格名称 1193:1769 / 胶囊文字：
+ *     一律 #FFFFFF（字族 / 字号 / 字重与浅色稿同值，仅换色）
+ *   · 汇报时间 1193:1685+1193:1768 / 风格说明 1193:1772 / 权限说明 1193:1661：
+ *     仍是 #8F8F8F，与浅色稿同值 —— 不重复声明
+ *   · 气泡 1193:1668：填充 #0D0D0D + 描边 2px #303030（=4rpx）
+ *   · 权限胶囊：选中 1193:1725 / 1193:1736 = #0D0D0D + 2px #303030 + 蓝光晕；
+ *     未选中 1193:1751 = #212121 + 2px #0D0D0D + 灰光晕
+ *   · CTA 1193:1659：#212121 + 1px rgba(13,13,13,0.05) + #FFFFFF，深色稿 effects 为空（无投影）
+ *   · 工作胶囊 1193:1682：#0D0D0D 90% + 0 3px 12px 3px rgba(255,255,255,0.1715)
+ * 图标（返回 1193:1675、时间箭头 1193:1763、勾选 1193:1717/1738、左右切换 1193:1765/1666、
+ * 气泡内光晕 1193:1760/1759/1771）在模板里按主题换图，此处只管版式。
+ * ========================================================================== */
+
+/* ① 根容器(1193:1657)：填充 #0D0D0D，继承字色改白 */
+.report-style-selector--dark {
+  color: #ffffff;
+  background: #0d0d0d;
+}
+
+/* ② 工作胶囊(1193:1682)：宽 hug × 高 36px=72rpx / r18=36rpx，
+   填充 #0D0D0D 90%；投影 0 3px 12px 3px rgba(255,255,255,0.1715) → 0 6rpx 24rpx 6rpx */
+.report-style-selector--dark .report-style-selector__working {
+  background: rgb(13 13 13 / 90%);
+  box-shadow: 0 6rpx 24rpx 6rpx rgb(255 255 255 / 17.15%);
+}
+
+/* 胶囊文字(1193:1684)：14px=28rpx Regular #FFFFFF */
+.report-style-selector--dark .report-style-selector__working-text {
+  color: #ffffff;
+}
+
+/* ③ 页面标题(1193:1741)：18px=36rpx Bold #FFFFFF，位置 / 行高 / 间距同浅色稿 */
+.report-style-selector--dark .report-style-selector__title {
+  color: #ffffff;
+}
+
+/* ⑤ 气泡(1193:1668)：196×196px，填充 #0D0D0D，描边 2px #303030（=4rpx）；
+   两层阴影在深色稿里仍是 0 5px 20px 2px rgba(166,166,166,0.25) +
+   inset 13px 19px 31px rgba(173,173,173,0.25)，沿用基础样式不重复声明 */
+.report-style-selector--dark .report-style-selector__bubble {
+  border: 4rpx solid #303030;
+  background: #0d0d0d;
+}
+
+/* 汇报风格标签(1193:1767)：14px=28rpx Regular #FFFFFF */
+.report-style-selector--dark .report-style-selector__style-label {
+  color: #ffffff;
+}
+
+/* 风格名称(1193:1769)：33px=66rpx Bold #FFFFFF */
+.report-style-selector--dark .report-style-selector__style-name {
+  color: #ffffff;
+}
+
+/* 骨架屏占位条：深色稿未覆盖加载态，取胶囊描边色 #303030，避免近黑的 rgb(89 67 66 / 14%) 不可见 */
+.report-style-selector--dark .report-style-selector__skeleton {
+  background: #303030;
+}
+
+/* ⑦ 权限胶囊(1193:1751 未选中 / 1193:1725、1193:1736 选中)：120×120px=240u 正圆。
+   内部三层模糊椭圆 + 一层顶部压暗矢量，按设计稿 bbox 相对胶囊左上精确定位（px×2=rpx）：
+     Ellipse 28  (-8.5, -22)       148.07×74.46   blur 12
+     Ellipse 30  (-27.5, 88.05)    144.12×58.02   blur 12
+     Ellipse 29  (-11.315, 30.7)   118.93×77.68   blur 12（选中态见下）
+     Vector 80   (14.5, 8)         96×32          blur 11，#0D0D0D α1 → α0.2216
+   设计稿用的是 LAYER_BLUR，这里用同心 radial-gradient 等效；胶囊 overflow:hidden 会把光晕
+   裁进圆内，background-origin 取 border-box 以对齐 4rpx 描边。 */
+.report-style-selector--dark .report-style-selector__capsule {
+  background-color: #212121;
+  background-image:
+    linear-gradient(180deg, rgb(13 13 13 / 100%) 0%, rgb(13 13 13 / 22.16%) 100%),
+    radial-gradient(closest-side, rgb(48 48 48 / 60%) 0%, rgb(48 48 48 / 0%) 100%),
+    radial-gradient(closest-side, rgb(33 33 33 / 60.31%) 0%, rgb(33 33 33 / 0%) 100%),
+    radial-gradient(closest-side, rgb(33 33 33 / 60.31%) 0%, rgb(33 33 33 / 0%) 100%);
+  background-position:
+    calc(29 * var(--rs-permission-u)) calc(16 * var(--rs-permission-u)),
+    calc(-22.63 * var(--rs-permission-u)) calc(61.4 * var(--rs-permission-u)),
+    calc(-55 * var(--rs-permission-u)) calc(176.1 * var(--rs-permission-u)),
+    calc(-17 * var(--rs-permission-u)) calc(-44 * var(--rs-permission-u));
+  background-size:
+    calc(192 * var(--rs-permission-u)) calc(64 * var(--rs-permission-u)),
+    calc(237.86 * var(--rs-permission-u)) calc(155.36 * var(--rs-permission-u)),
+    calc(288.24 * var(--rs-permission-u)) calc(116.04 * var(--rs-permission-u)),
+    calc(296.14 * var(--rs-permission-u)) calc(148.92 * var(--rs-permission-u));
+  background-repeat: no-repeat;
+  background-origin: border-box;
+  border: 4rpx solid #0d0d0d;
+}
+
+/* 选中胶囊(1193:1725 / 1193:1736)：换成 #0D0D0D 底 + 2px #303030 描边 + 蓝光晕
+   （Ellipse 28 #2E66F8@20%、Ellipse 30 #2E66F8@19%、Ellipse 29 #2F7AFF@31.08%；
+    选中态 Ellipse 29 为 (-13.04, 21.66) 124.2×91.08 blur 28） */
+.report-style-selector--dark .report-style-selector__capsule--checked {
+  background-color: #0d0d0d;
+  background-image:
+    linear-gradient(180deg, rgb(13 13 13 / 100%) 0%, rgb(13 13 13 / 22.16%) 100%),
+    radial-gradient(closest-side, rgb(47 122 255 / 31.08%) 0%, rgb(47 122 255 / 0%) 100%),
+    radial-gradient(closest-side, rgb(46 102 248 / 19%) 0%, rgb(46 102 248 / 0%) 100%),
+    radial-gradient(closest-side, rgb(46 102 248 / 20%) 0%, rgb(46 102 248 / 0%) 100%);
+  background-position:
+    calc(29 * var(--rs-permission-u)) calc(16 * var(--rs-permission-u)),
+    calc(-26.08 * var(--rs-permission-u)) calc(43.32 * var(--rs-permission-u)),
+    calc(-55 * var(--rs-permission-u)) calc(176.1 * var(--rs-permission-u)),
+    calc(-17 * var(--rs-permission-u)) calc(-44 * var(--rs-permission-u));
+  background-size:
+    calc(192 * var(--rs-permission-u)) calc(64 * var(--rs-permission-u)),
+    calc(248.4 * var(--rs-permission-u)) calc(182.16 * var(--rs-permission-u)),
+    calc(288.24 * var(--rs-permission-u)) calc(116.04 * var(--rs-permission-u)),
+    calc(296.14 * var(--rs-permission-u)) calc(148.92 * var(--rs-permission-u));
+  border-color: #303030;
+}
+
+/* 胶囊文字(1193:1727 / 1193:1729)：13px=26rpx Medium #FFFFFF */
+.report-style-selector--dark .report-style-selector__capsule-text {
+  color: #ffffff;
+}
+
+/* 未选中胶囊文字(1193:1757)：13px Regular #FFFFFF（选中态才是 Medium，浅色稿统一 500） */
+.report-style-selector--dark .report-style-selector__capsule:not(.report-style-selector__capsule--checked) .report-style-selector__capsule-text {
+  font-weight: 400;
+}
+
+/* ⑧ CTA 按钮(1193:1659)：295×50px=590×100rpx / r30=60rpx，填充 #212121，
+   描边沿用 1px rgba(13,13,13,0.05)（=2rpx）；深色稿 effects 为空 → 去掉浅色稿的 0 2px 8px 投影；
+   文案 16px=32rpx Inter Regular #FFFFFF */
+.report-style-selector--dark .report-style-selector__button {
+  color: #ffffff;
+  background: #212121;
+  box-shadow: none;
+}
+
+/* 不可用态：深色底上仍用 #999 灰字（选择器权重高于上面的 #FFFFFF，需显式补回） */
+.report-style-selector--dark .report-style-selector__button--disabled {
+  color: #999999;
 }
 </style>

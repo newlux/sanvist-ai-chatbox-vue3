@@ -8,14 +8,20 @@ import { useI18n } from "vue-i18n";
 import headerStatusLogo from "@/assets/img/sani-logo-sm.gif";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import arrowLeftIcon from "@/assets/img/nav-arrow-left.svg";
+import arrowLeftDarkIcon from "@/assets/img/nav-arrow-left-dark.svg";
 import arrowRightIcon from "@/assets/img/nav-arrow-right.svg";
+import arrowRightDarkIcon from "@/assets/img/nav-arrow-right-dark.svg";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
+import closeDarkIcon from "@/assets/img/voice-assistant/voice-back-dark.svg";
+import trackIcon from "@/assets/img/voice-assistant/voice-assistant-track.png";
+import trackDarkIcon from "@/assets/img/voice-assistant/voice-assistant-track-dark.svg";
 import ReportStyleSelector from "@/components/report-style-selector/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { usePcMode } from "@/hooks/usePcMode";
 import { useReportVoice } from "@/hooks/useReportVoice";
+import { useSystemStore } from "@/stores";
 
 const emit = defineEmits<{
   confirm: [voice: ReportVoiceOption, style: ListenBroadcastStyle, moduleCodes: string[]];
@@ -26,6 +32,12 @@ const { t } = useI18n();
 
 /** PC 端内嵌时顶栏右侧露出「最小化」，替换原来的空占位 */
 const { canMinimize, onMinimize } = useIframeMinimize();
+/**
+ * 外观：深色（设置弹层选深色 / 跟随系统且系统为深色）走深色稿 1193:2912「S11 汇报助手-选择人物」。
+ * 只换材质与字色，槽位坐标、滑动切换、试听播放、提交流程与所有动效一律不动。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 /** PC 端专用：把主视觉两侧的装饰声波替换成可点击的左右尖括号；APP / 移动端不渲染，仍是声波 */
 const { isPc } = usePcMode();
 
@@ -189,7 +201,7 @@ function closeSelector() {
 </script>
 
 <template>
-  <view class="report-voice-selector">
+  <view class="report-voice-selector" :class="{ 'report-voice-selector--dark': isDark }">
     <ReportStyleSelector
       v-if="step === 'style'"
       :voice-code="confirmedVoiceCode"
@@ -197,10 +209,15 @@ function closeSelector() {
       @close="onStyleBack"
     />
     <template v-else>
-      <!-- ② 顶部导航 Top Nav(309:2082)：关闭 + 工作胶囊 + Home -->
+      <!-- ② 顶部导航 Top Nav(309:2082)：关闭 + 工作胶囊 + Home；深色稿 1193:2990 -->
       <view class="report-voice-selector__topbar">
         <view class="report-voice-selector__close" @tap="closeSelector">
-          <image class="report-voice-selector__close-icon" :src="closeIcon" mode="aspectFit" />
+          <!-- 返回箭头：浅色描边 #0D0D0D，深色 1193:2996 描边 #FFFFFF -->
+          <image
+            class="report-voice-selector__close-icon"
+            :src="isDark ? closeDarkIcon : closeIcon"
+            mode="aspectFit"
+          />
         </view>
         <!-- 工作胶囊：设计稿 309:2085（hug×36，r18，白 90%，22×22 图标 + 14px 文案，间距 6） -->
         <view class="report-voice-selector__working">
@@ -238,7 +255,11 @@ function closeSelector() {
           class="report-voice-selector__side-arrow report-voice-selector__side-arrow--prev"
           @tap.stop="stepVoice(-1)"
         >
-          <image class="report-voice-selector__side-arrow-icon" :src="arrowLeftIcon" mode="aspectFit" />
+          <image
+            class="report-voice-selector__side-arrow-icon"
+            :src="isDark ? arrowLeftDarkIcon : arrowLeftIcon"
+            mode="aspectFit"
+          />
         </view>
         <view v-else class="report-voice-selector__wave report-voice-selector__wave--left" aria-hidden="true">
           <ReportWaveform :bars="leftWaveBars" :gradient="waveGradient" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
@@ -249,7 +270,11 @@ function closeSelector() {
           class="report-voice-selector__side-arrow report-voice-selector__side-arrow--next"
           @tap.stop="stepVoice(1)"
         >
-          <image class="report-voice-selector__side-arrow-icon" :src="arrowRightIcon" mode="aspectFit" />
+          <image
+            class="report-voice-selector__side-arrow-icon"
+            :src="isDark ? arrowRightDarkIcon : arrowRightIcon"
+            mode="aspectFit"
+          />
         </view>
         <view v-else class="report-voice-selector__wave report-voice-selector__wave--right" aria-hidden="true">
           <ReportWaveform :bars="rightWaveBars" :gradient="waveGradient" :box-width="70" :box-height="70" :bar-width="2" :spacing="4" :origin-x="3" :active="isPlaying" />
@@ -272,7 +297,12 @@ function closeSelector() {
         @touchend="endDrag"
         @touchcancel="endDrag"
       >
-        <image class="report-voice-selector__track" src="@/assets/img/voice-assistant/voice-assistant-track.png" mode="scaleToFill" />
+        <!-- 轨道弧线：浅色 309:2048 为图片资源；深色稿 1193:2925 换成设计稿导出的 #303030 矢量弧 -->
+        <image
+          class="report-voice-selector__track"
+          :src="isDark ? trackDarkIcon : trackIcon"
+          mode="scaleToFill"
+        />
         <view
           v-for="item in visibleVoices"
           :key="item.voice.id"
@@ -733,5 +763,92 @@ function closeSelector() {
   /* 底部安全区：改由按钮自身承担。优先用真实 inset；安卓 WebView 读不到时为 0，
      兜底 48px（96rpx）避免贴底的「下一步」被系统导航栏/手势条遮挡。 */
   margin-bottom: max(var(--safe-bottom-px, 0px), 48px);
+}
+
+/* ==========================================================================
+ * 深色主题（Ardot 1193:2912「S11 汇报助手-选择人物」，画布 375×812 / 底 #0D0D0D）
+ * 浅色稿（309:2xxx / 940:xx）的槽位坐标、滑动切换、试听播放、层级与全部动效一字不动，
+ * 本段只换材质与字色。1px = 2rpx。
+ *   · 标题 1193:2931 / 性格名称 1193:2963 / 选中标签 1193:2921：改为 #FFFFFF
+ *   · 性格说明 1193:3045 / 未选中标签 1193:2924 等 / 可滑动切换 1193:2989：
+ *     仍是 #8F8F8F / #8E8E8E，与浅色稿同值，不重复覆盖
+ *   · 工作胶囊 1193:3003：#0D0D0D 90% + 0 3px 12px 3px rgba(255,255,255,0.1715)
+ *   · 选中椭圆 1193:2929：填充 #2B344D → #152746，
+ *     描边渐变 #FC8FC4 → #74C8FF(48.72%) → #E3BAFF(75%) → #B6EAFF
+ *   · 普通头像椭圆 1193:2982 / 3033 / 2920 / 3040：#212121 底 + 1px #303030 描边
+ *   · 轨道弧线 1193:2925：#303030 1px 弧（模板换成设计稿导出的矢量图），红影沿用浅色稿
+ *   · 指示点 1193:2923（选中）/ 1193:3031、1193:2980（未选中，29.78% 灰不变）
+ *   · CTA 1193:3028：#212121 底 + 1px rgba(13,13,13,0.05) 描边 + #FFFFFF 文案，深色稿无投影
+ *   · 主视觉 1193:2913 仍是同一张人物图 + 白色淡出，未改
+ * ========================================================================== */
+
+/* ① 根容器(1193:2912)：填充 #0D0D0D，继承字色改白 */
+.report-voice-selector--dark {
+  color: #ffffff;
+  background: #0d0d0d;
+}
+
+/* ② 工作胶囊(1193:3003)：hug×36px / r18，填充 #0D0D0D 90%，
+   投影 0 3px 12px 3px rgba(255,255,255,0.1715) → 0 6rpx 24rpx 6rpx */
+.report-voice-selector--dark .report-voice-selector__working {
+  background: rgb(13 13 13 / 90%);
+  box-shadow: 0 6rpx 24rpx 6rpx rgb(255 255 255 / 17.15%);
+}
+
+/* 胶囊文字(1193:3004)：14px Regular #FFFFFF */
+.report-voice-selector--dark .report-voice-selector__working-text {
+  color: #ffffff;
+}
+
+/* ③ 页面标题(1193:2931)：18px Bold #FFFFFF，位置 / 行高 / 间距同浅色稿 */
+.report-voice-selector--dark .report-voice-selector__title {
+  color: #ffffff;
+}
+
+/* ④ PC 端左右切换按钮：深底上换成 #0D0D0D 盘 + #303030 描边（箭头已换白色图） */
+.report-voice-selector--dark .report-voice-selector__side-arrow {
+  background: #0d0d0d;
+  border-color: #303030;
+}
+
+/* ⑤ 性格名称(1193:2963)：18px Medium #FFFFFF */
+.report-voice-selector--dark .report-voice-selector__name {
+  color: #ffffff;
+}
+
+/* ⑥ 选中外层椭圆(1193:2929)：90×114px，填充 180° #2B344D → #152746 */
+.report-voice-selector--dark .report-voice-selector__selected-halo {
+  background: linear-gradient(180deg, #2b344d 0%, #152746 100%);
+}
+
+/* 描边环(1193:2929 stroke)：#FC8FC4 → #74C8FF(48.72%) → #E3BAFF(75%) → #B6EAFF */
+.report-voice-selector--dark .report-voice-selector__selected-halo::after {
+  background: linear-gradient(90deg, #fc8fc4 0%, #74c8ff 48.72%, #e3baff 75%, #b6eaff 100%);
+}
+
+/* 普通头像椭圆(1193:2982 / 3033 / 2920 / 3040)：填充 #212121、1px #303030 描边；
+   选中槽位由基础样式的 transparent + 无描边负责露出发光椭圆，这里用 :not 排除 */
+.report-voice-selector--dark .report-voice-selector__item:not(.report-voice-selector__item--selected) .report-voice-selector__avatar-wrap {
+  border-color: #303030;
+  background: #212121;
+}
+
+/* 选中标签(1193:2921)：14px Medium #FFFFFF（浅色稿 #0D0D0D） */
+.report-voice-selector--dark .report-voice-selector__item--selected .report-voice-selector__tag {
+  color: #ffffff;
+}
+
+/* 指示点(1193:2923)：深色稿写的是 #0D0D0D，与画布同色会完全看不见，
+   按「实心高亮当前项」的语义取 #FFFFFF；未选中点仍是 #D0D0D0 29.78%，与浅色稿同值 */
+.report-voice-selector--dark .report-voice-selector__dot--active {
+  background: #ffffff;
+}
+
+/* ⑨ CTA(1193:3028)：295×50px / r30，填充 #212121，描边沿用 1px rgba(13,13,13,0.05)；
+   深色稿 effects 为空 → 去掉浅色稿的 0 2px 8px 投影；文案 #FFFFFF（Inter Regular 16px） */
+.report-voice-selector--dark .report-voice-selector__button {
+  color: #ffffff;
+  background: #212121;
+  box-shadow: none;
 }
 </style>

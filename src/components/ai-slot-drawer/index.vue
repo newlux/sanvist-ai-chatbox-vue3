@@ -30,6 +30,14 @@ const props = defineProps({
    * 不传或其它场景（ai问问 / 作业指导）保持原行为。
    */
   scene: { type: String, default: "" },
+  /**
+   * 深色主题（首页问答态）：底部白板换成深色材质。
+   * 设计稿 1193:5104 是输入态，没画这块弹层，按同族暗色梯度推：
+   * 面板底 #1A1A1A + 1px #303030 分界，选项 / 圆钮 #212121，
+   * 选中 #303030，主按钮黑白反转（浅色黑底白字 → 深色白底黑字）。
+   * 默认关 —— 作业协同 / 听播页也复用它，那边仍是浅色稿。
+   */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{
@@ -403,7 +411,7 @@ watch(
 </script>
 
 <template>
-  <view v-if="visible && currentSlot" class="slot-drawer">
+  <view v-if="visible && currentSlot" class="slot-drawer" :class="{ 'slot-drawer--dark': dark }">
     <view class="slot-drawer__header">
       <text class="slot-drawer__label">
         {{ labelText }}
@@ -749,5 +757,84 @@ watch(
 @keyframes slot-drawer-slide-up {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }
+}
+
+/* ===== 深色主题：追问选项抽屉（首页问答态）=====
+   设计稿 1193:5104 只画了输入态，没给这块弹层的深色值，按同一套暗色梯度推：
+   - 面板：#1A1A1A（与页面底同色）+ 顶部 1px #303030 分界 + 向上投影
+   - 标签 / 进度：#8F8F8F（设计稿次级灰，1193:5171 同值）
+   - 题目 / 选项文字：#FFFFFF（同 1193:5112 正文白）
+   - 选项 / 翻页圆钮：#212121 + 1px #303030（同早报卡 1193:2101 材质）
+   - 选中态：#303030 + 白字
+   - 主按钮：与浅色稿黑白反转 —— #FFFFFF 底 + #1A1A1A 字；禁用 #212121 + #5D5D5D
+   - 底部提示：#BABABA（两稿同值）
+   尺寸 / 间距 / 圆角 / 动效一律不动：选项描边用 inset 阴影，不占盒模型 */
+.slot-drawer--dark {
+  border-top: 1px solid #303030;
+  background: #1a1a1a;
+  box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.6);
+
+  .slot-drawer__label,
+  .slot-drawer__progress {
+    color: #8f8f8f;
+  }
+
+  .slot-drawer__question {
+    color: #ffffff;
+  }
+
+  .slot-drawer__option {
+    background: #212121;
+    box-shadow: inset 0 0 0 1px #303030;
+  }
+
+  .slot-drawer__option--selected {
+    background: #303030;
+    box-shadow: inset 0 0 0 1px #303030;
+  }
+
+  .slot-drawer__option-text,
+  .slot-drawer__text-input,
+  .slot-drawer__remark-input,
+  .slot-drawer__remark-text--filled {
+    color: #ffffff;
+  }
+
+  .slot-drawer__remark-text {
+    color: #8f8f8f;
+  }
+
+  .slot-drawer__remark-placeholder {
+    color: #8f8f8f;
+  }
+
+  .slot-drawer__round {
+    background: #212121;
+  }
+
+  /* 图标自带浅灰圆底 + 深色线条：反相后圆底落成近黑、线条变浅，
+     再用 brightness 把线条抬到可读的浅灰 */
+  .slot-drawer__arrow-icon {
+    filter: invert(1) brightness(1.6);
+  }
+
+  /* 关闭图标是 #999 单色线：反相成 #666 后提亮到 ≈ #BDBDBD */
+  .slot-drawer__close-icon {
+    filter: invert(1) brightness(1.85);
+  }
+
+  .slot-drawer__submit {
+    background: #ffffff;
+    color: #1a1a1a;
+  }
+
+  .slot-drawer__submit--disabled {
+    background: #212121;
+    color: #5d5d5d;
+  }
+
+  .slot-drawer__hint {
+    color: #bababa;
+  }
 }
 </style>

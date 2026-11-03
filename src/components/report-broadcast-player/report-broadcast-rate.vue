@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { ReportPlaybackRate } from "@/config/report-playback-rate";
-import { onBeforeUnmount, onMounted } from "vue";
+import { computed, onBeforeUnmount, onMounted } from "vue";
 import { formatReportPlaybackRate, REPORT_PLAYBACK_RATES } from "@/config/report-playback-rate";
+import { useSystemStore } from "@/stores";
 
 defineProps<{
   currentRate: number;
@@ -11,6 +12,13 @@ const emit = defineEmits<{
   close: [];
   select: [rate: ReportPlaybackRate];
 }>();
+
+/**
+ * 外观：深色跟着播报页走（Ardot 1193:1864「点击功能件」同款浮层）。
+ * 卡片 #303030、选中行 #212121、文案 #FFFFFF，尺寸与 10 秒自动收起逻辑不动。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 /** 打开后没选倍速，10 秒自动收起。 */
 const AUTO_CLOSE_MS = 10_000;
@@ -42,7 +50,7 @@ onBeforeUnmount(clearAutoClose);
 <template>
   <Teleport to="body">
     <view class="report-broadcast-rate-mask" @tap="close">
-      <view class="report-broadcast-rate" @tap.stop>
+      <view class="report-broadcast-rate" :class="{ 'report-broadcast-rate--dark': isDark }" @tap.stop>
         <view
           v-for="rate in REPORT_PLAYBACK_RATES"
           :key="rate"
@@ -93,5 +101,21 @@ onBeforeUnmount(clearAutoClose);
   font-size: 28rpx;
   line-height: 1;
   color: #1a1a1a;
+}
+
+/* ===== 深色主题：语速面板（与功能件菜单同一套材质，Ardot 1193:1864 Group 75）=====
+   卡片 #303030 + 阴影 0 -2px 21px rgba(0,0,0,0.06)，选中行 #212121，文案 #FFFFFF；
+   240rpx 宽、76rpx 行高、12rpx 内边距与浅色稿完全一致 */
+.report-broadcast-rate--dark {
+  background: #303030;
+  box-shadow: 0 -4rpx 42rpx rgb(0 0 0 / 6%);
+
+  .report-broadcast-rate__item--active {
+    background: #212121;
+  }
+
+  .report-broadcast-rate__label {
+    color: #ffffff;
+  }
 }
 </style>

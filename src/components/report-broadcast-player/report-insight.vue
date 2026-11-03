@@ -6,7 +6,9 @@ import activeLightningIcon from "@/assets/img/report-broadcast/insight-lightning
 import defaultLightningIcon from "@/assets/img/report-broadcast/insight-lightning-default.svg";
 import operatorNextIcon from "@/assets/img/report-broadcast/insight-operator-next.svg";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
+import closeDarkIcon from "@/assets/img/voice-assistant/voice-back-dark.svg";
 import { useSafeArea } from "@/hooks/useSafeArea";
+import { useSystemStore } from "@/stores";
 
 const props = withDefaults(defineProps<{
   items: ReportInsightItem[];
@@ -57,7 +59,32 @@ function handleIconTap(item: ReportInsightItem) {
 }
 
 const { t } = useI18n();
+/**
+ * 外观：深色走 C 方案暗色稿 1193:1773「日常运营助手-闪鉴-等待用户输入」。
+ * 只换材质与字色，条目高度 / 间距 / 抽屉动效 / 加急交互一律不动。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 const voicePortrait = computed(() => props.portrait);
+/**
+ * 重播角标里的三角描边渐变：
+ * 浅色稿 309:3319 用品牌渐变 #3D21CD → #1999FE → #C067FA → #FD90C4；
+ * 深色稿 1193:1848 换成更亮的一组 #A7AAF9 → #75B6FA → #A8A9F9 → #F08FC2，并整体 60% 不透明。
+ */
+const replayGradientStops = computed(() => (isDark.value
+  ? [
+      { offset: "0%", color: "#A7AAF9" },
+      { offset: "48.72%", color: "#75B6FA" },
+      { offset: "76%", color: "#A8A9F9" },
+      { offset: "100%", color: "#F08FC2" },
+    ]
+  : [
+      { offset: "0%", color: "#3D21CD" },
+      { offset: "48.72%", color: "#1999FE" },
+      { offset: "76%", color: "#C067FA" },
+      { offset: "100%", color: "#FD90C4" },
+    ]));
+/** 深色稿三角描边 60% 不透明（1193:1848），浅色稿无此项 */
 const { safeBottomPx, safeTopPx } = useSafeArea();
 const statusbarStyle = computed(() => ({ height: `${safeTopPx.value}px` }));
 const contentBottomStyle = computed(() => ({ paddingBottom: `${safeBottomPx.value + 116}px` }));
@@ -71,14 +98,19 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
       'report-insight--embedded': props.embedded,
       'report-insight--leaving': props.leaving,
       'report-insight--instant': !props.animated,
+      'report-insight--dark': isDark,
     }"
     :style="contentBottomStyle"
   >
     <view v-if="!props.embedded" class="report-insight__statusbar" :style="statusbarStyle" />
-    <!-- 设计稿 2582:799：顶部关闭导航 -->
+    <!-- 设计稿 2582:799：顶部关闭导航；深色稿 1193:1793 返回箭头描边 #FFFFFF -->
     <view class="report-insight__nav">
       <view class="report-insight__close" @tap="emit('close')">
-        <image class="report-insight__close-icon" :src="closeIcon" mode="aspectFit" />
+        <image
+          class="report-insight__close-icon"
+          :src="isDark ? closeDarkIcon : closeIcon"
+          mode="aspectFit"
+        />
       </view>
     </view>
 
@@ -114,10 +146,12 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
               y2="0"
               gradientUnits="userSpaceOnUse"
             >
-              <stop offset="0%" stop-color="#3D21CD" />
-              <stop offset="48.72%" stop-color="#1999FE" />
-              <stop offset="76%" stop-color="#C067FA" />
-              <stop offset="100%" stop-color="#FD90C4" />
+              <stop
+                v-for="stop in replayGradientStops"
+                :key="stop.offset"
+                :offset="stop.offset"
+                :stop-color="stop.color"
+              />
             </linearGradient>
           </defs>
           <!-- 播放中显示暂停双条，收起态显示播放三角（与设计稿一致） -->
@@ -132,6 +166,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
             stroke="url(#report-insight-replay-gradient)"
             stroke-width="1.3"
             stroke-linejoin="round"
+            :opacity="isDark ? 0.6 : 1"
           />
         </svg>
       </view>
@@ -172,6 +207,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
               >
                 <image
                   class="report-insight__lightning-icon"
+                  :class="{ 'report-insight__lightning-icon--dark-idle': isDark && !item.isUrgent }"
                   :src="item.isUrgent ? activeLightningIcon : defaultLightningIcon"
                   mode="aspectFit"
                 />
@@ -752,6 +788,127 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   font-weight: 400;
   line-height: 34rpx;
   transform: translateX(-50%);
+}
+
+/* ===== 深色主题：闪鉴异常列表（Ardot 1193:1773「日常运营助手-闪鉴-等待用户输入」）=====
+   暗色稿与浅色稿（2582:799 / 309:3243 系列）坐标、字号、行高、条目高度完全一致，
+   这里只换材质与字色，1px = 2rpx：
+   - 画布 1193:1773：#0D0D0D（浅色稿 #FFFFFF）
+   - 关闭 1193:1793：描边 #FFFFFF（换 voice-back-dark.svg）
+   - 头像 1193:1841：填充 #414141 / 描边 #5D5D5D 1px（2rpx）
+   - 两行标题 1193:1823 / 1193:1824：#FFFFFF
+   - 语音提示条 1193:1860：底 #1166D6 @29.79%（浅色稿 10%）、文案 1193:1861 #FFFFFF
+   - 重播角标 1193:1843：底 #5D5D5D / 描边 #212121 1px（2rpx）/ 阴影 0 1px 11px rgba(0,0,0,0.10)
+   - 条目标题 1193:1851 / 1836 / 1819：#FFFFFF
+   - 超期文案 1193:1855：#FF6165（浅色稿 #E02E2A）
+   - 描述 1193:1854 / 1833 / 1818：#CDCDCD
+   - 闪电（未加急）1193:1853：#FFFFFF @35.57%（图标自带 0.3557 填充透明度，反相即可）
+   - 加急提示 1193:1827 / 1828：底 #0D0D0D + 1px（2rpx）#303030 描边，文案 #FFFFFF */
+@keyframes report-insight-portrait-morph-dark {
+  from {
+    border-color: transparent;
+    border-radius: 0;
+    background: transparent;
+    transform: translate(76rpx, 20rpx) scale(3.357);
+  }
+
+  to {
+    border-color: #5d5d5d;
+    border-radius: 70rpx;
+    background: #414141;
+    transform: none;
+  }
+}
+
+@keyframes report-insight-portrait-morph-out-dark {
+  from {
+    border-color: #5d5d5d;
+    border-radius: 70rpx;
+    background: #414141;
+    transform: none;
+  }
+
+  to {
+    border-color: transparent;
+    border-radius: 0;
+    background: transparent;
+    transform: translate(76rpx, 20rpx) scale(3.357);
+  }
+}
+
+.report-insight--dark {
+  background: #0d0d0d;
+
+  .report-insight__headline--first,
+  .report-insight__headline--second {
+    color: #ffffff;
+  }
+
+  // 1193:1860 底 #1166D6 29.79%、胶囊高 20px（40rpx）；1193:1861 文案 #FFFFFF
+  .report-insight__voice-tip {
+    height: 40rpx;
+    flex-basis: 40rpx;
+    background: rgb(17 102 214 / 29.79%);
+    color: #ffffff;
+  }
+
+  // 1193:1841 填充 #414141 + 1px #5D5D5D 描边；形变终态同步换成暗色
+  .report-insight__portrait {
+    border-color: #5d5d5d;
+    background: #414141;
+    animation: report-insight-portrait-morph-dark 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+
+  // 1193:1843 底 #5D5D5D + 1px #212121 描边 + 0 1px 11px rgba(0,0,0,0.10)
+  .report-insight__replay {
+    border-color: #212121;
+    background: #5d5d5d;
+    box-shadow: 0 2rpx 22rpx rgb(0 0 0 / 10%);
+  }
+
+  .report-insight__item-title {
+    color: #ffffff;
+  }
+
+  .report-insight__urgent-text {
+    color: #ff6165;
+  }
+
+  .report-insight__description {
+    color: #cdcdcd;
+  }
+
+  // 设计稿未画加载 / 无更多文案，按同一暗色体系的次级文字推
+  .report-insight__load-status {
+    color: #8f8f8f;
+  }
+
+  .report-insight__skeleton-block {
+    background: linear-gradient(90deg, #212121 25%, #303030 50%, #212121 75%);
+    background-size: 200% 100%;
+  }
+
+  // 1193:1829 底 #0D0D0D + 1px（2rpx）#303030 描边、圆角 12px（24rpx）；
+  // 1193:1828 文案 #FFFFFF；阴影 0 2px 8px rgba(0,0,0,0.04) 与浅色稿同值
+  .report-insight__urgent-toast {
+    border-color: #303030;
+    border-radius: 24rpx;
+    background: #0d0d0d;
+    color: #ffffff;
+    box-shadow: 0 4rpx 16rpx rgb(0 0 0 / 4%);
+  }
+}
+
+/* 重播退场：深色下要换用暗色版的逆向形变，优先级需高于上面的基础态 */
+.report-insight--dark.report-insight--leaving .report-insight__portrait {
+  animation: report-insight-portrait-morph-out-dark 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* 1193:1853：未加急闪电是 #FFFFFF @35.57%（浅色稿为 #828282 @35.57%）。
+   图标 SVG 自带 0.3557 填充透明度，反相后即得设计稿的白色半透明闪电；
+   已加急的品牌红闪电不动。 */
+.report-insight__lightning-icon--dark-idle {
+  filter: brightness(0) invert(1);
 }
 
 /* PC 端（鼠标/精确指针）隐藏异常列表滚动条：
