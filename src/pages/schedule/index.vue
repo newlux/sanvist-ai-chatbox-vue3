@@ -4,11 +4,14 @@ import type { SchedulePinchEvent } from "@/hooks/useScheduleGestures";
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
+import arrowNextIcon from "@/assets/img/schedule-arrow-next.svg";
+import arrowPrevIcon from "@/assets/img/schedule-arrow-prev.svg";
 import { useLandscape } from "@/hooks/useLandscape";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
+import { isWebEnvironment } from "@/utils/landscape-device";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -46,6 +49,16 @@ defineOptions({ name: "SchedulePage" });
  * 否则箭头落点、滚动位置还是按转屏前的宽度算的（与甘特页保持一致）。
  */
 const { rotated, exitLandscape } = useLandscape(measureLayout);
+
+/**
+ * 返回图标要不要顺时针补 90°。
+ *
+ * 图标本体画的是「托盘 + 向上箭头」，设计稿里是横置的（箭头朝右），所以竖着看时必须补 90°：
+ * - 网页版（浏览器 / PC 内嵌）：版面永远不转，一律要补；
+ * - 容器内只有 CSS 旋转模拟横屏（设备竖着拿、页面整体转了 90°）时才要补；
+ *   宿主原生转屏成功、天猫精灵智慧屏 / 酷开大屏这类横屏画布机型，版面本身已经是横的，补了反而歪 90°。
+ */
+const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
 
 /**
  * 顶部状态栏空白：调原生 landscapeFullscreen 转屏成功后，webview 铺满横屏、
@@ -521,14 +534,6 @@ function closeNotice() {
   activeLinkKey.value = "";
 }
 
-/** 顶部栏日期：有接口给的业务日期就用它，否则取系统当天 */
-function formatDate(date: Date) {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-const dateText = String(viewPayload?.businessDate || "").trim() || formatDate(new Date());
-
 /* ---------- 滚动 ----------
    横屏是用 CSS 把页面旋转 90° 模拟的，手势方向跟着转，所以：
    - 纵向：任务行超出屏幕时，内容区整体上下滚（左右两栏一起滚，保持对齐）；
@@ -697,18 +702,9 @@ function toggleShowAll() {
 </script>
 
 <template>
-  <view class="schedule" :class="['schedule--rep', { 'schedule--rotated': rotated }]">
-    <!-- 顶部栏（稿子 7229:254：标题、日期、图例、查看全部任务、返回对话） -->
+  <view class="schedule" :class="['schedule--rep', { 'schedule--rotated': rotated, 'schedule--exit-rotate': exitIconRotated }]">
+    <!-- 顶部栏（7229:254：图例、查看全部任务、返回对话）：按产品要求去掉左侧标题与日期 -->
     <view class="schedule__header" :style="headerTopStyle">
-      <view class="schedule__title-group">
-        <text class="schedule__title">
-          调度视图·重排草案
-        </text>
-        <text class="schedule__date">
-          {{ dateText }}
-        </text>
-      </view>
-
       <view class="schedule__tools">
         <!-- 图例（7229:440/437/444；色块 10×10 圆角 3） -->
         <view class="schedule__legend">
@@ -866,14 +862,14 @@ function toggleShowAll() {
           class="schedule__scroll-btn schedule__scroll-btn--prev"
           @tap="jumpToRow(-1, rowIndex)"
         >
-          <view class="schedule__scroll-icon schedule__scroll-icon--prev" />
+          <image class="schedule__scroll-icon schedule__scroll-icon--prev" :src="arrowPrevIcon" mode="aspectFit" />
         </view>
         <view
           v-if="rowHints[rowIndex] && rowHints[rowIndex].right"
           class="schedule__scroll-btn schedule__scroll-btn--next"
           @tap="jumpToRow(1, rowIndex)"
         >
-          <view class="schedule__scroll-icon schedule__scroll-icon--next" />
+          <image class="schedule__scroll-icon schedule__scroll-icon--next" :src="arrowNextIcon" mode="aspectFit" />
         </view>
       </view>
     </view>
@@ -929,28 +925,6 @@ function toggleShowAll() {
   padding: 0 28px;
   /* 行间距只给换行时用（一行时由 min-height + 居中维持设计稿 49 高） */
   gap: 4px 16px;
-}
-
-.schedule__title-group {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: 8px;
-}
-
-.schedule__title {
-  flex: none;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  color: #000000;
-}
-
-.schedule__date {
-  flex: none;
-  font-size: 11px;
-  white-space: nowrap;
-  color: #999999;
 }
 
 .schedule__tools {
@@ -1069,7 +1043,12 @@ function toggleShowAll() {
   position: relative;
   width: 13px;
   height: 14px;
-  rotate: 90deg;
+}
+
+/* 补 90°（页面没转的场景）：见脚本里的 exitIconRotated。
+   用 transform 而不是 rotate 独立属性：天猫精灵智慧屏 / 酷开大屏的 WebView 内核较老，不认 `rotate`。 */
+.schedule--exit-rotate .schedule__exit-icon {
+  transform: rotate(90deg);
 }
 
 /* 托盘：左、下、右三边，底部两角圆一点 */
@@ -1511,20 +1490,12 @@ function toggleShowAll() {
   opacity: 0.7;
 }
 
-/* 箭头：9×9 的直角旋转 45°（稿子 6832:719 / 10633:140，色 #1A1A1A） */
+/* 箭头：图片图标（稿子 6832:719 / 10633:140，1.5px 描边 #1A1A1A）。
+   原来是 9×9 直角 + rotate 45° 的 CSS 画法：旋转会把图形推出盒子（视觉中心偏右约 3px），
+   换成整块 svg 后宽高就是图形本身，交给按钮的 flex 居中即可真正居中。 */
 .schedule__scroll-icon {
-  width: 9px;
-  height: 9px;
-  border-top: 1.5px solid #1a1a1a;
-  border-right: 1.5px solid #1a1a1a;
-}
-
-.schedule__scroll-icon--prev {
-  transform: rotate(-135deg);
-}
-
-.schedule__scroll-icon--next {
-  transform: rotate(45deg);
+  width: 8px;
+  height: 14px;
 }
 
 /* 新旧关联虚线：细虚线（取新计划同色），不挡点击 */

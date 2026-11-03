@@ -4,8 +4,11 @@ import type { TaskDetailPanelPayload, TaskDetailPanelStatus } from "@/components
 import type { SchedulePinchEvent } from "@/hooks/useScheduleGestures";
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import arrowNextIcon from "@/assets/img/schedule-arrow-next.svg";
+import arrowPrevIcon from "@/assets/img/schedule-arrow-prev.svg";
 import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
 import { useLandscape } from "@/hooks/useLandscape";
+import { isWebEnvironment } from "@/utils/landscape-device";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
@@ -47,6 +50,16 @@ defineOptions({ name: "SchedulePrePage" });
  * 否则箭头落点、滚动位置还是按转屏前的宽度算的（与甘特页保持一致）。
  */
 const { rotated, exitLandscape } = useLandscape(measureLayout);
+
+/**
+ * 返回图标要不要顺时针补 90°。
+ *
+ * 图标本体画的是「托盘 + 向上箭头」，设计稿里是横置的（箭头朝右），所以竖着看时必须补 90°：
+ * - 网页版（浏览器 / PC 内嵌）：版面永远不转，一律要补；
+ * - 容器内只有 CSS 旋转模拟横屏（设备竖着拿、页面整体转了 90°）时才要补；
+ *   宿主原生转屏成功、天猫精灵智慧屏 / 酷开大屏这类横屏画布机型，版面本身已经是横的，补了反而歪 90°。
+ */
+const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
 
 /**
  * 顶部状态栏空白：原生 landscapeFullscreen 转屏成功后 webview 铺满横屏、
@@ -371,14 +384,6 @@ watch(() => rows.value.length, () => {
   nextTick(measureRowTops);
 });
 
-/** 顶部栏日期：有接口给的业务日期就用它，否则取系统当天 */
-function formatDate(date: Date) {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-const dateText = String(viewPayload?.businessDate || "").trim() || formatDate(new Date());
-
 /**
  * 退出到对话页（返回按钮 / 输入条发问共用）。
  *
@@ -504,19 +509,10 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 </script>
 
 <template>
-  <view class="schedule" :class="{ 'schedule--rotated': rotated }">
-    <!-- 顶部栏（稿子 6464:150：标题 6464:277 / 日期 6464:278 / 收起全部 6464:246 / 返回 10474:18）；
+  <view class="schedule" :class="{ 'schedule--rotated': rotated, 'schedule--exit-rotate': exitIconRotated }">
+    <!-- 顶部栏（6464:246 收起全部 / 10474:18 返回）：按产品要求去掉左侧标题与日期；
          原生横屏全屏时顶部留出状态栏高度（见 headerTopStyle） -->
     <view class="schedule__header" :style="headerTopStyle">
-      <view class="schedule__title-group">
-        <text class="schedule__title">
-          调度视图·预排草案
-        </text>
-        <text class="schedule__date">
-          {{ dateText }}
-        </text>
-      </view>
-
       <view class="schedule__tools">
         <!-- 收起/展开全部：34×34 圆形图标按钮（6464:246：白底 + 圆角 36 + 阴影，图标 6464:248） -->
         <!-- <view class="schedule__collapse" @tap="toggleExpand">
@@ -633,14 +629,14 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
           class="schedule__scroll-btn schedule__scroll-btn--prev"
           @tap="jumpToRow(-1, rowIndex)"
         >
-          <view class="schedule__scroll-icon schedule__scroll-icon--prev" />
+          <image class="schedule__scroll-icon schedule__scroll-icon--prev" :src="arrowPrevIcon" mode="aspectFit" />
         </view>
         <view
           v-if="rowHints[rowIndex] && rowHints[rowIndex].right"
           class="schedule__scroll-btn schedule__scroll-btn--next"
           @tap="jumpToRow(1, rowIndex)"
         >
-          <view class="schedule__scroll-icon schedule__scroll-icon--next" />
+          <image class="schedule__scroll-icon schedule__scroll-icon--next" :src="arrowNextIcon" mode="aspectFit" />
         </view>
       </view>
     </view>
@@ -688,28 +684,6 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   padding: 0 28px;
   /* 行间距只给换行时用（一行时由 min-height + 居中维持设计稿 49 高） */
   gap: 4px 16px;
-}
-
-.schedule__title-group {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: 8px;
-}
-
-.schedule__title {
-  flex: none;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  color: #000000;
-}
-
-.schedule__date {
-  flex: none;
-  font-size: 11px;
-  white-space: nowrap;
-  color: #999999;
 }
 
 .schedule__tools {
@@ -787,7 +761,17 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   position: relative;
   width: 13px;
   height: 14px;
-  rotate: 90deg;
+}
+
+/* 图标本体画的是「托盘 + 向上箭头」，设计稿里是横置的（箭头朝右），所以要顺时针补 90°。
+   判断依据是可视区方向而不是页面有没有转：
+   - 竖屏（网页版竖屏窗口、CSS 旋转模拟横屏的设备竖着拿）→ 需要补；
+   - 真横屏（宿主原生转屏成功、天猫精灵智慧屏 / 酷开大屏这类横屏画布机型）→ 版面已经是横的，补了反而歪 90°。
+   用 transform 而不是 rotate 独立属性：这两种安卓大屏的 WebView 内核较老，不认 `rotate`。 */
+@media (orientation: portrait) {
+  .schedule__exit-icon {
+    transform: rotate(90deg);
+  }
 }
 
 .schedule__exit-icon::before {
@@ -1072,20 +1056,12 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   opacity: 0.7;
 }
 
-/* 箭头：9×9 的直角旋转 45°（稿子 6832:719 / 10633:140，色 #1A1A1A） */
+/* 箭头：图片图标（稿子 6832:719 / 10633:140，1.5px 描边 #1A1A1A）。
+   原来是 9×9 直角 + rotate 45° 的 CSS 画法：旋转会把图形推出盒子（视觉中心偏右约 3px），
+   换成整块 svg 后宽高就是图形本身，交给按钮的 flex 居中即可真正居中。 */
 .schedule__scroll-icon {
-  width: 9px;
-  height: 9px;
-  border-top: 1.5px solid #1a1a1a;
-  border-right: 1.5px solid #1a1a1a;
-}
-
-.schedule__scroll-icon--prev {
-  transform: rotate(-135deg);
-}
-
-.schedule__scroll-icon--next {
-  transform: rotate(45deg);
+  width: 8px;
+  height: 14px;
 }
 
 /* ---------- 布局：外层横向滚动（时间轴方向）套「刻度 + 内容区」，内容区纵向滚动 ---------- */
