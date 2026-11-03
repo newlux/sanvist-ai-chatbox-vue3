@@ -5,10 +5,11 @@ import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import saniLogoGif from "@/assets/img/sani-logo.gif";
+import thinkLogoGif from "@/assets/img/think.gif";
+import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { setLocale } from "@/i18n";
-import { useChatStore } from "@/stores";
+import { useChatStore, useSystemStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { getSessionSceneLabel, isPodcastSession } from "@/utils/session-scene";
 
@@ -64,6 +65,7 @@ const emit = defineEmits([
  * 不传 scope，沿 provide 链取页面自己的那份 store（首页 / 智能体页各自独立）。
  */
 const chatStore = useChatStore();
+const systemStore = useSystemStore();
 const answering = computed(() => {
   if (!props.generating) return false;
   const list = chatStore.messages;
@@ -73,6 +75,10 @@ const answering = computed(() => {
     block => block.type === "answer" && String(block.payload?.content || "").trim().length > 0,
   );
 });
+/**
+ * 思考中 = 生成已开始但还没吐出 answer 正文；一出现正文就转「回答中」，生成结束回到常态。
+ * 岛内动图不再切 src：常态图固定 sani-logo.gif，think.gif 作为上层叠图淡入（见 --think / --think-on）
+ */
 const thinking = computed(() => props.generating && !answering.value);
 
 const logger = createLogger("chat-header");
@@ -85,15 +91,28 @@ const statusText = computed(() =>
   answering.value ? t("chat-status-generating") : t("chat-status-thinking"),
 );
 const { safeTopPx } = useSafeArea();
-/** 设计稿 309:3088：抽屉顶部的「中 / EN」切换，复用全局 i18n locale（默认 zh_CN） */
+/**
+ * 抽屉顶部的「中 / EN」开关已下线（设计稿 309:3088 的位置让给了品牌头像），
+ * 现在挂到齿轮弹层的「语言」分段上：只切换本应用可见的文案语言，
+ * 不改宿主语言、不落存储、不触发其他业务逻辑。
+ */
 const isEnglishLocale = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));
-/** 只切换本组件可见的文案语言，不改宿主语言、不落存储、不触发其他业务逻辑 */
-function onSelectLanguage(target: "zh_CN" | "en_US") {
-  if (String(locale.value) === target) return;
-  void setLocale(target);
-}
-function onToggleLanguage() {
-  onSelectLanguage(isEnglishLocale.value ? "zh_CN" : "en_US");
+/**
+ * 设置弹层「语言」分段的双向绑定：get 读全局 locale（宿主注入的 Lang 已生效），
+ * set 走 systemStore.setLanguage —— 同时改 i18n 与 header，保证两边一致
+ */
+const settingsLanguage = computed<"zh_CN" | "en_US">({
+  get: () => (isEnglishLocale.value ? "en_US" : "zh_CN"),
+  set: (value) => {
+    if (String(locale.value) === value) return;
+    void systemStore.setLanguage(value);
+  },
+});
+/** 齿轮弹层开关（设计稿 722:2800「设置」） */
+const isSettingsSheetOpen = ref(false);
+
+function onOpenSettingsSheet() {
+  isSettingsSheetOpen.value = true;
 }
 /** PC 端内嵌时头部露出「最小化」，替换原来的「回到首页」图标 */
 const { canMinimize, onMinimize } = useIframeMinimize();
@@ -489,13 +508,17 @@ onBeforeUnmount(() => {
                   <circle class="chat-header__press-ring-arc" cx="36" cy="36" r="34" />
                 </svg>
               </view>
-              <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），
-                   只换图源，尺寸 / 投影 / 状态环等一律不动 */
+              <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），常态 sani-logo.gif；
+                   思考中在其上叠一张 think.gif 淡入，不做 src / mode 切换，位置一律不动 */
               <!-- 长按 5 秒回到初始页：只有 restartable（首页对话页）碰触摸事件，
                    其它页面的岛保持纯展示、不抢触摸；热区就是三角图本身（62×62） -->
+              <!-- 常态动图：思考中只淡出、不卸载，长按热区与定位基准始终挂在它身上 -->
               <image
                 class="chat-header__island-logo"
-                :class="{ 'chat-header__island-logo--restartable': props.restartable }"
+                :class="{
+                  'chat-header__island-logo--restartable': props.restartable,
+                  'chat-header__island-logo--faded': thinking,
+                }"
                 :src="saniLogoGif"
                 mode="aspectFit"
                 @touchstart="onIslandPressStart"
@@ -506,6 +529,14 @@ onBeforeUnmount(() => {
                 @mousemove="onIslandPressMove"
                 @mouseup="clearIslandPressTimer"
                 @mouseleave="clearIslandPressTimer"
+              />
+              <!-- 思考中动图：叠在常态图正上方淡入，同时由 1 倍放大到 1.18 倍，
+                   避免换图源 + 换 mode 的瞬间尺寸硬跳（纯展示层，不吃触摸） -->
+              <image
+                class="chat-header__island-logo chat-header__island-logo--think"
+                :class="{ 'chat-header__island-logo--think-on': thinking }"
+                :src="thinkLogoGif"
+                mode="aspectFill"
               />
             </view>
             <!-- 长条胶囊：仅「思考中 / 正在回答」两个生成态展示，其余状态不出现 -->
@@ -594,8 +625,13 @@ onBeforeUnmount(() => {
           :style="historyDrawerStyle"
           @tap="onDrawerTap"
         >
-          <!-- 设计稿 309:3058 + 309:3088：搜索框与语言切换并排（203 + 17 + 66 = 286） -->
+          <!-- 设计稿 309:3052 顶部：左侧头像 44×44（x22~66），右侧搜索框 224×44（x80~304），间距 14 -->
           <view class="history-drawer__toolbar">
+            <image
+              class="history-drawer__avatar"
+              src="@/assets/img/header-island-logo.png"
+              mode="aspectFit"
+            />
             <view class="history-drawer__search">
               <image src="@/assets/img/icon-history-search.svg" mode="aspectFit" class="history-drawer__search-icon" />
               <input
@@ -604,38 +640,6 @@ onBeforeUnmount(() => {
                 :placeholder="t('history-search-placeholder')"
                 :maxlength="80"
               >
-            </view>
-            <view class="history-drawer__lang" @tap.stop="onToggleLanguage">
-              <view
-                class="history-drawer__lang-thumb"
-                :class="{ 'history-drawer__lang-thumb--en': isEnglishLocale }"
-              />
-              <text
-                class="history-drawer__lang-text"
-                :class="{ 'history-drawer__lang-text--on': !isEnglishLocale }"
-                @tap.stop="onSelectLanguage('zh_CN')"
-              >
-                中
-              </text>
-              <text
-                class="history-drawer__lang-text"
-                :class="{ 'history-drawer__lang-text--on': isEnglishLocale }"
-                @tap.stop="onSelectLanguage('en_US')"
-              >
-                EN
-              </text>
-            </view>
-          </view>
-          <view class="history-drawer__new-conversation">
-            <view class="history-drawer__new-conversation-item" @tap.stop="onNewConversationTap">
-              <image
-                src="@/assets/img/icon-new-conversation.svg"
-                mode="aspectFit"
-                class="history-drawer__new-conversation-item-icon"
-              />
-              <text class="history-drawer__new-conversation-item-label">
-                {{ t("history-new-conversation") }}
-              </text>
             </view>
           </view>
           <view class="history-drawer__session-history">
@@ -738,6 +742,29 @@ onBeforeUnmount(() => {
             </template>
           </z-paging>
 
+          <!-- 设计稿 309:3052 底部一行：左「新建对话」136×44（x18~154），右齿轮 32×32（x265~297） -->
+          <view class="history-drawer__footer">
+            <view class="history-drawer__new-conversation">
+              <view class="history-drawer__new-conversation-item" @tap.stop="onNewConversationTap">
+                <image
+                  src="@/assets/img/icon-new-conversation.svg"
+                  mode="aspectFit"
+                  class="history-drawer__new-conversation-item-icon"
+                />
+                <text class="history-drawer__new-conversation-item-label">
+                  {{ t("history-new-conversation") }}
+                </text>
+              </view>
+            </view>
+            <!-- 设计稿 722:2798 齿轮：点开设置弹层（722:2800），语言切换就在里面 -->
+            <image
+              class="history-drawer__settings"
+              src="@/assets/img/icon-history-settings.svg"
+              mode="aspectFit"
+              @tap.stop="onOpenSettingsSheet"
+            />
+          </view>
+
           <view v-if="editingMode" class="history-drawer__multi-footer">
             <view class="history-drawer__multi-btn" @tap="cancelMultiSelect">
               <text class="history-drawer__multi-btn-text">
@@ -821,6 +848,12 @@ onBeforeUnmount(() => {
           </view>
         </view>
       </view>
+
+      <!-- 设计稿 722:2800「设置」：历史抽屉底部齿轮点开的弹层，语言切换在这里 -->
+      <AiSettingsSheet
+        v-model:visible="isSettingsSheetOpen"
+        v-model:language="settingsLanguage"
+      />
     </view>
   </view>
 </template>
@@ -829,7 +862,10 @@ onBeforeUnmount(() => {
 .ai-chat-header {
   position: relative;
   flex: 0 0 auto;
-  z-index: 10;
+  /* z-index 会创建层叠上下文：历史抽屉写在内部的 1000 只是这个上下文里的排序，
+     真正与外层比较的是这里的值。底部 slot 抽屉是页面级 1002，
+     所以这里必须高于它，历史抽屉才能盖住（附件弹窗 1020 仍在其上） */
+  z-index: 1010;
   // 顶部由实色自上而下渐隐到全透明：内容滚到头部下方时柔和淡出，不再是硬边切断
   background: linear-gradient(
     180deg,
@@ -1036,6 +1072,34 @@ onBeforeUnmount(() => {
   border: 0;
   // 阴影必须跟随图案轮廓：box-shadow 会沿图片的方形盒子铺开，看起来就是一个「方图标」
   filter: drop-shadow(0 6rpx 18rpx rgba(0, 0, 0, 0.14)); // 0 3 9 rgba(0,0,0,.14)
+  // 换图（常态 ⇄ 思考中）走交叉淡入 + 缩放过渡，260ms 起缓停缓，避免尺寸硬跳
+  transition:
+    opacity 0.26s ease,
+    transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* 常态图在思考中淡出，但保留在原位：长按热区不动，位置不抖 */
+.chat-header__island-logo--faded {
+  opacity: 0;
+}
+
+/* 思考中动图 think.gif：画布 800×400，图案只占中间（宽约 42.5%、高约 75%），两侧是透明留白。
+   sani-logo.gif 是 300×267、已裁到图案边界，两者比例差一倍，所以：
+   1) 留白用 aspectFill 裁掉，图案正好撑满 62×62 的位；
+   2) 换算下来图案仍比原图小约 15%（340/400 的缩放差），要放大到 1.18 才与原图视觉等大；
+   3) 图案中心在画布上偏下约 2.5%（y 210 / 400），上移 3rpx 让中心仍落在原位置。
+   过渡：叠在常态图上层，起始与常态图等比(1) 且透明，思考中淡入并放大到 1.18，
+   配合下面的 transition 就是「从原动图的大小慢慢变大」，不再有换源瞬间的硬跳 */
+.chat-header__island-logo--think {
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3rpx) scale(1);
+}
+
+.chat-header__island-logo--think-on {
+  opacity: 1;
+  transform: translateY(-3rpx) scale(1.18);
 }
 
 /* ===== 岛屿下方的状态胶囊 =====
@@ -1230,10 +1294,11 @@ onBeforeUnmount(() => {
   padding: 0;
 }
 
+/* 设计稿 309:3052 历史列表：行高 46px（92rpx），首条(182) → 第二条(233) 间隔 5px（10rpx） */
 .history-drawer__group {
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  gap: 10rpx;
 }
 
 // 设计稿 309:3052 的列表是连续条目、不带「今天 / 昨天」这类日期分组标题，
@@ -1279,6 +1344,8 @@ onBeforeUnmount(() => {
   padding-left: 0;
   padding-right: 0;
 }
+/* 设计稿 309:3052 列表行：46px（92rpx）高、左右内边距 16px（32rpx）
+   —— 抽屉本身已有 18px 左右留白，文字落在 x=34（18 + 16），选中条落在 x=18 起、宽 286 */
 .history-drawer_item {
   height: 92rpx;
   padding: 0 32rpx;
@@ -1288,12 +1355,14 @@ onBeforeUnmount(() => {
   min-width: 0;
   box-sizing: border-box;
 }
+/* 设计稿 309:3094 / 309:3064 / 309:3053：14px（28rpx）/ Regular(400) / #0D0D0D，行高 20px（40rpx） */
 .history-drawer_item-label {
   overflow: hidden;
   min-width: 0;
   flex: 1;
-  color: #1a1a1a;
+  color: #0D0D0D;
   font-size: 28rpx;
+  font-weight: 400;
   line-height: 40rpx;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1325,17 +1394,19 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 96rpx;
 }
+/* 设计稿 309:3101 选中条：286×46、圆角 8px（16rpx）、底色 #F5F5F5（无描边、无阴影） */
 .history-drawer_item_active {
   border-radius: 16rpx;
-  background: #f5f5f5;
+  background: #F5F5F5;
 }
 .history-drawer_item_active .history-drawer_item-label {
-  color: #1a1a1a;
+  color: #0D0D0D;
 }
 
+/* 当前会话与批量选择态同一套选中样式，统一走设计稿的 #F5F5F5 */
 .history-drawer_item_current {
   border-radius: 16rpx;
-  background: #f3f4f6;
+  background: #F5F5F5;
 }
 .history-drawer__item {
   display: flex;
@@ -1373,18 +1444,31 @@ onBeforeUnmount(() => {
   font-size: 24rpx;
   color: #bbc0c9;
 }
-/* 设计稿 309:3058 / 309:3088：搜索框 203px（406rpx）+ 间距 17px（34rpx）+ 语言切换 66px（132rpx） */
+/* 设计稿 309:3052 顶部行：头像 44px（88rpx）+ 间距 14px（28rpx）+ 搜索框 224px（448rpx）= 286px
+   头像落在 x=22，比抽屉 18px 内边距再右移 4px（8rpx） */
 .history-drawer__toolbar {
   display: flex;
   align-items: center;
-  gap: 34rpx;
-  margin-bottom: 32rpx;
+  gap: 28rpx;
+  padding-left: 8rpx;
+  /* 搜索框底(126) → 「历史对话」标题顶(150) 的 24px 由标题自身的 padding-top 承担 */
+  margin-bottom: 0;
 }
-/* 设计稿 309:3059：203×44 / 圆角 10px（20rpx）/ 描边 1px（2rpx）#E0E0E0 / 内边距 12px（24rpx） */
+
+/* 设计稿 857:105：44×44（88rpx）品牌头像，无圆角，阴影 0 3 9 rgba(0,0,0,0.14)
+   图源是透明底 PNG，阴影必须用 filter: drop-shadow 沿图形轮廓投；
+   用 box-shadow 会画出一个 44×44 的矩形灰块，看上去像多了个白底 */
+.history-drawer__avatar {
+  width: 88rpx;
+  height: 88rpx;
+  flex-shrink: 0;
+  filter: drop-shadow(0 6rpx 18rpx rgba(0, 0, 0, 0.14));
+}
+/* 设计稿 309:3059：224×44（448×88rpx）/ 圆角 10px（20rpx）/ 描边 1px（2rpx）#E0E0E0 / 内边距 12px（24rpx） */
 .history-drawer__search {
   display: flex;
-  width: 406rpx;
-  flex: 0 0 406rpx;
+  width: 448rpx;
+  flex: 0 0 448rpx;
   height: 88rpx;
   align-items: center;
   gap: 6rpx;
@@ -1394,6 +1478,8 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   background: #ffffff;
 }
+/* 语言切换（设计稿 309:3088）暂时不上屏：抽屉顶部的这个位置现在是品牌头像，
+   中 / EN 开关后续放到点击齿轮弹出的设置弹框里，以下样式保留给弹框复用 */
 /* 设计稿 309:3088：轨道 66×32（132×64rpx）/ 圆角 18px（36rpx）/ 底 #F3F3F3 */
 .history-drawer__lang {
   position: relative;
@@ -1456,41 +1542,70 @@ onBeforeUnmount(() => {
 .history-drawer__search-input::placeholder {
   color: #999999;
 }
+/* 设计稿 309:3052 底部一行：左「新建对话」、右齿轮，两端对齐；
+   下 9px（18rpx）补足按钮底距屏幕 25px（抽屉已留 16px），上方空白由 z-paging（flex: 1）撑开 */
+.history-drawer__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18rpx 0;
+}
 .history-drawer__new-conversation {
   padding: 0;
 }
+/* 设计稿 722:2798：32×32（64rpx）齿轮，右边缘距内容区 7px（14rpx） */
+.history-drawer__settings {
+  width: 64rpx;
+  height: 64rpx;
+  flex-shrink: 0;
+  margin-right: 14rpx;
+}
 .history-drawer--batch-delete .history-drawer__toolbar,
-.history-drawer--batch-delete .history-drawer__new-conversation {
+.history-drawer--batch-delete .history-drawer__footer {
   display: none;
 }
+/* 设计稿 309:3071：136×44（272×88rpx）/ 圆角 10px（20rpx）/ 白底 + 1px（2rpx）#E0E0E0 描边 */
 .history-drawer__new-conversation-item {
   display: flex;
+  width: 272rpx;
+  height: 88rpx;
   align-items: center;
-  justify-content: center;
-  gap: 10rpx;
+  justify-content: flex-start;
+  /* 图标左内边距 22px（44rpx），图标与文案间距 10px（20rpx） */
+  gap: 20rpx;
+  padding: 0 0 0 44rpx;
+  border: 2rpx solid #e0e0e0;
   border-radius: 20rpx;
-  background: #f3f3f3;
-  padding: 26rpx 0;
+  box-sizing: border-box;
+  background: #ffffff;
 }
+/* 设计稿 309:3066：16px（32rpx）/ Regular(400) / #0D0D0D */
 .history-drawer__new-conversation-item-label {
   font-size: 32rpx;
-  color: #1a1a1a;
-  line-height: 44rpx;
+  font-weight: 400;
+  color: #0D0D0D;
+  line-height: 46rpx;
 }
+/* 设计稿 309:3067：18×18（36rpx）加号图标 */
 .history-drawer__new-conversation-item-icon {
   width: 36rpx;
   height: 36rpx;
+  flex-shrink: 0;
 }
+/* 设计稿 309:3099「历史对话」小节标题：
+   上 24px（48rpx）= 搜索框底(126) → 标题顶(150)；下 12px（24rpx）= 标题底(170) → 首条选中条(182) */
 .history-drawer__session-history {
-  padding: 32rpx 0;
+  padding: 48rpx 0 24rpx;
   margin: 0;
 }
 .history-drawer--batch-delete .history-drawer__session-history {
   padding-top: 0;
 }
+/* 设计稿 309:3099：14px（28rpx）/ Regular(400) / #5D5D5D，行高 20px（40rpx） */
 .history-drawer__session-history-label {
   font-size: 28rpx;
-  color: #666666;
+  font-weight: 400;
+  color: #5D5D5D;
   line-height: 40rpx;
 }
 .history-drawer__list-wrap {
