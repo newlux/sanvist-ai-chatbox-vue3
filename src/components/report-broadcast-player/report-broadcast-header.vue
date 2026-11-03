@@ -10,6 +10,8 @@ import menuPreferenceIcon from "@/assets/img/report-broadcast/icon-fav-setting.s
 import menuRateIcon from "@/assets/img/report-broadcast/icon-podcast-rate.svg";
 import moreIcon from "@/assets/img/report-broadcast/icon-show-more.svg";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
+import closeDarkIcon from "@/assets/img/voice-assistant/voice-back-dark.svg";
+import { useSystemStore } from "@/stores";
 
 const props = defineProps<{
   status: string;
@@ -35,6 +37,12 @@ const showStatusLogo = computed(() => props.active || Boolean(props.withIcon));
 
 const menuVisible = ref(false);
 const { t } = useI18n();
+/**
+ * 外观：深色走 C 方案暗色稿 1193:2708「听播-正在播放」与 1193:1864「点击功能件-中途提问」。
+ * 只换材质：状态胶囊底 / 字、功能件菜单卡、图标反白；尺寸、位置、流光动效一律不动。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 /** 展开菜单三项：图标均取自设计稿，行为沿用宿主页已有事件。 */
 const menuItems = [
@@ -76,9 +84,14 @@ function onItemTouchEnd() {
 </script>
 
 <template>
-  <view class="report-broadcast-header">
+  <view class="report-broadcast-header" :class="{ 'report-broadcast-header--dark': isDark }">
     <view class="report-broadcast-header__close" @tap="qaVisible ? onClose() : emit('exit-report')">
-      <image class="report-broadcast-header__icon" :src="closeIcon" mode="aspectFit" />
+      <!-- 返回箭头：浅色描边 #0D0D0D，深色稿（1193:1864 左上角）描边 #FFFFFF -->
+      <image
+        class="report-broadcast-header__icon"
+        :src="isDark ? closeDarkIcon : closeIcon"
+        mode="aspectFit"
+      />
     </view>
     <view
       class="report-broadcast-header__status"
@@ -110,7 +123,11 @@ function onItemTouchEnd() {
       class="report-broadcast-header__menu-mask"
       @tap="menuVisible = false"
     >
-      <view class="report-broadcast-header__menu" @tap.stop>
+      <view
+        class="report-broadcast-header__menu"
+        :class="{ 'report-broadcast-header__menu--dark': isDark }"
+        @tap.stop
+      >
         <view
           v-for="item in menuItems"
           :key="item.key"
@@ -292,6 +309,45 @@ function onItemTouchEnd() {
 @media (prefers-reduced-motion: reduce) {
   .report-broadcast-header__status-border {
     animation: none;
+  }
+}
+
+/* ===== 深色主题：播报头部（Ardot 1193:2708 / 1193:1864）=====
+   浅色稿（339:1359 系列）只给了一套白材质，深色按 C 方案暗色稿同位置节点逐项对应：
+   - 状态胶囊 1193:2797：底 #0D0D0D 90%，文案 #FFFFFF，外发光 0 3px 12px 3px rgba(255,255,255,0.17)
+   - 关闭 / 更多：白线（1193:1979 返回箭头、右上角更多），原图标是深色，反相处理
+   胶囊宽高、圆角、流光描边环与浅色稿完全一致，不因换色改动 */
+.report-broadcast-header--dark {
+  .report-broadcast-header__status {
+    color: #ffffff;
+    background: rgb(13 13 13 / 90%);
+    box-shadow: 0 6rpx 24rpx 6rpx rgb(255 255 255 / 17%);
+  }
+
+  .report-broadcast-header__more-icon,
+  .report-broadcast-header__minimize-icon {
+    filter: brightness(0) invert(1);
+  }
+}
+
+/* ===== 深色主题：功能件菜单（Ardot 1193:1864「点击功能件-中途提问」Group 75）=====
+   - 菜单卡 1193:1920：#303030 / r8 / 阴影 0 -2px 21px rgba(0,0,0,0.06)
+   - 选中行 1193:1921：#212121 / r6（比卡片再压一阶，靠明度差区分选中态）
+   - 文案 1193:1936 / 1193:1923 / 1193:1914：#FFFFFF 14px；图标同为白色线性图标 */
+.report-broadcast-header__menu--dark {
+  background: #303030;
+  box-shadow: 0 -4rpx 42rpx rgb(0 0 0 / 6%);
+
+  .report-broadcast-header__menu-item--active {
+    background: #212121;
+  }
+
+  .report-broadcast-header__menu-label {
+    color: #ffffff;
+  }
+
+  .report-broadcast-header__menu-icon {
+    filter: brightness(0) invert(1);
   }
 }
 </style>

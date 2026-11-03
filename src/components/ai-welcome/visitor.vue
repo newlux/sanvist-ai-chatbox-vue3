@@ -12,13 +12,17 @@ import welcomeAskVoice from "@/assets/audio/voice/welcome-ask.wav";
 // 中心 SANI 图标换成动态 GIF（原 header-island-logo.png 的动画版）：
 // 源图 3840×1920 / 156 帧 / 72MB，已裁掉透明留白、缩到 300×267、150 帧 / 40ms，约 2.5MB
 import saniLogo from "@/assets/img/sani-logo.gif";
+// 深色主题的 SANI 字标：Ardot 1193:4262 按 CROP 原样导出（231×104 @4x，显示 57.69×26）
+import saniWordmarkDark from "@/assets/img/sani-wordmark-dark.png";
+// 深色主题底板装饰：Ardot 1193:4289 Vector 94（676×975，深紫三角 + 白色渐变描边）
+import welcomeDarkBeam from "@/assets/img/welcome-dark-beam.svg";
 import { LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY, VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
 import { REPORT_STYLE_STORAGE_KEY } from "@/config/report-styles";
 import { REPORT_VOICE_STORAGE_KEY } from "@/config/report-voices";
 import { useMicLevel } from "@/hooks/useMicLevel";
 import { usePlainTts } from "@/hooks/usePlainTts";
 import { usePressDelay } from "@/hooks/usePressDelay";
-import { DEFAULT_CHAT_SCOPE, useChatStore, useUserStore, VISITOR_ROLE_ACCOUNTS } from "@/stores";
+import { DEFAULT_CHAT_SCOPE, useChatStore, useSystemStore, useUserStore, VISITOR_ROLE_ACCOUNTS } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission } from "@/utils/platform/mpaas";
 import { setGuestRole } from "@/utils/request";
@@ -29,6 +33,9 @@ const logger = createLogger("visitor");
 // 身份信息页命中「开始体验」后要按 role-select 页同样的方式进首页，需要身份 / 会话两个 store
 const userStore = useUserStore();
 const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
+// 外观（设置弹层 722:2999 系统 / 浅色 / 深色）：只有深色才走 C 方案 1193:4214 的标题样式
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 /**
  * 自我介绍文案：Ardot 306:6467（日常运营助手- SANI自我介绍）。
@@ -252,8 +259,10 @@ const CHOICE_BUBBLE_HOLO = computed(() => {
         width: `${bubble.size}rpx`,
         height: `${bubble.size}rpx`,
         fontSize: `${bubble.fontSize}rpx`,
-        // 装饰球只有一层纵向渐变（722:2720 等）；身份玻璃球的分层渐变在样式表里拼
-        backgroundImage: bubble.fill
+        // 装饰球只有一层纵向渐变（722:2720 等）；身份玻璃球的分层渐变在样式表里拼。
+        // 深色主题的装饰球（1193:5565）是纯色 #0D0D0D@80% + 渐变描边，材质写在样式表里，
+        // 这里不再注入浅色渐变（内联样式优先级最高，注入了 CSS 就盖不掉）
+        backgroundImage: bubble.fill && !systemStore.isDark
           ? `linear-gradient(180deg, ${bubble.fill[0]} 0%, ${bubble.fill[1]} 100%)`
           : undefined,
         "--holo-dx": `${CHOICE_CORE_X - centerX}rpx`,
@@ -1409,6 +1418,8 @@ onMounted(async () => {
       // 球的 pointer-events / 动画 / 选中态选择器统一从这里取态
       'welcome-visitor--choosing-in': choiceVisible,
       'welcome-visitor--choosing-out': chooseOut,
+      // 深色主题（设置 → 外观 → 深色）：只影响标题行与页面底色，交互层全部沿用浅色逻辑
+      'welcome-visitor--dark': isDark,
     }"
     @touchstart="onHoldStart"
     @touchmove="onHoldMove"
@@ -1418,6 +1429,15 @@ onMounted(async () => {
     @mouseup="onHoldEnd"
     @click="onPageClick"
   >
+    <!-- 深色主题底板装饰：1193:4289 Vector 94，676×975 的三角形（深紫填充 + 白色渐变描边），
+         按设计稿放到 (-151,-83)，超出画布的部分由根节点的 overflow: hidden 裁掉，
+         裁完就是设计稿里从顶部两侧斜下来的两道光束 -->
+    <image
+      v-if="isDark"
+      class="welcome-visitor__dark-beam"
+      :src="welcomeDarkBeam"
+      mode="scaleToFill"
+    />
     <!-- 自我介绍文案：Ardot 306:6467，长按录音松手后三行依次淡入上浮（不跳转，只在本页过渡） -->
     <view class="welcome-visitor__intro" :class="{ 'welcome-visitor__intro--in': introVisible }">
       <text
@@ -1471,10 +1491,18 @@ onMounted(async () => {
     <view class="welcome-visitor__content">
       <!-- 主视觉组：标题 + Logo -->
       <view class="welcome-visitor__hero">
-        <!-- 标题行 Hey,SANI：306:2801（Hey, 纯色）+ 306:2782（SANI 渐变），两段连写无间隙 -->
+        <!-- 标题行 Hey,SANI：
+             浅色 306:2801（Hey, 纯色）+ 306:2782（SANI 渐变），两段连写无间隙；
+             深色 1193:4238（Hey, 24px Inter Medium #FFFFFF）+ 1193:4262（SANI 位图字标 57.69×26） -->
         <view class="welcome-visitor__title">
           <text class="welcome-visitor__title-hey">Hey,</text>
-          <text class="welcome-visitor__title-brand">SANI</text>
+          <image
+            v-if="isDark"
+            class="welcome-visitor__title-brand-img"
+            :src="saniWordmarkDark"
+            mode="aspectFit"
+          />
+          <text v-else class="welcome-visitor__title-brand">SANI</text>
         </view>
         <!-- 主视觉：306:2783 容器 134×134 / 306:2791 图 110×110（居中，投影 0 3 9 rgba(0,0,0,.14)）
              中心图标为动态 GIF（原 306:2791 静态图的动画版），收尾态只淡出上下文案，图标本体与位置都不动 -->
@@ -2231,6 +2259,193 @@ onMounted(async () => {
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+
+/* 深色主题的 SANI 字标：1193:4262 已按 CROP 原样导出（231×104），
+   与 Hey, 同排垂直居中，显示尺寸就是设计稿的 57.69×26；间距由文字盒自带，不再额外加 gap */
+.welcome-visitor__title-brand-img {
+  flex: none;
+  width: 115rpx; // 57.69px
+  height: 52rpx; // 26px
+}
+
+/* 深色主题底板装饰 1193:4289 Vector 94：676×975，设计稿坐标 (525,892) 超出 375×812 画布，
+   换算成相对画布的偏移是 (-151,-83)，负偏移部分交给根节点的 overflow: hidden 裁切 */
+.welcome-visitor__dark-beam {
+  position: absolute;
+  z-index: 0;
+  top: -166rpx; // -83px
+  left: -302rpx; // -151px
+  width: 1352rpx; // 676px
+  height: 1950rpx; // 975px
+  pointer-events: none;
+}
+
+/* ===== 深色主题：Ardot 1193:4214「起始态 · 未唤醒」（C 方案：SanVIST 暗色主题）
+   浅色稿（722:2664 底板 / 306:2801 / 306:2782）的样式原样保留，这里只覆盖初始态：
+   - 底板 1193:4280 纯色 #0D0D0D + 1193:4290 渐变 #03021D 100% → 17.5%（右深左淡）
+     + 1193:4289 斜向光束（见 .welcome-visitor__dark-beam）；
+   - Hey, 1193:4238：24px / Inter Medium / #FFFFFF，文字盒 49×29（行盒 29px）；
+   - SANI 1193:4262：位图 57.69×26，顶边比 Hey 低 1px、水平紧贴；
+   - 副标题 1193:4236：#FFFFFF（浅色稿是渐变文字）；描述 1193:4240：#8E8E8E @ 75%；
+   - Hero 间距：文字盒底 320 → Logo 容器顶 333 = 13px（浅色稿是 5px）。
+   底部光效（glow）与录音 / 播报 / 身份选择等交互态不参与主题覆盖。 */
+.welcome-visitor--dark {
+  // 底色必须是 1193:4280 的 #0D0D0D：上层 #03021D 渐变左端只有 17.5% 不透明度，靠它透出黑色
+  background-color: #0d0d0d;
+  /* 渐变方向由 gradientTransform 解出：近乎水平（271deg）自右向左，
+     起点落在画布 78.19%、终点 -2.24%，换算成 CSS 轴上的位置即 21.8% 与 102.2% */
+  background-image: linear-gradient(271deg, #03021d 21.8%, rgba(3, 2, 29, 0.175) 102.2%);
+  // 继承色的文案（自我介绍 / 身份标题）在深底上要能读，浅色稿的 #0D0D0D 只属于浅色
+  color: #ffffff;
+}
+
+.welcome-visitor--dark .welcome-visitor__hero {
+  gap: 26rpx; // 13px
+}
+
+.welcome-visitor--dark .welcome-visitor__title {
+  align-items: center;
+  font-family: Inter, "Source Han Sans CN", "PingFang SC", sans-serif;
+  line-height: 58rpx; // 29px（浅色稿 70rpx / 35px）
+}
+
+.welcome-visitor--dark .welcome-visitor__title-hey {
+  color: #ffffff;
+}
+
+/* 1193:4236：副标题深色稿是纯白，浅色稿的渐变文字只在浅色生效 */
+.welcome-visitor--dark .welcome-visitor__slogan {
+  color: #ffffff;
+  background-image: none;
+  -webkit-text-fill-color: currentColor;
+}
+
+/* 1193:4240：描述 #8E8E8E，整体 75% 不透明度（浅色稿是不透明的 #8E8E8E） */
+.welcome-visitor--dark .welcome-visitor__desc {
+  opacity: 0.75;
+}
+
+/* 自我介绍三行（「欢迎了解日常运营AI助手 / 设备有事早知道，/ 少跑现场少翻表」）：
+   深色下统一纯白。浅色稿的「首行 #0D0D0D、二三行紫蓝粉渐变」只在浅色生效 ——
+   深底上深色字和低饱和渐变都读不清，这里把字色一起收白，入场动画与排版不动 */
+.welcome-visitor--dark .welcome-visitor__intro {
+  color: #ffffff;
+}
+
+.welcome-visitor--dark .welcome-visitor__intro-line {
+  background-image: none;
+  color: #ffffff;
+  -webkit-text-fill-color: currentColor;
+}
+
+/* ===== 深色主题：身份选择页（Ardot 1193:5473「日常运营助手- 开始选择身份」）
+   浅色稿（722:2734 标题 / 722:3064 / 1006:16 / 1006:3 身份球 / 722:2720 装饰球）全部保留，
+   这里只换材质与字色；入场翻折、漂浮、选中呼吸、点击逻辑一行不动：
+   - 标题 1193:5543：20px / Medium / #FFFFFF（浅色稿 #0D0D0D）；
+   - 身份球 1193:5570 / 5585 / 5507：彩色渐变填充 + 2px 渐变描边 + 阴影 0 1 11 rgba(0,0,0,.1)，
+     浅色稿的蓝 / 粉色斑 SVG 不再叠加（深色稿的材质本身就是渐变）；
+   - 球名 1193:5578 / 5583 / 5503：#FFFFFF；
+   - 装饰球 1193:5565 / 5489 / 5475 / 5480：#0D0D0D@80% + 1px 渐变描边 + 同款阴影，
+     球面高光换成 1193:5564 的 #060413 渐变；
+   - 底部提示 1193:5566：#8E8E8E（与浅色稿一致，无需覆盖）。 */
+
+.welcome-visitor--dark .welcome-visitor__choose-title {
+  color: #ffffff;
+}
+
+/* 1193:5570 Ellipse 59（82×82 / r30 / 描边 2px）
+   填充：gradientTransform 解出 ≈213deg（右中 → 左下）
+        #B221B2(1)@5.7% → #382CBB(1)@24.5% → #006FDD(.2)@55.6% → #0073DF(.1)@63.6% → #0081D6(1)@100%
+   描边：≈222deg，#779DC5@0% → #3E6399@51.1% → #FFFFFF@100%
+   填充中段是 20% / 10% 半透明，双层叠加会透出下层描边色，所以中间垫一层页面底色 #03021D，
+   还原设计稿里「球心透出背景」的效果；三层用 background-clip 分别裁到 padding-box / border-box */
+.welcome-visitor--dark .welcome-visitor__bubble--role {
+  border: 4rpx solid transparent; // 2px
+  background-color: transparent;
+  background-image:
+    linear-gradient(213deg, #b221b2 5.7%, #382cbb 24.5%, rgba(0, 111, 221, 0.2) 55.6%, rgba(0, 115, 223, 0.1) 63.6%, #0081d6 100%),
+    linear-gradient(#03021d, #03021d),
+    linear-gradient(222deg, #779dc5 0%, #3e6399 51.1%, #ffffff 100%);
+  background-origin: padding-box, padding-box, border-box;
+  background-clip: padding-box, padding-box, border-box;
+  box-shadow: 0 2rpx 22rpx 0 rgba(0, 0, 0, 0.1);
+}
+
+/* 深色球体自带渐变材质，浅色稿那两团蓝 / 粉色斑再叠上去会发灰 */
+.welcome-visitor--dark .welcome-visitor__bubble-aurora {
+  display: none;
+}
+
+.welcome-visitor--dark .welcome-visitor__bubble-text {
+  color: #ffffff;
+}
+
+/* 1193:5565 Ellipse 44：填充 #0D0D0D@80% + 1px 渐变描边 + 阴影 0 1 11 rgba(0,0,0,.1)，
+   整体 LAYER_BLUR 8（沿用浅色稿的 blur(16rpx)） */
+.welcome-visitor--dark .welcome-visitor__bubble--ghost {
+  border: 2rpx solid transparent; // 1px
+  background-color: transparent;
+  background-image:
+    linear-gradient(rgba(13, 13, 13, 0.8), rgba(13, 13, 13, 0.8)),
+    linear-gradient(222deg, #779dc5 0%, #3e6399 51.1%, #ffffff 100%);
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: 0 2rpx 22rpx 0 rgba(0, 0, 0, 0.1);
+}
+
+/* 1193:5564 Vector 80：球面高光由白色改成 #060413（100% → 26.3%），
+   尺寸 / 位置 / 模糊（72.3% × 24.1% @ 14.5%,7.4%、blur 5）沿用浅色稿 */
+.welcome-visitor--dark .welcome-visitor__bubble--ghost::after {
+  background-image: linear-gradient(180deg, #060413 0%, rgba(6, 4, 19, 0.263) 100%);
+}
+
+/* ===== 深色主题：身份信息页（Ardot 1193:3569「日常运营助手- 点开老板身份 看详细信息」）
+   浅色稿（331:391 标题 / 1006:313 等六枚胶囊 / 331:428 提示）全部保留，
+   这里只换材质与字色；胶囊入场翻折、图标位置、底部极光、按住说话的点击逻辑都不动：
+   - 标题 1193:3570：Inter 20px Medium #FFFFFF，文字盒 180×24 @(37.5,117)；
+   - 胶囊 1193:3618 / 3612 / 3616 / 3601 / 3572 / 3610：六枚材质完全一致 ——
+     填充 5 段渐变（≈218°）+ 1px 渐变描边（≈222°）+ 圆角 30 + 阴影 0 1 11 rgba(0,0,0,.1)；
+   - 胶囊文案：#FFFFFF；
+   - 底部提示 1193:3571：#8E8E8E（与浅色稿 331:428 同值，无需覆盖）。 */
+
+.welcome-visitor--dark .welcome-visitor__detail-title {
+  left: 75rpx; // x=37.5（浅色稿 331:391 是 x=53）
+  width: 360rpx; // 180px（浅色稿 297px，允许长标题折行）
+  color: #ffffff;
+  // 深色稿标题用 Inter，浅色稿是 Source Han Sans CN
+  font-family: Inter, "Source Han Sans SC", "PingFang SC", sans-serif;
+  line-height: 48rpx; // 24px（文字盒高，浅色稿 29px）
+}
+
+/* 胶囊材质（六枚同款）
+   填充：gradientTransform 解出 ≈218deg（右中 → 左下）
+        #B221B2(1)@5.7% → #382CBB(1)@24.5% → #006FDD(.2)@55.6% → #0073DF(.1)@63.6% → #0081D6(1)@100%
+   描边：≈222deg，#779DC5@0% → #3E6399@51.1% → #FFFFFF@100%，1px（= 2rpx）
+   圆角 30；阴影 0 1px 11px 0 rgba(0,0,0,0.1)
+   填充中段同样是 20% / 10% 半透明，垫一层页面底色 #03021D 还原设计稿的透底观感 */
+.welcome-visitor--dark .welcome-visitor__detail-tag {
+  border: 2rpx solid transparent;
+  border-radius: 60rpx; // 30px
+  background-color: transparent;
+  background-image:
+    linear-gradient(218deg, #b221b2 5.7%, #382cbb 24.5%, rgba(0, 111, 221, 0.2) 55.6%, rgba(0, 115, 223, 0.1) 63.6%, #0081d6 100%),
+    linear-gradient(#03021d, #03021d),
+    linear-gradient(222deg, #779dc5 0%, #3e6399 51.1%, #ffffff 100%);
+  background-origin: padding-box, padding-box, border-box;
+  background-clip: padding-box, padding-box, border-box;
+  box-shadow: 0 2rpx 22rpx 0 rgba(0, 0, 0, 0.1);
+  color: #ffffff;
+  // 深色稿是实色渐变 + 实描边，浅色稿那层玻璃背景模糊不再需要
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* 浅色稿的虹彩填充（::before）与白色高光描边（::after）在深色下让位给本体上的三层背景，
+   只关掉这两层装饰，胶囊本体与入场动画元素不受影响 */
+.welcome-visitor--dark .welcome-visitor__detail-tag::before,
+.welcome-visitor--dark .welcome-visitor__detail-tag::after {
+  display: none;
 }
 
 /*

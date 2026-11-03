@@ -39,7 +39,7 @@ import { useReportInsights } from "@/hooks/useReportInsights";
 import { loadReportStyle, saveReportStyle } from "@/hooks/useReportStyle";
 import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { provideChatScope, useChatStore, useUserStore } from "@/stores";
+import { provideChatScope, useChatStore, useSystemStore, useUserStore } from "@/stores";
 import { stripMarkdownTables } from "@/utils/ai-stream";
 import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
@@ -129,6 +129,14 @@ const reportQaNavigationVisible = ref(false);
 const reportQaFromInsight = ref(false);
 const reportBroadcastPlayerRef = ref<InstanceType<typeof ReportBroadcastPlayer> | null>(null);
 const showReportVoiceSelector = ref(false);
+/**
+ * 偏好选择流程（选助手 → 选汇报内容）期间的深色态：
+ * 选择器本身只占安全区以下的高度，顶部状态栏是页面级的透明占位，
+ * 深色下必须把页面底色一起压成 #0D0D0D（Ardot 1193:1657 画布），否则会留一条白条。
+ * 只在选择器开启时生效，播放态 / 聊天态不受影响。
+ */
+const systemStore = useSystemStore();
+const preferenceDark = computed(() => showReportVoiceSelector.value && systemStore.isDark);
 /** 是否由播报页「偏好设置」进入配置流程：决定关闭配置页时回播报页还是退出页面。 */
 const preferenceEntry = ref(false);
 /**
@@ -142,6 +150,12 @@ const reportBroadcastPortrait = ref("");
 const reportBizDate = ref("");
 /** 播报结束后改为页内展示洞察，不再跳转独立路由。 */
 const insightVisible = ref(false);
+/**
+ * 听播页深色：外观选深色或跟随系统且系统为深色时命中。
+ * 对应暗色稿 1193:2708「正在播放」/ 1193:3357「正在回答」/ 1193:1864「点击功能件-中途提问」/
+ * 1193:1773「闪鉴-异常列表」。异常详情弹窗（11101:714）没有暗色稿，仍是浅色浮层。
+ */
+const pageDark = computed(() => systemStore.isDark);
 /** 洞察层退场中：等还原动画走完再卸载，期间不接受重复重播。 */
 const insightLeaving = ref(false);
 /** 异常列表入场是否播放过渡动画：仅播报结束与语音跳转需要。 */
@@ -984,7 +998,11 @@ onBeforeUnmount(() => {
 <template>
   <view
     class="podcast-page"
-    :class="{ 'podcast-page--mix-fold-18': isMixFold18 }"
+    :class="{
+      'podcast-page--mix-fold-18': isMixFold18,
+      'podcast-page--preference-dark': preferenceDark,
+      'podcast-page--dark': pageDark,
+    }"
     :style="safeAreaStyle"
   >
     <!-- 所有页面共用宿主安全区；系统状态栏由手机原生绘制。 -->
@@ -1079,6 +1097,7 @@ onBeforeUnmount(() => {
         v-model="inputText"
         :attachment-disabled="true"
         :compact-voice-listening="true"
+        :dark="pageDark"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
@@ -1178,6 +1197,47 @@ onBeforeUnmount(() => {
   background: #ffffff;
   font-family: PingFang SC;
   overflow: hidden;
+}
+
+/* 偏好选择流程的深色态（Ardot 1193:1657）：把状态栏安全区一起铺成 #0D0D0D，
+   否则选择器下方是深色、顶上的安全区仍是白底。仅选择器开启且深色时命中。 */
+.podcast-page--preference-dark {
+  background: #0d0d0d;
+}
+
+/* ===== 深色主题：听播页（Ardot 1193:2708「听播-正在播放」/ 1193:1773「闪鉴-异常列表」）=====
+   暗色稿画布 #0D0D0D，浅色稿的页面底 #FFF 一一对应；状态栏安全区是页面级占位，
+   不一起压深就会在顶部留一条白边，所以底色放在页面根节点上。
+   - 底部快捷导航（消异常 / 回问问）1193:2813 Toolbar：底 #212121
+   - 输入栏与页面同色，键盘抬起时不能透出下方的深色字幕 */
+.podcast-page--dark {
+  background: #0d0d0d;
+
+  .podcast-page__chat {
+    background: #0d0d0d;
+  }
+
+  .podcast-page__quick-nav-button {
+    border-color: #212121;
+    background: #212121;
+  }
+
+  .podcast-page__quick-nav-button:active {
+    background: #303030;
+  }
+
+  .podcast-page__quick-nav-text {
+    color: #ffffff;
+  }
+
+  // 图标是 #6B6B6B 线性图标，深底下反相成白
+  .podcast-page__quick-nav-icon {
+    filter: brightness(0) invert(1);
+  }
+
+  :deep(.chat-input) {
+    background: #0d0d0d;
+  }
 }
 
 /* —— 进页拉取偏好的 loading 占位 —— */

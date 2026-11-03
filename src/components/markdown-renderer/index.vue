@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import MarkdownIt from "markdown-it";
 import mpHtml from "mp-html/dist/uni-app/components/mp-html/mp-html.vue";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
 import { createLogger } from "@/utils/logger";
 
 defineOptions({ name: "MarkdownRenderer" });
@@ -12,6 +12,12 @@ const props = defineProps({
 });
 const emit = defineEmits(["ready"]);
 const logger = createLogger("markdown");
+/**
+ * 是否渲染在深色 AI 气泡里：由 AiBubbleV2 provide（Ardot 1193:5104 深色稿）。
+ * mp-html 把排版写成行内 style，scoped 样式压不住，正文换色只能走 tagStyle；
+ * 没有 provide 的场景（听播 / 报告 / 分享海报）默认浅色稿。
+ */
+const darkContainer = inject("ai-bubble-dark", computed(() => false));
 /**
  * 单例：一次对话里会同时存在很多气泡，每个气泡各建一个 MarkdownIt
  * 会白白吃掉内存，且规则表完全一致。
@@ -79,11 +85,43 @@ const rawTagStyle = {
   td: "min-width: 160rpx; padding: 10rpx 12rpx; border: 1px solid #efefef; text-align: left; vertical-align: top; white-space: nowrap; word-break: keep-all;",
 };
 
+/**
+ * 深色正文配色（Ardot 1193:5104）：
+ * - 正文 p：1193:5140「设备运行状态正常…」14 / 24 / #FFFFFF 80%（行高 24px = 48rpx）
+ * - 标题 / 加粗：设计稿没有标题态，取正文白的实色 #FFFFFF
+ * - 引用块 / 分割线 / 表格描边：与深色卡分隔线 1193:5139 同值 #303030
+ * - code / pre：设计稿未给代码态，只把浅色底换成中性深色，文字保留原强调色
+ * 只追加同名属性（后写的覆盖前面的），字号 / 行高 / 间距一律不动。
+ */
+const darkTagOverrides: Record<string, string> = {
+  h1: "color: #ffffff;",
+  h2: "color: #ffffff;",
+  h3: "color: #ffffff;",
+  h4: "color: #ffffff;",
+  h5: "color: #ffffff;",
+  h6: "color: #ffffff;",
+  p: "color: rgba(255, 255, 255, 0.8); line-height: 48rpx;",
+  strong: "color: #ffffff;",
+  li: "color: rgba(255, 255, 255, 0.8);",
+  blockquote: "color: #bababa; background: rgba(255, 255, 255, 0.06); border-left-color: #303030;",
+  hr: "background: #303030;",
+  pre: "background: #1a1a1a;",
+  code: "background: #303030;",
+  // 表格：文字色与外部正文完全一致（同 p 的 80% 白），只换描边，不铺底
+  table: "color: rgba(255, 255, 255, 0.8);",
+  th: "border-color: #303030; color: rgba(255, 255, 255, 0.8);",
+  td: "border-color: #303030; color: rgba(255, 255, 255, 0.8);",
+};
+
 // 首次渲染时才计算：根字号是 uni 启动后设的，模块加载期取到的可能还是浏览器默认值
 const tagStyle = computed(() => {
   const ratio = getRpxToPx();
+  const dark = Boolean(darkContainer.value);
   return Object.fromEntries(
-    Object.entries(rawTagStyle).map(([tag, style]) => [tag, rpx2px(style, ratio)]),
+    Object.entries(rawTagStyle).map(([tag, style]) => {
+      const override = dark ? darkTagOverrides[tag] : "";
+      return [tag, rpx2px(override ? `${style} ${override}` : style, ratio)];
+    }),
   );
 });
 
@@ -135,10 +173,34 @@ function parseMarkdown(content) {
   }
 }
 
+/** 深色正文色（Ardot 1193:5140）：表格单元格要和表格外的正文同色 */
+const DARK_TEXT_COLOR = "rgba(255, 255, 255, 0.8)";
+
+/**
+ * 深色下把正文色直接写进表格标签的 style。
+ *
+ * 原因：mp-html 解析表格时会重写 table / tr / th / td 节点，并用自己的行内 style
+ * 覆盖 attrs.style（parser 里 `td.attrs.style = 'border:…;' + 原 style`），
+ * tagStyle 注入的 color 会被挤掉，单元格文字就还是浅色稿的 #2f323c。
+ * 这里在 HTML 层补 color，mp-html 会原样保留，和表格外正文保持一致。
+ * 只动表格标签；单元格里的 strong / code / a 有自己的行内色，优先级更高。
+ */
+function paintTableText(html: string) {
+  return html.replace(/<(table|thead|tbody|tr|th|td)(\s[^>]*)?>/gi, (_match, tag, attrs = "") => {
+    const styleMatch = attrs.match(/\bstyle\s*=\s*"([^"]*)"/i);
+    if (styleMatch) {
+      return `<${tag}${attrs.replace(styleMatch[0], `style="color:${DARK_TEXT_COLOR};${styleMatch[1]}"`)}>`;
+    }
+    return `<${tag}${attrs} style="color:${DARK_TEXT_COLOR}">`;
+  });
+}
+
 function renderLatest() {
   clearRenderTimer();
   if (pendingContent === lastRenderedContent) return;
-  const html = parseMarkdown(pendingContent);
+  let html = parseMarkdown(pendingContent);
+  // 深色容器里给表格补正文色（mp-html 会覆盖 tagStyle 注入的 color）
+  if (html && darkContainer.value) html = paintTableText(html);
   // 有正文却解析不出任何标签，说明 markdown-it 在当前运行环境失效了，
   // 直接把原文交给 mp-html，至少不会白屏
   renderedHtml.value = !html && pendingContent ? pendingContent : html;
@@ -179,6 +241,12 @@ watch(
   { immediate: true },
 );
 
+// 主题切换：表格染色是写在 HTML 里的，内容没变也要重新排一次
+watch(darkContainer, () => {
+  lastRenderedContent = "";
+  renderLatest();
+});
+
 onBeforeUnmount(clearRenderTimer);
 
 function onLinkTap(e) {
@@ -199,6 +267,7 @@ function onParseError(e) {
   <mpHtml
     :key="renderVersion"
     class="markdown-renderer"
+    :class="{ 'markdown-renderer--dark': darkContainer }"
     :content="renderedHtml"
     :tag-style="tagStyle"
     :selectable="true"
@@ -239,5 +308,24 @@ function onParseError(e) {
   line-height: 42rpx;
   word-break: break-word;
   white-space: pre-wrap;
+}
+
+/* ===== 深色容器（Ardot 1193:5104 → 正文 1193:5140）=====
+   正文主体在 tagStyle 里换色，这里补不走行内样式的兜底：容器默认字色、纯文本降级、表格 */
+.markdown-renderer--dark {
+  color: rgba(255, 255, 255, 0.8);
+
+  .markdown-renderer__fallback {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  /* 表格：mp-html 会把 table / tr / th / td 重写成 table 布局的模拟结构，
+     并给单元格补自己的行内 style，tagStyle 的 color 会被它后写的 style 盖掉。
+     这里再按「表格内所有后代」兜一层，确保单元格文字和表格外正文完全一致；
+     单元格里的 code / a 有自己的行内色，行内优先级更高，不受影响。 */
+  :deep(table),
+  :deep(table *) {
+    color: rgba(255, 255, 255, 0.8);
+  }
 }
 </style>

@@ -9,6 +9,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { getListenBroadcastHistory } from "@/api/listen-broadcast";
 import { useListenBroadcastPlayer } from "@/hooks/useListenBroadcastPlayer";
+import { useSystemStore } from "@/stores";
 import ReportBroadcastContent from "./report-broadcast-content.vue";
 import ReportBroadcastHeader from "./report-broadcast-header.vue";
 import ReportBroadcastHistory from "./report-broadcast-history.vue";
@@ -66,6 +67,12 @@ const currentBizDate = ref("");
 let finishedNotified = false;
 
 const { t } = useI18n();
+/**
+ * 外观：深色走 C 方案暗色稿 1193:2708「听播-正在播放」（画布 #0D0D0D）。
+ * 只换播放层的底色，头部 / 内容 / 历史 / 语速各自按同一套暗色梯度改自己的材质。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 const isQaVisible = computed(() => props.qaLoading || Boolean(props.qaAnswer));
 const statusText = computed(() => {
@@ -157,7 +164,10 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
 <template>
   <view
     class="report-broadcast-player"
-    :class="{ 'report-broadcast-player--overlay': showHistory || showRatePanel }"
+    :class="{
+      'report-broadcast-player--overlay': showHistory || showRatePanel,
+      'report-broadcast-player--dark': isDark,
+    }"
     :style="{ height: `calc(100% - ${dockOffset})` }"
   >
     <!-- 准备中（loading）也带品牌图标，与「已暂停」形态一致；流光只跟 active=playing 走，准备中无动效 -->
@@ -228,5 +238,12 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
  */
 .report-broadcast-player--overlay {
   z-index: 4;
+}
+
+/* ===== 深色主题：听播播放层（Ardot 1193:2708「日常运营助手-听播-正在播放」）=====
+   暗色稿画布 = #0D0D0D，浅色稿的 #FFF 一一对应；其余尺寸 / 间距 / 层级不动。
+   头部胶囊、字幕、进度条、播放按钮、历史抽屉、语速面板分别在各自组件里换材质。 */
+.report-broadcast-player--dark {
+  background: #0d0d0d;
 }
 </style>

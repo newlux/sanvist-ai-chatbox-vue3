@@ -30,6 +30,12 @@ const props = defineProps({
    * 播报期间常态那条淡蓝波浪让位，避免两种底纹叠在一起。
    */
   speaking: { type: Boolean, default: false },
+  /**
+   * 深色主题（首页问答态 Ardot 1193:2097 的 Toolbar 1193:2099）：
+   * 只换材质色，尺寸 / 间距 / 圆角两稿一致。默认关 —— 听播 / 作业指导 / 任务协同
+   * 也复用这个输入栏，那些页面还是浅色稿，不能跟着外观偏好一起变深。
+   */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -690,6 +696,7 @@ onBeforeUnmount(() => {
     :class="{
       'chat-input--keyboard-open': keyboardOpen || voiceKeyboardOpen,
       'chat-input--voice-panel-open': isVoicePanelOpen,
+      'chat-input--dark': dark,
     }"
     :style="inputLiftStyle"
   >
@@ -2019,4 +2026,75 @@ onBeforeUnmount(() => {
 }
 
 /* 附件来源弹窗样式随组件走：src/components/ai-attachment-picker/index.vue */
+
+/* ===== 深色主题：底部输入栏（Ardot 1193:2097 → Toolbar 1193:2099） =====
+   只换材质色，尺寸 / 间距 / 圆角两稿一致，不做改动：
+   - 加号 1193:2099;85:187：圆底 #212121，十字描边白（85:189 / 85:190）
+   - 按住说话 85:191 Voice Pill：r45 / 底 #212121；其中键盘块 85:200 底 #303030
+   - 底部提示 1204:292：#BABABA，两稿同值
+   页面底由 .ai-page--dark 给 #1A1A1A，这里只处理输入栏自己的块 */
+.chat-input--dark {
+  background: #1a1a1a;
+
+  // 录音态面板要透出页面底：容器一旦有实色会切掉波浪下半截（同浅色稿的处理）
+  &.chat-input--voice-panel-open {
+    background: transparent;
+  }
+
+  // 文本态整条胶囊（浅色 #FFFFFF，只有非 plain 的「有文字 / 生成中」才铺满整条）
+  .input-bar.input-bar--text:not(.input-bar--plain) {
+    background: #212121;
+    box-shadow: none;
+  }
+
+  // 文本态灰胶囊 #F3F3F3 → 与 Voice Pill 同一材质 #212121
+  .input-bar.input-bar--plain .input-bar__text-field {
+    background: #212121;
+  }
+
+  // 语音态：「按住说话」与右侧键盘（浅色是 #0D0D0D 3.61%）
+  .input-bar__hold,
+  .input-bar:not(.input-bar--text) .input-bar__mode {
+    background: #212121;
+  }
+
+  // 加号：底色由 icon-plus.svg 自带（3.61% 圆底），深色下补成设计稿的 #212121 实心圆
+  .input-bar__plus {
+    border-radius: 50%;
+    background: #212121;
+  }
+
+  // 「按住说话」文案：深底改白；生成中置灰态压到 #8F8F8F，避免白字看起来还能点
+  .input-bar__hold-label {
+    color: #ffffff;
+  }
+
+  .input-bar__hold--disabled .input-bar__hold-label {
+    color: #8f8f8f;
+  }
+
+  .input-bar__hold-hint {
+    color: #8f8f8f;
+  }
+
+  // 输入文字 / 占位
+  .input-bar__textarea,
+  .input-bar.input-bar--plain .input-bar__textarea {
+    color: #ffffff;
+  }
+
+  .input-bar__placeholder,
+  .input-bar.input-bar--plain .input-bar__placeholder {
+    color: #6b6b6b;
+  }
+
+  // 图标反相：加号十字 / 键盘 / 声波 / 发送 / 停止都是「深色线条 + 白/透明底」，
+  // 反相后正好是深底要的白线条。语音态发送是品牌红 #C8201E，不能跟着反相。
+  .input-bar__plus image,
+  .input-bar__mode image,
+  .input-bar__stop image,
+  .input-bar.input-bar--text .input-bar__send image {
+    filter: invert(1);
+  }
+}
 </style>
