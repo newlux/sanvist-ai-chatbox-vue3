@@ -1,12 +1,22 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { setLocale } from "@/i18n";
+import { getColorScheme } from "@/utils/platform/mpaas";
 
 /** 外观偏好：system 跟随系统深浅色，light / dark 为手动指定（对应设置弹层 722:2999 三段） */
 export type AppearanceMode = "system" | "light" | "dark";
 
-/** 外观是纯本地偏好，重启后要保留；与 Lang 不同，后者每次以宿主注入为准 */
+/** 实际生效的外观：只可能是 light / dark，不再出现 system */
+export type ResolvedAppearance = "light" | "dark";
+
+/**
+ * 实际生效的外观（light / dark）落这个 key：来源是宿主 `getColorScheme`，
+ * 拿不到或失败一律按 light，所以这个 key 里永远不会出现 system。
+ */
 const APPEARANCE_STORAGE_KEY = "appAppearance";
+
+/** 外观偏好（system / light / dark）单独存一份，重启后才知道要不要继续「跟随系统」 */
+const APPEARANCE_MODE_STORAGE_KEY = "appAppearanceMode";
 
 export const useSystemStore = defineStore("system", () => {
   const baseUrl = ref(import.meta.env.VITE_AI_QUESTION_BASE_URL);
@@ -53,40 +63,70 @@ export const useSystemStore = defineStore("system", () => {
     return typeof region === "string" ? region.toUpperCase() : "";
   });
 
-  /** 外观偏好：设置弹层里选的那一段，落 storage */
-  const appearance = ref<AppearanceMode>(readAppearance());
-  /** 系统当前是否深色，只在 appearance === "system" 时参与判定 */
-  const systemDark = ref(readSystemDark());
-  /** 当前是否按深色渲染：手动选深色，或跟随系统且系统是深色 */
-  const isDark = computed(
-    () => appearance.value === "dark" || (appearance.value === "system" && systemDark.value),
-  );
+  /** 外观偏好：设置弹层里选的那一段（system / light / dark），决定要不要跟随系统 */
+  const appearance = ref<AppearanceMode>(readAppearanceMode());
+  /**
+   * 实际生效的外观，只存 light / dark：
+   * 唯一来源是宿主 `getColorScheme`，没拿到（未注入 bridge / 调用失败 / success 不为 true）
+   * 一律按 light，所以初值直接是 light，避免先闪一下深色。
+   */
+  const appAppearance = ref<ResolvedAppearance>(readAppAppearance());
+  /** 当前是否按深色渲染 */
+  const isDark = computed(() => appAppearance.value === "dark");
 
-  function readAppearance(): AppearanceMode {
+  function readAppearanceMode(): AppearanceMode {
     try {
-      const raw = String(uni.getStorageSync(APPEARANCE_STORAGE_KEY) || "");
+      const raw = String(uni.getStorageSync(APPEARANCE_MODE_STORAGE_KEY) || "");
       if (raw === "light" || raw === "dark" || raw === "system") return raw;
     }
     catch {}
     return "system";
   }
 
-  /** 取系统深浅色：H5 用 matchMedia，兜底读 uni 的 theme 字段 */
-  function readSystemDark() {
-    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
-      return window.matchMedia("(prefers-color-scheme: dark)").matches;
-    }
+  /** 读上一次生效的具体外观：只认 light / dark，其余（含旧版本存的 system）都按 light */
+  function readAppAppearance(): ResolvedAppearance {
     try {
-      return String(uni.getSystemInfoSync().theme || "").toLowerCase() === "dark";
+      const raw = String(uni.getStorageSync(APPEARANCE_STORAGE_KEY) || "");
+      if (raw === "dark") return "dark";
     }
-    catch {
-      return false;
-    }
+    catch {}
+    return "light";
   }
 
+  /** 写入生效外观：state 与 storage 同时更新，保证 `appAppearance` 里只有 light / dark */
+  function setResolvedAppearance(value: ResolvedAppearance) {
+    appAppearance.value = value;
+    try {
+      uni.setStorageSync(APPEARANCE_STORAGE_KEY, value);
+    }
+    catch {}
+  }
+
+  /**
+   * 同步一次生效外观。
+   *
+   * - 偏好是 light / dark：直接用偏好的值，不用问原生；
+   * - 偏好是 system：`AlipayJSBridge.call("getColorScheme")` 拿 light / dark，
+   *   未注入 bridge、调用失败、超时、success 不为 true → 按默认值 light。
+   *
+   * 调用时机：App 启动（onLaunch）一次；设置弹层里选中「跟随系统」再拉一次，
+   * 这样用户刚从深色切到「跟随系统」时拿到的就是系统当前真实值，而不是上一次的缓存。
+   */
+  async function syncSystemColorScheme() {
+    if (appearance.value !== "system") {
+      setResolvedAppearance(appearance.value);
+      return appAppearance.value;
+    }
+    const scheme = await getColorScheme();
+    setResolvedAppearance(scheme === "dark" ? "dark" : "light");
+    return appAppearance.value;
+  }
+
+  // 系统深浅色变化：仅在「跟随系统」时再问一次原生（保持单一数据源），不直接读 matchMedia
   try {
-    uni.onThemeChange?.((res) => {
-      systemDark.value = String(res?.theme || "").toLowerCase() === "dark";
+    uni.onThemeChange?.(() => {
+      if (appearance.value !== "system") return;
+      void syncSystemColorScheme();
     });
   }
   catch {}
@@ -136,14 +176,21 @@ export const useSystemStore = defineStore("system", () => {
     gridCountry.value = value;
   }
 
-  /** 设置弹层「外观」分段：选中即生效，同时落 storage 供下次启动读取 */
+  /**
+   * 设置弹层「外观」分段：选中即生效。
+   *
+   * 偏好（system / light / dark）单独落一份；生效值始终换算成具体的 light / dark 写进
+   * `appAppearance`——选「跟随系统」时问一次原生 getColorScheme，避免沿用上一次的结论。
+   */
   function setAppearance(value: AppearanceMode) {
     const next: AppearanceMode = value === "light" || value === "dark" ? value : "system";
     appearance.value = next;
     try {
-      uni.setStorageSync(APPEARANCE_STORAGE_KEY, next);
+      uni.setStorageSync(APPEARANCE_MODE_STORAGE_KEY, next);
     }
     catch {}
+    if (next === "system") void syncSystemColorScheme();
+    else setResolvedAppearance(next);
   }
 
   function setStatusBarHeight(value: number) {
@@ -204,7 +251,9 @@ export const useSystemStore = defineStore("system", () => {
     keyHeight,
     from,
     appearance,
+    appAppearance,
     isDark,
+    syncSystemColorScheme,
     mapLang,
     finalMapLanguage,
     finalMapRegion,

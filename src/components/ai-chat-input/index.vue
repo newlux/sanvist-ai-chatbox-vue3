@@ -55,6 +55,8 @@ const emit = defineEmits([
   "recognize-begin",
   "recognize-fail",
   "voice-panel-open",
+  /** 「按住说话」录音态开关（true = 正在录）：头部灵动岛据此切换 listen.gif */
+  "voice-listening",
 ]);
 
 const { t } = useI18n();
@@ -317,6 +319,9 @@ watch(
   (recording) => {
     if (recording && props.compactVoiceListening) beginVoicePanelDelay();
     else cancelVoicePanelDelay();
+    // 同一份录音态同步给页面：首页灵动岛在「按住说话」时把常态动图换成 listen.gif，
+    // 松手进识别 / 取消 / 发送都会回到 false，不额外维护第二套状态机
+    emit("voice-listening", recording);
   },
   { immediate: true },
 );
@@ -395,14 +400,21 @@ let barSampleLogAt = 0;
 /** ~30fps：看着够顺滑，又不用每帧都去算 40 个节点（低端 WebView 也能扛） */
 const BAR_FRAME_MS = 33;
 
-/** 取 40 根声纹节点：容器重建（v-if 开关）后按数量重新收集一次 */
+/**
+ * 取 40 根声纹节点：录音面板是 v-if 挂载的，每轮录音都会重建一遍子树。
+ * 旧实现只比对「数量」，可是每轮都是同样的 40 根，数量永远相等 ——
+ * 第二次录音就会继续往上一轮那些已经脱离文档的老节点上写 transform，
+ * 表现就是「第一轮有动态、暂停后再问声纹僵成一条线」。
+ * 所以这里改成比对「首根是否仍挂在当前 host 下」，容器一换就重新收集。
+ */
 function getBarNodes(): HTMLElement[] {
   const host = readEl(voiceBarsRef.value);
   if (!host) {
     barNodes = [];
     return barNodes;
   }
-  if (barNodes.length !== host.children.length) {
+  const first = barNodes[0];
+  if (barNodes.length !== host.children.length || !first || first.parentElement !== host) {
     barNodes = Array.from(host.children) as HTMLElement[];
   }
   return barNodes;

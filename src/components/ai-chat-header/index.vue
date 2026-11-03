@@ -4,7 +4,9 @@ import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import minimizeIcon from "@/assets/img/min_icon.png";
+import listenLogoGif from "@/assets/img/listen.gif";
 import saniLogoGif from "@/assets/img/sani-logo.gif";
+import tellLogoGif from "@/assets/img/tell.gif";
 import thinkLogoGif from "@/assets/img/think.gif";
 import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
@@ -44,6 +46,16 @@ const props = defineProps({
    * 默认关：作业指导 / 任务协同也用这个头部，那边的岛保持纯展示、不吃触摸事件。
    */
   restartable: { type: Boolean, default: false },
+  /**
+   * 「按住说话」录音中（由 AiChatInput 的 voice-listening 事件驱动）。
+   * 只有首页对话页绑定：录音时岛内常态动图切成 listen.gif，其余页面不受影响。
+   */
+  voiceListening: { type: Boolean, default: false },
+  /**
+   * 自动听播（TTS）播放中：首页把 useRealtimeTts 的 playing 透进来。
+   * 回答中 → 播报结束这一整段岛内都走 tell.gif，生成结束后由它续上。
+   */
+  realtimeTtsPlaying: { type: Boolean, default: false },
 });
 const emit = defineEmits([
   "back",
@@ -87,6 +99,16 @@ const answering = computed(() => {
  * 岛内动图不再切 src：常态图固定 sani-logo.gif，think.gif 作为上层叠图淡入（见 --think / --think-on）
  */
 const thinking = computed(() => props.generating && !answering.value);
+/**
+ * 播报中 = 已出字进入「回答中」，一直到自动听播（TTS）放完为止。
+ * 生成结束后 answering 会落回 false，由 realtimeTtsPlaying 续上，两段相接就是完整的播报期。
+ */
+const telling = computed(() => answering.value || props.realtimeTtsPlaying);
+/**
+ * 岛内动图分四层：常态 sani-logo.gif 常驻；listen.gif（按住说话）/ tell.gif（播报中）/
+ * think.gif（思考中）都是叠在它上面的独立图层，靠 opacity + transform 过渡淡入淡出。
+ * 之所以不切常态图的 src：换源是瞬时替换，没有可过渡的中间态，看起来就是硬切。
+ */
 
 const logger = createLogger("chat-header");
 const { t, locale } = useI18n();
@@ -412,22 +434,70 @@ function deleteSelected() {
 
 /**
  * 长按灵动岛回到初始页（只有首页对话页开 restartable 时生效）。
- * 5 秒是「明显有意为之」的时长：短按 / 误触都不会触发，所以按下即开始计时，
- * 手指移动超过阈值（视作滑动）或松手就取消，不需要额外的进度反馈。
+ * 5 秒本身已经是「明显有意为之」的时长，但首页这块岛压在消息列表上方，
+ * 上下滑列表、惯性滚动时手指很容易停在岛附近 —— 所以再叠四层防误触：
+ * 1) 起手静置 300ms 才起算：轻点、擦碰连进度环都不会亮，也不会白等 5 秒；
+ * 2) 位移按直线距离判定（≤12px）：原来逐轴判断，斜向要走到 12√2≈17px 才算滑动，
+ *    斜着拖列表会误触发，改成欧氏距离后各方向一致；
+ * 3) 按住期间只要页面 / 列表发生滚动就取消：惯性滚动时手指几乎不动，
+ *    光靠位移阈值挡不住，这是最容易误触的场景；
+ * 4) 多指按下（第二根手指 / 手掌）、切后台、窗口失焦：一律取消。
+ * 触发后立刻复位视觉与监听，避免同一次按压被重复触发。
  */
 const ISLAND_LONG_PRESS_MS = 5000;
 /** 判定为滑动的手指位移（px）：与首页整页长按录音的阈值保持一致 */
 const ISLAND_MOVE_TOLERANCE_PX = 12;
+/** 起手静置时长（ms）：短于此值的按压视作轻点 / 擦碰，不点亮进度环也不计时 */
+const ISLAND_PRESS_ARM_MS = 300;
 let islandPressTimer: ReturnType<typeof setTimeout> | null = null;
+/** 起手静置计时器：还没起算时只有它在跑，页面不会出现进度环 */
+let islandArmTimer: ReturnType<typeof setTimeout> | null = null;
 let islandPressOrigin = { x: 0, y: 0 };
-/** 按住中：驱动那圈 5 秒走满的进度环，松手 / 滑动 / 计时结束都会复位 */
+/** 已起算：驱动那圈 5 秒走满的进度环，取消 / 计时结束都会复位 */
 const islandPressing = ref(false);
+
+/** 任意滚动（含 scroll-view 内部滚动）：capture 阶段兜住，直接取消长按 */
+function onIslandScrollGuard() {
+  if (islandArmTimer || islandPressTimer) clearIslandPressTimer();
+}
+
+/** 切后台 / 熄屏：回来时不该还停在一半的进度环上 */
+function onIslandVisibilityGuard() {
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    clearIslandPressTimer();
+  }
+}
+
+function attachIslandGuards() {
+  if (typeof window === "undefined") return;
+  // scroll 不冒泡，但捕获阶段会经过 window，能兜住页面与列表容器的滚动
+  window.addEventListener("scroll", onIslandScrollGuard, true);
+  window.addEventListener("blur", clearIslandPressTimer);
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", onIslandVisibilityGuard);
+  }
+}
+
+function detachIslandGuards() {
+  if (typeof window === "undefined") return;
+  window.removeEventListener("scroll", onIslandScrollGuard, true);
+  window.removeEventListener("blur", clearIslandPressTimer);
+  if (typeof document !== "undefined") {
+    document.removeEventListener("visibilitychange", onIslandVisibilityGuard);
+  }
+}
 
 function clearIslandPressTimer() {
   islandPressing.value = false;
-  if (!islandPressTimer) return;
-  clearTimeout(islandPressTimer);
-  islandPressTimer = null;
+  if (islandArmTimer) {
+    clearTimeout(islandArmTimer);
+    islandArmTimer = null;
+  }
+  if (islandPressTimer) {
+    clearTimeout(islandPressTimer);
+    islandPressTimer = null;
+  }
+  detachIslandGuards();
 }
 
 function readPressPoint(e: any) {
@@ -435,26 +505,44 @@ function readPressPoint(e: any) {
   return { x: Number(point?.clientX ?? 0), y: Number(point?.clientY ?? 0) };
 }
 
-function onIslandPressStart(e: any) {
-  if (!props.restartable) return;
-  islandPressOrigin = readPressPoint(e);
-  // 先归零上一轮，再点亮进度环（clearIslandPressTimer 会把 islandPressing 压回 false）
-  clearIslandPressTimer();
-  islandPressing.value = true;
-  islandPressTimer = setTimeout(() => {
-    islandPressTimer = null;
-    emit("restart");
-  }, ISLAND_LONG_PRESS_MS);
+/** 走满 5 秒：先复位环与监听再回传，避免这一次按压还能被 touchend 再取消一次 */
+function finishIslandPress() {
+  islandPressTimer = null;
+  islandPressing.value = false;
+  detachIslandGuards();
+  emit("restart");
 }
 
-/** 手指一移动就当滑动处理：避免用户上下滑消息列表时误触发 */
+function onIslandPressStart(e: any) {
+  if (!props.restartable) return;
+  // 录音中岛内已经不是常态图，这会儿按下去大概率是想结束说话，不接管
+  if (props.voiceListening) return;
+  // 多指 / 手掌误碰直接忽略
+  if (Array.isArray(e?.touches) && e.touches.length > 1) return;
+  islandPressOrigin = readPressPoint(e);
+  // 先归零上一轮（同时摘下上一轮的监听），再进入静置阶段
+  clearIslandPressTimer();
+  attachIslandGuards();
+  islandArmTimer = setTimeout(() => {
+    islandArmTimer = null;
+    // 进度环与 5 秒计时同时起步，环走满时刚好触发
+    islandPressing.value = true;
+    islandPressTimer = setTimeout(finishIslandPress, ISLAND_LONG_PRESS_MS);
+  }, ISLAND_PRESS_ARM_MS);
+}
+
+/** 位移超阈值 / 多指：一律当滑动或误碰处理，取消长按 */
 function onIslandPressMove(e: any) {
-  if (!islandPressTimer) return;
+  if (!islandArmTimer && !islandPressTimer) return;
+  if (Array.isArray(e?.touches) && e.touches.length > 1) {
+    clearIslandPressTimer();
+    return;
+  }
   const point = readPressPoint(e);
-  if (
-    Math.abs(point.x - islandPressOrigin.x) > ISLAND_MOVE_TOLERANCE_PX
-    || Math.abs(point.y - islandPressOrigin.y) > ISLAND_MOVE_TOLERANCE_PX
-  ) {
+  const offsetX = point.x - islandPressOrigin.x;
+  const offsetY = point.y - islandPressOrigin.y;
+  // 斜向 12px 也要挡住：用直线距离而不是逐轴比较
+  if (Math.hypot(offsetX, offsetY) > ISLAND_MOVE_TOLERANCE_PX) {
     clearIslandPressTimer();
   }
 }
@@ -525,12 +613,14 @@ onBeforeUnmount(() => {
                    思考中在其上叠一张 think.gif 淡入，不做 src / mode 切换，位置一律不动 */
               <!-- 长按 5 秒回到初始页：只有 restartable（首页对话页）碰触摸事件，
                    其它页面的岛保持纯展示、不抢触摸；热区就是三角图本身（62×62） -->
-              <!-- 常态动图：思考中只淡出、不卸载，长按热区与定位基准始终挂在它身上 -->
+              <!-- 常态动图：思考中 / 播报中 / 按住说话时只淡出、不卸载，长按热区与定位基准始终挂在它身上。
+                   图源固定 sani-logo.gif，绝不在这里换 src —— 换源是硬切，没有过渡；
+                   另外几张动图各自作为上层叠图淡入淡出，切换才是柔和交叉溶解 -->
               <image
                 class="chat-header__island-logo"
                 :class="{
                   'chat-header__island-logo--restartable': props.restartable,
-                  'chat-header__island-logo--faded': thinking,
+                  'chat-header__island-logo--faded': thinking || telling || props.voiceListening,
                 }"
                 :src="saniLogoGif"
                 mode="aspectFit"
@@ -542,6 +632,23 @@ onBeforeUnmount(() => {
                 @mousemove="onIslandPressMove"
                 @mouseup="clearIslandPressTimer"
                 @mouseleave="clearIslandPressTimer"
+              />
+              <!-- 按住说话动图 listen.gif：叠在常态图正上方，录音时淡入 + 由 2.36 缓升到 2.49 倍
+                   （百分比与 listen 图案留白的换算见 --listen 的样式注释），松手淡出；
+                   纯展示层，不吃触摸，避免抢走长按回首页的手势 -->
+              <image
+                class="chat-header__island-logo chat-header__island-logo--listen"
+                :class="{ 'chat-header__island-logo--listen-on': props.voiceListening }"
+                :src="listenLogoGif"
+                mode="aspectFit"
+              />
+              <!-- 播报中动图 tell.gif：从「回答中」一直覆盖到听完自动播报，
+                   与 listen.gif 同画布同图案尺寸（500×500，图案 201×173 居中），缩放与偏移共用一套值 -->
+              <image
+                class="chat-header__island-logo chat-header__island-logo--tell"
+                :class="{ 'chat-header__island-logo--tell-on': telling }"
+                :src="tellLogoGif"
+                mode="aspectFit"
               />
               <!-- 思考中动图：叠在常态图正上方淡入，同时由 1 倍放大到 1.18 倍，
                    避免换图源 + 换 mode 的瞬间尺寸硬跳（纯展示层，不吃触摸） -->
@@ -1133,6 +1240,37 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
+/* 按住说话 listen.gif / 播报中 tell.gif：两张图都是 500×500 正方形画布，
+   图案（三角）只占中间 201×172（tell 为 201×173），四周是透明留白；
+   sani-logo.gif 是 300×267 已裁到图案边界，所以同一尺寸的盒子里图案会小一半多，
+   按「图案宽度对齐原图」换算：
+   1) 124rpx 的盒子 aspectFit 后图案宽 = 124 × 201/500 ≈ 49.9rpx，要撑到 124rpx → 放大 2.49 倍；
+   2) 图案中心在画布上偏左上（cx 247 / cy 246.5~247，画布 250），放大后右移、下移各约 2rpx 复位；
+   3) drop-shadow 会被 transform 一起放大，这里按 1/2.49 折回去，保证投影仍是 0 3px 9px rgba(0,0,0,.14)。
+   过渡：与常态图交叉溶解 —— 起始 2.36 倍 / 全透明，状态命中后淡入并缓升到 2.49 倍，
+   340ms 起缓停缓（见 -on）；状态落下用 220ms，比淡入略快，
+   避免两张三角动图长时间叠在一起互相干扰。 */
+.chat-header__island-logo--listen,
+.chat-header__island-logo--tell {
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(2rpx, 2rpx) scale(2.36);
+  filter: drop-shadow(0 2.4rpx 7.2rpx rgba(0, 0, 0, 0.14));
+  transition:
+    opacity 0.22s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.chat-header__island-logo--listen-on,
+.chat-header__island-logo--tell-on {
+  opacity: 1;
+  transform: translate(2rpx, 2rpx) scale(2.49);
+  transition:
+    opacity 0.34s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
 /* 思考中动图 think.gif：画布 800×400，图案只占中间（宽约 42.5%、高约 75%），两侧是透明留白。
    sani-logo.gif 是 300×267、已裁到图案边界，两者比例差一倍，所以：
    1) 留白用 aspectFill 裁掉，图案正好撑满 62×62 的位；
@@ -1141,7 +1279,9 @@ onBeforeUnmount(() => {
    过渡：叠在常态图上层，起始与常态图等比(1) 且透明，思考中淡入并放大到 1.18，
    配合下面的 transition 就是「从原动图的大小慢慢变大」，不再有换源瞬间的硬跳 */
 .chat-header__island-logo--think {
-  z-index: 2;
+  // 叠图固定层级：常态 1 → 录音 / 播报 2 → 思考 3
+  // （这三个状态互斥，层级只是保证 DOM 顺序之外的确定性）
+  z-index: 3;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-3rpx) scale(1);

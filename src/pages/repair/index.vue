@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
+import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useUserStore } from "@/stores";
+import { useSystemStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { consumePendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { buildSanvistH5Url } from "@/utils/sanvist-h5-encrypt";
@@ -15,6 +18,8 @@ defineOptions({ name: "AiRepairPage" });
 
 const logger = createLogger("repair-page");
 const userStore = useUserStore();
+const systemStore = useSystemStore();
+const { locale } = useI18n();
 const { safeTopPx } = useSafeArea();
 const embedUrl = ref("");
 const loadError = ref("");
@@ -35,6 +40,24 @@ const embedStyle = computed(() => ({
   paddingTop: `${safeTopPx.value}px`,
 }));
 
+/**
+ * 当前选中的音色 id：读本机记忆的音色（听播页 saveReportVoice 写入的同一份数据），
+ * 没选过时与听播页保持一致的兜底口径 —— 取音色列表第一项。
+ */
+function resolveSelectedVoiceId() {
+  return loadReportVoice()?.id || REPORT_VOICE_OPTIONS[0]?.id || "";
+}
+
+/**
+ * 当前界面语言：优先取 systemStore.header.Lang（启动参数注入 + 设置弹层切换都会写这里），
+ * 它是宿主与请求头共用的口径（zh_CN / en_US）；拿到前用当前 i18n locale 兜底。
+ */
+function resolveSelectedLanguage() {
+  const fromHeader = String(systemStore.header?.Lang || "").trim();
+  if (fromHeader) return fromHeader;
+  return String(locale.value || "zh_CN");
+}
+
 function buildEmbedUrl() {
   try {
     const result = buildSanvistH5Url({
@@ -45,6 +68,12 @@ function buildEmbedUrl() {
       sessionId: String(repairNavigationContext.value.sessionId || "").trim() || undefined,
       conversationId: String(repairNavigationContext.value.conversationId || "").trim() || undefined,
       chatConversationId: repairDetailConversationId.value || undefined,
+      // 外观：带具体生效值（light / dark），不再把 system 透给内嵌页
+      theme: systemStore.appAppearance,
+      // 音色：把选中的音色 id 原样带给内嵌页
+      voice: resolveSelectedVoiceId(),
+      // 界面语言：把选中的中英文值（zh_CN / en_US）以 language 参数带给内嵌页
+      language: resolveSelectedLanguage(),
     });
     embedUrl.value = result.url;
     loadError.value = "";

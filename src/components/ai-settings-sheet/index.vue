@@ -132,7 +132,7 @@ function selectLanguage(value: AppLanguage) {
       </view>
 
       <!-- 设计稿 857:118：《个人信息清单》《三方信息共享清单》14px Medium #1166D6 -->
-      <text class="settings-sheet__links">{{ t("settings-privacy-links") }}</text>
+      <!-- <text class="settings-sheet__links">{{ t("settings-privacy-links") }}</text> -->
     </view>
   </view>
 </template>
@@ -185,14 +185,18 @@ function selectLanguage(value: AppLanguage) {
   flex-shrink: 0;
 }
 
-/* 设计稿 722:2824 / 722:2805 / 722:2835 / 873:1313：18px（36rpx）/ Regular / #0D0D0D，行高 26px */
+/* 设计稿 722:2824 / 722:2805 / 722:2835 / 873:1313：18px（36rpx）/ Regular / #0D0D0D，行高 26px
+   label 只吃剩余宽度：分段（尤其英文）撑开后不再换行，极端窄屏才省略 */
 .settings-sheet__label {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   color: #0d0d0d;
   font-size: 36rpx;
   font-weight: 400;
   line-height: 52rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 设计稿 722:2873：44×22（88×44rpx）轨道，圆角 11px（22rpx），#1166D6 */
@@ -236,19 +240,24 @@ function selectLanguage(value: AppLanguage) {
   background: #f3f3f3;
 }
 
-/* 设计稿 722:2992 等：分段 46×30（92×60rpx）、圆角 10px；未选中 #F3F3F3 底 + #5D5D5D 文字 */
+/* 设计稿 722:2992 等：分段 46×30（92×60rpx）为最小尺寸、圆角 10px；未选中 #F3F3F3 底 + #5D5D5D 文字
+   宽度不再写死：中文按 92rpx 起，英文（System / Light / Dark）文案更长时由内容撑开，
+   左右各留 12rpx 内边距，避免长文案贴边 */
 .settings-sheet__segment-item {
   display: flex;
+  box-sizing: border-box;
+  min-width: 92rpx;
+  height: 60rpx;
   align-items: center;
   justify-content: center;
-  width: 92rpx;
-  height: 60rpx;
+  padding: 0 12rpx;
   border-radius: 20rpx;
   background: #f3f3f3;
   color: #5d5d5d;
   font-size: 30rpx;
   font-weight: 400;
   line-height: 44rpx;
+  white-space: nowrap;
 }
 
 /* 选中：白底 + #0D0D0D 文字 */

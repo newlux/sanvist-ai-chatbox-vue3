@@ -209,6 +209,41 @@ export function notifyTokenExpiration() {
   callNativeSilently("tokenExpiration");
 }
 
+/** getColorScheme 的回参：success 为 true 才算拿到有效值 */
+interface ColorSchemeResult {
+  success?: boolean;
+  colorScheme?: string;
+  dark?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * 系统深浅色（宿主 `getColorScheme`）。
+ *
+ * 回参形如 `{ success: true, colorScheme: "light" | "dark", dark: false }`。
+ * 只在 `success === true` 且 colorScheme 合法时返回结果；未注入 bridge、调用失败、
+ * 超时、success 不为 true 统一返回 null，由调用方按「默认浅色」处理。
+ * 超时用 silentTimeout：宿主没实现这个 JSAPI 时不会回调，属预期内，不打错误日志。
+ */
+export async function getColorScheme(): Promise<"light" | "dark" | null> {
+  try {
+    const result = await callNative<ColorSchemeResult>("getColorScheme", {}, {
+      timeoutMs: 2000,
+      silentTimeout: true,
+    });
+    if (result?.success !== true) return null;
+    const scheme = String(result.colorScheme || "").toLowerCase();
+    if (scheme === "dark") return "dark";
+    if (scheme === "light") return "light";
+    // colorScheme 字段缺失时退一步用 dark 布尔值
+    if (typeof result.dark === "boolean") return result.dark ? "dark" : "light";
+    return null;
+  }
+  catch {
+    return null;
+  }
+}
+
 /**
  * 场景窗口（pushWindow）的容器参数：关掉宿主原生标题栏 / 右上角菜单。
  *

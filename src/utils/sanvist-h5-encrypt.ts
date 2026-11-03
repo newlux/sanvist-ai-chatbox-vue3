@@ -20,6 +20,8 @@ const DEFAULT_SOURCE = "sanvist";
 const DEFAULT_SYS_CODE = "sanvist";
 const DEFAULT_EXTERNAL_USER_ID = "shengmz2";
 const DEFAULT_NAME = "smz2";
+/** 外部主题兜底值：拿不到具体外观时按浅色（appAppearance 只会有 light / dark） */
+const DEFAULT_THEME = "light";
 
 /**
  * sanvist H5 公钥（PEM）。
@@ -53,6 +55,18 @@ export interface SanvistH5EncryptOptions {
   conversationId?: string;
   /** 维修助手详情页的会话 ID，作为 `/chat/{id}` 路径参数。 */
   chatConversationId?: string;
+  /**
+   * 外观主题：直接透传设置弹层里选中的外观值（system / light / dark），
+   * 由三方 H5 自己决定怎么落地，前端不再二次换算成 light/dark。
+   */
+  theme?: string;
+  /** 音色：透传选中的音色 id（与听播 TTS 用的是同一套 voice code），未传则不带该参数 */
+  voice?: string;
+  /**
+   * 界面语言：透传设置里选中的中英文值（zh_CN / en_US），URL 参数名用 `language`。
+   * 未传时保留固定下发的默认值 `language=zh-CN`；传了则覆盖为宿主口径的值。
+   */
+  language?: string;
 }
 
 export interface SanvistH5EncryptResult {
@@ -128,14 +142,22 @@ export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): Sanvis
     organizationId: "2",
     isChinaMode: "true",
     isConsumer: "true",
+    // 外观：透传当前生效的外观值（light / dark），未显式传入时按浅色处理
+    theme: String(options.theme || "").trim() || DEFAULT_THEME,
   });
   const userId = String(options.userId || "").trim();
   const sessionId = String(options.sessionId || "").trim();
   const conversationId = String(options.conversationId || "").trim();
   const chatConversationId = String(options.chatConversationId || "").trim();
+  const voice = String(options.voice || "").trim();
+  const language = String(options.language || "").trim();
   if (userId) params.set("userId", userId);
   if (sessionId) params.set("sessionId", sessionId);
   if (conversationId) params.set("conversationId", conversationId);
+  // 音色 id（如 xieshurou_v3.1）：与听播 TTS 同一个 code，回调方可据此复用同一音色
+  if (voice) params.set("voice", voice);
+  // 界面语言（zh_CN / en_US）：参数名统一为 `language`，未传时保留上面的默认值 zh-CN
+  if (language) params.set("language", language);
   const chatPath = chatConversationId ? `/chat/${encodeURIComponent(chatConversationId)}` : "/chat";
   const url = `${frontend}${chatPath}?${params.toString()}`;
   console.log("🚀 ~ buildSanvistH5Url ~ url:", url);

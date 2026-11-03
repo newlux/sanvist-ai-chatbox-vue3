@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
@@ -55,12 +55,7 @@ const emit = defineEmits(["item-click"]);
 
 const { t } = useI18n();
 
-/** swiper 同屏展示的入口数量，与模板 display-multiple-items 保持一致 */
-const VISIBLE_ITEM_COUNT = 3;
-
 const { isPc } = usePcMode();
-/** 当前首个可见项下标：交给 swiper 的 current 做受控滑动（手势滑动改它） */
-const currentIndex = ref(0);
 
 // 入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手（配件助手暂为首页内联，其余另开专属页）
 const DEFAULT_NAV_ITEMS: NavItem[] = [
@@ -125,53 +120,27 @@ const navItems = computed(() => {
 function onItemTap(item: NavItem) {
   emit("item-click", item);
 }
-
-/** 首个可见项的最大下标：同屏 3 个，末尾 3 个对齐后就到头了 */
-const maxIndex = computed(() => Math.max(0, navItems.value.length - VISIBLE_ITEM_COUNT));
-
-// 入口数量变化（如 PC 端收起「作业指导」）后把下标收进合法范围，避免 swiper 停在空档
-watch(maxIndex, (value) => {
-  if (currentIndex.value > value) currentIndex.value = Math.max(0, value);
-});
-
-/** 手势滑动后同步下标 */
-function onSwiperChange(event: { detail?: { current?: number } }) {
-  const next = Number(event?.detail?.current);
-  if (!Number.isFinite(next)) return;
-  currentIndex.value = Math.max(0, Math.min(maxIndex.value, next));
-}
 </script>
 
 <template>
   <view v-if="visible" class="ai-chat-nav" :class="{ 'ai-chat-nav--dark': dark }">
-    <view class="ai-chat-nav__track">
-      <swiper
-        class="ai-chat-nav__swiper"
-        :indicator-dots="false"
-        :autoplay="false"
-        :circular="false"
-        :display-multiple-items="VISIBLE_ITEM_COUNT"
-        :current="currentIndex"
-        previous-margin="40rpx"
-        next-margin="80rpx"
-        @change="onSwiperChange"
-      >
-        <swiper-item v-for="item in navItems" :key="item.key">
-          <view class="ai-chat-nav__item">
-            <view
-              class="ai-chat-nav__chip"
-              :class="{ 'ai-chat-nav__chip--active': item.key === activeKey }"
-              @tap="onItemTap(item)"
-            >
-              <image class="ai-chat-nav__icon" :src="item.icon" mode="aspectFit" />
-              <text class="ai-chat-nav__title">
-                {{ item.titleKey ? t(item.titleKey) : item.title }}
-              </text>
-            </view>
-          </view>
-        </swiper-item>
-      </swiper>
-    </view>
+    <!-- 横向滚动而不是等分 swiper：胶囊宽度跟文案走，英文（Guidance 等）不会被截断 -->
+    <scroll-view class="ai-chat-nav__scroll" scroll-x :show-scrollbar="false">
+      <view class="ai-chat-nav__list">
+        <view
+          v-for="item in navItems"
+          :key="item.key"
+          class="ai-chat-nav__chip"
+          :class="{ 'ai-chat-nav__chip--active': item.key === activeKey }"
+          @tap="onItemTap(item)"
+        >
+          <image class="ai-chat-nav__icon" :src="item.icon" mode="aspectFit" />
+          <text class="ai-chat-nav__title">
+            {{ item.titleKey ? t(item.titleKey) : item.title }}
+          </text>
+        </view>
+      </view>
+    </scroll-view>
   </view>
 </template>
 
@@ -187,35 +156,40 @@ function onSwiperChange(event: { detail?: { current?: number } }) {
   padding-top: 16rpx;
 }
 
-// 滑动轨道：swiper 铺满
-.ai-chat-nav__track {
-  position: relative;
-}
-
-.ai-chat-nav__swiper {
+// 滑动轨道：横向滚动，内容宽度由胶囊自己决定（不再等分屏宽）
+.ai-chat-nav__scroll {
   width: 100%;
   height: 72rpx;
+  white-space: nowrap;
 }
 
-.ai-chat-nav__item {
+.ai-chat-nav__list {
+  display: inline-flex;
   height: 72rpx;
-  padding-right: 16rpx;
   box-sizing: border-box;
+  align-items: center;
+  padding: 0 20rpx;
 }
 
 .ai-chat-nav__chip {
-  display: flex;
-  width: 100%;
-  height: 72rpx;
+  display: inline-flex;
+  flex: 0 0 auto;
   box-sizing: border-box;
   align-items: center;
   justify-content: center;
   gap: 12rpx;
+  height: 72rpx;
+  margin-right: 16rpx;
   padding: 0 24rpx;
   border: 1px solid #efefef;
   border-radius: 32rpx;
   background: #fff;
   white-space: nowrap;
+}
+
+// 末项右侧不留多余间距，滑到底就是最后一个胶囊
+.ai-chat-nav__chip:last-child {
+  margin-right: 0;
 }
 
 // 高亮的智能体入口：当前页对应的场景项（如作业指导页）
@@ -239,15 +213,13 @@ function onSwiperChange(event: { detail?: { current?: number } }) {
   flex-shrink: 0;
 }
 
+// 文案不做省略号：胶囊宽度跟着文字走，长词（Guidance / Reports 等）也能整词显示
 .ai-chat-nav__title {
-  min-width: 0;
-  overflow: hidden;
+  flex: 0 0 auto;
   color: #1a1a1a;
   font-size: 24rpx;
   font-weight: 500;
   line-height: 32rpx;
-  text-align: center;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
