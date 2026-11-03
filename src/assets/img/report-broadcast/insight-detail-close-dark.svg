@@ -1,0 +1,5 @@
+<svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 异常详情弹窗（深色稿 1193:4815）关闭 X：30×30，#8E8E8E 2px 描边（1193:4822 / 1193:4823） -->
+  <path d="M9 9L21 21" stroke="#8E8E8E" stroke-width="2" stroke-linecap="round"/>
+  <path d="M21 9L9 21" stroke="#8E8E8E" stroke-width="2" stroke-linecap="round"/>
+</svg>

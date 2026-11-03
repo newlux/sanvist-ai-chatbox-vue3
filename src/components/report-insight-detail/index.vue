@@ -16,9 +16,13 @@
  * 组件只做展示 + 事件回传：关闭、点击遮罩、加急处理。
  */
 import type { ReportInsightItem } from "@/hooks/useReportInsights";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import bellIcon from "@/assets/img/report-broadcast/insight-detail-bell.svg";
+import bellDarkIcon from "@/assets/img/report-broadcast/insight-detail-bell-dark.svg";
 import closeIcon from "@/assets/img/report-broadcast/insight-detail-close.svg";
+import closeDarkIcon from "@/assets/img/report-broadcast/insight-detail-close-dark.svg";
+import { useSystemStore } from "@/stores";
 
 defineProps<{
   /** 弹窗当前展示的异常条目；为 null 时整层不渲染。 */
@@ -33,6 +37,14 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+/**
+ * 外观：深色走 C 方案暗色稿 1193:4815「异常弹窗-未加急」。
+ * 只换材质与字色，弹窗尺寸 / 圆角 / 间距 / 点击热区 / transition 全部沿用浅色稿。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
+const closeCurrentIcon = computed(() => (isDark.value ? closeDarkIcon : closeIcon));
+const bellCurrentIcon = computed(() => (isDark.value ? bellDarkIcon : bellIcon));
 
 function onUrgentTap(item: ReportInsightItem) {
   emit("urgent", item);
@@ -44,6 +56,7 @@ function onUrgentTap(item: ReportInsightItem) {
   <view
     v-if="item"
     class="insight-detail"
+    :class="{ 'insight-detail--dark': isDark }"
     aria-modal="true"
     @tap.self="emit('close')"
   >
@@ -63,7 +76,8 @@ function onUrgentTap(item: ReportInsightItem) {
         :aria-label="t('close')"
         @tap="emit('close')"
       >
-        <image class="insight-detail__close-icon" :src="closeIcon" mode="aspectFit" />
+        <!-- 深色稿 1193:4822 / 1193:4823 描边 #8E8E8E（浅色稿 #999999） -->
+        <image class="insight-detail__close-icon" :src="closeCurrentIcon" mode="aspectFit" />
       </view>
 
       <!--
@@ -74,7 +88,8 @@ function onUrgentTap(item: ReportInsightItem) {
       -->
       <view class="insight-detail__header">
         <view class="insight-detail__bell-bg" aria-hidden="true">
-          <image class="insight-detail__bell-icon" :src="bellIcon" mode="aspectFit" />
+          <!-- 深色稿 1193:4839 填充 #FF6165（浅色稿 #C8201E） -->
+          <image class="insight-detail__bell-icon" :src="bellCurrentIcon" mode="aspectFit" />
         </view>
         <text class="insight-detail__title">
           {{ item.deviceId }}
@@ -404,5 +419,76 @@ function onUrgentTap(item: ReportInsightItem) {
 
 .insight-detail__action--urgent .insight-detail__action-text {
   color: #0d0d0d;
+}
+
+/* ==========================================================================
+   深色主题（Ardot 1193:4815「异常弹窗-未加急」，1px = 2rpx）
+   暗色稿与浅色稿（11101:714 系列）的尺寸、圆角、间距、点击热区完全一致，只换材质与字色：
+   - 遮罩 1193:4817：仍是 #000000 40%，与浅色稿同值，无需覆盖
+   - 弹窗底 1193:4820：#212121（浅色稿 #FFFFFF），圆角 20px（40rpx）不变
+   - 铃铛底圆 1193:4819：#303030（浅色稿 #F2F2F2）
+   - 铃铛图标 1193:4839：#FF6165（浅色稿 #C8201E，换 insight-detail-bell-dark.svg）
+   - 关闭 X 1193:4822 / 1193:4823：描边 #8E8E8E 2px（换 insight-detail-close-dark.svg）
+   - 标题 1193:4835：15px/500 #FFFFFF（浅色稿 #000000）
+   - 「事件详情」1193:4837：14px/400 #8E8E8E（浅色稿 #999999）
+   - 信息卡 1193:4828：#303030（浅色稿 #F6F6F6），圆角 8px（16rpx）、内边距 14px（28rpx）不变
+   - 「事件摘要：」1193:4832：#8E8E8E
+   - 加急按钮 1193:4826 / 1193:4827：底 #212121 + 1px（2rpx）#FF6165 描边 + 文案 #FF6165
+   几何量（宽高、圆角、间距、行高）一律沿用上面浅色稿的 rpx 值，不在深色分支重复声明。
+   ========================================================================== */
+.insight-detail--dark {
+  .insight-detail__popup {
+    background: #212121;
+  }
+
+  .insight-detail__close--active {
+    background: #303030;
+  }
+
+  .insight-detail__bell-bg {
+    background: #303030;
+  }
+
+  .insight-detail__title {
+    color: #ffffff;
+  }
+
+  .insight-detail__section-label {
+    color: #8e8e8e;
+  }
+
+  .insight-detail__box {
+    background: #303030;
+  }
+
+  // 深色稿里「异常类型 / 发生时间」的填充标记仍是 #1A1A1A（浅色稿残留，落在 #303030 上不可见），
+  // 但渲染图实际为白字，这里按渲染结果取 #FFFFFF，与摘要正文 1193:4831 同色
+  .insight-detail__row-text {
+    color: #ffffff;
+  }
+
+  // 1193:4832「事件摘要：」标签比正文弱一档
+  .insight-detail__row-prefix {
+    color: #8e8e8e;
+  }
+
+  // 1193:4826 未加急：底 #212121 + 1px（2rpx）#FF6165 描边；1193:4827 文案 #FF6165
+  .insight-detail__action {
+    border-color: #ff6165;
+    background: #212121;
+  }
+
+  .insight-detail__action-text {
+    color: #ff6165;
+  }
+
+  // 深色稿只画了「未加急」态；已加急沿用同一明度梯度的中性填充（#303030）+ 主文案白
+  .insight-detail__action--urgent {
+    background: #303030;
+  }
+
+  .insight-detail__action--urgent .insight-detail__action-text {
+    color: #ffffff;
+  }
 }
 </style>
