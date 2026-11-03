@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { setLocale } from "@/i18n";
 
 export const useSystemStore = defineStore("system", () => {
   const baseUrl = ref(import.meta.env.VITE_AI_QUESTION_BASE_URL);
@@ -65,6 +66,26 @@ export const useSystemStore = defineStore("system", () => {
 
   function setHeader(value: Record<string, unknown>) {
     header.value = value;
+  }
+
+  /**
+   * 统一写入界面语言：i18n 全局 locale 与 header 里的 Lang / language / X-Site-Language 一起改。
+   *
+   * - 启动时宿主注入的 Lang 走这里（App.vue onLaunch / bridge 晚到补参）；
+   * - 设置弹层手动切换也走这里，避免「界面切了英文、header 还是中文」；
+   * - 不落 storage：每次进页面都以宿主注入的 Lang 为准，本地缓存只会和宿主打架。
+   */
+  function setLanguage(lang: string) {
+    const nextLang = String(lang || "").trim();
+    if (!nextLang) return Promise.resolve("");
+
+    header.value = {
+      ...header.value,
+      Lang: nextLang,
+      "X-Site-Language": nextLang,
+      language: nextLang.split("_")[0],
+    };
+    return setLocale(nextLang);
   }
 
   function setGridCountry(value: string) {
@@ -136,6 +157,7 @@ export const useSystemStore = defineStore("system", () => {
     setBaseUrl,
     setDevice,
     setHeader,
+    setLanguage,
     setGridCountry,
     setStatusBarHeight,
     setTabbarHeight,

@@ -525,19 +525,28 @@ watch(
   animation: slot-drawer-slide-up 0.25s ease-out;
 }
 
-/* 标签 + 进度同一行，进度紧跟标签（设计稿间距 9px => 18rpx）；× 固定右侧 */
+/* 标签 + 进度同一行，进度紧跟标签（设计稿间距 9px => 18rpx）；× 固定右侧
+   用 min-height 而不是固定 height：标签文案来自后端 slot.description，
+   英文下经常长到一行放不下，固定高度会把折行后的第二行裁掉 */
 .slot-drawer__header {
   display: flex;
   align-items: center;
-  height: 52rpx;
+  min-height: 52rpx;
 }
 
+/* 标签允许收缩并折行：
+   原来 flex-shrink: 0 时，长英文标签既不收缩也不换行，整行撑出面板右边缘（右侧 × 一起被挤出去），
+   现在被限制在「面板宽度 − 进度 − ×」的剩余空间里，超出就折行 */
 .slot-drawer__label {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
   color: #999999;
   font-family: "PingFang SC", "Inter", sans-serif;
   font-size: 28rpx;
   line-height: 34rpx;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .slot-drawer__progress {
@@ -566,6 +575,7 @@ watch(
   height: 100%;
 }
 
+/* 题目同样来自后端 title，长英文按空格折行，超长单词也强制断开 */
 .slot-drawer__question {
   display: block;
   margin-top: 36rpx;
@@ -573,6 +583,9 @@ watch(
   font-family: "PingFang SC", "Inter", sans-serif;
   font-size: 28rpx;
   line-height: 34rpx;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 /* 选项多时在卡片内滚动，避免整屏占满 */

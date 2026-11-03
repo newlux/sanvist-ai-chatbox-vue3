@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { onLaunch } from "@dcloudio/uni-app";
 import { useI18n } from "vue-i18n";
-import { setLocale } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
 import { setupDebugConsole } from "@/utils/debug-console";
 import { isEmbeddedInIframe, isSanvistPcEmbedded, notifyParentReady, resolveFromParam } from "@/utils/iframe";
 import { warmPhoneInfo } from "@/utils/landscape-device";
+import { resolveLaunchQuery, subscribeStartupParams } from "@/utils/launch-query";
 import { createLogger } from "@/utils/logger";
 import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
 import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
@@ -29,8 +29,13 @@ const { t } = useI18n();
 const systemStore = useSystemStore();
 const userStore = useUserStore();
 
+/**
+ * 启动参数由宿主注入，离线包与在线包是同一套（Authorization / Lang / country / baseUrl ...）。
+ * onLaunch 的 options.query 在 hash 路由下未必完整，统一走 resolveLaunchQuery 做兜底：
+ * location.search → hash query → AlipayJSBridge.startupParams → options.query。
+ */
 function getLaunchQuery(options?: LaunchOptions): StartupQuery {
-  return options?.query || {};
+  return resolveLaunchQuery(options);
 }
 
 function initializeSystem(query: StartupQuery) {
@@ -127,12 +132,29 @@ function initializeIframeBridge(query: StartupQuery) {
   notifyParentReady();
 }
 
+/**
+ * 离线包场景常见「bridge 比页面晚到」：宿主塞在 startupParams 里的 Lang 那一刻才读得到。
+ * 只有真拿到且与当前语言不同才补切一次，避免重复拉远程语言包。
+ */
+function watchLateStartupParams() {
+  subscribeStartupParams((params) => {
+    const lateLang = String(params.Lang || "");
+    const currentLang = String(systemStore.header.Lang || "");
+    if (!lateLang || lateLang === currentLang) return;
+    logger.debug("bridge 晚到，补启动语言", lateLang);
+    // 与 onLaunch 同一个入口：i18n 与 header 一起改，设置弹层的分段也会跟着变
+    void systemStore.setLanguage(lateLang);
+  });
+}
+
 onLaunch(async (options) => {
   setAuthFailureHandler(handleAuthFailure);
   const query = getLaunchQuery(options);
   const baseInfo = initializeSystem(query);
   initializeIframeBridge(query);
-  await setLocale(baseInfo.lang);
+  // 语言只有一个入口：i18n 全局 locale 与 header 的 Lang 一起写
+  await systemStore.setLanguage(baseInfo.lang);
+  watchLateStartupParams();
   await systemStore.initPhoneSizesInfo();
   initializeDeviceInfo();
   // 预热设备信息：横屏调度视图（甘特 / 预排 / 重排）要按机型决定是否转屏，

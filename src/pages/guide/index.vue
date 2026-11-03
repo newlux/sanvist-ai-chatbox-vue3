@@ -1153,13 +1153,15 @@ $color-white: #ffffff;
 
 // 头部悬浮（与首页对话页一致）：不占布局高度，消息可以滚到它下面，透过 .ai-page__top-fade 的毛玻璃淡出；
 // 同时要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
-// 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）
+// 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）。
+// 这里必须是 1010：历史抽屉（内部 1000）的层级帽由这一层决定，
+// 底部 slot 抽屉是 1002，小于它就会被压住（附件弹窗 1020 仍在其上）
 .ai-page__chat > .ai-page__header {
   position: absolute;
   top: 0;
   right: 0;
   left: 0;
-  z-index: 30;
+  z-index: 1010;
 }
 
 // 顶部毛玻璃渐隐（与首页对话页同一层）：透明 + 背后模糊，状态栏与头部区域是半透明的，
@@ -1354,10 +1356,11 @@ $color-white: #ffffff;
 }
 
 /* Share sheet */
+/* 分享面板必须盖住 header（1010）：历史抽屉与设置弹层都挂在 header 的层叠上下文里 */
 .share-sheet-modal {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 1030;
   pointer-events: none;
 }
 
@@ -1454,10 +1457,11 @@ $color-white: #ffffff;
 }
 
 /* Share Poster Modal */
+/* 海报弹窗同样要盖住 header（1010） */
 .share-poster-modal {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 1030;
   display: flex;
   align-items: center;
   justify-content: center;

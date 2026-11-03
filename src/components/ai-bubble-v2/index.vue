@@ -282,13 +282,17 @@ const showWaiting = computed(
   () => Boolean(props.waitingText) && (props.loading || props.interrupted),
 );
 
+/**
+ * 过程状态行文案随当前语言切换（英文界面下不再出现中文）：
+ * 固定状态走 i18n，`status.title` 是后端下发的工作流节点名，原样保留。
+ */
 const processStatusText = computed(() => {
   const status = props.processStatus as { phase?: string; title?: string } | null;
   if (!status) return "";
-  if (status.phase === "succeeded") return "已完成";
-  if (status.phase === "failed") return "执行失败";
-  if (status.phase === "stopped") return "已停止";
-  return status.title ? `${status.title}...` : "正在思考...";
+  if (status.phase === "succeeded") return t("process-status-succeeded");
+  if (status.phase === "failed") return t("process-status-failed");
+  if (status.phase === "stopped") return t("process-status-stopped");
+  return status.title ? `${status.title}...` : t("process-status-thinking");
 });
 
 const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusText.value));
@@ -552,7 +556,7 @@ function onNegativeFeedback() {
             {{ processStatusText }}
           </text>
           <text v-if="durationSeconds != null && props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-duration">
-            耗时 {{ durationSeconds }} 秒
+            {{ t("process-duration", { seconds: durationSeconds }) }}
           </text>
         </view>
         <view
