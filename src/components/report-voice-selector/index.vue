@@ -283,10 +283,10 @@ function closeSelector() {
 
       <!-- ⑤ 性格信息：名称(309:2150) + 说明(309:2115) -->
       <text class="report-voice-selector__name">
-        {{ selectedVoice.name }}
+        {{ t(selectedVoice.nameKey) }}
       </text>
       <text class="report-voice-selector__description">
-        {{ selectedVoice.description }}
+        {{ t(selectedVoice.descriptionKey) }}
       </text>
 
       <!-- ⑥ 轮播区：轨道弧线(309:2048) + 5 槽位 -->
@@ -319,7 +319,7 @@ function closeSelector() {
           </view>
           <!-- 音色标签(309:2104 / 309:2041 等) -->
           <text class="report-voice-selector__tag">
-            {{ item.voice.tag }}
+            {{ t(item.voice.tagKey) }}
           </text>
         </view>
       </view>
@@ -541,12 +541,19 @@ function closeSelector() {
   height: calc(140 * var(--vs-hero-u)) !important;
 }
 
-/* —— ⑤ 性格信息：与主视觉底间距 25px=50rpx —— */
+/* —— ⑤ 性格信息：与主视觉底间距 25px=50rpx ——
+   英文文案比中文长（Gentle & Refined / Perfect for daily reports），
+   统一单行 + 省略，避免换行把下面的轮播区顶下去 */
 .report-voice-selector__name,
 .report-voice-selector__description {
   display: block;
+  box-sizing: border-box;
   width: 100%;
+  overflow: hidden;
+  padding: 0 40rpx;
   text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
@@ -673,14 +680,22 @@ function closeSelector() {
   border-radius: 50%;
 }
 
-/* 音色标签(309:2041 等)：14px=28rpx Regular，色 #8F8F8F */
+/* 音色标签(309:2041 等)：14px=28rpx Regular，色 #8F8F8F
+   槽位只有 140*u 宽，英文标签（Polished / Mature / Lively 等）比中文长，
+   统一按槽位宽度截断，避免文字溢出到左右相邻槽位上重叠 */
 .report-voice-selector__tag {
   display: block;
+  box-sizing: border-box;
+  max-width: calc(140 * var(--vs-car-u));
+  overflow: hidden;
   margin-top: calc(16 * var(--vs-car-u));
+  padding: 0 calc(4 * var(--vs-car-u));
   color: #8f8f8f;
   font-size: calc(28 * var(--vs-car-u));
   font-weight: 400;
   line-height: calc(34 * var(--vs-car-u));
+  text-align: center;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

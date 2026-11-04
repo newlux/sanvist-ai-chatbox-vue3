@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ListenBroadcastConfig, ListenBroadcastStyle } from "@/api/listen-broadcast/types";
+import type { ListenBroadcastConfig, ListenBroadcastModule, ListenBroadcastStyle } from "@/api/listen-broadcast/types";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { getListenBroadcastConfig, saveListenBroadcastPreference } from "@/api/listen-broadcast";
@@ -59,11 +59,58 @@ const selectionHintKey = ref("");
 const styles = computed(() => config.value?.styles || []);
 const modules = computed(() => config.value?.modules || []);
 const currentStyle = computed(() => styles.value[styleIndex.value]);
-const currentStyleDescription = computed(() => {
-  const style = currentStyle.value;
+
+/**
+ * 接口（/listen-broadcast/config）目前只下发中文文案，也没有语言入参，
+ * 所以这里按接口返回的文案建「原文 → 词条」映射，渲染时走 i18n。
+ * 命中不到的原样输出（后端新增风格 / 模块时不会出现空白或 key）。
+ */
+const STYLE_NAME_KEYS: Record<string, string> = {
+  项目概览: "report-style-name-project-overview",
+  经营概览: "report-style-name-operation-overview",
+  经营复盘: "report-style-name-business-review",
+  风险下钻: "report-style-name-risk-drilldown",
+};
+const STYLE_DESC_KEYS: Record<string, string> = {
+  总览昨日项目: "report-style-desc-project-overview",
+  让助手只报告异常: "report-style-desc-operation-overview",
+  回顾经营表现: "report-style-desc-business-review",
+  聚焦异常风险: "report-style-desc-risk-drilldown",
+};
+const MODULE_NAME_KEYS: Record<string, string> = {
+  经营概览: "report-module-name-operation-overview",
+  经营成本: "report-module-name-operating-cost",
+  成本能耗: "report-module-name-cost-energy",
+  风险预警: "report-module-name-risk-alert",
+};
+
+function translateByMap(map: Record<string, string>, text: string) {
+  const raw = String(text || "").trim();
+  const key = map[raw];
+  return key ? t(key) : raw;
+}
+
+function styleName(style?: ListenBroadcastStyle) {
+  return style ? translateByMap(STYLE_NAME_KEYS, style.name) : "";
+}
+
+function styleDescription(style?: ListenBroadcastStyle) {
   if (!style) return "";
-  return style.description || REPORT_STYLE_OPTIONS.find(item => item.name === style.name)?.description || "";
-});
+  const fallback = REPORT_STYLE_OPTIONS.find(item => item.name === style.name)?.description || "";
+  return translateByMap(STYLE_DESC_KEYS, style.description || fallback);
+}
+
+function moduleName(module: ListenBroadcastModule) {
+  return translateByMap(MODULE_NAME_KEYS, module.name);
+}
+
+const currentStyleDescription = computed(() => styleDescription(currentStyle.value));
+
+/**
+ * 风格名偏长（英文 Project Overview / Operations Overview 等）时缩一档字号：
+ * 气泡是 196×196 的圆，33px 的字在圆心上下会被圆边裁掉。
+ */
+const isLongStyleName = computed(() => styleName(currentStyle.value).length > 6);
 const canConfirm = computed(() => Boolean(currentStyle.value && modules.value.length && !submitting.value));
 const showStyleSwitch = computed(() => !loading.value && styles.value.length > 1);
 
@@ -252,8 +299,11 @@ onMounted(() => {
           <text class="report-style-selector__style-label">
             {{ t("report-style-label") }}
           </text>
-          <text class="report-style-selector__style-name">
-            {{ currentStyle?.name || "" }}
+          <text
+            class="report-style-selector__style-name"
+            :class="{ 'report-style-selector__style-name--compact': isLongStyleName }"
+          >
+            {{ styleName(currentStyle) }}
           </text>
           <text v-if="currentStyleDescription" class="report-style-selector__style-desc">
             {{ currentStyleDescription }}
@@ -311,7 +361,7 @@ onMounted(() => {
             mode="aspectFit"
           />
           <text class="report-style-selector__capsule-text">
-            {{ module.name }}
+            {{ moduleName(module) }}
           </text>
         </view>
       </template>
@@ -583,22 +633,34 @@ onMounted(() => {
    与标签底(255)间距 6px=12rpx */
 .report-style-selector__style-name {
   position: relative;
+  max-width: calc(300 * var(--rs-stage-u));
   margin-top: calc(12 * var(--rs-stage-u));
   color: #0d0d0d;
   font-size: calc(66 * var(--rs-stage-u));
   font-weight: 700;
   line-height: calc(96 * var(--rs-stage-u));
+  text-align: center;
+}
+
+/* 长文案（英文 Project Overview / Operations Overview）：缩字号 + 收紧行高，
+   在圆内折成两行也不会被左右圆边裁掉 */
+.report-style-selector__style-name--compact {
+  max-width: calc(320 * var(--rs-stage-u));
+  font-size: calc(46 * var(--rs-stage-u));
+  line-height: calc(58 * var(--rs-stage-u));
 }
 
 /* 风格说明(309:2290)：14px=28rpx Regular，色 #8F8F8F，行高 20px=40rpx；
    与名称底(309)间距 4px=8rpx */
 .report-style-selector__style-desc {
   position: relative;
+  max-width: calc(300 * var(--rs-stage-u));
   margin-top: calc(8 * var(--rs-stage-u));
   color: #8f8f8f;
   font-size: calc(28 * var(--rs-stage-u));
   font-weight: 400;
   line-height: calc(40 * var(--rs-stage-u));
+  text-align: center;
 }
 
 /* 分页圆点(940:182 8×6px 当前 / 940:183 6×6px 其余)，白底 */

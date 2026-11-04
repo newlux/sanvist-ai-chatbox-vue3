@@ -32,11 +32,14 @@ export const REPORT_VOICE_STORAGE_KEY = "ai-report-voice";
 export interface ReportVoiceOption {
   /** 声音 id，与 TTS/试听一一对应 */
   id: string;
-  /** 人设名（中文） */
+  /** 人设名（中文，仅内部标识，不直接展示） */
   voiceName: string;
-  name: string;
-  description: string;
-  tag: string;
+  /** 性格名 i18n key，如「温柔知性」 */
+  nameKey: string;
+  /** 性格说明 i18n key，如「适合日常汇报」 */
+  descriptionKey: string;
+  /** 轮播头像下方的短标签 i18n key，如「干练职场」 */
+  tagKey: string;
   gender: "female" | "male";
   /** 主视觉大图（半身白色上衣 + 底部淡出白，设计稿 2874:1） */
   hero: string;
@@ -51,9 +54,9 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
   {
     id: "xieshurou_v3.1",
     voiceName: "谢舒柔",
-    name: "温柔治愈",
-    description: "适合日常汇报",
-    tag: "温柔治愈",
+    nameKey: "report-voice-name-xieshurou",
+    descriptionKey: "report-voice-desc-daily",
+    tagKey: "report-voice-tag-gentle-healing",
     gender: "female",
     hero: heroMia,
     avatar: avatarMia,
@@ -62,9 +65,9 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
   {
     id: "longanyang_v3.1",
     voiceName: "龙安洋",
-    name: "阳光温暖",
-    description: "适合日常汇报",
-    tag: "干练职场",
+    nameKey: "report-voice-name-longanyang",
+    descriptionKey: "report-voice-desc-daily",
+    tagKey: "report-voice-tag-polished-pro",
     gender: "male",
     hero: heroEthan,
     avatar: avatarEthan,
@@ -73,9 +76,9 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
   {
     id: "xuyuyuan_v3.1",
     voiceName: "许玉远",
-    name: "温柔知性",
-    description: "适合日常汇报",
-    tag: "温柔知性",
+    nameKey: "report-voice-name-xuyuyuan",
+    descriptionKey: "report-voice-desc-daily",
+    tagKey: "report-voice-tag-gentle-intellectual",
     gender: "female",
     hero: heroSerena,
     avatar: avatarSerena,
@@ -84,9 +87,9 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
   {
     id: "longzhe_v3.1",
     voiceName: "龙哲",
-    name: "沉稳磁性",
-    description: "适合日常汇报",
-    tag: "成熟沉稳",
+    nameKey: "report-voice-name-longzhe",
+    descriptionKey: "report-voice-desc-daily",
+    tagKey: "report-voice-tag-mature-steady",
     gender: "male",
     hero: heroKai,
     avatar: avatarKai,
@@ -95,9 +98,9 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
   {
     id: "qiaoxiaojiao_v3.1",
     voiceName: "乔小娇",
-    name: "灵动可爱",
-    description: "适合日常汇报",
-    tag: "潮流活力",
+    nameKey: "report-voice-name-qiaoxiaojiao",
+    descriptionKey: "report-voice-desc-daily",
+    tagKey: "report-voice-tag-trendy-energetic",
     gender: "female",
     hero: heroBunny,
     avatar: avatarBunny,
@@ -106,9 +109,9 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
   {
     id: "longsanshu_v3.1",
     voiceName: "龙三叔",
-    name: "专业播报",
-    description: "适合日常汇报",
-    tag: "专业播报",
+    nameKey: "report-voice-name-longsanshu",
+    descriptionKey: "report-voice-desc-daily",
+    tagKey: "report-voice-tag-professional",
     gender: "male",
     hero: heroNeil,
     avatar: avatarNeil,
@@ -117,9 +120,9 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
   {
     id: "guyunshu_v3.1",
     voiceName: "顾云舒",
-    name: "知性温柔",
-    description: "适合日常汇报",
-    tag: "成熟沉稳",
+    nameKey: "report-voice-name-guyunshu",
+    descriptionKey: "report-voice-desc-daily",
+    tagKey: "report-voice-tag-mature-steady",
     gender: "female",
     hero: heroMaia,
     avatar: avatarMaia,
@@ -128,9 +131,9 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
   {
     id: "anmingyuan_v3.1",
     voiceName: "安明远",
-    name: "聪明伶俐",
-    description: "适合日常汇报",
-    tag: "轻快活力",
+    nameKey: "report-voice-name-anmingyuan",
+    descriptionKey: "report-voice-desc-daily",
+    tagKey: "report-voice-tag-light-lively",
     gender: "male",
     hero: heroMochi,
     avatar: avatarMochi,
