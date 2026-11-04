@@ -16,9 +16,9 @@ export function saveReportVoice(voice: ReportVoiceOption) {
   const saved = {
     id: voice.id,
     voiceName: voice.voiceName,
-    name: voice.name,
-    description: voice.description,
-    tag: voice.tag,
+    nameKey: voice.nameKey,
+    descriptionKey: voice.descriptionKey,
+    tagKey: voice.tagKey,
     gender: voice.gender,
   };
   try {
