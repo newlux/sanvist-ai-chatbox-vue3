@@ -9,8 +9,8 @@ import forge from "node-forge";
 /** 明文 UTF-8 字节上限（RSA-OAEP 2048 上限约 190 字节）。 */
 const PAYLOAD_MAX_BYTES = 190;
 
-const TEST_FRONTEND = "https://sprouts-dev-app-frontend.sany.com.cn";
-const PROD_FRONTEND = "https://sprouts-dev-app-frontend.sany.com.cn";
+const TEST_FRONTEND = "https://maix-bm.irootech.com/repair";
+const PROD_FRONTEND = "https://maix-bm.irootech.com/repair";
 // const PROD_FRONTEND = "https://fixmasterai.sany.com.cn";
 
 /** 仅 `pnpm build:h5` 注入 production，其余命令都走测试地址。 */

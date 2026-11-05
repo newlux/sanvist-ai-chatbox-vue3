@@ -28,6 +28,7 @@ import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
+import AiPartsJumpSheet from "@/components/ai-parts-jump-sheet/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
@@ -218,6 +219,8 @@ const askSlotDrawerVisible = ref(false);
 const askSlotDrawerHeight = ref(0);
 const assistantNavigationPayload = ref<AssistantNavigationPayload | null>(null);
 const assistantNavigationVisible = ref(false);
+/** 底部「配件助手」点击后的地址输入弹层 */
+const partsJumpVisible = ref(false);
 let repairSummaryPollingTimer: ReturnType<typeof setTimeout> | null = null;
 let repairSummaryPollingAttempts = 0;
 const REPAIR_SUMMARY_POLL_INTERVAL_MS = 5_000;
@@ -591,6 +594,12 @@ function enterListenReport() {
 }
 
 function onNavItemClick(item: { key?: string; title?: string; subagent?: string; mode?: string; url?: string }) {
+  // 配件助手：不再切内联智能体，改成弹层里手填地址 → 新开 /pages/parts/index 内嵌
+  if (item?.key === "parts-master-ai") {
+    partsJumpVisible.value = true;
+    return;
+  }
+
   if (item?.mode === "inline") {
     const subagent = String(item?.subagent || "");
     if (!subagent) return;
@@ -608,6 +617,15 @@ function onNavItemClick(item: { key?: string; title?: string; subagent?: string;
   if (targetUrl) {
     void navigateToScene(targetUrl);
   }
+}
+
+/**
+ * 配件助手跳转：弹层里填的是完整地址，原样带给内嵌页（不拼参数、不做校验）。
+ */
+function onPartsJump(url: string) {
+  const target = String(url || "").trim();
+  if (!target) return;
+  void navigateToScene(`/pages/parts/index?url=${encodeURIComponent(target)}`);
 }
 
 /**
@@ -1020,6 +1038,12 @@ onBeforeUnmount(() => {
         v-model:visible="assistantNavigationVisible"
         :payload="assistantNavigationPayload"
         @confirm="onAssistantNavigationConfirm"
+      />
+      <!-- 底部「配件助手」入口：填地址 → 新开内嵌页 -->
+      <AiPartsJumpSheet
+        v-model:visible="partsJumpVisible"
+        :dark="isDark"
+        @jump="onPartsJump"
       />
       <AiGuideStepSheet
         ref="guideStepSheetRef"
