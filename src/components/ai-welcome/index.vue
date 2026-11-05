@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useUserStore } from "@/stores";
+import { useSystemStore, useUserStore } from "@/stores";
 import AiWelcomeMember from "./member.vue";
 import AiWelcomeVisitor from "./visitor.vue";
 
@@ -11,6 +11,13 @@ defineOptions({
 
 const emit = defineEmits(["start-chat"]);
 const userStore = useUserStore();
+/**
+ * 深浅色：与对话页同一套口径 —— 唯一数据源 systemStore.isDark。
+ * 内层（visitor.vue）自己按深色稿铺底，这里只管容器：
+ * 顶部安全区属于容器的 padding，不跟着换底就会在深色下露出 #FAFAFA 白带。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 const { safeAreaStyle } = useSafeArea();
 const isVisitor = computed(() => userStore.isVisitor === true);
 
@@ -20,7 +27,11 @@ function onStartChat() {
 </script>
 
 <template>
-  <view class="welcome" :class="{ 'welcome--visitor': isVisitor }" :style="safeAreaStyle">
+  <view
+    class="welcome"
+    :class="{ 'welcome--visitor': isVisitor, 'welcome--dark': isDark }"
+    :style="safeAreaStyle"
+  >
     <AiWelcomeVisitor v-if="isVisitor" />
     <AiWelcomeMember v-else @start-chat="onStartChat" />
   </view>
@@ -57,5 +68,14 @@ function onStartChat() {
 
 .welcome:not(.welcome--visitor) {
   background-image: url("@/assets/img/icon-bg-login.jpeg");
+}
+
+/* ===== 深色主题：容器底 =====
+   游客欢迎页的深色底（Ardot 1193:4280 #0D0D0D）由 visitor.vue 自己铺在内容区，
+   顶部安全区是这里的 padding，不一起换底就会在刘海处露出 #FAFAFA 白带。
+   成员欢迎页用的是深色登录图，深底不影响观感，保持原样。 */
+.welcome--dark.welcome--visitor {
+  background: #0d0d0d;
+  color: #ffffff;
 }
 </style>

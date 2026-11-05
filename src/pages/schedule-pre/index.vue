@@ -13,6 +13,7 @@ import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
+import { useSystemStore } from "@/stores";
 import { backFromScene } from "@/utils/scene-navigation";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
@@ -69,6 +70,10 @@ const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
  */
 const { safeTopPx } = useSafeArea();
 const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
+
+/** 深浅色：与对话页同一套口径（唯一数据源 systemStore.isDark），页面只负责把 --dark 类挂到根节点 */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 /**
  * 原生手势在真机不生效（旋转页面里浏览器不接管）：自己接管触摸，见 hooks/useScheduleGestures。
@@ -509,7 +514,10 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 </script>
 
 <template>
-  <view class="schedule" :class="{ 'schedule--rotated': rotated, 'schedule--exit-rotate': exitIconRotated }">
+  <view
+    class="schedule"
+    :class="{ 'schedule--rotated': rotated, 'schedule--exit-rotate': exitIconRotated, 'schedule--dark': isDark }"
+  >
     <!-- 顶部栏（6464:246 收起全部 / 10474:18 返回）：按产品要求去掉左侧标题与日期；
          原生横屏全屏时顶部留出状态栏高度（见 headerTopStyle） -->
     <view class="schedule__header" :style="headerTopStyle">
@@ -643,10 +651,10 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 
 
     <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态） -->
-    <ScheduleAskBar @send="onAskSend" />
+    <ScheduleAskBar :dark="isDark" :rotated="rotated" @send="onAskSend" />
 
     <!-- 任务详情面板（横屏右侧，点击任务条滑出，稿子 6832:292） -->
-    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" />
+    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" :dark="isDark" />
   </view>
 </template>
 
@@ -1102,5 +1110,106 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 .schedule__rows-inner {
   position: relative;
   will-change: transform;
+}
+
+/* ===== 深色主题：调度视图·预排草案 =====
+   只换材质与字色，版式 / 行高 / 手势 / 缩放与滚动一行不动：
+   - 页面与排程区底：#0D0D0D；竖网格线 #262626；行分隔线 #303030
+   - 左列：类别 #8E8E8E、资源名 #E5E5E5、车号|班次 #6B6B6B
+   - 任务条：底 #1A1A1A + 1px #303030（预排不区分状态，只有强调条保留品牌红描边），
+     条内标题 80% 白、时段 #6B6B6B
+   - 返回按钮、左右箭头同步换材质；箭头图标是深色线条，反相成白 */
+.schedule--dark {
+  background: #0d0d0d;
+  color: #e5e5e5;
+
+  /* ---- 顶部栏：返回 ---- */
+  .schedule__exit {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__exit-icon::before,
+  .schedule__exit-arrow::before {
+    border-color: #e5e5e5;
+  }
+
+  .schedule__exit-arrow {
+    background: #e5e5e5;
+  }
+
+  /* ---- 主体 / 左列资源 ---- */
+  .schedule__body,
+  .schedule__side,
+  .schedule__grid-wrap,
+  .schedule__grid,
+  .schedule__ruler {
+    background: #0d0d0d;
+  }
+
+  .schedule__side {
+    border-top-color: #303030;
+    border-right-color: #303030;
+  }
+
+  .schedule__side-head-text {
+    color: #b3b3b3;
+  }
+
+  .schedule__side-category {
+    color: #8e8e8e;
+  }
+
+  .schedule__side-name {
+    color: #6b6b6b;
+  }
+
+  .schedule__side-name--main {
+    color: #e5e5e5;
+  }
+
+  /* ---- 排程区：竖网格线 / 刻度 ---- */
+  .schedule__grid-inner {
+    background-color: #0d0d0d;
+    background-image: repeating-linear-gradient(
+      to right,
+      #262626 0,
+      #262626 1px,
+      transparent 1px,
+      transparent var(--hour-width, 56px)
+    );
+  }
+
+  .schedule__ruler-label {
+    color: #8e8e8e;
+  }
+
+  /* ---- 任务条 ---- */
+  .schedule__bar {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__bar--mark {
+    border-color: #c8201e;
+  }
+
+  .schedule__bar-title {
+    color: rgb(255 255 255 / 80%);
+  }
+
+  .schedule__bar-time {
+    color: #6b6b6b;
+  }
+
+  /* ---- 左右隐藏任务箭头 ---- */
+  .schedule__scroll-btn {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__scroll-icon {
+    filter: invert(1);
+  }
 }
 </style>

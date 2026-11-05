@@ -1035,6 +1035,7 @@ onBeforeUnmount(() => {
       <AiGuideSuggestionSheet
         v-model:visible="guideSuggestionSheetVisible"
         :payload="guideSuggestionPayload"
+        :dark="isDark"
         :keyboard-height="keyboardHeight"
         @submit="onGuideSuggestionSubmit"
         @height-change="onGuideSuggestionHeightChange"

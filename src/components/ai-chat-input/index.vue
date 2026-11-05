@@ -2053,6 +2053,24 @@ onBeforeUnmount(() => {
     background: transparent;
   }
 
+  // 录音态底部面板（1204:467）：浅色稿是两层 #FAFAFA 渐隐，深底上就是一大片白底。
+  // 同一套坡道（0 → 80%@21.16% → 100%@35.86%）只换色，换成页面底 #1A1A1A 的渐隐；
+  // ::after 是第二层（起点 168rpx），色值必须一起换，否则下半段又是一块白
+  .voice-panel__fade,
+  .voice-panel__fade::after {
+    background: linear-gradient(
+      180deg,
+      rgb(26 26 26 / 0%) 0%,
+      rgb(26 26 26 / 80%) 21.16%,
+      #1a1a1a 35.86%
+    );
+  }
+
+  // 提示行「松手发送 上滑取消」：浅色稿 #6D8AA6 是给白底配的，深底上读不清，抬到 72% 白
+  .voice-panel__hint {
+    color: rgb(255 255 255 / 72%);
+  }
+
   // 文本态整条胶囊（浅色 #FFFFFF，只有非 plain 的「有文字 / 生成中」才铺满整条）
   .input-bar.input-bar--text:not(.input-bar--plain) {
     background: #212121;

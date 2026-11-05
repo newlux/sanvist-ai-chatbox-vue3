@@ -30,7 +30,7 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { provideChatScope, useChatStore, useSessionStore, useSystemStore, useUserStore } from "@/stores";
 import { openGanttView } from "@/utils/gantt-navigation";
 import { isWebEnvironment } from "@/utils/landscape-device";
 import { createLogger } from "@/utils/logger";
@@ -66,6 +66,12 @@ const { t, locale } = useI18n();
 const chatScope = provideChatScope("task");
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
+/**
+ * 深浅色：与首页（日常运营助手）同一套口径 —— 只有一个数据源 `systemStore.isDark`
+ * （系统 getColorScheme / 设置弹层选择都会合流到这里），页面只负责把 `--dark` 类往下传。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 // 注入 --safe-top-px：悬浮头部的高度补偿（--chat-header-height）要按真实状态栏算
 const { safeAreaStyle } = useSafeArea();
 /**
@@ -972,12 +978,12 @@ onUnload(() => {
 </script>
 
 <template>
-  <view class="ai-page" :style="safeAreaStyle">
+  <view class="ai-page" :class="{ 'ai-page--dark': isDark }" :style="safeAreaStyle">
     <view class="ai-page__chat" :style="chatViewportStyle">
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
-      <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车） -->
-      <AiChatBackdrop />
+      <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车）；深色下隐藏（见 .ai-page--dark） -->
+      <AiChatBackdrop class="ai-page__backdrop" />
       <!-- 顶部毛玻璃渐隐：与首页对话页同一层，状态栏 / 头部区域半透明，内容滚上来只会被虚化 -->
       <view class="ai-page__top-fade" />
       <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
@@ -1013,14 +1019,15 @@ onUnload(() => {
         </text>
         <!-- 异常情况摘要卡（Ardot 350:2199）：只有待机态是 exception（task-init 引导流程进来且选过身份）才铺，替代任务入口卡 -->
         <view v-if="welcomeCardKind === 'exception' && exceptionCard" class="task-welcome__entry">
-          <AiTaskExceptionCard :data="exceptionCard" />
+          <AiTaskExceptionCard :data="exceptionCard" :dark="isDark" />
         </view>
         <!-- 任务入口卡（AiGanttEntryCard）：只渲染初始化对话返回的卡片数据，没有就整卡不渲染 -->
         <view v-else-if="initialGanttPayload" class="task-welcome__entry">
           <GanttBlock
             :payload="initialGanttPayload"
+            :dark="isDark"
             card-only
-            @open="openGanttView"
+            @open="onGanttOpen"
           />
         </view>
         <text class="task-welcome__label">
@@ -1042,6 +1049,7 @@ onUnload(() => {
       <AiMessageList
         :key="chatListKey"
         top-inset="var(--chat-top-inset, 300rpx)"
+        :dark="isDark"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
@@ -1192,6 +1200,7 @@ onUnload(() => {
         v-else
         ref="chatInputRef"
         v-model="inputText"
+        :dark="isDark"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
@@ -1216,6 +1225,7 @@ onUnload(() => {
       <AiSlotDrawer
         :slots="askSlotQueue"
         scene="task"
+        :dark="isDark"
         :visible="askSlotDrawerVisible"
         @close="closeAskSlotDrawer"
         @submit="onAskSlotSubmit"
@@ -1224,6 +1234,7 @@ onUnload(() => {
       <AiGuideStepSheet
         v-model:visible="guideStepSheetVisible"
         :payload="guideStepPayload"
+        :dark="isDark"
         :keyboard-height="keyboardHeight"
         @submit="onGuideStepSubmit"
         @height-change="onGuideStepHeightChange"
@@ -1233,6 +1244,7 @@ onUnload(() => {
       <AiGuideSuggestionSheet
         v-model:visible="guideSuggestionSheetVisible"
         :payload="guideSuggestionPayload"
+        :dark="isDark"
         :keyboard-height="keyboardHeight"
         @submit="onGuideSuggestionSubmit"
         @height-change="onGuideSuggestionHeightChange"
@@ -1764,5 +1776,57 @@ $color-white: #ffffff;
   top: 0;
   left: -9999px;
   pointer-events: none;
+}
+
+/* ===== 深色主题：作业协同页（与首页对话页同一套口径，Ardot 1193:2097） =====
+   页面底 1193:2122：#1A1A1A（浅色稿 #FAFAFA 的对应值），顶部渐隐跟着换底，
+   角落光晕与设备线稿深色稿 visible = false；
+   待机引导区（Ardot 350:2151）只换字色与分隔线，间距 / 字号不动：
+   标题 #FFFFFF、说明与问题 80% 白、分隔线 #303030。 */
+.ai-page--dark {
+  background: #1a1a1a;
+
+  .ai-page__chat {
+    background: #1a1a1a;
+  }
+
+  // 渐隐材质换成深色页面底：上沿完全盖住滚上来的内容，往下渐透
+  .ai-page__top-fade {
+    background: linear-gradient(
+      180deg,
+      #1a1a1a 0%,
+      rgba(26, 26, 26, 0.7) 45%,
+      rgba(26, 26, 26, 0) 100%
+    );
+  }
+
+  // 浅色底上的彩色雾放到深底上会泛白，深色稿里这两个光晕本身就是关掉的
+  .ai-chat-glow {
+    display: none;
+  }
+
+  .ai-page__backdrop {
+    display: none;
+  }
+
+  .task-welcome__title {
+    color: #ffffff;
+  }
+
+  .task-welcome__desc {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .task-welcome__list {
+    border-bottom-color: #303030;
+  }
+
+  .task-welcome__row {
+    border-top-color: #303030;
+  }
+
+  .task-welcome__question {
+    color: rgba(255, 255, 255, 0.8);
+  }
 }
 </style>

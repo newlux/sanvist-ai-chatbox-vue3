@@ -11,6 +11,7 @@ import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
+import { useSystemStore } from "@/stores";
 import { isWebEnvironment } from "@/utils/landscape-device";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
@@ -67,6 +68,10 @@ const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
  */
 const { safeTopPx } = useSafeArea();
 const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
+
+/** 深浅色：与对话页同一套口径（唯一数据源 systemStore.isDark），页面只负责把 --dark 类挂到根节点 */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 /**
  * 原生手势在真机不生效（旋转页面里浏览器不接管）：自己接管触摸，见 hooks/useScheduleGestures。
@@ -702,7 +707,13 @@ function toggleShowAll() {
 </script>
 
 <template>
-  <view class="schedule" :class="['schedule--rep', { 'schedule--rotated': rotated, 'schedule--exit-rotate': exitIconRotated }]">
+  <view
+    class="schedule"
+    :class="[
+      'schedule--rep',
+      { 'schedule--rotated': rotated, 'schedule--exit-rotate': exitIconRotated, 'schedule--dark': isDark },
+    ]"
+  >
     <!-- 顶部栏（7229:254：图例、查看全部任务、返回对话）：按产品要求去掉左侧标题与日期 -->
     <view class="schedule__header" :style="headerTopStyle">
       <view class="schedule__tools">
@@ -887,7 +898,7 @@ function toggleShowAll() {
     </view>
 
     <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态） -->
-    <ScheduleAskBar @send="onAskSend" />
+    <ScheduleAskBar :dark="isDark" :rotated="rotated" @send="onAskSend" />
   </view>
 </template>
 
@@ -1545,5 +1556,214 @@ function toggleShowAll() {
 .schedule__rows-inner {
   position: relative;
   will-change: transform;
+}
+
+/* ===== 深色主题：调度视图·重排草案 =====
+   只换材质与字色，版式 / 行高 / 手势 / 缩放与滚动一行不动：
+   - 页面与排程区底：#0D0D0D；竖网格线 #262626；行分隔线 #303030（分组线 #3A3A3A）
+   - 左列：类别 #8E8E8E、资源名 #E5E5E5、车号|班次 #6B6B6B；旧 / 新 标签格透明底 + #303030 描边
+   - 任务条：底 #1A1A1A；原计划虚线 #3A3A3A、新计划虚线 #4C7396、已取消文案 #5D5D5D、
+     强调 / 选中为 #E5E5E5 实线；条内标题 80% 白、时段 #6B6B6B
+   - 顶部图例 / 勾选 / 返回、底部提示条、左右箭头同步换材质；箭头图标是深色线条，反相成白 */
+.schedule--dark {
+  background: #0d0d0d;
+  color: #e5e5e5;
+
+  /* ---- 顶部栏：图例 / 查看全部 / 返回 ---- */
+  .schedule__legend-text {
+    color: #b3b3b3;
+  }
+
+  .schedule__legend-chip {
+    border-color: #3a3a3a;
+    background: #1a1a1a;
+  }
+
+  .schedule__legend-chip--new {
+    border-color: #4c7396;
+    background: #1a1a1a;
+  }
+
+  .schedule__legend-chip--canceled {
+    border-color: #3a3a3a;
+    background: #141414;
+  }
+
+  .schedule__checkbox {
+    border-color: #4a4a4a;
+    background: transparent;
+  }
+
+  .schedule__checkbox--on {
+    border-color: #e5e5e5;
+    background: #e5e5e5;
+  }
+
+  .schedule__exit {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__exit-icon::before,
+  .schedule__exit-arrow::before {
+    border-color: #e5e5e5;
+  }
+
+  .schedule__exit-arrow {
+    background: #e5e5e5;
+  }
+
+  /* ---- 主体 / 左列资源 ---- */
+  .schedule__body,
+  .schedule__side,
+  .schedule__grid-wrap,
+  .schedule__grid,
+  .schedule__ruler {
+    background: #0d0d0d;
+  }
+
+  .schedule__side {
+    border-top-color: #303030;
+    border-right-color: #303030;
+  }
+
+  .schedule__side-head-text {
+    color: #b3b3b3;
+  }
+
+  .schedule__side-group {
+    border-top-color: #303030;
+  }
+
+  .schedule__side-group:last-child {
+    border-bottom-color: #303030;
+  }
+
+  .schedule__side-group--separator {
+    box-shadow: 0 1px 0 0 #303030;
+  }
+
+  .schedule__side-category {
+    color: #8e8e8e;
+  }
+
+  .schedule__side-name {
+    color: #6b6b6b;
+  }
+
+  .schedule__side-name--main {
+    color: #e5e5e5;
+  }
+
+  .schedule__side-tag {
+    border-color: #303030;
+    background: transparent;
+    color: #8e8e8e;
+  }
+
+  /* ---- 排程区：竖网格线 / 刻度 / 行分隔 ---- */
+  .schedule__grid-inner {
+    background-color: #0d0d0d;
+    background-image: repeating-linear-gradient(
+      to right,
+      #262626 0,
+      #262626 1px,
+      transparent 1px,
+      transparent var(--hour-width, 56px)
+    );
+  }
+
+  .schedule__ruler-label {
+    color: #8e8e8e;
+  }
+
+  .schedule__track--separator {
+    box-shadow: 0 1px 0 0 #303030;
+  }
+
+  /* ---- 任务条通用 ---- */
+  .schedule__bar {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__bar-title {
+    color: rgb(255 255 255 / 80%);
+  }
+
+  .schedule__bar-time {
+    color: #6b6b6b;
+  }
+
+  /* 新旧关联虚线：跟新计划描边同色 */
+  .schedule__link {
+    border-top-color: #4c7396;
+  }
+
+  /* ---- 底部提示条 / 左右隐藏任务箭头 ---- */
+  .schedule__notice {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__notice-chip {
+    background: #f2f2f2;
+    color: #1a1a1a;
+  }
+
+  .schedule__notice-text {
+    color: #e5e5e5;
+  }
+
+  .schedule__notice-close::before,
+  .schedule__notice-close::after {
+    background: #e5e5e5;
+  }
+
+  .schedule__scroll-btn {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__scroll-icon {
+    filter: invert(1);
+  }
+
+  /* ---- 重排专用：原计划 / 新计划 / 已取消 / 强调 ---- */
+  &.schedule--rep {
+    .schedule__bar {
+      border-color: #3a3a3a;
+      background: #1a1a1a;
+    }
+
+    .schedule__bar--new {
+      border-color: #4c7396;
+      background: #141414;
+    }
+
+    .schedule__bar--canceled .schedule__bar-title,
+    .schedule__bar--canceled .schedule__bar-time {
+      color: #5d5d5d;
+    }
+
+    .schedule__bar--mark {
+      border-color: #e5e5e5;
+    }
+
+    .schedule__bar--active {
+      border-color: #e5e5e5;
+      box-shadow: 0 0 0 1px #e5e5e5 inset;
+    }
+
+    /* 分组分隔线在重排稿里比普通行线深一档 */
+    .schedule__track--separator,
+    .schedule__side-group--separator {
+      box-shadow: 0 1px 0 0 #3a3a3a;
+    }
+
+    .schedule__side-group--separator {
+      border-top-color: #3a3a3a;
+    }
+  }
 }
 </style>

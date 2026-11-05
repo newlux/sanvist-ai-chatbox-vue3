@@ -12,7 +12,7 @@ import closeIcon from "@/assets/img/icon-close.svg";
  * - 问题行 ← data.items[].suggestion_question
  * - 选项卡 ← data.items[].options[].label
  * - 末尾输入框的 placeholder ← data.items[].other_text（为空则不展示），右侧带「发送」图标
- *   （与原生输入栏 input-bar 同款 icon-send.svg，与键盘回车等效，输入为空时置灰）
+ *   （与对话页输入栏同款 icon-send-up.svg：黑圆 + 白上箭头，与键盘回车等效，输入为空时置灰）
  *
  * 与步骤卡的区别：options 是**并行分支**，点哪一项就把那一项作为下一轮提问发出去；
  * 没有 i/n 进度，也没有「确认 / 拍照」这类步骤语义。
@@ -25,10 +25,13 @@ const props = withDefaults(defineProps<{
   visible?: boolean;
   /** 键盘高度（px）：末尾输入框聚焦时把卡片顶上去，别被键盘盖住 */
   keyboardHeight?: number;
+  /** 深色模式：白板换成深色底板（#212121），由页面按 systemStore.isDark 传 */
+  dark?: boolean;
 }>(), {
   payload: null,
   visible: false,
   keyboardHeight: 0,
+  dark: false,
 });
 
 const emit = defineEmits<{
@@ -52,6 +55,8 @@ const question = computed(() => String(props.payload?.question || "").trim());
 const otherText = computed(() => String(props.payload?.other_text || "").trim());
 /** 输入框有内容，「发送」按钮才是可用态 */
 const canSubmitText = computed(() => Boolean(draftText.value.trim()));
+/** 占位文案颜色：placeholder-style 是内联样式，样式表盖不住，深色只能在这里换 */
+const placeholderStyle = computed(() => (props.dark ? "color:#6b6b6b;" : "color:#999999;"));
 
 function submitQuery(query: string) {
   if (!query) return;
@@ -106,6 +111,7 @@ watch(() => props.visible, () => {
   <view
     v-if="visible && options.length"
     class="guide-suggestion-sheet"
+    :class="{ 'guide-suggestion-sheet--dark': dark }"
     :style="keyboardHeight > 0 ? { bottom: `${keyboardHeight}px` } : undefined"
   >
     <view class="guide-suggestion-sheet__header">
@@ -143,7 +149,7 @@ watch(() => props.visible, () => {
           class="guide-suggestion-sheet__input"
           type="text"
           :placeholder="otherText"
-          placeholder-style="color:#999999;"
+          :placeholder-style="placeholderStyle"
           confirm-type="send"
           :confirm-hold="true"
           @confirm="onSubmitText"
@@ -156,7 +162,7 @@ watch(() => props.visible, () => {
           @touchstart.stop.prevent="onSubmitText"
           @tap="onSubmitText"
         >
-          <image class="guide-suggestion-sheet__send-icon" src="@/assets/img/icon-send.svg" mode="aspectFit" />
+          <image class="guide-suggestion-sheet__send-icon" src="@/assets/img/icon-send-up.svg" mode="aspectFit" />
         </view>
       </view>
     </view>
@@ -291,7 +297,7 @@ watch(() => props.visible, () => {
   color: #000000;
 }
 
-/* 发送图标：与原生输入栏 input-bar__send 同款（icon-send.svg，图标自带底色，不再加按钮底色） */
+/* 发送图标：与对话页输入栏同款（icon-send-up.svg：黑圆 + 白上箭头，圆形底由切图自带） */
 .guide-suggestion-sheet__send {
   display: flex;
   align-items: center;
@@ -324,5 +330,37 @@ watch(() => props.visible, () => {
   font-weight: 400;
   line-height: 30rpx;
   color: #bababa;
+}
+
+/* ===== 深色主题：多轮追问卡 =====
+   与回复卡同一套材质（底 #212121），尺寸 / 圆角 / 间距 / 键盘顶升逻辑一律不动：
+   - 白板 → #212121；向上阴影加深（浅色阴影在深底上看不见）
+   - 小标签 #8E8E8E、问题 #FFFFFF、选项卡与输入行 rgba(255,255,255,.06)、文案 85% 白
+   - 关闭图标（#999）与红色发送按钮原样保留，深底上照样清楚；免责声明压到 #6B6B6B */
+.guide-suggestion-sheet--dark {
+  background: #212121;
+  box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.45);
+
+  .guide-suggestion-sheet__label {
+    color: #8e8e8e;
+  }
+
+  .guide-suggestion-sheet__question {
+    color: #ffffff;
+  }
+
+  .guide-suggestion-sheet__option,
+  .guide-suggestion-sheet__input-row {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .guide-suggestion-sheet__option-label,
+  .guide-suggestion-sheet__input {
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .guide-suggestion-sheet__hint {
+    color: #6b6b6b;
+  }
 }
 </style>

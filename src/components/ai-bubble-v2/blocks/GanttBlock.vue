@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { GanttViewPayload } from "@/api/chat/types";
 
-import { computed } from "vue";
+import { computed, inject } from "vue";
 import AiGanttEntryCard from "@/components/ai-gantt-entry-card/index.vue";
 import { hasGanttCard, resolveGanttCardText } from "@/utils/gantt-card";
 
@@ -21,9 +21,15 @@ const props = defineProps({
   payload: { type: Object as () => GanttViewPayload | null, default: () => ({}) },
   /** 只取卡片数据渲染，缺省字段不推导 */
   cardOnly: { type: Boolean, default: false },
+  /** 深色模式：气泡内由 ai-bubble-v2 provide 注入，页面直接用时可显式传 */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{ open: [payload: GanttViewPayload] }>();
+
+/** 气泡里的深色状态（ai-bubble-v2 provide "ai-bubble-dark"）；不在气泡里默认 false */
+const darkContainer = inject("ai-bubble-dark", computed(() => false));
+const isDark = computed(() => props.dark || darkContainer.value);
 
 const view = computed<GanttViewPayload>(() => props.payload || {});
 
@@ -47,6 +53,7 @@ function onTap() {
     :status="cardText.status"
     :devices="cardText.devices"
     :task-count="cardText.taskCount"
+    :dark="isDark"
     @tap="onTap"
   />
 </template>

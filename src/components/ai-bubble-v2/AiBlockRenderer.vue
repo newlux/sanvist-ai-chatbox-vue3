@@ -74,6 +74,14 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  /**
+   * 深色模式：气泡里的块通过 ai-bubble-v2 的 provide 拿深色状态，不需要传；
+   * 消息列表把「调度视图入口卡」独立渲染在气泡外，那一处拿不到 provide，由列表显式传进来。
+   */
+  dark: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits([
@@ -187,7 +195,12 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
   />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
   <!-- 调度视图入口卡（COMPONENT scene=task / type=gantt）：点它跳横屏调度视图并带上整包数据 -->
-  <GanttBlock v-else-if="block.type === 'gantt'" :payload="block.payload" @open="onGanttOpen" />
+  <GanttBlock
+    v-else-if="block.type === 'gantt'"
+    :payload="block.payload"
+    :dark="dark"
+    @open="onGanttOpen"
+  />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
   <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />
   <GuideVideoBlock v-else-if="block.type === 'video'" :payload="block.payload" />

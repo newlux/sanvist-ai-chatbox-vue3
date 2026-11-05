@@ -1125,6 +1125,7 @@ onBeforeUnmount(() => {
       <AiGuideSuggestionSheet
         v-model:visible="reportQaGuideSuggestionVisible"
         :payload="reportQaGuideSuggestion"
+        :dark="pageDark"
         :keyboard-height="keyboardHeight"
         @submit="onReportQaQuerySubmit"
       />
