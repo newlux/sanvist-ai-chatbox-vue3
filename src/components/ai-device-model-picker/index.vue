@@ -23,6 +23,8 @@ withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: "update:modelValue", value: string): void;
   (e: "update:visible", value: boolean): void;
+  /** 用户点了某个机型（页面据此做「切换机型」的反馈：成功播报 / 失败提示） */
+  (e: "select", modelKey: string): void;
 }>();
 
 function closeSheet() {
@@ -33,6 +35,8 @@ function closeSheet() {
 function selectModel(modelKey: string) {
   emit("update:modelValue", modelKey);
   closeSheet();
+  // 放在收起之后：页面在「切换失败」分支里会把卡片重新弹起来，晚到的收起会把这次重开覆盖掉
+  emit("select", modelKey);
 }
 </script>
 

@@ -4,6 +4,7 @@ import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload } from "@/api/chat/types";
+import type { DeviceModelOption } from "@/api/user-role/device-models";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { getDeviceModels, getTodayAwakeningPrompt } from "@/api/user-role";
 import iconHelp from "@/assets/img/icon-help.svg";
@@ -24,7 +25,9 @@ import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
+import { useSpeakText } from "@/hooks/useSpeakText";
 import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { isDeviceModelSwitchIntent } from "@/utils/device-model-intent";
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -113,6 +116,8 @@ const {
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用实时 TTS 做流式听播。
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
 const realtimeTts = useRealtimeTts(chatScope);
+/** 播报任意文本（机型切换回执这类本地提示语，没有服务端 messageId，两套听播引擎都用不了） */
+const noticeTts = useSpeakText();
 const { sendMessage: sendChatMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
   // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
@@ -131,10 +136,17 @@ const { sendMessage: sendChatMessage, sendQuickPrompt, beginAsrPlaceholder, disc
   },
 });
 
-/** 停掉本页两套听播引擎（实时流式 + 历史整段）：换交互 / 离开页面时统一走这里。 */
+/** 停掉本页全部听播（实时流式 + 历史整段 + 本地提示语音）：换交互 / 离开页面时统一走这里。 */
 function stopSceneTts() {
   realtimeTts.stop();
   stopHistoryTts();
+  noticeTts.stop();
+}
+
+/** 弹机型选择卡片：机型还没拉回来时先补一次请求，避免弹出一张空列表 */
+function openDeviceModelSheet() {
+  if (!userStore.deviceModels.length) void loadDeviceModels();
+  deviceModelSheetVisible.value = true;
 }
 
 /**
@@ -142,6 +154,16 @@ function stopSceneTts() {
  * 同步停、不依赖 activeRequestSeq watcher —— 发出去的瞬间就安静。
  */
 function sendMessage(payload?: Parameters<typeof sendChatMessage>[0]) {
+  // 语音说「换台设备 / 打开设备列表」这类指令：这句话不发给对话接口，
+  // 撤掉语音的「识别中…」占位、清空输入框，直接把机型卡片弹起来重选。
+  const rawText = String(payload?.text ?? chatStore.inputText ?? "");
+  if (isDeviceModelSwitchIntent(rawText)) {
+    stopSceneTts();
+    discardAsrPlaceholder();
+    chatStore.inputText = "";
+    openDeviceModelSheet();
+    return;
+  }
   stopSceneTts();
   return sendChatMessage(payload);
 }
@@ -514,18 +536,71 @@ async function loadAwakeningPrompt() {
 }
 
 /**
+ * 机型列表只认接口：modelName 是选项卡展示的型号牌，modelKey 才是随对话透传给 Dify 的
+ * inputs.device_model。按 modelKey 去重并补全 modelName（老数据可能只给 key）。
+ */
+function normalizeDeviceModels(apiModels: DeviceModelOption[]) {
+  const merged: DeviceModelOption[] = [];
+  const seen = new Set<string>();
+  for (const item of apiModels) {
+    const modelKey = String(item?.modelKey || "").trim();
+    if (!modelKey || seen.has(modelKey)) continue;
+    seen.add(modelKey);
+    merged.push({ modelKey, modelName: String(item?.modelName || modelKey) });
+  }
+  return merged;
+}
+
+/**
  * 机型选项：进入本页时初始化拉取，拿到数据后直接把选择卡片弹起来。
+ * 机型全部由接口下发（原先前端固定补的两款汽车起重机已由接口返回，不再附加）；
  * 失败或没有机型时只记日志，不打断页面。
  */
 async function loadDeviceModels() {
+  let apiModels: DeviceModelOption[] = [];
   try {
     const data = await getDeviceModels();
-    const models = Array.isArray(data?.models) ? data.models : [];
-    userStore.setDeviceModels(models);
-    deviceModelSheetVisible.value = models.length > 0;
+    apiModels = Array.isArray(data?.models) ? data.models : [];
   } catch (error) {
     logger.warn("failed to load device models", error);
   }
+  const models = normalizeDeviceModels(apiModels);
+  userStore.setDeviceModels(models);
+  deviceModelSheetVisible.value = models.length > 0;
+}
+
+/**
+ * 机型选择卡片选中后：切换机型 + 语音回一句。
+ *
+ * 切换成功 → 只播语音「已切换到{设备名称}，接下来我会按这台设备回答。」，往对话里插气泡会把
+ *            正常问答记录冲乱，所以不再落文字消息；
+ * 切换失败 → toast「切换失败，请重新选择。」，并把选择卡片重新弹起来让用户重选。
+ *
+ * 机型目前只落在本地（selectedDeviceModel → watch 同步 store → 下一次对话作为
+ * inputs.device_model 透传）。后端若要做切换请求，在 try 里 await 那次请求、失败抛错即可，
+ * 失败分支已经接好。
+ */
+async function onDeviceModelSelect(modelKey: string) {
+  const model = userStore.deviceModels.find(item => item.modelKey === modelKey);
+  let switched = false;
+  try {
+    if (!model) throw new Error(`device model not found: ${modelKey}`);
+    // 切机型时先让当前听播闭嘴，免得和回执语音叠在一起
+    stopSceneTts();
+    selectedDeviceModel.value = modelKey;
+    switched = true;
+  } catch (error) {
+    logger.warn("switch device model failed", error);
+  }
+
+  if (switched && model) {
+    noticeTts.speak(`已切换到${model.modelName}，接下来我会按这台设备回答。`);
+    return;
+  }
+
+  uni.showToast({ title: "切换失败，请重新选择。", icon: "none" });
+  // 重选：把卡片重新弹起来（成功时卡片已经自己收起）
+  openDeviceModelSheet();
 }
 
 async function onScrollTop() {
@@ -764,11 +839,14 @@ onUnload(() => {
         @dock-height-change="setInputDockHeight"
       />
 
-      <!-- 进入页面自动弹起的机型选择卡片，选完即收起；页面上不保留入口 -->
+      <!-- 进入页面自动弹起的机型选择卡片，选完即收起；页面上不保留入口。
+           选中值只由 onDeviceModelSelect 在「切换成功」时写回（不回接 update:modelValue），
+           切换失败时卡片里的选中态仍是上一台设备 -->
       <AiDeviceModelPicker
-        v-model="selectedDeviceModel"
+        :model-value="selectedDeviceModel"
         v-model:visible="deviceModelSheetVisible"
         :models="userStore.deviceModels"
+        @select="onDeviceModelSelect"
       />
 
       <!-- 回答里的指导步骤卡片：选中步骤后自动收起并带上选择回发下一轮 -->
