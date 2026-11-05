@@ -1,4 +1,5 @@
 import type { PlatformRequestOptions } from "@/utils/platform/http-request";
+import { readBridgeStartupParams } from "@/utils/launch-query";
 import { createLogger } from "@/utils/logger";
 
 import {
@@ -45,8 +46,24 @@ let authorization = "";
 let guestRole = "";
 let baseURL = import.meta.env.VITE_AI_QUESTION_BASE_URL;
 
+/** 宿主下发的鉴权串（Authorization 头原值，通常形如 `bearer xxx`），由 App.vue 启动时写入 */
 export function setRequestAuth(value: string) {
-  authorization = value;
+  authorization = String(value || "").trim();
+}
+
+/**
+ * 取当前 Authorization。
+ *
+ * 正常情况下 App 的 onLaunch 已经写入；但离线包 / 场景窗口里 bridge 常比首屏晚，
+ * 补参回调又可能晚于第一个请求，所以为空时在这里再从桥上读一次（拿到就缓存）。
+ * 大小写两种写法宿主都用过（Authorization / authorization）。
+ */
+function resolveAuthorization(): string {
+  if (authorization) return authorization;
+  const params = readBridgeStartupParams();
+  const late = String(params.Authorization || params.authorization || "").trim();
+  if (late) authorization = late;
+  return authorization;
 }
 
 export function setRequestBaseURL(value: string) {
@@ -57,9 +74,14 @@ export function getRequestBaseURL() {
   return baseURL;
 }
 
+/**
+ * 统一请求头：宿主注入的 Authorization + 游客角色 + 调用方自定义头。
+ * JSON / 上传 / SSE（fetch）都走这里，保证三处口径一致。
+ */
 export function getRequestHeaders(headers: Record<string, string> = {}) {
+  const auth = resolveAuthorization();
   return {
-    ...(authorization ? { Authorization: authorization } : {}),
+    ...(auth ? { Authorization: auth } : {}),
     ...(guestRole ? { "guest-role": guestRole } : {}),
     ...headers,
   };

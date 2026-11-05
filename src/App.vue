@@ -43,7 +43,8 @@ function initializeSystem(query: StartupQuery) {
   setupDebugConsole(query);
   setSceneStartupQuery(query);
 
-  const authorization = query?.Authorization || authorizationFallback;
+  // 宿主大小写两种写法都出现过（Authorization / authorization），这里都认
+  const authorization = String(query?.Authorization || query?.authorization || authorizationFallback || "").trim();
   const lang = String(query.Lang || "zh_CN");
   const country = String(query.country || "");
   const version = String(query.version || "");
@@ -133,11 +134,26 @@ function initializeIframeBridge(query: StartupQuery) {
 }
 
 /**
- * 离线包场景常见「bridge 比页面晚到」：宿主塞在 startupParams 里的 Lang 那一刻才读得到。
- * 只有真拿到且与当前语言不同才补切一次，避免重复拉远程语言包。
+ * 晚到的授权信息：写入请求模块（后续请求头自动带上）并同步 header。
+ * header 是整份替换，这里合并后写回，别把 Lang / Timezone 等一起冲掉。
+ */
+function applyLateAuthorization(params: StartupQuery) {
+  const lateAuth = String(params?.Authorization || params?.authorization || "").trim();
+  if (!lateAuth) return;
+  const currentAuth = String(systemStore.header.Authorization || "").trim();
+  if (lateAuth === currentAuth) return;
+  logger.info("bridge 晚到，补授权信息");
+  setRequestAuth(lateAuth);
+  systemStore.setHeader({ ...systemStore.header, Authorization: lateAuth });
+}
+
+/**
+ * 离线包场景常见「bridge 比页面晚到」：宿主塞在 startupParams 里的 Authorization / Lang
+ * 那一刻才读得到。只有真拿到且与当前值不同才补一次，避免重复写 header、重复拉远程语言包。
  */
 function watchLateStartupParams() {
   subscribeStartupParams((params) => {
+    applyLateAuthorization(params);
     const lateLang = String(params.Lang || "");
     const currentLang = String(systemStore.header.Lang || "");
     if (!lateLang || lateLang === currentLang) return;
