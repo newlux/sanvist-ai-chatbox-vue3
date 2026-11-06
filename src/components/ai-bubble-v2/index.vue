@@ -993,6 +993,10 @@ function onNegativeFeedback() {
   right: 40rpx;
   left: 40rpx;
   z-index: 1005; // 盖过顶部毛玻璃（1）、低于头部（1010）与录音条（1001）
+  padding-bottom: 12rpx;
+  // 铺页面底色（下沿羽化到透明）：列表被顶上去之后这块本来就是空白；
+  // 万一 pin 没到位、旧气泡还停在原处，也不会从字的缝里透出来跟文字叠在一起
+  background: linear-gradient(180deg, #fafafa 0%, #fafafa 62%, rgba(250, 250, 250, 0) 100%);
   color: #0d0d0d;
   font-size: 32rpx;
   font-weight: 500;
@@ -1004,6 +1008,7 @@ function onNegativeFeedback() {
 }
 
 .ai-bubble-v2-asr-tip--dark {
+  background: linear-gradient(180deg, #1a1a1a 0%, #1a1a1a 62%, rgba(26, 26, 26, 0) 100%);
   color: #f2f3f5;
 }
 

@@ -91,13 +91,9 @@ const secondsText = computed(() => `${props.seconds}s`);
 </script>
 
 <template>
-  <!-- ===== 录音中底部光晕 =====
-       浅色稿：白色主光 + 极淡蓝边（不是整块蓝雾），胶囊周围亮，往上/往外淡出到透明；
-       深色稿：沿用原来的冷蓝光，避免白雾糊在深底上 -->
-  <view class="voice-query__glow" :class="{ 'voice-query__glow--dark': dark }" aria-hidden="true">
-    <view class="voice-query__glow-white" />
-    <view class="voice-query__glow-ellipse" />
-  </view>
+  <!-- ===== 录音中底部半圆光晕：#0F7EEE 径向渐变，圆心在底部正中，向上收成半圆顶 =====
+       单层纯渐变就够：靠 alpha 收边，不会像「模糊层 + overflow 裁」那样切出硬线 -->
+  <view class="voice-query__glow" :class="{ 'voice-query__glow--dark': dark }" aria-hidden="true" />
 
   <!-- 设计稿 70:1651 Voice Pill：327×44 / r45 / rgba(13,13,13,0.38) / 左右 24 距底 36 -->
   <view class="voice-query" :class="{ 'voice-query--dark': dark }">
@@ -143,74 +139,44 @@ const secondsText = computed(() => `${props.seconds}s`);
 
 <style scoped lang="scss">
 /* ===================== 录音中底部光晕 =====================
-   浅色稿按「白为主、蓝做边」实现：胶囊周围一圈白色柔光，再往外是一层几乎看不见的淡蓝，
-   到边界已经透明，所以没有硬切边（原来用 blur + overflow 裁，蓝块上沿会出现一条直线）。
-   bottom 带上 safe-area：胶囊本身也随安全区上移，光晕必须同幅上移。 */
+   色值用 #0F7EEE（rgb(15,126,238)），径向渐变：圆心在底部正中，
+   从胶囊底下向四周衰减，抬头是一条大半径的圆弧 —— 不是线性渐变那样整条横平。
+
+   形状要「很扁的弧」：水平半径给到 120%（比屏宽还宽），垂直半径 = 层高 230px，
+   宽高比接近 2:1。屏幕可见的只是这个超大椭圆的顶部一小段，
+   所以中间几乎是平的、两侧缓缓落到屏幕边上（不是小半圆那种碗形）。
+
+   bottom: 0 而不是 safe-area：光晕要贴到屏幕最下沿，
+   胶囊与提示语各自带 safe-area 上移，不受影响。 */
 .voice-query__glow {
   position: fixed;
   right: 0;
-  bottom: calc(env(safe-area-inset-bottom) - 80rpx);
+  bottom: 0;
   left: 0;
   z-index: 1000; // 压在胶囊（1001）之下、内容之上
-  height: 420rpx;
+  height: 460rpx; // 230px，与椭圆的垂直半径一致
+  background: radial-gradient(
+    ellipse 75% 78% at 50% 100%,
+    rgba(15, 126, 238, 0.4) 0%,
+    rgba(15, 126, 238, 0.26) 30%,
+    rgba(15, 126, 238, 0.12) 58%,
+    rgba(15, 126, 238, 0.04) 82%,
+    rgba(15, 126, 238, 0) 100%
+  );
   pointer-events: none;
   animation: voice-query-glow-in 260ms ease-out both;
 }
 
-/* 中心提亮：纯白椭圆，焦点落在胶囊上（距底约 58px），四周平滑淡出到透明。
-   z-index 压在外圈淡蓝之上：白光要在里、蓝边在外，反过来中心会被蓝染一道 */
-.voice-query__glow-white {
-  position: absolute;
-  z-index: 1;
-  right: -10%;
-  bottom: 0;
-  left: -10%;
-  height: 400rpx;
-  border-radius: 50%;
-  background: radial-gradient(
-    ellipse 50% 50% at 50% 55%,
-    #ffffff 0%,
-    rgba(255, 255, 255, 0.92) 38%,
-    rgba(255, 255, 255, 0.45) 66%,
-    rgba(255, 255, 255, 0) 100%
-  );
-}
-
-/* 外圈淡蓝：只在白光边缘透出一点冷色，量级压到「不仔细看看不出来」 */
-.voice-query__glow-ellipse {
-  position: absolute;
-  right: -16%;
-  bottom: -100rpx;
-  left: -16%;
-  height: 540rpx;
-  border-radius: 50%;
-  background: radial-gradient(
-    ellipse 50% 50% at 50% 50%,
-    rgba(222, 236, 255, 0.85) 0%,
-    rgba(226, 238, 255, 0.45) 55%,
-    rgba(226, 238, 255, 0) 100%
-  );
-}
-
-/* 深色外观：白雾糊在深底上会发脏，换回原来的冷蓝光 */
+/* 深色外观：深底上要更亮一点才看得出，色值不变 */
 .voice-query__glow--dark {
-  .voice-query__glow-white {
-    background: radial-gradient(
-      ellipse 50% 50% at 50% 55%,
-      rgba(41, 93, 195, 0.55) 0%,
-      rgba(13, 122, 186, 0.35) 45%,
-      rgba(13, 122, 186, 0) 100%
-    );
-  }
-
-  .voice-query__glow-ellipse {
-    background: radial-gradient(
-      ellipse 50% 50% at 50% 50%,
-      rgba(15, 126, 238, 0.4) 0%,
-      rgba(15, 126, 238, 0.18) 55%,
-      rgba(15, 126, 238, 0) 100%
-    );
-  }
+  background: radial-gradient(
+    ellipse 120% 100% at 50% 100%,
+    rgba(15, 126, 238, 0.56) 0%,
+    rgba(15, 126, 238, 0.37) 30%,
+    rgba(15, 126, 238, 0.17) 58%,
+    rgba(15, 126, 238, 0.06) 82%,
+    rgba(15, 126, 238, 0) 100%
+  );
 }
 
 /* 与胶囊的散开动画同步浮现；静态终态与设计稿完全一致 */
