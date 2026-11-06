@@ -41,12 +41,51 @@ export function readUrlLaunchQuery(): LaunchQuery {
   return result;
 }
 
-/** 读 mPaaS 注入的启动参数；bridge 未就绪或宿主没注入时返回空对象 */
+/**
+ * query 可能不是对象：mPaaS 有的版本把 `startupParams.query` 存成
+ * URL 查询串（`Authorization=xxx&Lang=zh_CN`），甚至是带 `?` 的完整地址。
+ * 统一解析成对象，解析不了的键保持原样。
+ */
+function parseQuerySource(source: string): LaunchQuery {
+  const questionMark = source.indexOf("?");
+  const text = (questionMark >= 0 ? source.slice(questionMark + 1) : source).replace(/^#\/?/, "");
+  const result: LaunchQuery = {};
+  if (!text) return result;
+  try {
+    new URLSearchParams(text).forEach((value, key) => {
+      result[key] = value;
+    });
+  }
+  catch {
+    return result;
+  }
+  return result;
+}
+
+/**
+ * 读 mPaaS 注入的启动参数；bridge 未就绪或宿主没注入时返回空对象。
+ *
+ * 宿主会把真正的业务参数包一层 `query`（`startupParams.query.Authorization`），
+ * 这里把 query 里的键摊平到顶层，同时保留 `query` 原始值（对象或查询串都认），
+ * 两种取法都能用；顶层与 query 冲突时以 query 为准（宿主真正传的业务参数）。
+ */
 export function readBridgeStartupParams(): LaunchQuery {
   try {
     if (typeof AlipayJSBridge === "undefined") return {};
     const params = AlipayJSBridge?.startupParams;
-    return params && typeof params === "object" ? { ...params } : {};
+    if (!params || typeof params !== "object") return {};
+
+    const raw = { ...params } as LaunchQuery;
+    const nestedRaw = raw.query;
+    const nested = typeof nestedRaw === "string"
+      ? parseQuerySource(nestedRaw)
+      : nestedRaw && typeof nestedRaw === "object"
+        ? (nestedRaw as LaunchQuery)
+        : null;
+    // 宿主有时把参数拼在 startupParams.url 上（离线包地址），同样解析后兜底
+    const fromUrlInParams = typeof raw.url === "string" ? parseQuerySource(raw.url) : {};
+
+    return { ...fromUrlInParams, ...raw, ...(nested || {}) };
   }
   catch {
     return {};
@@ -62,6 +101,37 @@ export function resolveLaunchQuery(options?: { query?: LaunchQuery } | null): La
     ...readUrlLaunchQuery(),
     ...readBridgeStartupParams(),
     ...(options?.query || {}),
+  };
+}
+
+/**
+ * 联调用：把启动参数的各个来源分别摊开，便于确认真机上宿主到底传了什么、从哪条通道传的。
+ *
+ * 与 resolveLaunchQuery 的合并顺序一致：url → bridge → onLaunch.query（后者覆盖前者）。
+ */
+export function describeLaunchSources(options?: { query?: LaunchQuery } | null) {
+  const url = typeof location === "undefined"
+    ? { href: "", search: "", hash: "", referrer: "" }
+    : {
+        // 宿主跳转进来的完整地址（含 hash 上的 query），离线包地址也能从这里看出来
+        href: location.href,
+        search: location.search,
+        hash: location.hash,
+        referrer: typeof document === "undefined" ? "" : document.referrer,
+      };
+
+  const fromBridge = readBridgeStartupParams();
+
+  return {
+    url,
+    fromUrl: readUrlLaunchQuery(),
+    // 已摊平 query 的桥参数；query 若是查询串，摊平后顶层就有 Authorization
+    fromBridge,
+    // 摊平后顶层取出来的 token，日志里直接对一下
+    bridgeAuthorization: String(fromBridge.Authorization || fromBridge.authorization || "").trim(),
+    // query 是对象还是字符串（宿主两种形态都出现过，查不到 token 时先看这个）
+    bridgeQueryType: typeof fromBridge.query,
+    fromOnLaunch: { ...(options?.query || {}) },
   };
 }
 

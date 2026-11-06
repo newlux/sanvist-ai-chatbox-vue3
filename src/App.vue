@@ -5,10 +5,10 @@ import { useI18n } from "vue-i18n";
 import { useSystemStore, useUserStore } from "@/stores";
 import { setupDebugConsole } from "@/utils/debug-console";
 import { isEmbeddedInIframe, isSanvistPcEmbedded, notifyParentReady, resolveFromParam } from "@/utils/iframe";
-import { warmPhoneInfo } from "@/utils/landscape-device";
-import { resolveLaunchQuery, subscribeStartupParams } from "@/utils/launch-query";
+import { isWebEnvironment, warmPhoneInfo } from "@/utils/landscape-device";
+import { describeLaunchSources, readBridgeStartupParams, resolveLaunchQuery, subscribeStartupParams } from "@/utils/launch-query";
 import { createLogger } from "@/utils/logger";
-import { isMpaasReady, notifyTokenExpiration } from "@/utils/platform/mpaas";
+import { isMpaasReady, notifyTokenExpiration, waitForMpaas } from "@/utils/platform/mpaas";
 import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
 import { setSceneStartupQuery } from "@/utils/scene-navigation";
@@ -51,27 +51,97 @@ function getLaunchQuery(options?: LaunchOptions): StartupQuery {
   return resolveLaunchQuery(options);
 }
 
-function initializeSystem(query: StartupQuery) {
+/**
+ * 等 bridge 就绪后再读启动参数（对齐 mysany-ms App.vue 的 onLaunch 写法）。
+ *
+ * mysany-ms 的做法是把启动流程整个包在 `ready(cb)` 里，回调里才读
+ * `AlipayJSBridge.startupParams` → `getUrlParams(startupParams.query)` → `query.Authorization`；
+ * 原因是 bridge 是异步注入的，onLaunch 当场读大概率还是空值。
+ *
+ * 这里等价实现：真机最多等 BRIDGE_READY_TIMEOUT_MS；
+ * 网页 / PC 内嵌（isWebEnvironment）本来就没有 bridge，直接跳过，不拖慢启动。
+ */
+const BRIDGE_READY_TIMEOUT_MS = 1000;
+
+async function waitBridgeReady(): Promise<boolean> {
+  if (isMpaasReady()) return true;
+  if (isWebEnvironment()) return false;
+
+  const bridge = await waitForMpaas(BRIDGE_READY_TIMEOUT_MS);
+  if (!bridge) {
+    logger.warn("[auth] bridge 未在超时内就绪，先按本地 token 启动，就绪后再补正");
+  }
+  return Boolean(bridge);
+}
+
+/**
+ * 宿主 token 的唯一取值口径：bridge 的 `startupParams.query.Authorization`。
+ *
+ * onLaunch 已先 await waitBridgeReady()（对齐 mysany-ms 的 ready 包裹），
+ * 所以这里通常能直接拿到宿主 token；但个别宿主会在 ready 之后才补 startupParams，
+ * 仍保留一次晚到补正（见 watchLateStartupParams / watchLateAuthorization）。
+ *
+ * `startupParams.query` 既可能是对象也可能是查询串（`Authorization=xx&Lang=zh_CN`），
+ * readBridgeStartupParams 已统一解析并摊平到顶层，顶层与嵌套两种取法都认。
+ */
+function readHostAuthorization(): string {
+  const bridge = readBridgeStartupParams();
+  // query 是对象时直接看它（摊平后顶层也有，双保险）；字符串形态已由 readBridgeStartupParams 解析并摊平
+  const nestedRaw = bridge.query;
+  const nested = nestedRaw && typeof nestedRaw === "object" ? (nestedRaw as StartupQuery) : {};
+  return String(
+    nested.Authorization || nested.authorization || bridge.Authorization || bridge.authorization || "",
+  ).trim();
+}
+
+function initializeSystem(query: StartupQuery, launchOptions?: LaunchOptions) {
   // 调试面板尽早开：后面初始化里的日志也要能收进去
-  setupDebugConsole(query);
+  // 注意 vConsole 是动态 import，面板就绪前打出去的 console 收不进去，
+  // 需要被面板看到的启动期日志统一放到 debugReady.then 里打。
+  const debugReady = setupDebugConsole(query);
   setSceneStartupQuery(query);
 
-  // token 优先级：宿主注入 > 本地兜底 > 空（空则后续请求不带 Authorization 头）
-  const hostAuthorization = String(query?.Authorization || "").trim();
+  // token 只认宿主启动参数 query 下那份：bridge → startupParams.query.Authorization；
+  // 取不到就用本地配置的 token，两者都没有则置空（请求不带 Authorization 头）。
+  const hostAuthorization = readHostAuthorization();
   const authorization = hostAuthorization || LOCAL_AUTHORIZATION_FALLBACK;
-  if (hostAuthorization) logger.info("[auth] 使用宿主注入的 token");
-  else if (authorization) logger.warn("[auth] 宿主未注入 token，回退到本地 token");
-  else logger.warn("[auth] 宿主与本地都没有 token，请求将不带 Authorization 头");
+
+  // 联调：面板就绪后再打，否则真机上根本看不到
+  void debugReady.then(() => {
+    // 面板加载期间 bridge 可能已经就绪：先补一次 token（幂等），别等 ready 事件
+    syncHostAuthorization("debug-console-ready");
+
+    const sources = describeLaunchSources(launchOptions);
+    // 宿主跳转地址 + 三条来源（url / bridge startupParams / onLaunch.query）各自的原样快照
+    logger.warn("[launch] 宿主参数来源", sources);
+    // 合并后真正生效的那份（onLaunch 时刻的，bridge 晚到时会为空，以宿主参数来源为准）
+    logger.warn("[launch] 启动参数（合并后）", { ...query });
+    // 用 warn 打：生产默认级别是 warn，联调时要能在控制台看到最终生效的 token
+    logger.warn("[auth] token", {
+      source: hostAuthorization ? "host" : "local",
+      authorization: authorization || "",
+      // 当前实际生效的（补正后应与宿主一致）
+      current: String(systemStore.header.Authorization || ""),
+      bridgeAuthorization: sources.bridgeAuthorization,
+      bridgeQueryType: sources.bridgeQueryType,
+    });
+  });
   const lang = String(query.Lang || "zh_CN");
   const country = String(query.country || "");
   const version = String(query.version || "");
   const username = String(query.username || "");
   const timezone = query.Timezone;
   const demoMode = query.DemoMode === true || query.DemoMode === "true";
-  const baseUrl = String(query.baseUrl || import.meta.env.VITE_AI_QUESTION_BASE_URL);
+  // 接口地址固定用 env 配置，忽略宿主启动参数里的 baseUrl：
+  // 宿主传的值出现过缺网关前缀（只有域名）的情况，请求会 503 routeNotFound。
+  const baseUrl = String(import.meta.env.VITE_AI_QUESTION_BASE_URL || "");
 
   setRequestAuth(authorization);
   setRequestBaseURL(baseUrl);
+  // 联调：确认请求实际打到哪个地址（现在只由 VITE_AI_QUESTION_BASE_URL 决定）
+  void debugReady.then(() => {
+    logger.warn("[launch] baseUrl", { baseUrl });
+  });
   // 恢复上次选的驻场身份；Guest-Role 请求头由 visitorRole 的 watch 统一同步（见文件顶部）
   userStore.restoreVisitorRole();
 
@@ -151,19 +221,43 @@ function initializeIframeBridge(query: StartupQuery) {
 }
 
 /**
- * 离线包场景常见「bridge 比页面晚到」：宿主塞在 startupParams 里的 Lang / Authorization
- * 那一刻才读得到。都只在真拿到且与当前值不同时才补一次。
+ * 宿主 token 补正（幂等）。
+ *
+ * onLaunch 时 bridge 往往还没注入 startupParams，只能先退回本地配置的 token；
+ * bridge 就绪后立刻换成宿主下发的 token（请求头与 systemStore.header 一起更新）。
+ */
+function syncHostAuthorization(reason: string) {
+  const hostAuth = readHostAuthorization();
+  if (!hostAuth) return;
+
+  const currentAuth = String(systemStore.header.Authorization || "");
+  if (hostAuth === currentAuth) return;
+
+  logger.warn("[auth] 改用宿主 token", { reason, authorization: hostAuth, previous: currentAuth });
+  setRequestAuth(hostAuth);
+  systemStore.setHeader({ ...systemStore.header, Authorization: hostAuth });
+}
+
+/**
+ * 订阅 bridge 就绪，仅用于补 token。
+ *
+ * 必须紧跟 initializeSystem 注册：后面 setLanguage 会 await 远程语言包，
+ * 拖到那时才订阅就错过 bridge 就绪事件了（表现为日志里桥参数已有 token、
+ * 请求头却还是本地那条）。
+ */
+function watchLateAuthorization() {
+  // bridge 已就绪时 subscribeStartupParams 会立即回调，未就绪则等 AlipayJSBridgeReady
+  subscribeStartupParams(() => syncHostAuthorization("bridge-ready"));
+}
+
+/**
+ * 离线包场景常见「bridge 比页面晚到」：宿主塞在 startupParams 里的 Lang 那一刻才读得到。
+ * 只在真拿到且与当前值不同时才补一次。
  */
 function watchLateStartupParams() {
   subscribeStartupParams((params) => {
-    // 宿主晚到的 token 覆盖本地兜底：token 以宿主注入为准（见文件顶部常量注释）
-    const lateAuth = String(params.Authorization || params.authorization || "").trim();
-    const currentAuth = String(systemStore.header.Authorization || "");
-    if (lateAuth && lateAuth !== currentAuth) {
-      logger.warn("bridge 晚到，补宿主 Authorization");
-      setRequestAuth(lateAuth);
-      systemStore.setHeader({ ...systemStore.header, Authorization: lateAuth });
-    }
+    // 联调：bridge 晚到的那份宿主参数也整体打一次
+    logger.warn("[launch] bridge 晚到参数", { ...params });
 
     const lateLang = String(params.Lang || "");
     const currentLang = String(systemStore.header.Lang || "");
@@ -176,9 +270,14 @@ function watchLateStartupParams() {
 
 onLaunch(async (options) => {
   setAuthFailureHandler(handleAuthFailure);
+  // 参考 mysany-ms：先等 bridge ready，再读 startupParams.query 里的 Authorization，
+  // 避免用本地兜底 token 把首批请求发出去（网页环境没有 bridge，这里会直接返回）
+  await waitBridgeReady();
   const query = getLaunchQuery(options);
-  const baseInfo = initializeSystem(query);
+  const baseInfo = initializeSystem(query, options);
   initializeIframeBridge(query);
+  // token 补正订阅要尽早注册，别被下面的 setLanguage 阻塞
+  watchLateAuthorization();
   // 系统深浅色只认宿主 getColorScheme：进应用先问一次（拿不到就按浅色）。
   // 不 await：bridge 未就绪时内部最多等 3s，不能把启动流程卡在这里。
   void systemStore.syncSystemColorScheme();

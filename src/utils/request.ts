@@ -1,5 +1,4 @@
 import type { PlatformRequestOptions } from "@/utils/platform/http-request";
-import { readBridgeStartupParams } from "@/utils/launch-query";
 import { createLogger } from "@/utils/logger";
 
 import {
@@ -51,21 +50,6 @@ export function setRequestAuth(value: string) {
   authorization = String(value || "").trim();
 }
 
-/**
- * 取当前 Authorization。
- *
- * 正常情况下 App 的 onLaunch 已经写入；但离线包 / 场景窗口里 bridge 常比首屏晚，
- * 补参回调又可能晚于第一个请求，所以为空时在这里再从桥上读一次（拿到就缓存）。
- * 大小写两种写法宿主都用过（Authorization / authorization）。
- */
-function resolveAuthorization(): string {
-  if (authorization) return authorization;
-  const params = readBridgeStartupParams();
-  const late = String(params.Authorization || params.authorization || "").trim();
-  if (late) authorization = late;
-  return authorization;
-}
-
 export function setRequestBaseURL(value: string) {
   if (value) baseURL = value;
 }
@@ -107,9 +91,9 @@ function mergeHeaders(base: Record<string, string>, extra: Record<string, string
  * Authorization 与 Guest-Role 都从这里出，调用方不用各自拼。
  */
 export function getRequestHeaders(headers: Record<string, string> = {}) {
-  const auth = resolveAuthorization();
   const base: Record<string, string> = {};
-  if (auth) base.Authorization = auth;
+  // token 只由 App.vue 初始化时写入（宿主 query 里的 Authorization，取不到用本地配置），为空就不带头
+  if (authorization) base.Authorization = authorization;
   if (guestRole) base["Guest-Role"] = guestRole;
   // 调用方显式传的（如工作流的 Guest-Role）覆盖全局身份，且不会产生重名头
   return mergeHeaders(base, headers);
