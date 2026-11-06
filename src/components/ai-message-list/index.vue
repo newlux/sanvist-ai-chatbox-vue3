@@ -331,6 +331,27 @@ function findScrollViewport(node: Element | null): HTMLElement | null {
   return null;
 }
 
+/**
+ * 兜底：只认**可滚**的那一层（overflow auto / scroll），但不看此刻是否溢出。
+ *
+ * 垫白和定位挨在同一帧里：刚把 blank 加进 DOM 就去找滚动层时，
+ * scrollHeight 有时还没跟上，findScrollableAncestor 会返回 null 直接放弃定位 ——
+ * 表现就是「实时文字在顶部，但提问气泡和回复停在原处、没往上走」。
+ * 这里拿到底座容器再设 scrollTop，即使当时被 clamp 成 0，
+ * 调用方也能用「设完读回来自检」发现没到位，继续垫白重试。
+ */
+function findScrollLayer(node: Element | null): HTMLElement | null {
+  let current = node?.parentElement || null;
+  while (current) {
+    const { overflowY } = getComputedStyle(current);
+    if ((overflowY === "auto" || overflowY === "scroll") && current.clientHeight > 0) {
+      return current as HTMLElement;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
 function setPinned(pinned: boolean) {
   if (pinned === props.pinnedToBottom) return;
   emit("pinned-change", pinned);
@@ -691,13 +712,22 @@ function alignMessageToTop(messageId: string, attempt = 0) {
     nextTick(() => alignMessageToTop(messageId, attempt + 1));
     return;
   }
-  const scroller = findScrollableAncestor(inner);
+  // 优先拿「此刻确实溢出」的那层；刚垫完白还没反映到 scrollHeight 时退回可滚容器兜底
+  const scroller = findScrollableAncestor(inner) || findScrollLayer(inner);
   if (!scroller) return;
   if (next !== Math.round(scroller.scrollTop)) {
     scrollTopPx.value = next;
     scroller.scrollTop = next;
     // 定位是用户主动跳的，别把它当成「上翻看历史」而关掉后续的贴底判定
     lastScrollTop = next;
+  }
+  /**
+   * 自检：设完立刻读回来，没到位说明可滚量不够（被 clamp 了）。
+   * 这种情况必须继续垫白重试 —— 否则提问就停在原处、旧内容一动不动，
+   * 而顶部浮层的实时文字已经盖在它上面了。
+   */
+  if (Math.abs(scroller.scrollTop - next) > 1 && attempt < PIN_LIFT_MAX_TRIES && ensureScrollableTo(next)) {
+    nextTick(() => alignMessageToTop(messageId, attempt + 1));
   }
   // #endif
 }
