@@ -7,13 +7,9 @@ import { useI18n } from "vue-i18n";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
-import iconShare from "@/assets/img/icon-action-share.svg";
 import iconArrowNext from "@/assets/img/icon-arrow-red.svg";
-import iconBadFilled from "@/assets/img/icon-bad-fill.svg";
-import iconBad from "@/assets/img/icon-bad.svg";
-import iconGoodFilled from "@/assets/img/icon-good-fill.svg";
-import iconGood from "@/assets/img/icon-good.svg";
 import iconRepair from "@/assets/img/icon-repair-dark.svg";
+import saniIcon from "@/assets/img/icon-sani.png";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { toInlineImageUrl } from "@/utils/image-preview";
@@ -50,6 +46,12 @@ const props = defineProps({
   noAnswerGroup: { type: Boolean, default: false },
   /** 语音已松手、ASR 尚未返回：展示「识别中...」占位 */
   asrPending: { type: Boolean, default: false },
+  /**
+   * 顶部「识别中...」实时转写浮层是否可以出现。
+   * 首页从初始页起飞时，要等中间图标飞进灵动岛、落位动效收尾之后再出现，
+   * 否则这行文字会跟图标动效叠在一起；其它入口（对话页直接说话）默认 true。
+   */
+  asrTipReady: { type: Boolean, default: true },
   /** 维修助手回流的 QA 卡片标题。 */
   assistantCallbackTitle: { type: String, default: "" },
   /** 回流卡片副标题：故障诊断 / 快问快答。 */
@@ -302,7 +304,8 @@ const showWaiting = computed(
 const processStatusText = computed(() => {
   const status = props.processStatus as { phase?: string; title?: string } | null;
   if (!status) return "";
-  if (status.phase === "succeeded") return t("process-status-succeeded");
+  // 完成态不再显示「已完成」：改为品牌署名 SANI，前面由模板配 sani 图标（26×26）
+  if (status.phase === "succeeded") return "SANI";
   if (status.phase === "failed") return t("process-status-failed");
   if (status.phase === "stopped") return t("process-status-stopped");
   return status.title ? `${status.title}...` : t("process-status-thinking");
@@ -364,29 +367,10 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   emit("guide-check-step-select", payload);
 }
 
-function onShareTap() {
-  emit("share-click");
-}
-
-function onCopyTap() {
-  emit("copy-click");
-}
-
+/** 语音播报：按钮已移到过程状态行（SANI 后面），这里只把点击往上抛 */
 function onTtsTap() {
   if (!props.ttsEnabled) return;
   emit("tts-click");
-}
-
-function onFeedbackChange(value) {
-  emit("feedback-change", value);
-}
-
-function onPositiveFeedback() {
-  onFeedbackChange(props.positive === true ? "" : "good");
-}
-
-function onNegativeFeedback() {
-  onFeedbackChange(props.positive === false ? "" : "bad");
 }
 </script>
 
@@ -411,7 +395,7 @@ function onNegativeFeedback() {
          所以「停止问答 → 再次发起问答」也一定出现在顶部 -->
     <Teleport to="body">
       <view
-        v-if="isUser && props.asrPending"
+        v-if="isUser && props.asrPending && props.asrTipReady"
         class="ai-bubble-v2-asr-tip"
         :class="{ 'ai-bubble-v2-asr-tip--dark': props.dark }"
       >
@@ -590,15 +574,37 @@ function onNegativeFeedback() {
             },
           ]"
         >
-          <text v-if="props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-icon">
-            ✓
-          </text>
+          <!-- 完成态品牌署名：sani 图标 26×26（52rpx）+ 文案 SANI，替代原来的「✓ 已完成」 -->
+          <image
+            v-if="props.processStatus?.phase === 'succeeded'"
+            class="ai-bubble-v2__process-icon-img"
+            :src="saniIcon"
+            mode="aspectFit"
+          />
           <text class="ai-bubble-v2__process-text">
             {{ processStatusText }}
           </text>
-          <text v-if="durationSeconds != null && props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-duration">
+          <!-- 语音播报按钮：从底部操作栏上移到 SANI 后面，完成态且允许操作时才可点 -->
+          <view
+            v-if="props.processStatus?.phase === 'succeeded' && props.showActions && props.ttsEnabled"
+            class="ai-bubble-v2__action-btn ai-bubble-v2__process-tts"
+            @tap.stop="onTtsTap"
+          >
+            <view v-if="props.ttsLoading" class="ai-bubble-v2__tts-spinner" />
+            <!-- 播放中：蓝色声波条依次起伏，动画从左往右推进 -->
+            <view v-else-if="props.ttsPlaying" class="ai-bubble-v2__tts-wave">
+              <view
+                v-for="index in 4"
+                :key="index"
+                class="ai-bubble-v2__tts-wave-bar"
+                :class="`ai-bubble-v2__tts-wave-bar--${index}`"
+              />
+            </view>
+            <image v-else :src="iconRadioOn" mode="aspectFit" class="ai-bubble-v2__action-icon" />
+          </view>
+          <!-- <text v-if="durationSeconds != null && props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-duration">
             {{ t("process-duration", { seconds: durationSeconds }) }}
-          </text>
+          </text> -->
         </view>
         <view
           v-if="showProcessSubtitle && !props.assistantCallbackTitle"
@@ -647,60 +653,8 @@ function onNegativeFeedback() {
             {{ t("ai-busy-retry-later") }}
           </text>
         </view>
-        <!-- 底部安全提示已还原到输入栏下方（ai-chat-input），此处不再重复。
-             生成中先把动作栏按最终高度占好位（只弱化、不吃事件），
-             回答结束不会突然多出一行，点击也不会在流式期间误触发 -->
-        <view
-          v-if="props.showActions"
-          class="ai-bubble-v2__actions"
-          :class="{ 'ai-bubble-v2__actions--pending': props.loading }"
-        >
-          <view
-            v-if="props.ttsEnabled"
-            class="ai-bubble-v2__action-btn"
-            @tap.stop="onTtsTap"
-          >
-            <view v-if="props.ttsLoading" class="ai-bubble-v2__tts-spinner" />
-            <!-- 播放中：蓝色声波条依次起伏，动画从左往右推进 -->
-            <view v-else-if="props.ttsPlaying" class="ai-bubble-v2__tts-wave">
-              <view
-                v-for="index in 4"
-                :key="index"
-                class="ai-bubble-v2__tts-wave-bar"
-                :class="`ai-bubble-v2__tts-wave-bar--${index}`"
-              />
-            </view>
-            <image v-else :src="iconRadioOn" mode="aspectFit" class="ai-bubble-v2__action-icon" />
-          </view>
-          <view class="ai-bubble-v2__action-btn" @tap.stop="onCopyTap">
-            <image :src="iconCopy" mode="aspectFit" class="ai-bubble-v2__action-icon" />
-          </view>
-          <view class="ai-bubble-v2__action-btn" @tap.stop="onShareTap">
-            <image :src="iconShare" mode="aspectFit" class="ai-bubble-v2__action-icon" />
-          </view>
-          <view
-            class="ai-bubble-v2__action-btn"
-            :class="{ 'ai-bubble-v2__action-btn--liked': props.positive === true }"
-            @tap.stop="onPositiveFeedback"
-          >
-            <image
-              :src="props.positive === true ? iconGoodFilled : iconGood"
-              mode="aspectFit"
-              class="ai-bubble-v2__action-icon"
-            />
-          </view>
-          <view
-            class="ai-bubble-v2__action-btn"
-            :class="{ 'ai-bubble-v2__action-btn--disliked': props.positive === false }"
-            @tap.stop="onNegativeFeedback"
-          >
-            <image
-              :src="props.positive === false ? iconBadFilled : iconBad"
-              mode="aspectFit"
-              class="ai-bubble-v2__action-icon"
-            />
-          </view>
-        </view>
+        <!-- 底部操作栏（复制 / 分享 / 点赞 / 点踩）已移除：
+             语音播报按钮上移到过程状态行的 SANI 后面，其余动作不再展示 -->
       </template>
     </view>
     <!-- 追问属于当前回答，但不放进回答卡片；与卡片保持独立且紧邻的视觉关系。 -->
@@ -720,7 +674,7 @@ function onNegativeFeedback() {
    勾选框 / 附件 / 气泡之间的横向间距统一走 gap（8px），不靠 margin 撑 */
 .ai-bubble-v2 {
   display: flex;
-  margin-bottom: 40rpx;
+  // margin-bottom: 40rpx;
   gap: 16rpx;
 }
 /* 带追问时换行排：追问整行铺满，与回答卡的间距 12px */
@@ -807,11 +761,11 @@ function onNegativeFeedback() {
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
   display: flex;
   flex-direction: column;
-  gap: 24rpx;
+  gap: 10rpx 24rpx;
   padding: 40rpx;
-  border: 1px solid #efefef;
-  border-radius: 40rpx;
-  background: #f3f3f3;
+  // border: 1px solid #efefef;
+  // border-radius: 40rpx;
+  // background: #f3f3f3;
   // box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04);
 }
 /* 没有正文只有独立卡片：不画白卡外壳，只留操作栏 */
@@ -1198,8 +1152,8 @@ function onNegativeFeedback() {
   line-height: 36rpx;
 }
 .ai-bubble-v2__process-status--with-content {
-  padding-bottom: 24rpx;
-  border-bottom: 1px solid #e8e8e8;
+  // padding-bottom: 24rpx;
+  // border-bottom: 1px solid #e8e8e8;
 }
 .ai-bubble-v2__process-status--with-subtitle {
   padding-bottom: 24rpx;
@@ -1232,6 +1186,13 @@ function onNegativeFeedback() {
   color: #5d5d5d;
   font-size: 24rpx;
   line-height: 36rpx;
+}
+/* 完成态品牌图标：26×26（52rpx），与 SANI 文字同排、垂直居中；
+   图标与文字的间距沿用 status 行的 gap，不额外加 margin */
+.ai-bubble-v2__process-icon-img {
+  width: 52rpx; // 26px
+  height: 52rpx; // 26px
+  flex-shrink: 0;
 }
 .ai-bubble-v2__process-text {
   min-width: 0;
@@ -1291,22 +1252,11 @@ function onNegativeFeedback() {
 .ai-bubble-v2__streaming {
   padding-top: 24rpx;
 }
-/* ===== 操作栏：设计稿 1187:18「Actions Bar」=====
-   横向 gap 8px，图标 16px（首个 18px）；上方 1px #E8E8E8 分隔线（1187:16 Divider 2），
-   线与图标的间距 12px；与正文的间距由卡片父级 gap 统一给 */
-.ai-bubble-v2__actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 16rpx;
-  padding-top: 24rpx;
-  border-top: 1px solid #e8e8e8;
-}
-/* 生成中的占位态：位置/高度与完成态完全一致（所以不会跳），
-   只做弱化 + 不吃事件 —— 流式期间点不到，回答落地后自动恢复 */
-.ai-bubble-v2__actions--pending {
-  opacity: 0.35;
-  pointer-events: none;
+/* 过程状态行内的语音播报按钮（原设计稿 1187:18 Actions Bar 的 TTS）。
+   16×16（32rpx）见 .ai-bubble-v2__action-btn；与 SANI 文字之间留 4px，
+   加上状态行本身的 gap 4px，视觉间距 8px，不用 margin 撑 */
+.ai-bubble-v2__process-tts {
+  padding-left: 8rpx;
 }
 /* ===== 空回答兜底提示 =====
    （设计稿无此状态，沿用回答正文的字号/行高规范：14px / 20px / #1A1A1E） */
@@ -1465,12 +1415,7 @@ function onNegativeFeedback() {
     color: #5d5d5d;
   }
 
-  // 操作栏分隔线 1193:5117（Divider 2）#303030
-  .ai-bubble-v2__actions {
-    border-top-color: #303030;
-  }
-
-  // 操作栏图标 1193:5120：全部 #8F8F8F 线框。
+  // 语音播报图标 1193:5120：全部 #8F8F8F 线框。
   // 图标是自带颜色的 svg，先压成纯黑再反相到 #8F8F8F；点赞 / 点踩选中的那两颗保留品牌色
   .ai-bubble-v2__action-btn:not(.ai-bubble-v2__action-btn--liked):not(.ai-bubble-v2__action-btn--disliked) .ai-bubble-v2__action-icon {
     filter: brightness(0) invert(0.56); // 0.56 × 255 ≈ #8F8F8F

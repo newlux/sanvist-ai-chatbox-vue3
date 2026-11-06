@@ -67,12 +67,21 @@ function readCssInset(side: "top" | "bottom") {
  * 内嵌 webview 里前三条经常同时为 0（H5 的 statusBarHeight 恒为 0，
  * 安卓 WebView 又常不支持 safe-area-inset），没有兜底就会顶到状态栏底下。
  */
+/**
+ * 安全区是全局物理量：所有组件共用同一份值。
+ * 列表里每条消息都会 useSafeArea（如 ai-bubble-v2 的实时转写浮层要跟头部对齐），
+ * 每个实例各持一份 ref、各跑一次「读系统信息 + 插 DOM 探针」，消息越多越慢。
+ */
+const safeTopPx = ref(0);
+const safeBottomPx = ref(0);
+
 export function useSafeArea() {
   const systemStore = useSystemStore();
-  const safeTopPx = ref(0);
-  const safeBottomPx = ref(0);
 
-  function refreshSafeArea() {
+  function refreshSafeArea(force = false) {
+    // 已经有有效值就直接复用，不再重复探测
+    if (!force && safeTopPx.value > 0) return;
+
     const platform = detectPlatform();
     let source = "fallback";
     let top = 0;
@@ -130,7 +139,7 @@ export function useSafeArea() {
   }
 
   refreshSafeArea();
-  onMounted(refreshSafeArea);
+  onMounted(() => refreshSafeArea());
 
   const safeAreaStyle = computed<Record<string, string>>(() => ({
     "--safe-top-px": `${safeTopPx.value}px`,

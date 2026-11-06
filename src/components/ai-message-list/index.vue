@@ -57,6 +57,15 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /**
+   * 顶部「识别中...」实时转写浮层的出现时机：
+   * 首页从初始页起飞时要等中间图标飞进灵动岛、落位动效收尾后再显示，
+   * 其余入口不传即立即显示。
+   */
+  asrTipReady: {
+    type: Boolean,
+    default: true,
+  },
   showQuickList: {
     type: Boolean,
     default: true,
@@ -1297,6 +1306,7 @@ watch(
               :disabled="isMessageDisabled(index, msg)"
               :no-answer-group="!!msg.noAnswerGroup"
               :asr-pending="!!msg.asrPending"
+              :asr-tip-ready="asrTipReady"
               @suggestion-tap="onSuggestionTap($event, index)"
               @ask-slot-open="onAskSlotOpen($event, index)"
               @assistant-navigation-open="onAssistantNavigationOpen"

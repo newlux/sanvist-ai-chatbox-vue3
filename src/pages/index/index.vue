@@ -700,6 +700,13 @@ const WELCOME_LISTEN_IDLE_MS = 900;
  * 空闲时留在上面会让人以为还在播报。
  */
 const islandListenFromWelcome = ref(false);
+/**
+ * 顶部「识别中...」浮层的出场闸门。
+ * 从初始页起飞时先关上：这行文字要等中间图标飞进灵动岛、落位动效彻底收尾之后才出现，
+ * 否则它会和图标动效叠在一起（看起来像被图标压住半截）。
+ * 对话页里直接说话不经过起飞，保持 true 立即显示。
+ */
+const asrTipReady = ref(true);
 /** 上面这段延续的收尾定时器（回初始页 / 卸载要清掉） */
 let islandListenIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -934,6 +941,8 @@ function onVoiceLevel(level: number) {
  * 用户在飞行动画里开口也不会丢（ready 前的音频由会话自己缓存）。
  */
 function onWelcomeStart() {
+  // 先关掉「识别中」浮层再起飞：语音链路是异步的，慢一点就会抢在动效前面冒出文字
+  asrTipReady.value = false;
   void startVoiceQuery();
   void goToChat();
 }
@@ -1014,6 +1023,8 @@ async function goToChat() {
   // 随后欢迎层让位、对话页开始渲染
   const from = readClientRect(".welcome__logo-fly");
   const startedAt = performance.now();
+  // 起飞开始就关掉「识别中」浮层，等落位动效走完再放出来
+  asrTipReady.value = false;
   welcomeLeaving.value = true;
   pageStage.value = "chat";
 
@@ -1040,6 +1051,8 @@ async function goToChat() {
       // 位移特效彻底走完、欢迎层也收掉了，这时才把岛内换成 listen.gif：
       // 飞行途中提前换的话，会被上层欢迎层挡住一半，露出来的那半边容易看成「两张图打架」
       islandListenFromWelcome.value = true;
+      // 同一时刻放行「识别中...」浮层：图标已经落位，文字再出现不会跟动效打架
+      asrTipReady.value = true;
       // 只延续一小段，随后交回空闲态 sani-logo-sm.gif
       if (islandListenIdleTimer) clearTimeout(islandListenIdleTimer);
       islandListenIdleTimer = setTimeout(() => {
@@ -1122,6 +1135,7 @@ function onRestartToStart() {
     islandListenIdleTimer = null;
   }
   islandListenFromWelcome.value = false;
+  asrTipReady.value = true;
   welcomeLeaving.value = false;
   welcomeLanded.value = false;
   welcomeLogoStyle.value = {};
@@ -1365,6 +1379,7 @@ onBeforeUnmount(() => {
     islandListenIdleTimer = null;
   }
   islandListenFromWelcome.value = false;
+  asrTipReady.value = true;
 });
 </script>
 
@@ -1420,6 +1435,7 @@ onBeforeUnmount(() => {
         :key="aiSessionId || 'new-conversation'"
         top-inset="var(--chat-top-inset, 300rpx)"
         :dark="isDark"
+        :asr-tip-ready="asrTipReady"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
