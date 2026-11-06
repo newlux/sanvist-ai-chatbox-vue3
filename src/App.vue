@@ -14,11 +14,14 @@ import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL 
 import { setSceneStartupQuery } from "@/utils/scene-navigation";
 
 const logger = createLogger("app");
-// 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
-// 否则一旦这串固定 token 泄漏或过期，线上会静默变成无鉴权请求
-const authorizationFallback = import.meta.env.DEV
-  ? "bearer 9ae76087-03f6-4db0-878b-ed6e9af37879"
-  : "";
+/**
+ * 本地兜底 token：只在宿主启动参数里没带 Authorization 时使用。
+ *
+ * 取值优先级：宿主注入（query.Authorization）> 本地兜底（这一串）> 空串。
+ * 置空时请求不会带 Authorization 头（见 utils/request 的 getRequestHeaders）。
+ * 注意：这串会打进产物，正式上线前需要确认是否保留。
+ */
+const LOCAL_AUTHORIZATION_FALLBACK = "bearer 2e729dca-582b-4fbb-bd5d-550c6b051567";
 
 type StartupQuery = Record<string, any>;
 
@@ -53,8 +56,12 @@ function initializeSystem(query: StartupQuery) {
   setupDebugConsole(query);
   setSceneStartupQuery(query);
 
-  // 宿主大小写两种写法都出现过（Authorization / authorization），这里都认
-  const authorization = String(query?.Authorization || query?.authorization || authorizationFallback || "").trim();
+  // token 优先级：宿主注入 > 本地兜底 > 空（空则后续请求不带 Authorization 头）
+  const hostAuthorization = String(query?.Authorization || "").trim();
+  const authorization = hostAuthorization || LOCAL_AUTHORIZATION_FALLBACK;
+  if (hostAuthorization) logger.info("[auth] 使用宿主注入的 token");
+  else if (authorization) logger.warn("[auth] 宿主未注入 token，回退到本地 token");
+  else logger.warn("[auth] 宿主与本地都没有 token，请求将不带 Authorization 头");
   const lang = String(query.Lang || "zh_CN");
   const country = String(query.country || "");
   const version = String(query.version || "");
@@ -144,26 +151,20 @@ function initializeIframeBridge(query: StartupQuery) {
 }
 
 /**
- * 晚到的授权信息：写入请求模块（后续请求头自动带上）并同步 header。
- * header 是整份替换，这里合并后写回，别把 Lang / Timezone 等一起冲掉。
- */
-function applyLateAuthorization(params: StartupQuery) {
-  const lateAuth = String(params?.Authorization || params?.authorization || "").trim();
-  if (!lateAuth) return;
-  const currentAuth = String(systemStore.header.Authorization || "").trim();
-  if (lateAuth === currentAuth) return;
-  logger.info("bridge 晚到，补授权信息");
-  setRequestAuth(lateAuth);
-  systemStore.setHeader({ ...systemStore.header, Authorization: lateAuth });
-}
-
-/**
- * 离线包场景常见「bridge 比页面晚到」：宿主塞在 startupParams 里的 Authorization / Lang
- * 那一刻才读得到。只有真拿到且与当前值不同才补一次，避免重复写 header、重复拉远程语言包。
+ * 离线包场景常见「bridge 比页面晚到」：宿主塞在 startupParams 里的 Lang / Authorization
+ * 那一刻才读得到。都只在真拿到且与当前值不同时才补一次。
  */
 function watchLateStartupParams() {
   subscribeStartupParams((params) => {
-    applyLateAuthorization(params);
+    // 宿主晚到的 token 覆盖本地兜底：token 以宿主注入为准（见文件顶部常量注释）
+    const lateAuth = String(params.Authorization || params.authorization || "").trim();
+    const currentAuth = String(systemStore.header.Authorization || "");
+    if (lateAuth && lateAuth !== currentAuth) {
+      logger.warn("bridge 晚到，补宿主 Authorization");
+      setRequestAuth(lateAuth);
+      systemStore.setHeader({ ...systemStore.header, Authorization: lateAuth });
+    }
+
     const lateLang = String(params.Lang || "");
     const currentLang = String(systemStore.header.Lang || "");
     if (!lateLang || lateLang === currentLang) return;
