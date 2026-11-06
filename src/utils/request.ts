@@ -75,16 +75,44 @@ export function getRequestBaseURL() {
 }
 
 /**
- * 统一请求头：宿主注入的 Authorization + 游客角色 + 调用方自定义头。
- * JSON / 上传 / SSE（fetch）都走这里，保证三处口径一致。
+ * 合并请求头：**头名大小写不敏感**（HTTP 规范如此）。
+ *
+ * 之前用对象展开，`Guest-Role`（这里注入的）和调用方传的 `guest-role`（工作流按身份覆盖）
+ * 会同时留在 header 对象里，uni.request / fetch 就发两条同名头；
+ * 网关把它们合并成一个值，最终变成 `Guest-Role: OWNER, OWNER`，工作流按错误身份取数。
+ *
+ * 规则：同名（忽略大小写）只保留一份，后传入的覆盖前面的；空值忽略。
+ */
+function mergeHeaders(base: Record<string, string>, extra: Record<string, string> = {}) {
+  const merged: Record<string, string> = {};
+  /** lowerCase → 当前实际写入 merged 的键名 */
+  const nameByLower = new Map<string, string>();
+
+  const write = (name: string, value: string | undefined) => {
+    if (!name || value == null || value === "") return;
+    const lower = name.toLowerCase();
+    const previous = nameByLower.get(lower);
+    if (previous !== undefined) delete merged[previous];
+    nameByLower.set(lower, name);
+    merged[name] = String(value);
+  };
+
+  Object.entries(base).forEach(([name, value]) => write(name, value));
+  Object.entries(extra).forEach(([name, value]) => write(name, value));
+  return merged;
+}
+
+/**
+ * 统一请求头：JSON / 上传 / SSE（fetch）都走这里。
+ * Authorization 与 Guest-Role 都从这里出，调用方不用各自拼。
  */
 export function getRequestHeaders(headers: Record<string, string> = {}) {
   const auth = resolveAuthorization();
-  return {
-    ...(auth ? { Authorization: auth } : {}),
-    ...(guestRole ? { "guest-role": guestRole } : {}),
-    ...headers,
-  };
+  const base: Record<string, string> = {};
+  if (auth) base.Authorization = auth;
+  if (guestRole) base["Guest-Role"] = guestRole;
+  // 调用方显式传的（如工作流的 Guest-Role）覆盖全局身份，且不会产生重名头
+  return mergeHeaders(base, headers);
 }
 
 export const GUEST_ROLE_OPTIONS = ["OWNER", "OPERATOR"] as const;
@@ -95,8 +123,17 @@ export function isGuestRole(value: unknown): value is GuestRole {
   return typeof value === "string" && (GUEST_ROLE_OPTIONS as readonly string[]).includes(value);
 }
 
-export function setGuestRole(role: string) {
-  guestRole = role;
+/**
+ * 写入驻场身份：选中「老板」即 OWNER，之后所有接口自动带 `Guest-Role: OWNER`。
+ * 唯一入口是 App.vue 对 userStore.visitorRole 的 watch，页面不要各自调。
+ */
+export function setGuestRole(role: string | null | undefined) {
+  guestRole = String(role || "").trim();
+}
+
+/** 当前入驻身份（调试 / 日志用） */
+export function getGuestRole() {
+  return guestRole;
 }
 
 type AuthFailureHandler = (statusCode: number, message: string) => void;

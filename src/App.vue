@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onLaunch } from "@dcloudio/uni-app";
+import { watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useSystemStore, useUserStore } from "@/stores";
 import { setupDebugConsole } from "@/utils/debug-console";
@@ -30,10 +31,19 @@ const systemStore = useSystemStore();
 const userStore = useUserStore();
 
 /**
- * 启动参数由宿主注入，离线包与在线包是同一套（Authorization / Lang / country / baseUrl ...）。
- * onLaunch 的 options.query 在 hash 路由下未必完整，统一走 resolveLaunchQuery 做兜底：
- * location.search → hash query → AlipayJSBridge.startupParams → options.query。
+ * 驻场身份 → 请求头 `Guest-Role` 的唯一同步点。
+ *
+ * 任何写 visitorRole 的地方（身份选择页、启动时 restoreVisitorRole、退出时清空）
+ * 都会自动带上 / 清掉这个头，页面不用再各自调 setGuestRole。
+ * `flush: "sync"`：身份选择页写完会立刻发请求（预取今日觉醒），必须当场生效，
+ * 否则那一次请求还是按旧身份发出去。
  */
+watch(
+  () => userStore.visitorRole,
+  role => setGuestRole(role),
+  { immediate: true, flush: "sync" },
+);
+
 function getLaunchQuery(options?: LaunchOptions): StartupQuery {
   return resolveLaunchQuery(options);
 }
@@ -55,8 +65,8 @@ function initializeSystem(query: StartupQuery) {
 
   setRequestAuth(authorization);
   setRequestBaseURL(baseUrl);
+  // 恢复上次选的驻场身份；Guest-Role 请求头由 visitorRole 的 watch 统一同步（见文件顶部）
   userStore.restoreVisitorRole();
-  if (userStore.visitorRole) setGuestRole(userStore.visitorRole);
 
   userStore.setIsVisitor(true);
   systemStore.setHeader({

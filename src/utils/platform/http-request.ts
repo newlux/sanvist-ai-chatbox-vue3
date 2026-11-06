@@ -47,7 +47,14 @@ function withChannelHeader(headers?: Record<string, string>) {
   // #ifdef APP-PLUS
   channel = "app";
   // #endif
-  return { ...headers, "X-Channel": channel };
+  // 头名大小写不敏感：调用方若自己带了 x-channel，先丢掉，避免发出两条同名头被网关合并
+  const merged: Record<string, string> = {};
+  Object.entries(headers || {}).forEach(([name, value]) => {
+    if (name.toLowerCase() === "x-channel") return;
+    merged[name] = value;
+  });
+  merged["X-Channel"] = channel;
+  return merged;
 }
 
 /** 请求体大小，用于排查「体积过大被容器拒掉」这类问题（base64 音频动辄几百 KB） */
