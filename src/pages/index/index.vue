@@ -44,6 +44,7 @@ import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
 import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
+import { openRepairAssistant } from "@/utils/repair-h5";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -237,12 +238,17 @@ function onAssistantCallbackOpen(conversationId: string) {
   const id = String(conversationId || "").trim();
   if (!id) return;
   clearPendingRepairCallback();
-  void navigateToScene(`/pages/repair/index?conversationId=${encodeURIComponent(id)}`);
+  // 直接 pushWindow 打开三方页（顶层文档，容器会注入 AlipayJSBridge）；
+  // 只有容器里没有 bridge 时才降级回本地 iframe 页
+  openRepairAssistant({ chatConversationId: id }, () => {
+    void navigateToScene(`/pages/repair/index?conversationId=${encodeURIComponent(id)}`);
+  });
 }
 
 /**
  * 弹层确认后的去向按 target 分流：
- * - maintenance_assistant：把上下文落盘 → 另开维修助手页（/pages/repair/index）；
+ * - maintenance_assistant：直接 pushWindow 打开维修助手三方 H5（顶层 WebView，bridge 可直连），
+ *   pushWindow 不可用时才降级到本地 iframe 页 /pages/repair/index；
  * - parts_assistant：配件助手还没独立页，就地切到首页内联智能体（subagent=parts），不跳页；
  *   其中「启动拍照 / 启动上传」再把对应选择器拉起来，选完挂在输入栏（与步骤卡拍照同一套）。
  */
@@ -262,18 +268,25 @@ async function onAssistantNavigationConfirm(
     return;
   }
   if (payload.target !== "maintenance_assistant") return;
-  stashPendingRepairNavigationContext({
-    ...payload.context,
-    userId: userStore.userId,
-    sessionId: payload.sessionId,
-    conversationId: payload.conversationId,
-  });
   const aiAskConversationId = String(payload.conversationId || "").trim();
   const aiAskSessionId = String(payload.sessionId || "").trim();
   if (aiAskConversationId && aiAskSessionId) {
     stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
   }
-  void navigateToScene("/pages/repair/index");
+  /**
+   * 直接用 pushWindow 打开三方 H5，而不是先跳本地 iframe 页：
+   * pushWindow 出来的是独立 WebView，容器会把 AlipayJSBridge 注入到顶层文档，
+   * 三方页能直接调原生能力（iframe 跨域拿不到 bridge）。
+   * 上下文只在降级到本地页时才落盘 —— 不走 iframe 就没人消费，避免留下脏数据。
+   */
+  openRepairAssistant({ sessionId: aiAskSessionId, conversationId: aiAskConversationId }, () => {
+    stashPendingRepairNavigationContext({
+      ...payload.context,
+      userId: userStore.userId,
+      sessionId: payload.sessionId,
+      conversationId: payload.conversationId,
+    });
+  });
 }
 
 /** 确认进入配件助手：与点底部「配件助手」入口同一套切换（高亮 + subagent=parts）。 */

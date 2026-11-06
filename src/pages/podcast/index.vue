@@ -43,6 +43,7 @@ import { provideChatScope, useChatStore, useSystemStore, useUserStore } from "@/
 import { stripMarkdownTables } from "@/utils/ai-stream";
 import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
+import { openRepairAssistant } from "@/utils/repair-h5";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { backFromScene, isSceneWindowRoot, navigateToScene } from "@/utils/scene-navigation";
 
@@ -835,19 +836,24 @@ function onReportQaQuerySubmit(query: string) {
   void sendMessage({ text });
 }
 
-/** 跳转确认：与首页同一套上下文落盘 + 场景跳转。 */
+/** 跳转确认：与首页同一套参数口径，用 pushWindow 直接开三方页（bridge 可直连）。 */
 function onReportQaNavigationConfirm(payload: AssistantNavigationPayload) {
   if (payload.target !== "maintenance_assistant") return;
-  stashPendingRepairNavigationContext({
-    ...payload.context,
-    userId: userStore.userId,
-    sessionId: payload.sessionId,
-    conversationId: payload.conversationId,
-  });
   // 回调摘要轮询只保留在首页：听播页不写 pending，避免残留数据被首页误消费
   // 跳到维修助手前收尾：别把播报 / 答案朗读带过去
   stopPlaybackOnLeave();
-  void navigateToScene("/pages/repair/index");
+  // 上下文只在降级回本地 iframe 页时才落盘
+  openRepairAssistant(
+    { sessionId: String(payload.sessionId || ""), conversationId: String(payload.conversationId || "") },
+    () => {
+      stashPendingRepairNavigationContext({
+        ...payload.context,
+        userId: userStore.userId,
+        sessionId: payload.sessionId,
+        conversationId: payload.conversationId,
+      });
+    },
+  );
 }
 
 function dismissReportQa() {
