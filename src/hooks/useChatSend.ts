@@ -183,6 +183,12 @@ export function useChatSend(scope?: string, handlers?: {
    * 作业指导 / 任务协同不传，行为保持原样（发送即回底）。
    */
   alignSentMessageToTop?: boolean;
+  /**
+   * 配合 alignSentMessageToTop：发送后**立刻**把这条提问顶到头部下沿（不等回答变长）。
+   * 首页开启 —— 每次提问都落在同一个位置，历史内容往上顶走；
+   * 作业指导 / 任务协同不传，仍是「发送回底、回答变长后由 capRoundAtTop 收住」。
+   */
+  pinOnSend?: boolean;
 }) {
   const { t } = useI18n();
   const chatStore = useChatStore(scope);
@@ -258,10 +264,16 @@ export function useChatSend(scope?: string, handlers?: {
    */
   function alignAfterUserMessage(userMsgId: string) {
     if (handlers?.alignSentMessageToTop) {
-      // 不在这里顶到上方：发送瞬间回答还没开始，跳上去只会让屏幕下半空着
       chatStore.setPinnedToBottom(true);
       chatStore.setPinMessage(userMsgId);
       chatStore.setCapRoundAtTop(true);
+      // pinOnSend 的页面（首页）：发送后立刻把提问顶到头部下沿，每次提问都落在同一个位置，
+      // 历史内容往上走，回答再从它下面长出来（capRoundAtTop 保证回答再长也不把提问推出屏幕）
+      if (handlers.pinOnSend) {
+        chatStore.pinMessageToTop(userMsgId);
+        return;
+      }
+      // 其余页面：发送即回底，等回答变长后由 capRoundAtTop 收住
       chatStore.scrollToBottom(true);
       return;
     }
