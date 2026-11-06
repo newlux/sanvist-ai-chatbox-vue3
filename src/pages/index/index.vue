@@ -225,8 +225,8 @@ const messageBottomInset = computed(() => {
  */
 const voicePanelOpen = ref(false);
 /**
- * 「按住说话」录音中：输入栏把录音态透出来，顶部灵动岛据此把常态动图换成 listen.gif。
- * 只在录音期间为 true（松手进识别 / 取消 / 发送都会回落），思考中的 think.gif 逻辑不受影响。
+ * 「按住说话」录音中：输入栏把录音态透出来，顶部灵动岛据此把常态动图换成 sani-logo-sm.gif。
+ * 只在录音期间为 true（松手进识别 / 取消 / 发送都会回落），思考 / 回答的状态图逻辑不受影响。
  */
 const voiceListening = ref(false);
 const askSlotQueue = ref<AskSlotPayload[]>([]);
@@ -689,23 +689,30 @@ const WELCOME_FLY_PEAK_SCALE = 1.16;
 /** 放大达到峰值的进度点（0~1）：前半程膨胀，后半程收小并加速冲刺 */
 const WELCOME_FLY_PEAK_AT = 0.45;
 
+/** 落位后 listen.gif 在岛内再呼吸多久，然后交回空闲态 sani-logo-sm.gif */
+const WELCOME_LISTEN_IDLE_MS = 900;
+
 /**
  * 岛内是否处在「从初始页飞进来」的 listen 态。
  *
- * 落位后切上去就一直保持 listen.gif，不再淡回常态三角图 —— 顶部从此就是这张呼吸图，
- * 想换回三角图只有两个出口：长按灵动岛回初始页，或页面卸载。
+ * 落位后切上去，让飞过来的 listen 图有一段延续；播完（WELCOME_LISTEN_IDLE_MS）
+ * 就交回空闲态 sani-logo-sm.gif —— listen.gif 现在是「回答中 / 播报中」的状态图，
+ * 空闲时留在上面会让人以为还在播报。
  */
 const islandListenFromWelcome = ref(false);
+/** 上面这段延续的收尾定时器（回初始页 / 卸载要清掉） */
+let islandListenIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * 初始页「点击说话」→ 立刻起飞，同时在问答页顶部做实时字幕（WS 流式 ASR）。
+ * 初始页「点击说话」→ 立刻起飞，同时在问答页顶部落一条「识别中」的用户气泡（WS 流式 ASR）。
  *
- * 点击即进问答页：partial 边识别边在顶部从左往右长出来，说完（静音 1.5s）自动收尾，
- * final 再把它落成右侧用户气泡；这条气泡固定停在顶部，回答从它下面长出来。
+ * 这条气泡就是本轮的提问：一开始就顶到头部下沿（与文字提问同一个落点），
+ * partial 逐字回填到气泡里，说完（静音 1.5s）自动收尾，final 原地变成正式提问、回答从下面长出来。
+ * 不再用浮层字幕铺字——浮层是绝对定位，会压在上一条被顶到顶部的提问气泡上（表现为两段文字重叠）。
  */
 const voiceQueryActive = ref(false);
-/** 实时字幕：partial 是「完整文本的当前版本」，直接整体替换，不要自己拼接 */
-const voiceQueryText = ref("");
+/** 本轮 ASR 占位气泡的 id：partial / final 都按 id 回填，不用下标 */
+const voicePlaceholderId = ref("");
 /** 实时音量 0~1（已平滑）：驱动底部录音条的声纹长短 */
 const voiceLevel = ref(0);
 /** 已录秒数：底部录音条右侧那枚 4s */
@@ -726,12 +733,22 @@ let voiceNoSpeechTimer: ReturnType<typeof setTimeout> | null = null;
 const VOICE_LEVEL_THRESHOLD = 0.015;
 let voiceSilenceSince = 0;
 let voiceHeard = false;
+/** 录音条散开落定后再对一次落点的定时器（列表可视高这时才稳定） */
+let voicePinTimer: ReturnType<typeof setTimeout> | null = null;
 
-function resetVoiceQuery() {
+/**
+ * keepPlaceholder：final 已经回来、准备发问时置 true —— 占位气泡要留给 sendMessage 原地替换成正式提问，
+ * 这里不能删，否则会先撤掉再 push 一条新的，顶部位置会闪一下。
+ */
+function resetVoiceQuery(options?: { keepPlaceholder?: boolean }) {
   // 序号自增：正在 await 权限 / 采集的启动流程据此自行作废
   voiceSeq += 1;
+  if (voicePinTimer) {
+    clearTimeout(voicePinTimer);
+    voicePinTimer = null;
+  }
   voiceQueryActive.value = false;
-  voiceQueryText.value = "";
+  voicePlaceholderId.value = "";
   voiceFinishing.value = false;
   voiceLevel.value = 0;
   voiceSeconds.value = 0;
@@ -749,6 +766,8 @@ function resetVoiceQuery() {
   voiceCapture = null;
   voiceSession?.close();
   voiceSession = null;
+  // 没走到 final（取消 / 通道失败 / 权限被拒）：占位气泡已经没有内容可回填，撤掉
+  if (!options?.keepPlaceholder) discardAsrPlaceholder();
 }
 
 function failVoiceQuery(title: string) {
@@ -763,13 +782,39 @@ async function startVoiceQuery() {
   }
 
   const seq = ++voiceSeq;
-  voiceQueryText.value = "";
   voiceFinishing.value = false;
   voiceLevel.value = 0;
   voiceSeconds.value = 0;
   voiceSilenceSince = 0;
   voiceHeard = false;
   voiceQueryActive.value = true;
+
+  // 本轮提问一开始就落成真实气泡并顶到头部下沿（beginAsrPlaceholder 内部走 alignAfterUserMessage）：
+  // 已生成的问答往上走，新提问每次都落在同一个顶部位置，partial 回填只改内容、不换位置
+  beginAsrPlaceholder();
+  voicePlaceholderId.value = chatStore.messages.find(item => item.role === "user" && item.asrPending)?.id || "";
+  /**
+   * 显式再钉一次。
+   * beginAsrPlaceholder 发现「已经有占位气泡」会直接 return（不重新登记本轮提问），
+   * 这种情况下 pin 就没人做了 —— 实时文字会老老实实长在列表末尾（屏幕下方）。
+   * 这里按 id 无条件再登记一次，重复登记是幂等的。
+   */
+  if (voicePlaceholderId.value) {
+    chatStore.setPinnedToBottom(true);
+    chatStore.setPinMessage(voicePlaceholderId.value);
+    chatStore.setCapRoundAtTop(true);
+    chatStore.pinMessageToTop(voicePlaceholderId.value);
+  }
+  /**
+   * 点下去到录音条散开落定（约 300ms）之间，列表可视高还会变一次，
+   * 那之后可滚量变小、之前的落点可能被 clamp 掉。等它落定再对一次落点，
+   * 实时文字才会自始至终钉在同一个顶部位置。
+   */
+  if (voicePinTimer) clearTimeout(voicePinTimer);
+  voicePinTimer = setTimeout(() => {
+    voicePinTimer = null;
+    if (voicePlaceholderId.value) chatStore.pinMessageToTop(voicePlaceholderId.value);
+  }, 360);
 
   // 底部录音条的计时：从进入问答页就开始走，和真实录音时长对齐
   if (voiceTickTimer) clearInterval(voiceTickTimer);
@@ -788,18 +833,31 @@ async function startVoiceQuery() {
 
     const session = openAsrStreamSession({
       onPartial(text) {
-        if (seq === voiceSeq) voiceQueryText.value = text;
+        if (seq !== voiceSeq || !voicePlaceholderId.value) return;
+        // partial 是「完整文本的当前版本」：整体替换气泡内容，不要自己拼接
+        chatStore.patchMessageById(voicePlaceholderId.value, { content: text });
       },
       onFinal(text) {
         if (seq !== voiceSeq) return;
         const query = String(text).trim();
-        resetVoiceQuery();
-        // 静音 / 误触时服务端回空串：提示重说，别拿空问题去提问
+        // 占位气泡的 id 要在 resetVoiceQuery 清空之前留住：final 之后它要接着停在顶部
+        const placeholderId = voicePlaceholderId.value;
+        // 占位气泡先留着：sendMessage 按 asrPending 找到它，原地改成正式提问，顶部位置不动
+        resetVoiceQuery({ keepPlaceholder: true });
+        // 静音 / 误触时服务端回空串：撤掉占位，提示重说，别拿空问题去提问
         if (!query) {
+          discardAsrPlaceholder();
           uni.showToast({ title: t("no-speech-recognized"), icon: "none" });
           return;
         }
         sendQuickPrompt(query);
+        /**
+         * 停止问答后立刻再问：列表还停在上一轮的落点，sendMessage 那次 pin 会和
+         * 「上一轮短回复 + 录音条换回输入栏」的布局变化撞在一起，可能滚不到目标位置，
+         * 气泡就停在屏幕中间。这里按 id 再钉一次（重复钉是幂等的），
+         * 文字从浮层收成气泡时位置不跳。
+         */
+        if (placeholderId) chatStore.pinMessageToTop(placeholderId);
       },
       onError() {
         // 通道层失败（握手被网关拦、服务未部署）和「没听清」要分开提示，
@@ -982,6 +1040,12 @@ async function goToChat() {
       // 位移特效彻底走完、欢迎层也收掉了，这时才把岛内换成 listen.gif：
       // 飞行途中提前换的话，会被上层欢迎层挡住一半，露出来的那半边容易看成「两张图打架」
       islandListenFromWelcome.value = true;
+      // 只延续一小段，随后交回空闲态 sani-logo-sm.gif
+      if (islandListenIdleTimer) clearTimeout(islandListenIdleTimer);
+      islandListenIdleTimer = setTimeout(() => {
+        islandListenIdleTimer = null;
+        islandListenFromWelcome.value = false;
+      }, WELCOME_LISTEN_IDLE_MS);
     }, WELCOME_LAND_FADE_MS);
   };
 
@@ -1053,6 +1117,10 @@ function onRestartToStart() {
   }
   stopWelcomeFly();
   resetVoiceQuery();
+  if (islandListenIdleTimer) {
+    clearTimeout(islandListenIdleTimer);
+    islandListenIdleTimer = null;
+  }
   islandListenFromWelcome.value = false;
   welcomeLeaving.value = false;
   welcomeLanded.value = false;
@@ -1212,6 +1280,17 @@ function onPinnedChange(pinned: boolean) {
   if (pinned) chatStore.setCapRoundAtTop(false);
 }
 
+/**
+ * 内容长高后的贴底跟随。
+ *
+ * 录音期间一律不跟：实时文字是逐字长出来的，每长一点就贴一次底，
+ * 钉在顶部的那条实时气泡会被一路拽到下面去。此时只让气泡自己向下生长。
+ */
+function onMessageContentGrow() {
+  if (voiceQueryActive.value) return;
+  chatStore.scrollToBottom();
+}
+
 async function onScrollTop() {
   if (!chatStore.aiSessionId) return;
   try {
@@ -1281,6 +1360,10 @@ onBeforeUnmount(() => {
   }
   stopWelcomeFly();
   resetVoiceQuery();
+  if (islandListenIdleTimer) {
+    clearTimeout(islandListenIdleTimer);
+    islandListenIdleTimer = null;
+  }
   islandListenFromWelcome.value = false;
 });
 </script>
@@ -1321,7 +1404,7 @@ onBeforeUnmount(() => {
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
         :share-selected-round-count="shareSelectedRoundCount"
-        :voice-listening="voiceListening"
+        :voice-listening="voiceListening || voiceQueryActive"
         :listen-idle="islandListenFromWelcome"
         restartable
         @back="backToWelcome"
@@ -1355,7 +1438,7 @@ onBeforeUnmount(() => {
         :step-card-step-id="guideStepCardStepId"
         :pin-step-card="guideStepSheetVisible"
         @card-space-change="onGuideStepCardSpaceChange"
-        @content-grow="chatStore.scrollToBottom()"
+        @content-grow="onMessageContentGrow"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :listen-broadcast="listenBroadcast"
@@ -1381,16 +1464,8 @@ onBeforeUnmount(() => {
         @scroll-top="onScrollTop"
         @pinned-change="onPinnedChange"
       />
-      <!-- 语音提词：初始页说出来的那句话先在顶部逐字铺开（左对齐、图标下方 20px），
-           铺完再收成右侧用户气泡发出去 -->
-      <view v-if="voiceQueryActive" class="voice-typewriter">
-        <text class="voice-typewriter__body">
-          {{ voiceQueryText || t("welcome-voice-listening") }}
-        </text>
-        <text class="voice-typewriter__caret">
-          |
-        </text>
-      </view>
+      <!-- 语音提问不再用浮层提词：实时文本直接回填到列表里那条「识别中」的用户气泡上，
+           由消息列表把它顶到头部下沿，避免浮层与上一条提问气泡重叠（见 startVoiceQuery） -->
       <!-- 一键回到底部：离底时出现，贴底自动隐藏；
            垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙；
            水平居中，只放 arrow-down.png（无白底 / 阴影，见 .chat-scroll-bottom） -->
@@ -1683,53 +1758,6 @@ $color-white: #ffffff;
   to {
     opacity: 1;
   }
-}
-
-/* 语音提词：落点与第一条用户气泡完全一致（气泡顶边就是内容上内边距的下沿），
-   这样文字收成气泡时原地接管，不会上下跳。
-   z-index 要盖过顶部毛玻璃（1）、又低于头部（1010），文字才不会被模糊层吃掉 */
-.voice-typewriter {
-  position: absolute;
-  top: var(--chat-top-inset, 300rpx);
-  right: 40rpx;
-  left: 40rpx;
-  z-index: 1005;
-  pointer-events: none;
-}
-
-.voice-typewriter__body,
-.voice-typewriter__caret {
-  color: #0d0d0d;
-  font-size: 32rpx; // 16px
-  font-weight: 500;
-  line-height: 48rpx;
-}
-
-.voice-typewriter__body {
-  word-break: break-all;
-}
-
-/* 打字光标：靠闪烁给出「正在说」的节奏 */
-.voice-typewriter__caret {
-  margin-left: 4rpx;
-  animation: voice-caret-blink 1s steps(1) infinite;
-}
-
-@keyframes voice-caret-blink {
-  0%,
-  50% {
-    opacity: 1;
-  }
-
-  50.01%,
-  100% {
-    opacity: 0;
-  }
-}
-
-.ai-page--dark .voice-typewriter__body,
-.ai-page--dark .voice-typewriter__caret {
-  color: #f2f3f5;
 }
 
 // 一键回到底部：只剩 arrow-down.png 图本身（白底圆钮 / 阴影 / 描边全部去掉），水平居中。

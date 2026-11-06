@@ -263,12 +263,21 @@ const UNPIN_SCROLL_UP_PX = 12;
  */
 const PIN_MESSAGE_TOP_MIN_Y_PX = 150;
 /**
- * 第 2 问起，提问气泡在「本轮实际落点」上再往上抬的高度（px）。
+ * 把提问顶到头部下沿时，允许在内容末尾垫的空白上限（px）。
  *
- * 刚发出去时提问下面只有一个等待占位 + 输入栏留白，落点会被夹住（滚到底也顶不到头部下沿），
- * 气泡就比第一问低一截。这里只补一小段（40~60 之间），保持贴底的观感，不让屏幕下部空一大片。
+ * 刚发出去时提问下面只有一个等待占位 + 输入栏留白，整段内容还不到一屏，
+ * 滚到底也顶不到落点 —— 差多少就垫多少空白补上，每一问才真正落在同一个位置。
+ * 上限只防极端内容把末尾垫出好几屏空白。
  */
-const PIN_ROUND2_LIFT_PX = 48;
+const PIN_SPACER_MAX_PX = 1000;
+/**
+ * 垫白时在「刚好够到落点」之外再留的余量（px）。
+ *
+ * 不留在落点下方，滚到位那一下就等于滑到了最底：
+ * 列表会派发 scrolltolower → 页面上报「用户在底部」，把本轮的「提问封顶」撤掉，
+ * 之后实时文字一长就又退回贴底（表现就是「录音时文字掉到下面去」）。
+ */
+const PIN_SPACER_SLACK_PX = 160;
 /** 行内样式的 rpx 在 H5 不会被编译，减去的这段走 CSS 变量（值定义在 .msg-list__inner 上） */
 const CHAT_BOX_TOP_PADDING_VAR = `var(--chat-box-top-padding, 20px)`;
 let lastScrollTop = 0;
@@ -286,8 +295,8 @@ const scrollTopPx = ref(0);
  * 混进去会把「被输入栏盖住的高度」算多，落点跟着漂。
  */
 const shortReplySpacerPx = ref(0);
-/** 本轮提问已经做过「再往上抬一小段」：80ms 补量 / 重复定位时不再抬，免得越抬越高 */
-let pinLiftDone = false;
+/** 「垫白再定位」最多连续做几次：布局每次都会变（图标 / 输入栏换成录音条），一次量不准 */
+const PIN_LIFT_MAX_TRIES = 3;
 
 /**
  * H5：取节点最近的「真正在滚」的祖先。
@@ -301,6 +310,22 @@ function findScrollableAncestor(node: Element | null): HTMLElement | null {
     const scrollable = overflowY === "auto" || overflowY === "scroll";
     const overflows = current.scrollHeight > current.clientHeight + 1;
     if (scrollable && overflows) return current as HTMLElement;
+    current = current.parentElement;
+  }
+  return null;
+}
+
+/**
+ * 同上，但**不要求**内容已经溢出 —— 内容不足一屏时也能量到视口高。
+ * 垫白要按「内容高 + 补白 − 视口高」算，缺了视口高就会永远少补一截。
+ */
+function findScrollViewport(node: Element | null): HTMLElement | null {
+  let current = node?.parentElement || null;
+  while (current) {
+    const overflowY = getComputedStyle(current).overflowY;
+    if (overflowY === "auto" || overflowY === "scroll" || overflowY === "hidden") {
+      if (current.clientHeight > 0) return current as HTMLElement;
+    }
     current = current.parentElement;
   }
   return null;
@@ -531,30 +556,24 @@ function alignToReplyEnd(forceUp = false) {
         target = baseContentHeight - visibleHeight;
       }
       /**
-       * 本轮提问是跟随的上限：内容一直往上走，但提问顶到头部下沿就停住。
+       * 本轮提问就是落点：每一问都停在头部下沿，历史内容整体往上走。
        *
-       * 显示位置取「贴底」与「提问顶到上方」两个落点里更靠上的那个：
-       * - 回答短、整轮放得下：贴底更靠上 → 停在贴底，提问自然还在视野里（下方不留大片空白）；
-       * - 回答长到把提问顶出去：提问落点更靠上 → 停在提问贴顶，不再继续往上推。
-       *
-       * 注意别在收尾时强行把提问拉到头部下沿：短回复那样会在下方垫出一大段空白，
-       * 内容被顶到中间，看着像没排满。
+       * 不再和「贴底」取更靠上的那个 —— 那样回答一短就退化成贴底（滚不动），
+       * 第二问会停在屏幕中间，和第一问的位置对不上。
+       * 整段内容还不到一屏时（提问下面只有等待占位 + 输入栏留白）先垫白，
+       * 垫完再重算一次，落点才真的可达。
        */
-      // baseContentHeight <= listHeight 说明整段对话本来就不到一屏（首轮短问答）：
-      // 贴底布局已经把它放在输入栏上方，这是正常观感，不往上顶（顶了下面会空一大片）
-      if (!forceUp && props.capRoundAtTop && baseContentHeight > listHeight + 1) {
+      if (props.capRoundAtTop && props.pinMessageId) {
         const userTop = Number(userRect?.top);
         const topTarget = userTop - innerTop - pinnedTopGapPx();
         if (Number.isFinite(topTarget)) {
-          /**
-           * 一律按「真末尾」贴底（思考中 / 流式作答也一样）：气泡底部那行操作栏
-           * （播报 / 复制 / 反馈 / 分享）是独立于 .ai-content-blocks 的一块，
-           * 用「正文末尾」口径会把它整行留在输入栏下面，表现就是「气泡只露一半、
-           * 回复完才整块出现」。内容够短时这里就是滚到底（clamp 到内容高 − 视口高）。
-           */
           const bottomTarget = Math.max(0, Math.round(baseContentHeight - listHeight));
           const capTarget = Math.max(0, Math.round(topTarget));
-          target = Math.min(bottomTarget, capTarget);
+          if (ensureScrollableTo(capTarget)) {
+            nextTick(() => alignToReplyEnd(forceUp));
+            return;
+          }
+          target = capTarget;
           /**
            * 封顶说明下方还有内容露不出来（回答比可视区高）：收尾后上报「未贴底」，
            * 页面那边才显示「回到底部」。
@@ -601,6 +620,43 @@ watch(
 );
 
 /**
+ * 内容末尾垫白：让 next 这个 scrollTop 真的可达。
+ *
+ * 整段内容不到一屏时滚不动（没有滚动容器 / scrollHeight 等于 clientHeight），
+ * 提问永远到不了头部下沿。差多少就垫多少空白，垫完可滚量正好等于 next。
+ *
+ * @returns 是否垫了空白（调用方据此重新定位一次）
+ */
+function ensureScrollableTo(next: number) {
+  // #ifdef H5
+  if (next <= 0) return false;
+  const remain = PIN_SPACER_MAX_PX - shortReplySpacerPx.value;
+  if (remain <= 0) return false;
+  const inner = document.querySelector(".msg-list__inner") as HTMLElement | null;
+  if (!inner) return false;
+  /**
+   * 内容高必须用元素实测，不能用 scrollHeight：内容不足一屏时 scrollHeight 会被钳到 clientHeight，
+   * 「可滚量 = scrollHeight − clientHeight」算出来是 0，补白就永远少补 (视口高 − 内容高) 那一截，
+   * 补完还是差一点、滚不到落点 —— 表现就是「实时文字贴着列表末尾，怎么都不上去」。
+   */
+  const contentHeight = inner.getBoundingClientRect().height;
+  const viewport = findScrollableAncestor(inner) || findScrollViewport(inner);
+  const viewportHeight = viewport ? viewport.clientHeight : 0;
+  if (!contentHeight || !viewportHeight) return false;
+  // 让「内容高 + 补白 − 视口高」正好等于 next
+  const need = next + viewportHeight - contentHeight;
+  if (need <= 1) return false;
+  shortReplySpacerPx.value = Math.round(
+    shortReplySpacerPx.value + Math.min(remain, need + PIN_SPACER_SLACK_PX),
+  );
+  return true;
+  // #endif
+  // #ifndef H5
+  return false;
+  // #endif
+}
+
+/**
  * 把某条消息顶到「悬浮头部下沿」。
  *
  * 不用 scroll-into-view：那个是把元素顶部对到滚动容器最上沿，消息会钻到悬浮头部（毛玻璃层）底下被糊掉。
@@ -609,13 +665,11 @@ watch(
  * 再往下那点呼吸位由 padding 自己给出（见 listPadStyle），因为第一轮问答时上面没有内容可滚，
  * 靠滚动压不下去。
  */
-function alignMessageToTop(messageId: string) {
+function alignMessageToTop(messageId: string, attempt = 0) {
   // #ifdef H5
   const inner = document.querySelector(".msg-list__inner") as HTMLElement | null;
   const anchor = document.getElementById(chatMessageAnchorDomId(messageId));
   if (!inner || !anchor) return;
-  const scroller = findScrollableAncestor(inner);
-  if (!scroller) return;
   const padTop = Number.parseFloat(getComputedStyle(inner).paddingTop) || 0;
   // .chat-box 自己还有一段上内边距：气泡的「天然位置」是 padTop + 这段，
   // 落点也要按这个口径算，否则内容还能滚时会比不滚时高 20px
@@ -623,28 +677,27 @@ function alignMessageToTop(messageId: string) {
   const chatBoxTop = chatBox ? Number.parseFloat(getComputedStyle(chatBox).paddingTop) || 0 : 0;
   const offsetInContent = anchor.getBoundingClientRect().top - inner.getBoundingClientRect().top;
   const next = Math.max(0, Math.round(offsetInContent - padTop - chatBoxTop));
+  /**
+   * 整段内容还不到一屏时（第二问刚发出去 / 正在录音，提问下面只有一行实时文字），
+   * 滚到底也顶不到落点，表现为「第一问在顶部、新提问停在屏幕中间」。
+   * 先按差额垫白，垫完再定位 —— 只有垫了才滚得到，每一问才真的从同一个位置开始。
+   * 允许重试几次：垫白本身、输入栏换成录音条都会改可视高度，一次量不准；上限防抖。
+   *
+   * 不再限定「已经问过一轮」：停止问答会留下一条短回复，列表被收在上一轮的位置，
+   * 这时再问第二轮，可滚量可能刚好不够（内容高 ≈ 视口高），
+   * 按轮数判断恰好漏掉这种最常复现的场景，新提问就停在屏幕中间。按可达性判断更准。
+   */
+  if (next > 0 && attempt < PIN_LIFT_MAX_TRIES && ensureScrollableTo(next)) {
+    nextTick(() => alignMessageToTop(messageId, attempt + 1));
+    return;
+  }
+  const scroller = findScrollableAncestor(inner);
+  if (!scroller) return;
   if (next !== Math.round(scroller.scrollTop)) {
     scrollTopPx.value = next;
     scroller.scrollTop = next;
     // 定位是用户主动跳的，别把它当成「上翻看历史」而关掉后续的贴底判定
     lastScrollTop = next;
-  }
-  /**
-   * 第 2 问起再往上抬一小段（见 PIN_ROUND2_LIFT_PX）：
-   * 落点被夹住时气泡会比第一问低一截，这里按「当前实际落点」抬 40~60px，
-   * 抬多少就在内容末尾垫多少空白（几十 px，落在输入栏留白里，看不出空）。
-   * 只抬一次，且已经贴到头部下沿就不抬，避免补量 / 重复定位时越抬越高。
-   */
-  const userRounds = (props.messages || []).filter(message => message?.role === "user").length;
-  const headerLine = padTop + chatBoxTop;
-  const landedY = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-  if (userRounds > 1 && !pinLiftDone && landedY - headerLine > 1) {
-    pinLiftDone = true;
-    shortReplySpacerPx.value = Math.round(
-      shortReplySpacerPx.value + Math.min(PIN_ROUND2_LIFT_PX, landedY - headerLine),
-    );
-    // 空白生效后再定位一次（这时才滚得到新的落点）
-    nextTick(() => alignMessageToTop(messageId));
   }
   // #endif
 }
@@ -652,17 +705,20 @@ function alignMessageToTop(messageId: string) {
 watch(
   () => props.pinMessageToken,
   async () => {
-    // 新的一轮（或换会话 / 新对话把令牌清零）：抬升只做一次，
-    // 上一步为了够到落点垫的空白也按本轮重新算——清零放在目标判空之前，
-    // 否则换会话时 spacer 会跟着旧的 pinMessageId 一起留在新会话里
-    pinLiftDone = false;
+    // 新的一轮（或换会话 / 新对话把令牌清零）：垫的空白按本轮重新算 ——
+    // 清零放在目标判空之前，否则换会话时 spacer 会跟着旧的 pinMessageId 留在新会话里
     shortReplySpacerPx.value = 0;
     const targetId = props.pinMessageId;
     if (!targetId) return;
+    const token = props.pinMessageToken;
     await nextTick();
     alignMessageToTop(targetId);
-    // 头像、附件、首行文字是渲染后才定高的，补一次
-    setTimeout(() => alignMessageToTop(targetId), 80);
+    // 头像、附件、首行文字，以及「输入栏 ↔ 录音条」的切换都是渲染后才定高的：
+    // 多补几次，每次都从 attempt=0 重来（还差就继续垫白），直到落点真的对上
+    [90, 320, 760].forEach(delay => setTimeout(() => {
+      if (props.pinMessageToken !== token) return;
+      alignMessageToTop(targetId);
+    }, delay));
   },
   { flush: "post" },
 );
@@ -676,7 +732,6 @@ watch(
   () => (props.messages || []).length,
   (length) => {
     if (length) return;
-    pinLiftDone = false;
     shortReplySpacerPx.value = 0;
     scrollTopPx.value = 0;
   },

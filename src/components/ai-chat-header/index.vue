@@ -5,7 +5,7 @@ import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import listenLogoGif from "@/assets/img/listen.gif";
-import saniLogoGif from "@/assets/img/sani-logo.gif";
+import saniLogoSmGif from "@/assets/img/sani-logo-sm.gif";
 import tellLogoGif from "@/assets/img/tell.gif";
 import thinkLogoGif from "@/assets/img/think.gif";
 import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
@@ -47,8 +47,8 @@ const props = defineProps({
    */
   restartable: { type: Boolean, default: false },
   /**
-   * 「按住说话」录音中（由 AiChatInput 的 voice-listening 事件驱动）。
-   * 只有首页对话页绑定：录音时岛内常态动图切成 listen.gif，其余页面不受影响。
+   * 录音中（按住说话，或初始页「点击说话」那条语音提问链路）。
+   * 只有首页对话页绑定：录音时岛内叠上 sani-logo-sm.gif，其余页面不受影响。
    */
   voiceListening: { type: Boolean, default: false },
   /**
@@ -59,7 +59,7 @@ const props = defineProps({
   listenIdle: { type: Boolean, default: false },
   /**
    * 自动听播（TTS）播放中：首页把 useRealtimeTts 的 playing 透进来。
-   * 回答中 → 播报结束这一整段岛内都走 tell.gif，生成结束后由它续上。
+   * 回答中 → 播报结束这一整段岛内都走 sani-logo-sm.gif，生成结束后由它续上。
    */
   realtimeTtsPlaying: { type: Boolean, default: false },
 });
@@ -102,7 +102,6 @@ const answering = computed(() => {
 });
 /**
  * 思考中 = 生成已开始但还没吐出 answer 正文；一出现正文就转「回答中」，生成结束回到常态。
- * 岛内动图不再切 src：常态图固定 sani-logo.gif，think.gif 作为上层叠图淡入（见 --think / --think-on）
  */
 const thinking = computed(() => props.generating && !answering.value);
 /**
@@ -110,23 +109,30 @@ const thinking = computed(() => props.generating && !answering.value);
  * 生成结束后 answering 会落回 false，由 realtimeTtsPlaying 续上，两段相接就是完整的播报期。
  */
 const telling = computed(() => answering.value || props.realtimeTtsPlaying);
-/** 岛内走 listen.gif：按住说话期间，或刚从初始页飞进来还没播完这一段 */
-const islandListening = computed(() => props.voiceListening || props.listenIdle);
+/** 录音中（按住说话 / 初始页「点击说话」那条语音链路） */
+const recording = computed(() => props.voiceListening);
 /**
- * 岛内动图分四层：常态 sani-logo.gif 常驻；listen.gif（按住说话）/ tell.gif（播报中）/
- * think.gif（思考中）都是叠在它上面的独立图层，靠 opacity + transform 过渡淡入淡出。
- * 之所以不切常态图的 src：换源是瞬时替换，没有可过渡的中间态，看起来就是硬切。
+ * 岛内动图按状态分四张，各自作为叠图靠 opacity 交叉溶解（绝不切常态图的 src，换源是硬切）：
+ *   空闲            → sani-logo-sm.gif（常驻底层；96×85，与旧常态图 300×267 同比例同裁切）
+ *   正在思考        → think.gif
+ *   正在回答 / 自动播报 → listen.gif
+ *   录音中          → tell.gif
+ * 优先级：录音 > 回答/播报 > 思考 > 从初始页飞入那一段，同一时刻只亮一层。
  */
+const answeringGifOn = computed(() => !recording.value && telling.value);
+const thinkingGifOn = computed(() => !recording.value && !answeringGifOn.value && thinking.value);
+/** 从初始页飞入那一段仍走 listen.gif，落位时是同一张图在延续；有状态时让位给状态图 */
+const listeningGifOn = computed(
+  () => answeringGifOn.value
+    || (!recording.value && !thinkingGifOn.value && props.listenIdle),
+);
+/** 有任意状态图亮着：底层常驻图淡出 */
+const islandAnyGifOn = computed(
+  () => recording.value || answeringGifOn.value || thinkingGifOn.value || listeningGifOn.value,
+);
 
 const logger = createLogger("chat-header");
 const { t, locale } = useI18n();
-/**
- * 灵动岛下方的长条胶囊只在生成过程中出现：
- * 未出字「思考中」→ 出字后「正在回答」，其余状态整个胶囊不渲染。
- */
-const statusText = computed(() =>
-  answering.value ? t("chat-status-generating") : t("chat-status-thinking"),
-);
 const { safeTopPx } = useSafeArea();
 /**
  * 抽屉顶部的「中 / EN」开关已下线（设计稿 309:3088 的位置让给了品牌头像），
@@ -617,20 +623,20 @@ onBeforeUnmount(() => {
                   <circle class="chat-header__press-ring-arc" cx="36" cy="36" r="34" />
                 </svg>
               </view>
-              <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），常态 sani-logo.gif；
-                   思考中在其上叠一张 think.gif 淡入，不做 src / mode 切换，位置一律不动 */
+              <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），空闲 sani-logo-sm.gif；
+                   空闲 sm / 思考 think / 回答·播报 listen / 录音 tell 四张同位置叠图 淡入，不做 src / mode 切换，位置一律不动 */
               <!-- 长按 5 秒回到初始页：只有 restartable（首页对话页）碰触摸事件，
                    其它页面的岛保持纯展示、不抢触摸；热区就是三角图本身（62×62） -->
-              <!-- 常态动图：思考中 / 播报中 / 按住说话时只淡出、不卸载，长按热区与定位基准始终挂在它身上。
-                   图源固定 sani-logo.gif，绝不在这里换 src —— 换源是硬切，没有过渡；
-                   另外几张动图各自作为上层叠图淡入淡出，切换才是柔和交叉溶解 -->
+              <!-- 空闲态动图：有状态图亮起时只淡出、不卸载，长按热区与定位基准始终挂在它身上。
+                   这是 sani-logo-sm.gif，绝不在这里换 src —— 换源是硬切，没有过渡；
+                   状态图各自作为上层叠图淡入淡出，切换才是柔和交叉溶解 -->
               <image
                 class="chat-header__island-logo"
                 :class="{
                   'chat-header__island-logo--restartable': props.restartable,
-                  'chat-header__island-logo--faded': thinking || telling || islandListening,
+                  'chat-header__island-logo--faded': islandAnyGifOn,
                 }"
-                :src="saniLogoGif"
+                :src="saniLogoSmGif"
                 mode="aspectFit"
                 @touchstart="onIslandPressStart"
                 @touchmove="onIslandPressMove"
@@ -641,40 +647,30 @@ onBeforeUnmount(() => {
                 @mouseup="clearIslandPressTimer"
                 @mouseleave="clearIslandPressTimer"
               />
-              <!-- 按住说话动图 listen.gif：叠在常态图正上方，录音时淡入 + 由 2.36 缓升到 2.49 倍
-                   （百分比与 listen 图案留白的换算见 --listen 的样式注释），松手淡出；
-                   从初始页飞进来的那一小段也走这层（listen-idle），落位时是同一张图在延续；
+              <!-- 从初始页飞进来的那一小段走这层 listen.gif（listen-idle），落位时是同一张图在延续，
+                   淡入 + 由 2.36 缓升到 2.49 倍（换算见 --listen 的样式注释）；
+                   这层同时服务「回答中 / 自动播报」，录音或思考时按优先级让位；
                    纯展示层，不吃触摸，避免抢走长按回首页的手势 -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--listen"
-                :class="{ 'chat-header__island-logo--listen-on': islandListening }"
+                :class="{ 'chat-header__island-logo--listen-on': listeningGifOn }"
                 :src="listenLogoGif"
                 mode="aspectFit"
               />
-              <!-- 播报中动图 tell.gif：从「回答中」一直覆盖到听完自动播报，
-                   与 listen.gif 同画布同图案尺寸（500×500，图案 201×173 居中），缩放与偏移共用一套值 -->
-              <image
-                class="chat-header__island-logo chat-header__island-logo--tell"
-                :class="{ 'chat-header__island-logo--tell-on': telling }"
-                :src="tellLogoGif"
-                mode="aspectFit"
-              />
-              <!-- 思考中动图：叠在常态图正上方淡入，同时由 1 倍放大到 1.18 倍，
-                   避免换图源 + 换 mode 的瞬间尺寸硬跳（纯展示层，不吃触摸） -->
+              <!-- think.gif：正在思考（800×400 画布，留白用 aspectFill 裁掉，换算见 --think 注释） -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--think"
-                :class="{ 'chat-header__island-logo--think-on': thinking }"
+                :class="{ 'chat-header__island-logo--think-on': thinkingGifOn }"
                 :src="thinkLogoGif"
                 mode="aspectFill"
               />
-            </view>
-            <!-- 长条胶囊：仅「思考中 / 正在回答」两个生成态展示，其余状态不出现 -->
-            <view v-if="props.generating" class="chat-header__status-pill">
-              <view class="chat-header__status-pill-border" />
-              <!-- 胶囊只留一行：思考中「思考中」/ 出字后「正在回答」 -->
-              <text class="chat-header__status-text">
-                {{ statusText }}
-              </text>
+              <!-- tell.gif：录音中（按住说话 / 点击说话） -->
+              <image
+                class="chat-header__island-logo chat-header__island-logo--tell"
+                :class="{ 'chat-header__island-logo--tell-on': recording }"
+                :src="tellLogoGif"
+                mode="aspectFit"
+              />
             </view>
           </view>
 
@@ -1029,23 +1025,6 @@ onBeforeUnmount(() => {
     filter: brightness(0) invert(1);
   }
 
-  /* ===== 灵动岛「思考中」状态胶囊（Ardot 722:408「深色-思考中」→ Frame 96）=====
-     底 #303030 / 圆角 20 / 内边距 10·13 / 总高 40px（20 + 行高 20 + 20）/
-     阴影 0 2px 8px rgba(0,0,0,0.04)，文案 14px Medium #FFFFFF（.chat-header__status-text 已同值）；
-     深色稿里胶囊没有浅色稿那圈 1px 白描边，直接关掉 */
-  .chat-header__status-pill {
-    padding: 20rpx 26rpx; // 10 / 13
-    background: #303030;
-    box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04); // 0 2px 8px
-  }
-
-  .chat-header__status-pill-border {
-    background: transparent;
-  }
-
-  .chat-header__status-text {
-    color: #ffffff;
-  }
 }
 
 :deep(.uni-popup) {
@@ -1232,7 +1211,7 @@ onBeforeUnmount(() => {
   left: 18rpx; // 9px
   width: 124rpx; // 62px（722:340 实测 62×62）
   height: 124rpx;
-  // 图片本身是透明背景 GIF（300×267，内容已裁到图案边界），这里再显式声明一次透明底，
+  // 图片本身是透明背景 GIF（96×85，内容已裁到图案边界），这里再显式声明一次透明底，
   // 防止 image 组件/内核给它补上默认白底而露出方形
   background-color: transparent;
   border: 0;
@@ -1249,16 +1228,13 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-/* 按住说话 listen.gif / 播报中 tell.gif：两张图都是 500×500 正方形画布，
-   图案（三角）只占中间 201×172（tell 为 201×173），四周是透明留白；
-   sani-logo.gif 是 300×267 已裁到图案边界，所以同一尺寸的盒子里图案会小一半多，
+/* 从初始页飞入那一段的 listen.gif：500×500 画布，图案（三角）只占中间 201×172，四周是透明留白；
+   sani-logo-sm.gif 是 96×85 已裁到图案边界，所以同一尺寸的盒子里图案会小一半多，
    按「图案宽度对齐原图」换算：
    1) 124rpx 的盒子 aspectFit 后图案宽 = 124 × 201/500 ≈ 49.9rpx，要撑到 124rpx → 放大 2.49 倍；
    2) 图案中心在画布上偏左上（cx 247 / cy 246.5~247，画布 250），放大后右移、下移各约 2rpx 复位；
    3) drop-shadow 会被 transform 一起放大，这里按 1/2.49 折回去，保证投影仍是 0 3px 9px rgba(0,0,0,.14)。
-   过渡：与常态图交叉溶解 —— 起始 2.36 倍 / 全透明，状态命中后淡入并缓升到 2.49 倍，
-   340ms 起缓停缓（见 -on）；状态落下用 220ms，比淡入略快，
-   避免两张三角动图长时间叠在一起互相干扰。 */
+   过渡：与常态图交叉溶解 —— 起始 2.36 倍 / 全透明，命中后淡入并缓升到 2.49 倍。 */
 .chat-header__island-logo--listen,
 .chat-header__island-logo--tell {
   z-index: 2;
@@ -1280,16 +1256,11 @@ onBeforeUnmount(() => {
     transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* 思考中动图 think.gif：画布 800×400，图案只占中间（宽约 42.5%、高约 75%），两侧是透明留白。
-   sani-logo.gif 是 300×267、已裁到图案边界，两者比例差一倍，所以：
+/* think.gif（正在思考）：画布 800×400，图案只占中间（宽约 42.5%、高约 75%），两侧是透明留白。
    1) 留白用 aspectFill 裁掉，图案正好撑满 62×62 的位；
    2) 换算下来图案仍比原图小约 15%（340/400 的缩放差），要放大到 1.18 才与原图视觉等大；
-   3) 图案中心在画布上偏下约 2.5%（y 210 / 400），上移 3rpx 让中心仍落在原位置。
-   过渡：叠在常态图上层，起始与常态图等比(1) 且透明，思考中淡入并放大到 1.18，
-   配合下面的 transition 就是「从原动图的大小慢慢变大」，不再有换源瞬间的硬跳 */
+   3) 图案中心在画布上偏下约 2.5%（y 210 / 400），上移 3rpx 让中心仍落在原位置。 */
 .chat-header__island-logo--think {
-  // 叠图固定层级：常态 1 → 录音 / 播报 2 → 思考 3
-  // （这三个状态互斥，层级只是保证 DOM 顺序之外的确定性）
   z-index: 3;
   opacity: 0;
   pointer-events: none;
@@ -1299,65 +1270,6 @@ onBeforeUnmount(() => {
 .chat-header__island-logo--think-on {
   opacity: 1;
   transform: translateY(-3rpx) scale(1.18);
-}
-
-/* ===== 岛屿下方的状态胶囊 =====
-   等待中 722:326：h32 / r20 / 白 / 内边距 6·20 / 文案 "SANI" 14px Medium
-   思考中 / 回答中：同一尺寸，只把文案换成一行「思考中」/「正在回答」
-   胶囊与圆形底部重叠 6px（722:2498 里胶囊 y=138，圆形 y=52~144） */
-.chat-header__status-pill {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  margin-top: -12rpx; // 与圆形底部重叠 6px
-  padding: 12rpx 40rpx; // 6 / 20
-  border-radius: 40rpx; // 20px
-  overflow: hidden; // clipsContent: true（描边环不溢出圆角）
-  /* 纯白底 + 向下投影：靠投影从滚动内容里浮起来（白底不再需要背景模糊） */
-  background: #ffffff;
-  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.08); // 0 4px 12px rgba(0,0,0,.08)
-}
-
-/**
- * 描边：去掉彩色渐变，改为与圆形灵动岛一致的 1px 纯白描边。
- * 渐变无法直接作用于 border，仍沿用 mask 挖空法，只保留 2rpx 的环。
- */
-.chat-header__status-pill-border {
-  position: absolute;
-  z-index: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  padding: 2rpx; // 1px 描边宽度，与圆形 1px 白描边对齐
-  border-radius: 40rpx; // 跟随胶囊 20px
-  background: #ffffff;
-  /* 先写标准属性、再用 -webkit- 兜底：老 WebView 只认前缀版本 */
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  pointer-events: none;
-}
-
-// 胶囊文案：设计稿 722:327 / 722:337（Source Han Sans CN Medium 14px / #0D0D0D / 行盒 20px）
-.chat-header__status-text {
-  position: relative;
-  z-index: 1; // 压在描边之上
-  color: #0d0d0d;
-  font-family:
-    "Source Han Sans CN",
-    "PingFang SC",
-    "Noto Sans SC",
-    "Microsoft YaHei",
-    sans-serif;
-  font-size: 28rpx; // 14px
-  font-weight: 500; // Medium
-  line-height: 40rpx; // 20px
-  letter-spacing: 0;
-  text-align: center;
 }
 
 // --- icons (用 CSS 近似 Figma 形状，后续可替换为 svg 资源) ---

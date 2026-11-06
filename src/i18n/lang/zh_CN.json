@@ -282,6 +282,7 @@
   "guide-init-welcome-title": "欢迎了解作业指导AI助手",
   "guide-init-welcome-subtitle": "师傅远在千里，\n经验近在车里",
   "welcome-tap-to-speak": "点击说话",
+  "welcome-ai-disclaimer": "内容由AI生成，请核实重要信息",
   "welcome-voice-done": "说完了",
   "welcome-voice-listening": "正在聆听…",
   "welcome-voice-unsupported": "当前环境不支持语音输入",
