@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 
 /**
- * 语音提问底部条 —— 1:1 还原 Ardot「起始态 • 唤醒-智能体移动到顶部」(70:1614) 的 Voice Pill。
+ * 语音提问底部条 —— 还原 Ardot「起始态 • 唤醒-智能体移动到顶部」(70:1614) 的 Voice Pill。
  *
  * 设计稿实测（px，1px = 2rpx）：
- * - 胶囊 70:1651：327×44，x=24，距页底 36，圆角 45，底 rgba(13,13,13,0.279)
- * - 左按钮 70:1653：36×36，内边距 6 / 4，圆角 18，底 rgba(255,255,253,0.336)，白色 × 线宽 2
+ * - 胶囊 70:1651：327×44，x=24，距页底 36，圆角 45
+ * - 左按钮 70:1653：36×36，内边距 6 / 4，圆角 18，白色 × 线宽 2
  * - 声纹 77:1006：87×9.405，x=53，16 根 2px 白线，中心间距 5.8
  * - 计时 70:1652：14px / 行高 20 / #FFFFFF，x=262
  * - 右按钮 70:1657：36×36，圆角 18，#FFFFFF，箭头线宽 1.667 / #0D0D0D
@@ -16,6 +17,8 @@ import { computed } from "vue";
 defineOptions({
   name: "AiVoiceQueryBar",
 });
+
+const { t } = useI18n();
 
 const props = defineProps({
   /** 实时音量 0~1（已平滑）：整体缩放声纹，基线高度仍是设计稿那 16 根 */
@@ -88,18 +91,17 @@ const secondsText = computed(() => `${props.seconds}s`);
 </script>
 
 <template>
-  <!-- ===== 录音中底部蓝光：设计稿 77:11564 Frame 86 =====
-       容器 375×166，y=676（页面 812 高，下沿 842 → 溢出 30px，由 overflow 裁掉，对应设计稿 clipsContent） -->
-  <view class="voice-query__glow" aria-hidden="true">
-    <!-- 77:11569 Vector 87：449×195 @(-38,9)，#295DC3 → #0D7ABA，图层模糊 50 -->
-    <view class="voice-query__glow-block" />
-    <!-- 77:11567 Ellipse 75：434×341 @(-31,39)，#0F7EEE 0 → 40%，图层模糊 37 -->
+  <!-- ===== 录音中底部光晕 =====
+       浅色稿：白色主光 + 极淡蓝边（不是整块蓝雾），胶囊周围亮，往上/往外淡出到透明；
+       深色稿：沿用原来的冷蓝光，避免白雾糊在深底上 -->
+  <view class="voice-query__glow" :class="{ 'voice-query__glow--dark': dark }" aria-hidden="true">
+    <view class="voice-query__glow-white" />
     <view class="voice-query__glow-ellipse" />
   </view>
 
-  <!-- 设计稿 70:1651 Voice Pill：327×44 / r45 / rgba(13,13,13,0.279) / 左右 24 距底 36 -->
+  <!-- 设计稿 70:1651 Voice Pill：327×44 / r45 / rgba(13,13,13,0.38) / 左右 24 距底 36 -->
   <view class="voice-query" :class="{ 'voice-query--dark': dark }">
-    <!-- 设计稿 70:1653 Group 109：36×36 圆 + 白色 ×（左内边距 6、上 4） -->
+    <!-- 设计稿 70:1653 Group 109：36×36 浅色圆 + 深灰 ×（左内边距 6、上 4） -->
     <view class="voice-query__cancel" @tap="emit('cancel')">
       <view class="voice-query__cross" />
     </view>
@@ -131,50 +133,84 @@ const secondsText = computed(() => `${props.seconds}s`);
       </view>
     </view>
   </view>
+
+  <!-- 胶囊下方的安全提示：输入栏换成录音条时原来那句提示会跟着一起消失，
+       这里补回来，位置 / 字号 / 颜色与 .chat-input__footer 完全同口径 -->
+  <text class="voice-query__hint">
+    {{ t("ai-content-disclaimer") }}
+  </text>
 </template>
 
 <style scoped lang="scss">
-/* ===================== 录音中底部蓝光：设计稿 77:11564 Frame 86 =====================
-   容器 375×166 / y=676：下沿 842 超出页面 812 共 30px，靠 overflow 裁掉（设计稿 clipContent）。
-   bottom 带上 safe-area：胶囊本身也随安全区上移，光晕必须同幅上移，
-   否则「光晕顶边距胶囊底边 100px」这个设计关系会在全面屏上被拉断。 */
+/* ===================== 录音中底部光晕 =====================
+   浅色稿按「白为主、蓝做边」实现：胶囊周围一圈白色柔光，再往外是一层几乎看不见的淡蓝，
+   到边界已经透明，所以没有硬切边（原来用 blur + overflow 裁，蓝块上沿会出现一条直线）。
+   bottom 带上 safe-area：胶囊本身也随安全区上移，光晕必须同幅上移。 */
 .voice-query__glow {
   position: fixed;
   right: 0;
-  bottom: calc(env(safe-area-inset-bottom) - 60rpx);
+  bottom: calc(env(safe-area-inset-bottom) - 80rpx);
   left: 0;
   z-index: 1000; // 压在胶囊（1001）之下、内容之上
-  height: 332rpx; // 166px
-  overflow: hidden;
+  height: 420rpx;
   pointer-events: none;
   animation: voice-query-glow-in 260ms ease-out both;
 }
 
-/* 77:11569 Vector 87：449×195 @(-38,9)，相对容器 left -38 / top 9
-   gradientTransform 是单位阵（竖向那组是 [[0,1,0],[-1,0,1]]，可反推出单位阵=横向）→ 渐变自左向右；
-   449→898rpx、195→390rpx、-38→-76rpx、9→18rpx */
-.voice-query__glow-block {
+/* 中心提亮：纯白椭圆，焦点落在胶囊上（距底约 58px），四周平滑淡出到透明。
+   z-index 压在外圈淡蓝之上：白光要在里、蓝边在外，反过来中心会被蓝染一道 */
+.voice-query__glow-white {
   position: absolute;
-  top: 18rpx;
-  left: -76rpx;
-  width: 898rpx;
-  height: 390rpx;
-  background: linear-gradient(90deg, #295dc3 0%, #0d7aba 100%);
-  filter: blur(50px); // LAYER_BLUR radius 50（filter 只吃 px，不写 rpx）
+  z-index: 1;
+  right: -10%;
+  bottom: 0;
+  left: -10%;
+  height: 400rpx;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse 50% 50% at 50% 55%,
+    #ffffff 0%,
+    rgba(255, 255, 255, 0.92) 38%,
+    rgba(255, 255, 255, 0.45) 66%,
+    rgba(255, 255, 255, 0) 100%
+  );
 }
 
-/* 77:11567 Ellipse 75：434×341 @(-31,39)
-   gradientTransform 反解出的方向是「自下而上」（stop0 透明在下方，stop1 40% 在上方）；
-   434→868rpx、341→682rpx、-31→-62rpx、39→78rpx */
+/* 外圈淡蓝：只在白光边缘透出一点冷色，量级压到「不仔细看看不出来」 */
 .voice-query__glow-ellipse {
   position: absolute;
-  top: 78rpx;
-  left: -62rpx;
-  width: 868rpx;
-  height: 682rpx;
+  right: -16%;
+  bottom: -100rpx;
+  left: -16%;
+  height: 540rpx;
   border-radius: 50%;
-  background: linear-gradient(0deg, rgba(15, 126, 238, 0) 0%, rgba(15, 126, 238, 0.4) 100%);
-  filter: blur(37px); // LAYER_BLUR radius 37
+  background: radial-gradient(
+    ellipse 50% 50% at 50% 50%,
+    rgba(222, 236, 255, 0.85) 0%,
+    rgba(226, 238, 255, 0.45) 55%,
+    rgba(226, 238, 255, 0) 100%
+  );
+}
+
+/* 深色外观：白雾糊在深底上会发脏，换回原来的冷蓝光 */
+.voice-query__glow--dark {
+  .voice-query__glow-white {
+    background: radial-gradient(
+      ellipse 50% 50% at 50% 55%,
+      rgba(41, 93, 195, 0.55) 0%,
+      rgba(13, 122, 186, 0.35) 45%,
+      rgba(13, 122, 186, 0) 100%
+    );
+  }
+
+  .voice-query__glow-ellipse {
+    background: radial-gradient(
+      ellipse 50% 50% at 50% 50%,
+      rgba(15, 126, 238, 0.4) 0%,
+      rgba(15, 126, 238, 0.18) 55%,
+      rgba(15, 126, 238, 0) 100%
+    );
+  }
 }
 
 /* 与胶囊的散开动画同步浮现；静态终态与设计稿完全一致 */
@@ -190,7 +226,9 @@ const secondsText = computed(() => `${props.seconds}s`);
 
 /* 设计稿 70:1651 Voice Pill
    327×44px → 654×88rpx；x=24（左右 48rpx）；距底 36px=72rpx；
-   圆角 45px→90rpx（大于半高，视觉即胶囊）；底 rgba(13,13,13,0.279)；
+   圆角 45px→90rpx（大于半高，视觉即胶囊）；
+   底 rgba(13,13,13,0.38)：浅色稿的胶囊是中性灰（约 #A2A2A2），
+   原来 0.279 压在蓝光上偏深，换成白光晕后要再压深一点才和稿子一致；
    padding 6 / 4 → 12rpx / 8rpx */
 .voice-query {
   position: fixed;
@@ -204,7 +242,7 @@ const secondsText = computed(() => `${props.seconds}s`);
   height: 88rpx;
   padding: 8rpx 12rpx;
   border-radius: 90rpx;
-  background: rgba(13, 13, 13, 0.279);
+  background: rgba(13, 13, 13, 0.38);
   // 入场：从中间向两边散开（clip-path 只裁视觉，不改布局），散开到位后内部元素再淡入，
   // 就是「点击说话 → 向两边散开 → 出现录音态」的节奏。
   // 容器不支持 clip-path 时直接显示完整胶囊，功能不受影响
@@ -255,7 +293,8 @@ const secondsText = computed(() => `${props.seconds}s`);
   background: rgba(255, 255, 253, 0.336);
 }
 
-/* 设计稿 70:1654 / 70:1655：两条 16.97px（33.94rpx）长、2px（4rpx）粗的白线交叉 90° */
+/* 设计稿 70:1654 / 70:1655：两条 16.97px（33.94rpx）长、2px（4rpx）粗的线交叉 90°。
+   浅色稿的胶囊是中灰、X 落在更亮的浅灰圆上，用深灰才看得清（原来是白色，压在深色胶囊上） */
 .voice-query__cross {
   position: relative;
   width: 33.94rpx;
@@ -269,7 +308,7 @@ const secondsText = computed(() => `${props.seconds}s`);
     width: 100%;
     height: 4rpx;
     margin-top: -2rpx;
-    background: #ffffff;
+    background: rgba(13, 13, 13, 0.6);
     content: "";
   }
 
@@ -389,6 +428,23 @@ const secondsText = computed(() => `${props.seconds}s`);
   background: #0d0d0d;
 }
 
+/* ===== 胶囊下方的安全提示 =====
+   口径与输入栏的 .chat-input__footer 保持一致（12px / #BABABA / 居中 / 文字底距页面底 15px），
+   录音条替掉输入栏时这句提示不能跟着丢 */
+.voice-query__hint {
+  position: fixed;
+  right: 0;
+  bottom: calc(30rpx + env(safe-area-inset-bottom));
+  left: 0;
+  z-index: 1001;
+  color: #bababa;
+  font-size: 24rpx; // 12px
+  line-height: 30rpx;
+  text-align: center;
+  pointer-events: none;
+  animation: voice-query-part-in 200ms ease 140ms backwards;
+}
+
 /* 深色外观：设计稿无此态，仅夜间模式兜底（数值按同比例反色） */
 .voice-query--dark {
   background: rgba(242, 242, 245, 0.16);
@@ -398,12 +454,22 @@ const secondsText = computed(() => `${props.seconds}s`);
   background: rgba(255, 255, 253, 0.2);
 }
 
+/* 深底 + 浅圆：X 换回白色 */
+.voice-query--dark .voice-query__cross::before,
+.voice-query--dark .voice-query__cross::after {
+  background: #ffffff;
+}
+
 .voice-query--dark .voice-query__bar {
   background: #f2f3f5;
 }
 
 .voice-query--dark .voice-query__time {
   color: #f2f3f5;
+}
+
+.voice-query--dark .voice-query__hint {
+  color: rgba(242, 243, 245, 0.55);
 }
 
 .voice-query--dark .voice-query__submit {
