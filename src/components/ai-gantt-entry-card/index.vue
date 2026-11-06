@@ -28,6 +28,8 @@ const props = defineProps({
   devices: { type: String, default: "" },
   /** 任务数描述：空则「任务数」行不显示 */
   taskCount: { type: String, default: "" },
+  /** 深色模式：由 GanttBlock 透传（气泡内来自 ai-bubble-v2 的 provide，页面直用时显式传） */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{
@@ -44,7 +46,7 @@ const titleText = computed(() => props.title.trim() || t("task-entry-gantt-title
 </script>
 
 <template>
-  <view class="gantt-entry" @tap="emit('tap')">
+  <view class="gantt-entry" :class="{ 'gantt-entry--dark': dark }" @tap="emit('tap')">
     <view class="gantt-entry__head">
       <!-- 甘特图小图标：双人/联系人图形，设计稿切图（32×32 @2x → 显示 16×16） -->
       <image
@@ -173,5 +175,35 @@ const titleText = computed(() => props.title.trim() || t("task-entry-gantt-title
   /* 值过长时换行展示，不截断 */
   white-space: normal;
   word-break: break-word;
+}
+
+/* ===== 深色主题：与气泡回复卡同一套材质（底 #212121 / 描边 #303030），
+   标题 #FFFFFF、标签 #8E8E8E、值 85% 白、箭头线框 #8F8F8F；
+   图标是深色切图，深底下反相成白；尺寸 / 间距 / 字号不动 ===== */
+.gantt-entry--dark {
+  border-color: #303030;
+  background: #0d0d0d;
+
+  /* 深色切图压成纯白，避免深底上看不见 */
+  .gantt-entry__icon {
+    filter: brightness(0) invert(1);
+  }
+
+  .gantt-entry__title {
+    color: #ffffff;
+  }
+
+  .gantt-entry__chevron {
+    border-top-color: #8f8f8f;
+    border-right-color: #8f8f8f;
+  }
+
+  .gantt-entry__label {
+    color: #8e8e8e;
+  }
+
+  .gantt-entry__value {
+    color: rgba(255, 255, 255, 0.85);
+  }
 }
 </style>

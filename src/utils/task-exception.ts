@@ -18,16 +18,28 @@
  * 建议问题随卡片一起下发，页面拿去铺「你还可以这么问」，取不到时回落到本地兜底文案。
  */
 export interface TaskExceptionRow {
-  /** 左侧标签，自带冒号（设计稿「异常对象：」） */
-  label: string;
+  /** 左侧标签原文（接口下发时用它，文案语言由接口决定） */
+  label?: string;
+  /** 左侧标签的 i18n key（本地兜底文案走这里，随中英文切换） */
+  labelKey?: string;
   /** 右侧内容，可多行 */
   value: string;
 }
 
 export interface TaskExceptionCard {
-  title: string;
+  /** 标题原文（接口下发时用它） */
+  title?: string;
+  /** 标题的 i18n key（本地兜底标题，「异常情况摘要」/「Exception Summary」） */
+  titleKey?: string;
   rows: TaskExceptionRow[];
 }
+
+/** 卡片标题与两个行标签的 i18n key（zh_CN / en_US 各一份，其余语言回退 en_US） */
+export const TASK_EXCEPTION_I18N = {
+  title: "task-exception-title",
+  object: "task-exception-object",
+  desc: "task-exception-desc",
+} as const;
 
 /**
  * 解析结果：
@@ -42,12 +54,15 @@ export interface TaskExceptionSummary {
 /**
  * 设计稿 350:2199 的文案口径（「异常情况摘要」+ 行标签）。
  * 只作为标题缺省值与行标签来源，不再整卡兜底 —— 没有接口数据就不铺卡。
+ *
+ * 标题 / 标签走 i18n key（不是写死中文）：只有值和标题原文来自接口，
+ * 接口没给标题、或只给了对象/描述时，标签必须跟随当前语言。
  */
 export const TASK_EXCEPTION_MOCK: TaskExceptionCard = {
-  title: "异常情况摘要",
+  titleKey: TASK_EXCEPTION_I18N.title,
   rows: [
-    { label: "异常对象：", value: "混凝土搅拌车--粤A8766H" },
-    { label: "异常情况：", value: "搅拌车堵车，预计晚到 50 分钟，可能影响现场浇筑作业" },
+    { labelKey: TASK_EXCEPTION_I18N.object, value: "混凝土搅拌车--粤A8766H" },
+    { labelKey: TASK_EXCEPTION_I18N.desc, value: "搅拌车堵车，预计晚到 50 分钟，可能影响现场浇筑作业" },
   ],
 };
 
@@ -114,6 +129,12 @@ function pickText(source: Record<string, unknown> | null, keys: string[]) {
   return "";
 }
 
+/** 标签补冒号：中文用全角「：」，其它语言用半角「:」，已带冒号的不重复加 */
+function appendColon(label: string) {
+  if (/[：:]$/.test(label)) return label;
+  return /[\u4E00-\u9FFF]/.test(label) ? `${label}：` : `${label}:`;
+}
+
 /** 接口直接给 rows / items 数组时按它渲染；标签统一补上设计稿的冒号 */
 function pickRows(source: Record<string, unknown> | null): TaskExceptionRow[] {
   if (!source) return [];
@@ -123,9 +144,15 @@ function pickRows(source: Record<string, unknown> | null): TaskExceptionRow[] {
     const record = toRecord(item);
     const label = pickText(record, ["label", "name", "key", "title"]);
     const value = pickText(record, ["value", "content", "text", "desc", "description"]);
-    if (label && value) rows.push({ label: label.endsWith("：") ? label : `${label}：`, value });
+    if (label && value) rows.push({ label: appendColon(label), value });
     return rows;
   }, []);
+}
+
+/** 标题：接口给了就用原文（语言由接口决定），没给就回落到 i18n key（跟随中英文） */
+function resolveTitle(source: Record<string, unknown> | null): Pick<TaskExceptionCard, "title" | "titleKey"> {
+  const title = pickText(source, TITLE_KEYS);
+  return title ? { title } : { titleKey: TASK_EXCEPTION_I18N.title };
 }
 
 /** 建议问题：数组里只留非空字符串，去重后返回 */
@@ -150,17 +177,18 @@ function readCard(raw: unknown): TaskExceptionCard | null {
   if (!source) return null;
 
   const rows = pickRows(source);
-  if (rows.length) return { title: pickText(source, TITLE_KEYS) || TASK_EXCEPTION_MOCK.title, rows };
+  if (rows.length) return { ...resolveTitle(source), rows };
 
   const object = pickText(source, OBJECT_KEYS);
   const desc = pickText(source, DESC_KEYS);
   if (!object && !desc) return null;
 
-  // 只给了一侧也只渲染那一侧：缺的那行整行不出现，不编造内容
+  // 只给了一侧也只渲染那一侧：缺的那行整行不出现，不编造内容。
+  // 标签用 i18n key（不写死中文），否则英文界面下会出现「English 值 + 中文标签」
   const fallback: TaskExceptionRow[] = [];
-  if (object) fallback.push({ label: TASK_EXCEPTION_MOCK.rows[0].label, value: object });
-  if (desc) fallback.push({ label: TASK_EXCEPTION_MOCK.rows[1].label, value: desc });
-  return { title: pickText(source, TITLE_KEYS) || TASK_EXCEPTION_MOCK.title, rows: fallback };
+  if (object) fallback.push({ labelKey: TASK_EXCEPTION_I18N.object, value: object });
+  if (desc) fallback.push({ labelKey: TASK_EXCEPTION_I18N.desc, value: desc });
+  return { ...resolveTitle(source), rows: fallback };
 }
 
 /**

@@ -42,8 +42,9 @@ const props = defineProps({
     default: true,
   },
   /**
-   * 发问 / 回复气泡的深色材质（Ardot 1193:5104）。
-   * 由页面显式传：首页问答态跟随外观设置变深；作业指导 / 任务协同仍是浅色稿，不传即浅色。
+   * 发问 / 回复气泡与气泡外独立卡片的深色材质（Ardot 1193:5104）。
+   * 由页面显式传（首页 / 作业指导 / 任务协同都传 systemStore.isDark），不传即浅色；
+   * 气泡里的块还能靠 ai-bubble-v2 的 provide 兜底，挂在气泡外的调度视图入口卡只能靠这个 prop。
    */
   dark: {
     type: Boolean,
@@ -1244,7 +1245,8 @@ watch(
               :key="`gantt-${block.id}`"
               class="chat-box__card chat-box__card--gantt"
             >
-              <AiBlockRenderer :block="block" @gantt-open="onGanttOpen" />
+              <!-- 这张卡挂在气泡外，拿不到 ai-bubble-v2 的 provide，深色由列表显式传进来 -->
+              <AiBlockRenderer :block="block" :dark="dark" @gantt-open="onGanttOpen" />
             </view>
           </view>
         </view>

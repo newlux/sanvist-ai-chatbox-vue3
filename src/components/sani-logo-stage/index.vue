@@ -21,8 +21,11 @@ const props = withDefaults(defineProps<{
   bubbles: SaniStageBubble[];
   /** 当前选中 / 命中的球 key */
   selectedKey?: string;
+  /** 深色模式：身份球 / 装饰球换深色稿材质（与首页欢迎态深色稿同一套） */
+  dark?: boolean;
 }>(), {
   selectedKey: "",
+  dark: false,
 });
 
 const emit = defineEmits<{ select: [key: string] }>();
@@ -47,7 +50,9 @@ const items = computed(() => props.bubbles.map((bubble, index) => {
       width: `${bubble.size}rpx`,
       height: `${bubble.size}rpx`,
       fontSize: `${bubble.fontSize ?? 0}rpx`,
-      backgroundImage: bubble.fill
+      // 深色稿的球体材质是「实色渐变填充 + 渐变描边」（见样式表），
+      // 浅色稿那层内联渐变会盖掉 CSS，所以深色下不再注入（与首页 welcome-visitor 的处理一致）
+      backgroundImage: bubble.fill && !props.dark
         ? `linear-gradient(180deg, ${bubble.fill[0]} 0%, ${bubble.fill[1]} 100%)`
         : undefined,
       "--holo-dx": `${-bubble.cx}rpx`,
@@ -65,7 +70,7 @@ const items = computed(() => props.bubbles.map((bubble, index) => {
   <!-- 画布铺满内容区：logo 靠 flex 居中，气泡挂在 logo 容器内、以容器左上为原点相对定位，
        屏高变化时 logo 和气泡一起走（与首页 welcome-visitor 同构）。
        pointer-events 只在气泡上放开，整块画布不拦截页面根级的长按 / 点按手势 -->
-  <view class="sani-stage">
+  <view class="sani-stage" :class="{ 'sani-stage--dark': dark }">
     <view class="sani-stage__core">
       <image class="sani-stage__logo" :src="logo" mode="aspectFit" />
       <view
@@ -273,5 +278,62 @@ const items = computed(() => props.bubbles.map((bubble, index) => {
   line-height: 1.44;
   white-space: pre-line;
   word-break: break-word;
+}
+
+/* ===== 深色主题：身份球 + 装饰球（Ardot 1193:5473「日常运营助手-开始选择身份」）=====
+   浅色稿（1006:3 / 1006:16 身份球、722:2720 装饰球）原样保留，这里只换材质与字色；
+   入场翻折、漂浮、选中呼吸、点击逻辑一行不动：
+   - 身份球 1193:5570：彩色渐变填充 + 2px 渐变描边 + 阴影 0 1 11 rgba(0,0,0,.1)，
+     浅色稿那两团蓝 / 粉色斑 SVG 不再叠加（深色稿材质本身就是渐变）；
+   - 球名：#FFFFFF；
+   - 装饰球 1193:5565：#0D0D0D@80% + 1px 渐变描边 + 同款阴影，球面高光换成 #060413 渐变。 */
+.sani-stage--dark {
+  .sani-stage__bubble {
+    color: #ffffff;
+  }
+
+  // 填充中段是 20% / 10% 半透明，叠在描边层上会透出描边色，
+  // 所以中间垫一层页面底色 #03021D，还原设计稿「球心透出背景」的观感
+  .sani-stage__bubble--role {
+    border: 4rpx solid transparent; // 2px
+    background-color: transparent;
+    background-image:
+      linear-gradient(213deg, #b221b2 5.7%, #382cbb 24.5%, rgba(0, 111, 221, 0.2) 55.6%, rgba(0, 115, 223, 0.1) 63.6%, #0081d6 100%),
+      linear-gradient(#03021d, #03021d),
+      linear-gradient(222deg, #779dc5 0%, #3e6399 51.1%, #ffffff 100%);
+    background-origin: padding-box, padding-box, border-box;
+    background-clip: padding-box, padding-box, border-box;
+    box-shadow: 0 2rpx 22rpx 0 rgba(0, 0, 0, 0.1);
+  }
+
+  // 命中态：浅色稿的淡蓝底在深色材质上会被盖掉，这里只补回那圈白色柔光
+  .sani-stage__bubble--role.sani-stage__bubble--active {
+    z-index: 2;
+    box-shadow:
+      0 0 12rpx 2rpx rgba(255, 255, 255, 0.85),
+      0 0 20rpx 4rpx rgba(158, 199, 255, 0.45),
+      0 2rpx 22rpx 0 rgba(0, 0, 0, 0.1);
+  }
+
+  // 深色球体自带渐变材质，浅色稿那两团色斑再叠上去会发灰
+  .sani-stage__bubble-aurora {
+    display: none;
+  }
+
+  .sani-stage__bubble--ghost {
+    border: 2rpx solid transparent; // 1px
+    background-color: transparent;
+    background-image:
+      linear-gradient(rgba(13, 13, 13, 0.8), rgba(13, 13, 13, 0.8)),
+      linear-gradient(222deg, #779dc5 0%, #3e6399 51.1%, #ffffff 100%);
+    background-origin: padding-box, border-box;
+    background-clip: padding-box, border-box;
+    box-shadow: 0 2rpx 22rpx 0 rgba(0, 0, 0, 0.1);
+  }
+
+  // 1193:5564 Vector 80：球面高光由白色改成 #060413（尺寸 / 位置 / 模糊沿用浅色稿）
+  .sani-stage__bubble--ghost::after {
+    background-image: linear-gradient(180deg, #060413 0%, rgba(6, 4, 19, 0.263) 100%);
+  }
 }
 </style>

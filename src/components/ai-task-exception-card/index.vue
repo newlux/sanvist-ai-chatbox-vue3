@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import type { TaskExceptionCard } from "@/utils/task-exception";
+import type { TaskExceptionCard, TaskExceptionRow } from "@/utils/task-exception";
+
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 
 /**
  * 异常情况摘要卡片 —— Ardot 350:2151 里的节点 350:2199（Group 24 / Rectangle 56）。
@@ -17,24 +20,46 @@ import type { TaskExceptionCard } from "@/utils/task-exception";
  */
 defineOptions({ name: "AiTaskExceptionCard" });
 
-defineProps<{
+const props = defineProps<{
   data: TaskExceptionCard;
+  /** 深色模式：页面按 systemStore.isDark 透传 */
+  dark?: boolean;
 }>();
+
+const { t, locale } = useI18n();
+
+/**
+ * 标题 / 行标签都要做中英文适配：
+ * - 接口下发了原文（英文环境通常接口直接给英文）→ 用原文；
+ * - 接口没给（本地兜底）→ 用 i18n key，跟随当前语言。
+ * 之前标签写死中文，英文界面下就成了「English 值 + 异常对象：」这种混排。
+ */
+const title = computed(() => props.data.title || (props.data.titleKey ? t(props.data.titleKey) : ""));
+
+function resolveLabel(row: TaskExceptionRow) {
+  return row.label || (row.labelKey ? t(row.labelKey) : "");
+}
+
+/**
+ * 标签列宽：设计稿按中文「异常对象：」标注 70px，英文标签（Exception object:）更宽，
+ * 固定 70px 会折成两行，所以非中文时把标签列放宽到 110px。
+ */
+const labelColumnStyle = computed(() => (/^zh/i.test(String(locale.value)) ? {} : { width: "220rpx" }));
 </script>
 
 <template>
-  <view class="te-card">
+  <view class="te-card" :class="{ 'te-card--dark': dark }">
     <text class="te-card__title">
-      {{ data.title }}
+      {{ title }}
     </text>
     <view class="te-card__rows">
       <view
-        v-for="row in data.rows"
-        :key="row.label"
+        v-for="(row, index) in data.rows"
+        :key="row.labelKey || row.label || index"
         class="te-card__row"
       >
-        <text class="te-card__label">
-          {{ row.label }}
+        <text class="te-card__label" :style="labelColumnStyle">
+          {{ resolveLabel(row) }}
         </text>
         <text class="te-card__value">
           {{ row.value }}
@@ -93,5 +118,23 @@ defineProps<{
   font-weight: 400;
   line-height: 40rpx; // 20
   word-break: break-word;
+}
+
+/* ===== 深色主题：与气泡回复卡同一套材质（底 #212121 / 描边 #303030）；
+   标题 #FFFFFF、标签 #5D5D5D、值 80% 白。尺寸 / 间距 / 字号不动 ===== */
+.te-card--dark {
+  background: #212121;
+
+  .te-card__title {
+    color: #ffffff;
+  }
+
+  .te-card__label {
+    color: #5d5d5d;
+  }
+
+  .te-card__value {
+    color: rgba(255, 255, 255, 0.8);
+  }
 }
 </style>

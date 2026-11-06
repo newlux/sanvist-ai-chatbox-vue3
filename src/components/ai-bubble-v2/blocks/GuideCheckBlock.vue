@@ -153,11 +153,13 @@ function resolveRootElement(): HTMLElement | null {
       </view>
     </view>
 
-    <!-- 参考来源：与回答气泡里的参考资料同款（标题 + 条目） -->
+    <!-- 参考来源：与回答气泡里的参考资料同款（标题 + 条目）。
+         这张卡本身还是白底（深色稿未出），所以显式关掉深色，避免深色条目压在白卡上 -->
     <GuideSourceBlock
       v-if="sources.length"
       class="guide-check-block__sources"
       :payload="{ evidence: sources }"
+      :dark="false"
     />
 
     <text v-if="status" class="guide-check-block__status">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, inject } from "vue";
 import copyIcon from "@/assets/img/icon-action-copy.svg";
 import documentIcon from "@/assets/img/guide-source-document.svg";
 import imageIcon from "@/assets/img/guide-source-image.svg";
@@ -10,7 +10,16 @@ defineOptions({ name: "GuideSourceBlock" });
 
 const props = defineProps({
   payload: { type: Object, default: () => ({}) },
+  /**
+   * 深色模式：不传（undefined）时跟随 ai-bubble-v2 的 provide；
+   * 显式传值优先 —— 白底容器（如核对卡）里的来源条目要显式传 false。
+   */
+  dark: { type: Boolean, default: undefined },
 });
+
+/** 是否在深色 AI 气泡里（Ardot 1193:5104），没有 provide 的场景默认 false */
+const darkContainer = inject("ai-bubble-dark", computed(() => false));
+const isDark = computed(() => props.dark ?? darkContainer.value);
 
 const evidence = computed(() => (Array.isArray(props.payload?.evidence) ? props.payload.evidence : [])
   .map(item => ({
@@ -53,7 +62,11 @@ function onSourceTap(item: { fileType: string; url: string }) {
 </script>
 
 <template>
-  <view v-if="evidence.length" class="guide-source-block">
+  <view
+    v-if="evidence.length"
+    class="guide-source-block"
+    :class="{ 'guide-source-block--dark': isDark }"
+  >
     <text class="guide-source-block__title">
       参考来源
     </text>
@@ -138,5 +151,32 @@ function onSourceTap(item: { fileType: string; url: string }) {
   flex: 0 0 32rpx;
   width: 32rpx;
   height: 32rpx;
+}
+
+/* ===== 深色主题：参考来源列表（深色 AI 气泡内，Ardot 1193:5104）=====
+   条目底色由浅蓝 #F2F7FF 换成 6% 白（叠在 #212121 回复卡上 ≈ #2E2E2E），
+   文字抬到 80% 白、箭头压到 50% 白；文档 / 图片 / 视频图标是 #6B7A90 线条，提亮一档；
+   尺寸 / 圆角 / 间距 / 点击态一律不动。 */
+.guide-source-block--dark {
+  .guide-source-block__title {
+    color: #8e8e8e;
+  }
+
+  .guide-source-block__item {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .guide-source-block__name {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .guide-source-block__arrow {
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .guide-source-block__type-icon,
+  .guide-source-block__copy-icon {
+    filter: brightness(1.5);
+  }
 }
 </style>

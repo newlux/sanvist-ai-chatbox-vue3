@@ -9,6 +9,7 @@ import arrowNextIcon from "@/assets/img/schedule-arrow-next.svg";
 import arrowPrevIcon from "@/assets/img/schedule-arrow-prev.svg";
 import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
+import { useSystemStore } from "@/stores";
 import { useLandscape } from "@/hooks/useLandscape";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
@@ -71,6 +72,10 @@ const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
  */
 const { safeTopPx } = useSafeArea();
 const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
+
+/** 深浅色：与对话页同一套口径（唯一数据源 systemStore.isDark），页面只负责把 --dark 类挂到根节点 */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 /** 手势接管在 measureRowTops / syncRowTops 之后接线（要读旋转状态与行偏移量） */
 
@@ -674,7 +679,12 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 <template>
   <view
     class="schedule"
-    :class="{ 'schedule--rotated': rotated, 'schedule--leaving': leaving, 'schedule--exit-rotate': exitIconRotated }"
+    :class="{
+      'schedule--rotated': rotated,
+      'schedule--leaving': leaving,
+      'schedule--exit-rotate': exitIconRotated,
+      'schedule--dark': isDark,
+    }"
     :style="{ transformOrigin: leaveOrigin }"
   >
     <!-- 顶部栏（6832:275 图例 / 10474:18 返回）：按产品要求去掉左侧标题与日期；
@@ -827,10 +837,10 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 
 
     <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态） -->
-    <ScheduleAskBar @send="onAskSend" />
+    <ScheduleAskBar :dark="isDark" :rotated="rotated" @send="onAskSend" />
 
     <!-- 任务详情面板（横屏右侧，点击任务条滑出，稿子 6832:292） -->
-    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" />
+    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" :dark="isDark" />
   </view>
 </template>
 
@@ -907,7 +917,9 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   background: #f0f0f0;
 }
 
+/* 执行中：色块描边跟任务条一致（#A1B2CA），否则图例和条两套观感 */
 .schedule__legend-chip--running {
+  border-color: #a1b2ca;
   background: #ecf5ff;
 }
 
@@ -1201,8 +1213,9 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 }
 
 /* 任务条四态（稿子 6832:13）：底 / 描边按状态切换 */
+/* 执行中：#A1B2CA 描边把淡蓝底从白底上拎出来 */
 .schedule__bar--running {
-  border-color: #ffffff;
+  border-color: #a1b2ca;
   background: #ecf5ff;
 }
 
@@ -1407,5 +1420,151 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   line-height: 15px;
   white-space: nowrap;
   transform: translateX(-50%);
+}
+
+/* ===== 深色主题：调度视图（全量） =====
+   只换材质与字色，版式 / 行高 / 手势 / 缩放与滚动一行不动：
+   - 页面与排程区底：#0D0D0D；竖网格线 #262626；行分隔线 #303030
+   - 左列：类别 #8E8E8E、资源名 #E5E5E5、车号|班次 #6B6B6B
+   - 任务条：底 #1A1A1A + 1px #303030；进行中偏蓝 #16283C、已完成 #1F1F1F、
+     待执行 #1A1A1A、已逾期虚线 #6B6B6B；强调条保留品牌红描边；条内标题 80% 白、时段 #6B6B6B
+   - 当前时间线 / 胶囊、跨天分界仍用蓝色与红色（语义色），不参与换色 */
+.schedule--dark {
+  background: #0d0d0d;
+  color: #e5e5e5;
+
+  /* ---- 顶部栏：状态图例 / 返回 ---- */
+  .schedule__legend-text {
+    color: #b3b3b3;
+  }
+
+  .schedule__legend-chip {
+    border-color: #303030;
+    background: #1f1f1f;
+  }
+
+  // 执行中的 #A1B2CA 描边在深色下沿用（是状态标识色，不随主题换）
+  .schedule__legend-chip--running {
+    border-color: #a1b2ca;
+    background: #23344b;
+  }
+
+  .schedule__legend-chip--pending {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__legend-chip--overdue {
+    border-color: #6b6b6b;
+    background: #1a1a1a;
+  }
+
+  .schedule__exit {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__exit-icon::before,
+  .schedule__exit-arrow::before {
+    border-color: #e5e5e5;
+  }
+
+  .schedule__exit-arrow {
+    background: #e5e5e5;
+  }
+
+  /* ---- 主体 / 左列资源 ---- */
+  .schedule__body,
+  .schedule__side,
+  .schedule__grid-wrap,
+  .schedule__grid,
+  .schedule__ruler {
+    background: #0d0d0d;
+  }
+
+  .schedule__side {
+    border-top-color: #303030;
+    border-right-color: #303030;
+  }
+
+  .schedule__side-head-text {
+    color: #b3b3b3;
+  }
+
+  .schedule__side-category {
+    color: #8e8e8e;
+  }
+
+  .schedule__side-name {
+    color: #6b6b6b;
+  }
+
+  .schedule__side-name--main {
+    color: #e5e5e5;
+  }
+
+  /* ---- 排程区：竖网格线 / 刻度 ---- */
+  .schedule__grid-inner {
+    background-color: #0d0d0d;
+    background-image: repeating-linear-gradient(
+      to right,
+      #262626 0,
+      #262626 1px,
+      transparent 1px,
+      transparent var(--hour-width, 56px)
+    );
+  }
+
+  .schedule__ruler-label {
+    color: #8e8e8e;
+  }
+
+  /* ---- 任务条四态 ---- */
+  .schedule__bar {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__bar--running {
+    border-color: #a1b2ca;
+    background: #16283c;
+  }
+
+  .schedule__bar--done {
+    border-color: #303030;
+    background: #1f1f1f;
+  }
+
+  .schedule__bar--pending {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__bar--overdue {
+    border-color: #6b6b6b;
+    background: #1a1a1a;
+  }
+
+  .schedule__bar--mark {
+    border-color: #c8201e;
+  }
+
+  .schedule__bar-title {
+    color: rgb(255 255 255 / 80%);
+  }
+
+  .schedule__bar-time {
+    color: #6b6b6b;
+  }
+
+  /* ---- 左右隐藏任务箭头 ---- */
+  .schedule__scroll-btn {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__scroll-icon {
+    filter: invert(1);
+  }
 }
 </style>

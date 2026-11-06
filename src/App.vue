@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onLaunch } from "@dcloudio/uni-app";
+import { watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useSystemStore, useUserStore } from "@/stores";
 import { setupDebugConsole } from "@/utils/debug-console";
@@ -13,11 +14,14 @@ import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL 
 import { setSceneStartupQuery } from "@/utils/scene-navigation";
 
 const logger = createLogger("app");
-// 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
-// 否则一旦这串固定 token 泄漏或过期，线上会静默变成无鉴权请求
-const authorizationFallback = import.meta.env.DEV
-  ? "bearer 9ae76087-03f6-4db0-878b-ed6e9af37879"
-  : "";
+/**
+ * 本地兜底 token：只在宿主启动参数里没带 Authorization 时使用。
+ *
+ * 取值优先级：宿主注入（query.Authorization）> 本地兜底（这一串）> 空串。
+ * 置空时请求不会带 Authorization 头（见 utils/request 的 getRequestHeaders）。
+ * 注意：这串会打进产物，正式上线前需要确认是否保留。
+ */
+const LOCAL_AUTHORIZATION_FALLBACK = "bearer 2e729dca-582b-4fbb-bd5d-550c6b051567";
 
 type StartupQuery = Record<string, any>;
 
@@ -30,10 +34,19 @@ const systemStore = useSystemStore();
 const userStore = useUserStore();
 
 /**
- * 启动参数由宿主注入，离线包与在线包是同一套（Authorization / Lang / country / baseUrl ...）。
- * onLaunch 的 options.query 在 hash 路由下未必完整，统一走 resolveLaunchQuery 做兜底：
- * location.search → hash query → AlipayJSBridge.startupParams → options.query。
+ * 驻场身份 → 请求头 `Guest-Role` 的唯一同步点。
+ *
+ * 任何写 visitorRole 的地方（身份选择页、启动时 restoreVisitorRole、退出时清空）
+ * 都会自动带上 / 清掉这个头，页面不用再各自调 setGuestRole。
+ * `flush: "sync"`：身份选择页写完会立刻发请求（预取今日觉醒），必须当场生效，
+ * 否则那一次请求还是按旧身份发出去。
  */
+watch(
+  () => userStore.visitorRole,
+  role => setGuestRole(role),
+  { immediate: true, flush: "sync" },
+);
+
 function getLaunchQuery(options?: LaunchOptions): StartupQuery {
   return resolveLaunchQuery(options);
 }
@@ -43,7 +56,12 @@ function initializeSystem(query: StartupQuery) {
   setupDebugConsole(query);
   setSceneStartupQuery(query);
 
-  const authorization = query?.Authorization || authorizationFallback;
+  // token 优先级：宿主注入 > 本地兜底 > 空（空则后续请求不带 Authorization 头）
+  const hostAuthorization = String(query?.Authorization || "").trim();
+  const authorization = hostAuthorization || LOCAL_AUTHORIZATION_FALLBACK;
+  if (hostAuthorization) logger.info("[auth] 使用宿主注入的 token");
+  else if (authorization) logger.warn("[auth] 宿主未注入 token，回退到本地 token");
+  else logger.warn("[auth] 宿主与本地都没有 token，请求将不带 Authorization 头");
   const lang = String(query.Lang || "zh_CN");
   const country = String(query.country || "");
   const version = String(query.version || "");
@@ -54,8 +72,8 @@ function initializeSystem(query: StartupQuery) {
 
   setRequestAuth(authorization);
   setRequestBaseURL(baseUrl);
+  // 恢复上次选的驻场身份；Guest-Role 请求头由 visitorRole 的 watch 统一同步（见文件顶部）
   userStore.restoreVisitorRole();
-  if (userStore.visitorRole) setGuestRole(userStore.visitorRole);
 
   userStore.setIsVisitor(true);
   systemStore.setHeader({
@@ -133,11 +151,20 @@ function initializeIframeBridge(query: StartupQuery) {
 }
 
 /**
- * 离线包场景常见「bridge 比页面晚到」：宿主塞在 startupParams 里的 Lang 那一刻才读得到。
- * 只有真拿到且与当前语言不同才补切一次，避免重复拉远程语言包。
+ * 离线包场景常见「bridge 比页面晚到」：宿主塞在 startupParams 里的 Lang / Authorization
+ * 那一刻才读得到。都只在真拿到且与当前值不同时才补一次。
  */
 function watchLateStartupParams() {
   subscribeStartupParams((params) => {
+    // 宿主晚到的 token 覆盖本地兜底：token 以宿主注入为准（见文件顶部常量注释）
+    const lateAuth = String(params.Authorization || params.authorization || "").trim();
+    const currentAuth = String(systemStore.header.Authorization || "");
+    if (lateAuth && lateAuth !== currentAuth) {
+      logger.warn("bridge 晚到，补宿主 Authorization");
+      setRequestAuth(lateAuth);
+      systemStore.setHeader({ ...systemStore.header, Authorization: lateAuth });
+    }
+
     const lateLang = String(params.Lang || "");
     const currentLang = String(systemStore.header.Lang || "");
     if (!lateLang || lateLang === currentLang) return;

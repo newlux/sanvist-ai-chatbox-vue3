@@ -228,10 +228,11 @@ export function runBlockingWorkflow(params: RunWorkflowParams) {
     response_mode: params.responseMode ?? "blocking",
     user: String(params.user || "").trim() || "guest",
   };
-  // guest-role 头按调用方指定的身份覆盖（不指定则用 App 里按 visitorRole 设好的那份）
+  // Guest-Role 头按调用方指定的身份覆盖（不指定则用 App 里按 visitorRole 设好的那份）。
+  // 头名与 request.getRequestHeaders 注入的保持一致（合并时大小写不敏感，这里用规范写法便于日志核对）
   const guestRole = String(params.guestRole || "").trim();
   const options = guestRole
-    ? { headers: { ...jsonOptions.headers, "guest-role": guestRole } }
+    ? { headers: { ...jsonOptions.headers, "Guest-Role": guestRole } }
     : jsonOptions;
   logger.info("[chat] 工作流入参", body);
   return request

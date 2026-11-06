@@ -9,7 +9,7 @@ import { VISITOR_ROLE_OPTIONS_CACHE_KEY } from "@/config";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { DEFAULT_CHAT_SCOPE, useChatStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
-import { isGuestRole, setGuestRole } from "@/utils/request";
+import { isGuestRole } from "@/utils/request";
 
 defineOptions({ name: "RoleSelectPage" });
 const logger = createLogger("role-select");
@@ -108,8 +108,8 @@ async function startChat() {
   try {
     chatStore.resetConversation();
     userStore.setAwakeningPrompt(null);
+    // 只写 store：Guest-Role 请求头由 App.vue 对 visitorRole 的 watch 同步（sync，立刻生效）
     userStore.setVisitorRole(selectedRole.value);
-    setGuestRole(selectedRole.value);
     // 设置身份后立刻预取今日觉醒内容，进入首页即可直接展示
     const result = await getTodayAwakeningPrompt();
     userStore.setAwakeningPrompt(result ?? null);

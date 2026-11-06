@@ -23,7 +23,7 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { provideChatScope, useChatStore, useSessionStore, useSystemStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -44,6 +44,12 @@ const { t } = useI18n();
 const chatScope = provideChatScope("guide");
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
+/**
+ * 深浅色：与首页（日常运营助手）同一套口径 —— 只有一个数据源 `systemStore.isDark`
+ * （系统 getColorScheme / 设置弹层选择都会合流到这里），页面只负责把 `--dark` 类往下传。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 // 注入 --safe-top-px：悬浮头部的高度补偿（--chat-header-height）要按真实状态栏算
 const { safeAreaStyle } = useSafeArea();
 /**
@@ -859,7 +865,7 @@ onUnload(() => {
 </script>
 
 <template>
-  <view class="ai-page" :style="safeAreaStyle">
+  <view class="ai-page" :class="{ 'ai-page--dark': isDark }" :style="safeAreaStyle">
     <view class="ai-page__chat" :style="chatViewportStyle">
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
@@ -918,6 +924,7 @@ onUnload(() => {
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
         top-inset="var(--chat-top-inset, 300rpx)"
+        :dark="isDark"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
@@ -1067,6 +1074,7 @@ onUnload(() => {
         v-else
         ref="chatInputRef"
         v-model="inputText"
+        :dark="isDark"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
@@ -1092,6 +1100,7 @@ onUnload(() => {
         v-model:visible="guideStepSheetVisible"
         :payload="guideStepPayload"
         :step-index="guideStepRequestedIndex"
+        :dark="isDark"
         :keyboard-height="keyboardHeight"
         @submit="onGuideStepSubmit"
         @height-change="onGuideStepHeightChange"
@@ -1101,6 +1110,7 @@ onUnload(() => {
       <AiGuideSuggestionSheet
         v-model:visible="guideSuggestionSheetVisible"
         :payload="guideSuggestionPayload"
+        :dark="isDark"
         :keyboard-height="keyboardHeight"
         @submit="onGuideSuggestionSubmit"
         @height-change="onGuideSuggestionHeightChange"
@@ -1628,5 +1638,54 @@ $color-white: #ffffff;
   top: 0;
   left: -9999px;
   pointer-events: none;
+}
+
+/* ===== 深色主题：作业指导页（与首页对话页同一套口径，Ardot 1193:2097） =====
+   页面底 1193:2122：#1A1A1A（浅色稿 #FAFAFA 的对应值），顶部渐隐跟着换底，
+   角落光晕深色稿 visible = false；
+   待机引导区（Ardot 347:5392）只换字色与分隔线，间距 / 字号不动：
+   标题 #FFFFFF、greeting 与问题 80% 白、分隔线 #303030。 */
+.ai-page--dark {
+  background: #1a1a1a;
+
+  .ai-page__chat {
+    background: #1a1a1a;
+  }
+
+  // 渐隐材质换成深色页面底：上沿完全盖住滚上来的内容，往下渐透
+  .ai-page__top-fade {
+    background: linear-gradient(
+      180deg,
+      #1a1a1a 0%,
+      rgba(26, 26, 26, 0.7) 45%,
+      rgba(26, 26, 26, 0) 100%
+    );
+  }
+
+  // 浅色底上的彩色雾放到深底上会泛白，深色稿里这两个光晕本身就是关掉的
+  .ai-chat-glow {
+    display: none;
+  }
+
+  .guide-welcome__title {
+    color: #ffffff;
+  }
+
+  .guide-welcome__greeting {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .guide-welcome__list {
+    border-top-color: #303030;
+    border-bottom-color: #303030;
+  }
+
+  .guide-welcome__row {
+    border-bottom-color: #303030;
+  }
+
+  .guide-welcome__question {
+    color: rgba(255, 255, 255, 0.8);
+  }
 }
 </style>

@@ -24,6 +24,8 @@ defineOptions({ name: "AiTaskDetailPanel" });
 const props = defineProps<{
   visible: boolean;
   detail: TaskDetailPanelPayload | null;
+  /** 深色模式：与调度视图底板同步（页 #0D0D0D、卡 #1A1A1A + #303030 描边） */
+  dark?: boolean;
 }>();
 
 const emit = defineEmits<{ "update:visible": [value: boolean] }>();
@@ -58,7 +60,7 @@ function close() {
 </script>
 
 <template>
-  <view v-if="visible" class="tdp">
+  <view v-if="visible" class="tdp" :class="{ 'tdp--dark': dark }">
     <!-- 蒙层：40% 黑，点击关闭（6832:306） -->
     <view class="tdp__mask" @tap="close" @touchstart.stop />
 
@@ -496,5 +498,101 @@ function close() {
 
 .tdp__panel > .tdp__row + .tdp__row {
   margin-top: 6px;
+}
+
+/* ===== 深色主题：任务详情面板 =====
+   与调度视图同一套材质（页 #0D0D0D、卡 #1A1A1A + 1px #303030）：尺寸 / 圆角 / 间距一律不动。
+   状态胶囊保留各自语义色相，只把浅底色压成深底 + 亮字。 */
+.tdp--dark {
+  .tdp__panel {
+    background: #0d0d0d;
+  }
+
+  .tdp__title {
+    color: #ffffff;
+  }
+
+  .tdp__close-icon::before,
+  .tdp__close-icon::after {
+    background: #8e8e8e;
+  }
+
+  /* 站点卡 / 现场配合行 */
+  .tdp__site,
+  .tdp__support {
+    background: #1a1a1a;
+  }
+
+  .tdp__site-name,
+  .tdp__site-work,
+  .tdp__site-note,
+  .tdp__support-text {
+    color: #e5e5e5;
+  }
+
+  .tdp__site-volume,
+  .tdp__label,
+  .tdp__section {
+    color: #8e8e8e;
+  }
+
+  .tdp__value {
+    color: rgb(255 255 255 / 85%);
+  }
+
+  /* 时段 / 进度卡 */
+  .tdp__info {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  /* 逾期提示：白底虚线 → 深底虚线 */
+  .tdp__warning {
+    border-color: #6b6b6b;
+    background: #1a1a1a;
+  }
+
+  .tdp__warning-icon {
+    border-color: #8e8e8e;
+  }
+
+  .tdp__warning-icon::after {
+    background: #8e8e8e;
+  }
+
+  .tdp__warning-title {
+    color: #e5e5e5;
+  }
+
+  .tdp__warning-text {
+    color: #8e8e8e;
+  }
+
+  /* 状态胶囊：保留色相、压深底、提亮字 */
+  .tdp__status {
+    background: #16283c;
+    color: #cfe4ff;
+  }
+
+  .tdp__status--done {
+    background: #242424;
+    color: #b3b3b3;
+  }
+
+  .tdp__status--pending {
+    background: #241f3d;
+    color: #c3b6ff;
+  }
+
+  .tdp__status--canceled {
+    background: #1f1f1f;
+    color: #6b6b6b;
+  }
+
+  .tdp__status--overdue {
+    border-color: #4a4a4a;
+    background: transparent;
+    color: #8e8e8e;
+  }
 }
 </style>

@@ -9,10 +9,12 @@ import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl,
 import { getFlowSteps } from "@/api/flow";
 import welcomeVoiceSrc from "@/assets/audio/voice/welcome-task.wav";
 import brandLogo from "@/assets/img/sani-logo.gif";
+// 深色主题底板装饰：与首页欢迎态同一张图（Ardot 1193:4289 Vector 94，676×975 三角 + 白色渐变描边）
+import welcomeDarkBeam from "@/assets/img/welcome-dark-beam.svg";
 import SaniLogoStage from "@/components/sani-logo-stage/index.vue";
 import { usePlainTts } from "@/hooks/usePlainTts";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useUserStore } from "@/stores";
+import { useSystemStore, useUserStore } from "@/stores";
 import { VISITOR_ROLE_ACCOUNTS } from "@/stores/modules/user";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission } from "@/utils/platform/mpaas";
@@ -65,6 +67,12 @@ const emit = defineEmits(["finish"]);
 const logger = createLogger("task-init-page");
 const { t, locale } = useI18n();
 const userStore = useUserStore();
+/**
+ * 深浅色：与首页欢迎页 / 对话页同一套口径 —— 唯一数据源 systemStore.isDark。
+ * 本页视觉与「Hey,SANI」欢迎态同源，深色下沿用同一张底板（#0D0D0D + 右深左淡的冷色渐变）。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 /**
  * 顶部状态栏高度：设计稿 375×812（含 54 高状态栏），自我介绍帧标题 y=117（节点 350:1052 /
  * 722:2492 这一帧里 Main Title 的位置）。本页所有 y 都是扣掉状态栏后的值（126rpx = 63px），
@@ -1297,6 +1305,8 @@ onBeforeUnmount(() => {
       'gi--recording': isRecording,
       'gi--checking': isChecking,
       'gi--missed': isMissed,
+      // 深色主题：只换底板与文字材质，坐标 / 动画 / 交互逻辑全部不动
+      'gi--dark': isDark,
     }"
     @tap="onPageTap"
     @touchstart="onHoldStart"
@@ -1308,6 +1318,16 @@ onBeforeUnmount(() => {
   >
     <!-- 背景：设计稿 #F5FCFF → #FFF 的冷色渐变 -->
     <view class="gi__bg" />
+
+    <!-- 深色主题底板装饰：与首页欢迎态同一张图（1193:4289 Vector 94，676×975 的三角，
+         深紫填充 + 白色渐变描边），同一坐标 (-151,-83)；超出画布的部分由根节点
+         overflow: hidden 裁掉，裁完就是两条从顶部向底部两侧展开的亮色「八」字光束 -->
+    <image
+      v-if="isDark"
+      class="gi__dark-beam"
+      :src="welcomeDarkBeam"
+      mode="scaleToFill"
+    />
 
     <!-- 底部光效：与「Hey,SANI」欢迎页（welcome-visitor__glow）同一套实现 ——
          常态不铺任何底色（整条与页面同色）；播报 / 按住说话 / 校验中 / 未命中
@@ -1384,6 +1404,7 @@ onBeforeUnmount(() => {
         :logo="brandLogo"
         :bubbles="stageBubbles"
         :selected-key="selectedKey"
+        :dark="isDark"
         @select="onStageSelect"
       />
 
@@ -1877,6 +1898,84 @@ onBeforeUnmount(() => {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* ===== 深色主题：任务协同初始化页（与首页欢迎态 / 对话页同一套暗色口径）=====
+   底板沿用「Hey,SANI」欢迎态（Ardot 1193:4280 / 1193:4290）：#0D0D0D + 右深左淡的冷色渐变；
+   文字：标题 / Hey, / SANI / 副标题 / 标语统一 #FFFFFF，描述 #8E8E8E（整体 75%），胶囊文案 #FFFFFF。
+   底部光效位图与灵动岛属于插画层，深色稿同样保留；坐标 / 间距 / 字号 / 入场动画一律不动。 */
+.gi--dark {
+  background: #0d0d0d;
+  color: #ffffff;
+
+  // 招呼帧（.gi--welcome）在浅色稿是纯 #FAFAFA，深色下同样换成同一张冷色底板
+  .gi__bg {
+    background: linear-gradient(271deg, #03021d 21.8%, rgba(3, 2, 29, 0.175) 102.2%);
+  }
+
+  .gi__title {
+    color: #ffffff;
+  }
+
+  // 浅色稿的紫 → 蓝 → 粉渐变字在深底上发暗，统一收白（与欢迎态深色稿一致）
+  .gi__subtitle-line,
+  .gi__brand-title-sani,
+  .gi__brand-slogan {
+    background-image: none;
+    color: #ffffff;
+    -webkit-text-fill-color: currentColor;
+  }
+
+  .gi__brand-title-hey {
+    color: #ffffff;
+  }
+
+  // 1193:4240 同口径：描述在深底上整体压到 75%
+  .gi__brand-desc {
+    opacity: 0.75;
+  }
+
+  // 深色底板装饰（1193:4289 Vector 94）：676×975 的三角按设计稿放到 (-151,-83)，
+  // 超出画布的部分由根节点 overflow: hidden 裁掉，裁完就是底部两条斜向展开的亮色「八」字光束 ——
+  // 尺寸 / 坐标与首页欢迎帧（.welcome-visitor__dark-beam）完全一致
+  .gi__dark-beam {
+    position: absolute;
+    z-index: 0;
+    top: -166rpx; // -83px
+    left: -302rpx; // -151px
+    width: 1352rpx; // 676px
+    height: 1950rpx; // 975px
+    pointer-events: none;
+  }
+
+  // 选项胶囊（1193:3618 同款材质）：深色稿是实色渐变填充 + 1px（2rpx）渐变描边 + 阴影 0 1 11 rgba(0,0,0,.1)。
+  // 浅色稿那层「16% 透明渐变 + 玻璃模糊」压在深底上会发灰，这里整体换材质，宽高 / 圆角 / 动画不动
+  .gi__pill {
+    border: 2rpx solid transparent;
+    background-color: transparent;
+    background-image:
+      linear-gradient(218deg, #b221b2 5.7%, #382cbb 24.5%, rgba(0, 111, 221, 0.2) 55.6%, rgba(0, 115, 223, 0.1) 63.6%, #0081d6 100%),
+      linear-gradient(#03021d, #03021d),
+      linear-gradient(222deg, #779dc5 0%, #3e6399 51.1%, #ffffff 100%);
+    background-origin: padding-box, padding-box, border-box;
+    background-clip: padding-box, padding-box, border-box;
+    box-shadow: 0 2rpx 22rpx 0 rgba(0, 0, 0, 0.1);
+    // 深色稿是实色渐变 + 实描边，浅色稿的玻璃背景模糊不再需要
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  // 命中 / 选中态：材质已换成实色渐变，浅色稿那圈白色柔光保留（并补回被上面覆盖的投影）
+  .gi__pill--selected {
+    box-shadow:
+      0 0 12rpx 2rpx rgba(255, 255, 255, 0.85),
+      0 0 20rpx 4rpx rgba(158, 199, 255, 0.45),
+      0 2rpx 22rpx 0 rgba(0, 0, 0, 0.1);
+  }
+
+  .gi__pill-text {
+    color: #ffffff;
   }
 }
 </style>
