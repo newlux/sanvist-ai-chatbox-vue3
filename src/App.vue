@@ -132,10 +132,16 @@ function initializeSystem(query: StartupQuery, launchOptions?: LaunchOptions) {
   const username = String(query.username || "");
   const timezone = query.Timezone;
   const demoMode = query.DemoMode === true || query.DemoMode === "true";
-  const baseUrl = String(query.baseUrl || import.meta.env.VITE_AI_QUESTION_BASE_URL);
+  // 接口地址固定用 env 配置，忽略宿主启动参数里的 baseUrl：
+  // 宿主传的值出现过缺网关前缀（只有域名）的情况，请求会 503 routeNotFound。
+  const baseUrl = String(import.meta.env.VITE_AI_QUESTION_BASE_URL || "");
 
   setRequestAuth(authorization);
   setRequestBaseURL(baseUrl);
+  // 联调：确认请求实际打到哪个地址（现在只由 VITE_AI_QUESTION_BASE_URL 决定）
+  void debugReady.then(() => {
+    logger.warn("[launch] baseUrl", { baseUrl });
+  });
   // 恢复上次选的驻场身份；Guest-Role 请求头由 visitorRole 的 watch 统一同步（见文件顶部）
   userStore.restoreVisitorRole();
 
