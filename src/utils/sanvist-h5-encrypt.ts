@@ -56,6 +56,11 @@ export interface SanvistH5EncryptOptions {
   /** 维修助手详情页的会话 ID，作为 `/chat/{id}` 路径参数。 */
   chatConversationId?: string;
   /**
+   * hash 路由（如配件助手的 `/agent`）：传了就走 `?query#hash` 形态，
+   * 参数仍然全部落在 query 里；不传则沿用 `${frontend}${chatPath}?query`。
+   */
+  hashPath?: string;
+  /**
    * 外观主题：直接透传设置弹层里选中的外观值（system / light / dark），
    * 由三方 H5 自己决定怎么落地，前端不再二次换算成 light/dark。
    */
@@ -159,7 +164,16 @@ export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): Sanvis
   // 界面语言（zh_CN / en_US）：参数名统一为 `language`，未传时保留上面的默认值 zh-CN
   if (language) params.set("language", language);
   const chatPath = chatConversationId ? `/chat/${encodeURIComponent(chatConversationId)}` : "/chat";
-  const url = `${frontend}${chatPath}?${params.toString()}`;
+  /**
+   * hash 路由（配件助手 `#/agent`）：路径交给 hash，参数全部留在 query；
+   * 这种形态没有 `/chat/{id}` 可放，所以会话 id 额外以 query 参数带给内嵌页。
+   */
+  const hashPath = String(options.hashPath || "").trim();
+  if (hashPath && chatConversationId) params.set("chatConversationId", chatConversationId);
+  // hash 形态保留目录尾斜杠（`/dev/dist/?source=...#/agent`），与三方页给的入口地址一致
+  const url = hashPath
+    ? `${frontend}/?${params.toString()}#${hashPath}`
+    : `${frontend}${chatPath}?${params.toString()}`;
   console.log("🚀 ~ buildSanvistH5Url ~ url:", url);
 
   return {

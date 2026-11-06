@@ -57,7 +57,7 @@ const { t } = useI18n();
 
 const { isPc } = usePcMode();
 
-// 入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手（配件助手暂为首页内联，其余另开专属页）
+// 入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手（各自另开专属页）
 const DEFAULT_NAV_ITEMS: NavItem[] = [
   {
     key: "vox-core",
@@ -97,10 +97,10 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     titleKey: "nav-parts",
     icon: iconParts,
     subagent: "parts",
-    // 配件助手暂时没有独立页面：先作为首页内联智能体挂上去（点击切换 / 高亮，
-    // 后续提问带上 subagent=parts）。等配件页就绪，改成 mode: "page" + url 即可，
-    // 点击分发在 index 页的 onNavItemClick 里，不用另写。
-    mode: "inline",
+    // 配件助手：与维修助手同一条内嵌链路 —— 本地页用 iframe 打开三方 H5，
+    // 区别是只走 iframe，不调用容器的 pushWindow 另开 WebView
+    mode: "page",
+    url: "/pages/parts/index",
   },
 ];
 

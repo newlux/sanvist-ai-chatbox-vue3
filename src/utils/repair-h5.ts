@@ -26,7 +26,7 @@ export interface RepairH5OpenOptions {
  * 当前选中的音色 id：读本机记忆的音色（听播页 saveReportVoice 写入的同一份数据），
  * 没选过时与听播页保持一致的兜底口径 —— 取音色列表第一项。
  */
-function resolveSelectedVoiceId() {
+export function resolveSelectedVoiceId() {
   return loadReportVoice()?.id || REPORT_VOICE_OPTIONS[0]?.id || "";
 }
 
@@ -34,7 +34,7 @@ function resolveSelectedVoiceId() {
  * 当前界面语言：优先取 systemStore.header.Lang（启动参数注入 + 设置弹层切换都会写这里），
  * 它是宿主与请求头共用的口径（zh_CN / en_US）；拿到前用 uni 的 locale 兜底。
  */
-function resolveSelectedLanguage(language?: string) {
+export function resolveSelectedLanguage(language?: string) {
   const explicit = String(language || "").trim();
   if (explicit) return explicit;
   const fromHeader = String(useSystemStore().header?.Lang || "").trim();

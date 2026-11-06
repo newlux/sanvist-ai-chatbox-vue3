@@ -4,13 +4,15 @@ import { useI18n } from "vue-i18n";
 import { onLoad } from "@dcloudio/uni-app";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { createLogger } from "@/utils/logger";
+import { buildPartsH5Url } from "@/utils/parts-h5";
 import { waitForMpaas } from "@/utils/platform/mpaas";
 
 /**
- * 配件助手页：全屏内嵌三方 H5。
+ * 配件助手页：全屏内嵌三方 H5（与维修助手同一套内嵌方式，但只走 iframe，
+ * 不调用容器的 pushWindow 另开 WebView）。
  *
- * 地址由首页「配件助手」弹层里手填，页面通过 `?url=` 接过来原样使用，
- * 不做域名白名单、不做参数拼接（填什么就打开什么）。
+ * 地址由 utils/parts-h5 构建（带加密 payload 与会话 / 外观 / 音色 / 语言参数），
+ * 入口仍可传 `?url=` 手填地址覆盖，此时原样使用、不做任何拼接。
  *
  * 另外把父窗口的 `AlipayJSBridge` 注入给内嵌页，让三方页也能直接
  * `AlipayJSBridge.call("imageChoose", ...)` 调原生能力：
@@ -129,7 +131,23 @@ function readUrl(value: unknown) {
 }
 
 onLoad((options) => {
-  iframeSrc.value = readUrl(options?.url);
+  // 兼容手填地址的入口：带了 ?url= 就原样加载，不拼参数、不校验域名
+  const manualUrl = readUrl(options?.url);
+  if (manualUrl) {
+    iframeSrc.value = manualUrl;
+    return;
+  }
+
+  try {
+    iframeSrc.value = buildPartsH5Url({
+      sessionId: String(options?.sessionId || ""),
+      conversationId: String(options?.conversationId || ""),
+      chatConversationId: String(options?.chatConversationId || ""),
+    });
+  }
+  catch (error) {
+    logger.error("failed to build parts h5 url", error);
+  }
 });
 </script>
 
