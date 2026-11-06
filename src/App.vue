@@ -16,7 +16,7 @@ const logger = createLogger("app");
 // 兜底 token 仅用于本地联调；生产包必须由宿主通过启动参数注入，
 // 否则一旦这串固定 token 泄漏或过期，线上会静默变成无鉴权请求
 const authorizationFallback = import.meta.env.DEV
-  ? "bearer 9ae76087-03f6-4db0-878b-ed6e9af37879"
+  ? "bearer 57afa6e1-fcae-4950-856b-e79ab69a6163"
   : "";
 
 type StartupQuery = Record<string, any>;

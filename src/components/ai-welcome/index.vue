@@ -131,10 +131,17 @@ onBeforeUnmount(() => {
       <view class="welcome__composer-kb">
         <image
           class="welcome__composer-kb-icon"
-          src="@/assets/img/icon-keyboard.svg"
+          src="@/assets/img/icon-keyboard-dark.svg"
           mode="aspectFit"
         />
       </view>
+    </view>
+
+    <!-- 底部免责提示：固定在输入条下方最后一行，起飞时与标题 / 输入条一起淡出 -->
+    <view class="welcome__disclaimer">
+      <text class="welcome__disclaimer-text">
+        {{ t("welcome-ai-disclaimer") }}
+      </text>
     </view>
   </view>
 </template>
@@ -154,8 +161,9 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   padding-top: var(--safe-top-px, 0px);
   padding-top: max(var(--safe-top-px, 0px), env(safe-area-inset-top));
-  padding-bottom: calc(40rpx + constant(safe-area-inset-bottom));
-  padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
+  // 与问答页底部一致：提示文字底边到页面底边 15px
+  padding-bottom: calc(30rpx + constant(safe-area-inset-bottom));
+  padding-bottom: calc(30rpx + env(safe-area-inset-bottom));
   overflow: hidden;
   background: #fafafa;
   color: #0d0d0d;
@@ -170,7 +178,8 @@ onBeforeUnmount(() => {
 }
 
 .welcome--leaving .welcome__title,
-.welcome--leaving .welcome__composer {
+.welcome--leaving .welcome__composer,
+.welcome--leaving .welcome__disclaimer {
   opacity: 0;
   transition: opacity 240ms ease;
 }
@@ -282,14 +291,17 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-/* ===== 底部输入条：加号 / 点击说话 / 键盘，整行左右留白 20px，间距 10px ===== */
+/* ===== 底部输入条：加号 / 点击说话 / 键盘 =====
+   尺寸与问答页 .input-bar 语音态完全同一套（上下 8px / 左右 20px、min-height 64px、间距 10px），
+   两页来回切时这一行的高度、按钮大小、图标大小都不许变 */
 .welcome__composer {
   display: flex;
   flex: none;
   width: 100%;
   align-items: center;
   gap: 20rpx; // 10px
-  padding: 0 40rpx; // 20px
+  min-height: 128rpx; // 64px
+  padding: 16rpx 40rpx; // 上下 8px / 左右 20px
   box-sizing: border-box;
   transition: opacity 240ms ease;
 }
@@ -315,7 +327,7 @@ onBeforeUnmount(() => {
 }
 
 .welcome__composer-voice-label {
-  color: #5e5e5e;
+  color: #0d0d0d; // 与问答页 .input-bar__hold-label 同色
   font-size: 28rpx; // 14px
   font-weight: 400;
   line-height: 40rpx;
@@ -335,7 +347,26 @@ onBeforeUnmount(() => {
 }
 
 .welcome__composer-kb-icon {
-  width: 56rpx; // 28px
-  height: 56rpx;
+  width: 40rpx; // 20px，与问答页 .input-bar__mode image 同尺寸
+  height: 40rpx;
+}
+
+/* ===== 底部免责提示：输入条下方 12px，12px / 17px 浅灰居中 =====
+   不再吃 flex:1，固定在最后一行；起飞时跟着标题 / 输入条一起淡出 */
+.welcome__disclaimer {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  margin-top: 16rpx; // 8px，与问答页 .chat-input__footer 的上间距一致
+  padding: 0 40rpx;
+  transition: opacity 240ms ease;
+}
+
+.welcome__disclaimer-text {
+  color: #9a9a9a;
+  font-size: 24rpx; // 12px
+  font-weight: 400;
+  line-height: 34rpx; // 17px
+  text-align: center;
 }
 </style>
