@@ -3,8 +3,8 @@ import { useI18n } from "vue-i18n";
 import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete.svg";
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
-import minimizeIcon from "@/assets/img/min_icon.png";
 import listenLogoGif from "@/assets/img/listen.gif";
+import minimizeIcon from "@/assets/img/min_icon.png";
 import saniLogoSmGif from "@/assets/img/sani-logo-sm.gif";
 import tellLogoGif from "@/assets/img/tell.gif";
 import thinkLogoGif from "@/assets/img/think.gif";
@@ -581,7 +581,7 @@ onBeforeUnmount(() => {
       <!-- 状态栏占位：动态读取真实机型状态栏高度 -->
       <view class="chat-header__statusbar" :style="statusbarStyle" />
 
-      <!-- 头部（Figma: 50px, padding 13/16）；灵动岛是浮层，不参与这一行的布局 -->
+      <!-- 头部（设计稿 722:69：50px 高、左右 20px、图标 24×24 垂直居中）；灵动岛是浮层，不参与这一行的布局 -->
       <view class="chat-header__bar">
         <template v-if="!shareMode">
           <view v-if="props.backOnly" class="chat-header__icon-btn" @tap="onBackTap">
@@ -624,7 +624,7 @@ onBeforeUnmount(() => {
                 </svg>
               </view>
               <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），空闲 sani-logo-sm.gif；
-                   空闲 sm / 思考 think / 回答·播报 listen / 录音 tell 四张同位置叠图 淡入，不做 src / mode 切换，位置一律不动 */
+                   空闲 sm / 思考 think / 回答·播报 listen / 录音 tell 四张同位置叠图 淡入，不做 src / mode 切换，位置一律不动 -->
               <!-- 长按 5 秒回到初始页：只有 restartable（首页对话页）碰触摸事件，
                    其它页面的岛保持纯展示、不抢触摸；热区就是三角图本身（62×62） -->
               <!-- 空闲态动图：有状态图亮起时只淡出、不卸载，长按热区与定位基准始终挂在它身上。
@@ -999,7 +999,7 @@ onBeforeUnmount(() => {
     rgba(250, 250, 250, 0.92) 45%,
     rgba(250, 250, 250, 0) 100%
   );
-  // box-shadow: 0 8rpx 24rpx rgba(26, 26, 26, 0.06);
+  // 设计稿头部无投影：不加 box-shadow，底部靠渐变自然淡出
 }
 
 /* 悬浮头部（首页对话页）：底色交给页面顶部的毛玻璃渐隐层，
@@ -1052,12 +1052,15 @@ onBeforeUnmount(() => {
   min-height: env(safe-area-inset-top);
 }
 
+/* ===== 头部行：设计稿 722:69 头部 50px 高、左右 20px、图标 24×24 垂直居中 =====
+   行高 50px（100rpx）已含竖向余量，所以只留左右 20px（40rpx）内边距，
+   竖向由 align-items: center 居中，不再用 padding 上下凑位置 */
 .chat-header__bar {
   position: relative; // 灵动岛以这一行为定位基准做浮动
   height: 100rpx; // 50px
   display: flex;
   align-items: center;
-  padding: 16rpx 40rpx; // 4px 20px
+  padding: 0 40rpx; // 左右各 20px；上下的 (50-24)/2=13px 由 align-items 居中承担
   box-sizing: border-box;
   gap: 12rpx; // 6px
   justify-content: space-between;
@@ -1424,12 +1427,14 @@ onBeforeUnmount(() => {
   color: #9aa0aa;
 }
 
+/* 空态：z-paging 的空视图，设计稿 309:3052 未画，按列表区垂直居中处理
+   与「历史对话」标题的 16px 间距用 padding-top 承担，不引入 margin */
 .history-drawer__empty {
   display: flex;
   min-height: 360rpx;
   align-items: center;
   justify-content: center;
-  padding: 0 32rpx;
+  padding: 32rpx;
   box-sizing: border-box;
 }
 
@@ -1464,6 +1469,7 @@ onBeforeUnmount(() => {
   align-items: center;
   flex: 1;
   min-width: 0;
+  gap: 16rpx; // 标题与场景标签的 8px 间距，由 flex gap 承担
   box-sizing: border-box;
 }
 /* 设计稿 309:3094 / 309:3064 / 309:3053：14px（28rpx）/ Regular(400) / #0D0D0D，行高 20px（40rpx） */
@@ -1484,7 +1490,6 @@ onBeforeUnmount(() => {
   display: none;
   flex-shrink: 0;
   height: 36rpx;
-  margin-left: 16rpx;
   padding: 0 12rpx;
   border-radius: 8rpx;
   background: #eef1f5;
@@ -1550,11 +1555,6 @@ onBeforeUnmount(() => {
   height: 36rpx;
 }
 
-.history-drawer__empty {
-  margin-top: 32rpx;
-  font-size: 24rpx;
-  color: #bbc0c9;
-}
 /* 设计稿 309:3052 顶部行：头像 44px（88rpx）+ 间距 14px（28rpx）+ 搜索框 224px（448rpx）= 286px
    头像落在 x=22，比抽屉 18px 内边距再右移 4px（8rpx） */
 .history-drawer__toolbar {
@@ -1563,7 +1563,6 @@ onBeforeUnmount(() => {
   gap: 28rpx;
   padding-left: 8rpx;
   /* 搜索框底(126) → 「历史对话」标题顶(150) 的 24px 由标题自身的 padding-top 承担 */
-  margin-bottom: 0;
 }
 
 /* 设计稿 857:105：44×44（88rpx）品牌头像，无圆角，阴影 0 3 9 rgba(0,0,0,0.14)
@@ -1654,22 +1653,22 @@ onBeforeUnmount(() => {
   color: #999999;
 }
 /* 设计稿 309:3052 底部一行：左「新建对话」、右齿轮，两端对齐；
-   下 9px（18rpx）补足按钮底距屏幕 25px（抽屉已留 16px），上方空白由 z-paging（flex: 1）撑开 */
+   下 9px（18rpx）补足按钮底距屏幕 25px（抽屉已留 16px），上方空白由 z-paging（flex: 1）撑开；
+   右 7px（14rpx）= 齿轮右边缘(297) 到内容区右边(304)，用父级 padding 让位，不用子元素 margin */
 .history-drawer__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18rpx 0;
+  padding: 18rpx 14rpx 18rpx 0;
 }
 .history-drawer__new-conversation {
   padding: 0;
 }
-/* 设计稿 722:2798：32×32（64rpx）齿轮，右边缘距内容区 7px（14rpx） */
+/* 设计稿 722:2798：32×32（64rpx）齿轮，右边缘距内容区 7px（14rpx）由 footer 的右侧 padding 让出 */
 .history-drawer__settings {
   width: 64rpx;
   height: 64rpx;
   flex-shrink: 0;
-  margin-right: 14rpx;
 }
 .history-drawer--batch-delete .history-drawer__toolbar,
 .history-drawer--batch-delete .history-drawer__footer {
@@ -1707,7 +1706,6 @@ onBeforeUnmount(() => {
    上 24px（48rpx）= 搜索框底(126) → 标题顶(150)；下 12px（24rpx）= 标题底(170) → 首条选中条(182) */
 .history-drawer__session-history {
   padding: 48rpx 0 24rpx;
-  margin: 0;
 }
 .history-drawer--batch-delete .history-drawer__session-history {
   padding-top: 0;
@@ -1758,16 +1756,20 @@ onBeforeUnmount(() => {
   justify-content: space-between;
 }
 
+/* 批量删除态（设计稿未画）：按钮文案 16px（32rpx）/ Semibold(600)；
+   次要色取浅色稿二级文字 #5D5D5D，删除红取品牌红 #C8201E（与全项目一致） */
 .history-drawer__multi-btn-text {
-  color: #5f6775;
+  color: #5D5D5D;
   font-size: 32rpx;
   font-weight: 600;
+  line-height: 46rpx;
 }
 
 .history-drawer__multi-btn-text--danger {
-  color: #e60000;
+  color: #C8201E;
   font-size: 32rpx;
   font-weight: 600;
+  line-height: 46rpx;
 }
 
 .history-action-menu-mask {
@@ -1776,28 +1778,33 @@ onBeforeUnmount(() => {
   z-index: 1199;
 }
 
+/* ===== 长按菜单（设计稿 309 系未画，沿用同一套暗色/浅色体系推）=====
+   卡片 336×274rpx（168×137px），圆角 8px（16rpx），内边距 18px / 16px（36rpx / 32rpx）。
+   三项之间的 17px（34rpx）间距交给父级 flex 的 gap，不用相邻兄弟 margin 堆叠 */
 .history-action-menu {
   position: fixed;
   left: 36rpx;
   z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 34rpx;
   width: 336rpx;
   height: 274rpx;
   box-sizing: border-box;
   border: 0;
   border-radius: 16rpx;
   background: #ffffff;
+  // 浮层投影：x 0 / y -2px（-4rpx）/ 模糊 21px（42rpx）/ 扩散 0 / rgba(0,0,0,.06)
   box-shadow: 0 -4rpx 42rpx rgba(0, 0, 0, 0.06);
   padding: 36rpx 32rpx;
 }
 
+/* 单项：行高 22px（44rpx），图标 16×16（32rpx）与文字间距 8px（16rpx） */
 .history-action-menu__item {
   display: flex;
   align-items: center;
   height: 44rpx;
   gap: 16rpx;
-}
-.history-action-menu__item + .history-action-menu__item {
-  margin-top: 34rpx;
 }
 
 .history-action-menu__text {
