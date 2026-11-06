@@ -26,6 +26,11 @@ const props = defineProps({
    */
   compactVoiceListening: { type: Boolean, default: false },
   /**
+   * 中间那颗改成「点击说话」：点一下把语音提问交回页面（流式 ASR + 顶部实时字幕 + 底部录音条），
+   * 与初始页同一套功能，不再走内部的「按住说话」长按手势。
+   */
+  tapToTalk: { type: Boolean, default: false },
+  /**
    * 语音播报（TTS）进行中：底部换成「请选择你的身份吧」页同一套三色带波纹。
    * 播报期间常态那条淡蓝波浪让位，避免两种底纹叠在一起。
    */
@@ -55,6 +60,8 @@ const emit = defineEmits([
   "recognize-begin",
   "recognize-fail",
   "voice-panel-open",
+  /** 点击说话：把这一轮语音提问交给页面（首页走流式 ASR 链路） */
+  "voice-query-start",
   /** 「按住说话」录音态开关（true = 正在录）：头部灵动岛据此切换 listen.gif */
   "voice-listening",
 ]);
@@ -290,7 +297,8 @@ const {
   onRecognizeFail: () => emit("recognize-fail"),
   toggleQuickList: () => emit("toggle-quick-list", true),
   dismissKeyboard: onDismissKeyboard,
-  emitVoiceEvent: (event, payload) => emit(event, payload),
+  // event 由 useVoiceInput 内部按固定几个名字传，这里断言回 emits 的联合类型
+  emitVoiceEvent: (event, payload) => emit(event as Parameters<typeof emit>[0], payload),
 });
 
 /**
@@ -603,6 +611,15 @@ function onTrySend() {
 }
 
 const textTextareaRef = ref<unknown>(null);
+
+/**
+ * 点击说话：不进入内部的长按状态机（那套是整段录音 + 上传识别），
+ * 直接把「开始一轮语音提问」交给页面，由页面的流式 ASR 链路接管。
+ */
+function onVoiceQueryStartTap() {
+  if (props.isLoading) return;
+  emit("voice-query-start");
+}
 
 /**
  * 供外部调用（步骤卡拍照）：先切到文本模式，再聚焦文本输入框。
@@ -962,8 +979,17 @@ onBeforeUnmount(() => {
           加号（左 44×44） + 按住说话框（中 219×44，r45，#0D0D0D 3.61%） + 键盘（右 44×44）
           录音手势直接挂在「按住说话」这块框上，不再用原来的小语音段图标
         -->
+        <!-- 首页问答态：中间那颗「点击说话」，点一下交回页面开流式语音提问 -->
         <view
-          v-if="inputMode === 'voice'"
+          v-if="inputMode === 'voice' && tapToTalk"
+          class="input-bar__hold"
+          :class="{ 'input-bar__hold--disabled': isLoading }"
+          @tap="onVoiceQueryStartTap"
+        >
+          <text class="input-bar__hold-label">{{ t("welcome-tap-to-speak") }}</text>
+        </view>
+        <view
+          v-else-if="inputMode === 'voice'"
           class="input-bar__hold"
           :class="{ 'input-bar__hold--disabled': isLoading }"
           @touchstart.prevent="onVoicePillTouchStart"

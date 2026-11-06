@@ -42,6 +42,14 @@ const props = defineProps({
     default: true,
   },
   /**
+   * 顶部对齐：语音问出来的那条气泡固定在顶部，回答从它下面长出来。
+   * 默认 false，保持「内容贴底」的原有排布。
+   */
+  topAligned: {
+    type: Boolean,
+    default: false,
+  },
+  /**
    * 发问 / 回复气泡的深色材质（Ardot 1193:5104）。
    * 由页面显式传：首页问答态跟随外观设置变深；作业指导 / 任务协同仍是浅色稿，不传即浅色。
    */
@@ -955,8 +963,8 @@ function ganttBlocks(message: UiChatMessage) {
  * 列表回到普通滚动，不会出现「顶部内容被裁掉且滚不上去」。
  */
 const listViewportHeight = ref(0);
-/** 只有进入对话才贴底：空会话的业务概览仍要按原来的从上往下排 */
-const dockedToBottom = computed(() => (props.messages?.length ?? 0) > 0);
+/** 只有进入对话才贴底：空会话的业务概览仍要按原来的从上往下排；topAligned 时改为从顶部排 */
+const dockedToBottom = computed(() => (props.messages?.length ?? 0) > 0 && !props.topAligned);
 
 let viewportObserver: ResizeObserver | null = null;
 

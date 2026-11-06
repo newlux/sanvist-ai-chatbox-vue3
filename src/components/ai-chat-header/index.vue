@@ -52,6 +52,12 @@ const props = defineProps({
    */
   voiceListening: { type: Boolean, default: false },
   /**
+   * 从初始页飞进来的那一段：岛内先继续放 listen.gif（和飞过来的那张图同一张），
+   * 让「中间放大 → 顶部落位」是同一张动图在延续，不出现落位后换回三角图的硬切。
+   * 由首页在起飞后打开、播完这一段再关掉，其它页面不传。
+   */
+  listenIdle: { type: Boolean, default: false },
+  /**
    * 自动听播（TTS）播放中：首页把 useRealtimeTts 的 playing 透进来。
    * 回答中 → 播报结束这一整段岛内都走 tell.gif，生成结束后由它续上。
    */
@@ -104,6 +110,8 @@ const thinking = computed(() => props.generating && !answering.value);
  * 生成结束后 answering 会落回 false，由 realtimeTtsPlaying 续上，两段相接就是完整的播报期。
  */
 const telling = computed(() => answering.value || props.realtimeTtsPlaying);
+/** 岛内走 listen.gif：按住说话期间，或刚从初始页飞进来还没播完这一段 */
+const islandListening = computed(() => props.voiceListening || props.listenIdle);
 /**
  * 岛内动图分四层：常态 sani-logo.gif 常驻；listen.gif（按住说话）/ tell.gif（播报中）/
  * think.gif（思考中）都是叠在它上面的独立图层，靠 opacity + transform 过渡淡入淡出。
@@ -620,7 +628,7 @@ onBeforeUnmount(() => {
                 class="chat-header__island-logo"
                 :class="{
                   'chat-header__island-logo--restartable': props.restartable,
-                  'chat-header__island-logo--faded': thinking || telling || props.voiceListening,
+                  'chat-header__island-logo--faded': thinking || telling || islandListening,
                 }"
                 :src="saniLogoGif"
                 mode="aspectFit"
@@ -635,10 +643,11 @@ onBeforeUnmount(() => {
               />
               <!-- 按住说话动图 listen.gif：叠在常态图正上方，录音时淡入 + 由 2.36 缓升到 2.49 倍
                    （百分比与 listen 图案留白的换算见 --listen 的样式注释），松手淡出；
+                   从初始页飞进来的那一小段也走这层（listen-idle），落位时是同一张图在延续；
                    纯展示层，不吃触摸，避免抢走长按回首页的手势 -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--listen"
-                :class="{ 'chat-header__island-logo--listen-on': props.voiceListening }"
+                :class="{ 'chat-header__island-logo--listen-on': islandListening }"
                 :src="listenLogoGif"
                 mode="aspectFit"
               />
