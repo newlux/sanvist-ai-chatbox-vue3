@@ -11,6 +11,7 @@ import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
+import { useSystemStore } from "@/stores";
 import { isWebEnvironment } from "@/utils/landscape-device";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
@@ -33,8 +34,9 @@ import { backFromScene } from "@/utils/scene-navigation";
  * 双指缩放：与甘特页同一套（useScheduleGestures 接管两指手势），按两指间距比例改「每小时像素宽」
  * （28–168px，基准 56px），捏合中心的时刻保持不动；刻度、任务条、新旧连线、箭头跟着实时重排。
  *
- * 横屏方式与 pages/schedule-gantt 一致：`useLandscape()` 先让宿主原生转屏（landscapeFullscreen），
- * 原生不支持时把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
+ * 横屏方式与 pages/schedule-gantt 一致：宿主用 openH5Container 打开甘特图应用时本身就是全屏横屏，
+ * 前端不再申请转屏（不再调 landscapeFullscreen）；只有宿主没给横屏可视区时，
+ * `useLandscape()` 才把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
  *
  * 任务条样式（稿子 7229:254）：26 高、单行——原计划 #F4F4F4 + 虚线 #D9D9D9、
  * 新计划 白底 + 虚线 #9DB3CC、已取消同原计划但文案转灰、强调条为深色实线 #1A1A1A。
@@ -61,12 +63,16 @@ const { rotated, exitLandscape } = useLandscape(measureLayout);
 const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
 
 /**
- * 顶部状态栏空白：调原生 landscapeFullscreen 转屏成功后，webview 铺满横屏、
- * 状态栏压在页面顶边，顶栏要给状态栏让出这段高度；
+ * 顶部状态栏空白：宿主全屏横屏时 webview 铺满屏幕、状态栏压在页面顶边，
+ * 顶栏要给状态栏让出这段高度；
  * CSS 旋转模拟（rotated）时状态栏在设备的物理顶边（对应页面左侧），不需要留。
  */
 const { safeTopPx } = useSafeArea();
 const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
+
+/** 深浅色：与对话页同一套口径（唯一数据源 systemStore.isDark），页面只负责把 --dark 类挂到根节点 */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 /**
  * 原生手势在真机不生效（旋转页面里浏览器不接管）：自己接管触摸，见 hooks/useScheduleGestures。
@@ -664,10 +670,8 @@ watch(() => rows.value.length, () => {
 /**
  * 退出到对话页（返回按钮 / 输入条发问共用）。
  *
- * 顺序：关掉原生横屏（`landscapeFullscreen(false)`）并**等可视区确认回到竖屏**
- * → 竖屏恢复后再写入待发送问题 → 跳回对话页。
- * 之前是 `exitLandscape()` 与 `backFromScene()` 同步连着调，原生转屏还没生效就跳页，
- * 对话页和键盘会落在横屏里；问题也会在错误的视口下发出。
+ * 顺序：撤掉 CSS 旋转兜底（`exitLandscape()`；方向由宿主容器自己管，
+ * 不再调 landscapeFullscreen） → 写入待发送问题 → 跳回对话页。
  *
  * `ask` 有值才走「发送问答」那一步，返回按钮不传，因此只收横屏不提问。
  *
@@ -675,7 +679,7 @@ watch(() => rows.value.length, () => {
  * 也要回那个会话（而不是首页），提问才落在原来的对话里。
  */
 async function leaveToChat(ask?: string) {
-  // 原生横屏置 false 之后要等屏幕真的转回来，再跳页 / 发问
+  // 先撤掉 CSS 旋转兜底，再跳页 / 发问
   await exitLandscape();
   if (ask) stashPendingScheduleAsk(ask);
   backFromScene("/pages/task/index");
@@ -702,7 +706,10 @@ function toggleShowAll() {
 </script>
 
 <template>
-  <view class="schedule" :class="['schedule--rep', { 'schedule--rotated': rotated, 'schedule--exit-rotate': exitIconRotated }]">
+  <view
+    class="schedule"
+    :class="['schedule--rep', { 'schedule--rotated': rotated, 'schedule--exit-rotate': exitIconRotated, 'schedule--dark': isDark }]"
+  >
     <!-- 顶部栏（7229:254：图例、查看全部任务、返回对话）：按产品要求去掉左侧标题与日期 -->
     <view class="schedule__header" :style="headerTopStyle">
       <view class="schedule__tools">
@@ -886,8 +893,9 @@ function toggleShowAll() {
       <view class="schedule__notice-close" @tap="closeNotice" />
     </view>
 
-    <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态） -->
-    <ScheduleAskBar @send="onAskSend" />
+    <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态）
+         rotated：CSS 旋转模拟横屏时键盘从本地右侧升起，抬升方向与竖屏不同（见组件内注释） -->
+    <ScheduleAskBar :dark="isDark" :rotated="rotated" @send="onAskSend" />
   </view>
 </template>
 
@@ -1309,12 +1317,13 @@ function toggleShowAll() {
   overflow: hidden;
 }
 
+/* 条内文字按设计稿弱化：标题 11/500 #0D0D0D、时段 11/400 #8F8F8F，行高 16（1522:524 / 1522:525） */
 .schedule__bar-title {
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 500;
-  line-height: 13px;
-  color: #1a1a1e;
+  line-height: 16px;
+  color: #0d0d0d;
   white-space: nowrap;
 }
 
@@ -1322,8 +1331,8 @@ function toggleShowAll() {
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 400;
-  line-height: 13px;
-  color: #999999;
+  line-height: 16px;
+  color: #8f8f8f;
   white-space: nowrap;
 }
 
@@ -1545,5 +1554,214 @@ function toggleShowAll() {
 .schedule__rows-inner {
   position: relative;
   will-change: transform;
+}
+
+/* ===== 深色主题：调度视图·重排草案 =====
+   只换材质与字色，版式 / 行高 / 手势 / 缩放与滚动一行不动：
+   - 页面与排程区底：#0D0D0D；竖网格线 #262626；行分隔线 #303030（分组线 #3A3A3A）
+   - 左列：类别 #8E8E8E、资源名 #E5E5E5、车号|班次 #6B6B6B；旧 / 新 标签格透明底 + #303030 描边
+   - 任务条：底 #1A1A1A；原计划虚线 #3A3A3A、新计划虚线 #4C7396、已取消文案 #5D5D5D、
+     强调 / 选中为 #E5E5E5 实线；条内标题 80% 白、时段 #6B6B6B
+   - 顶部图例 / 勾选 / 返回、底部提示条、左右箭头同步换材质；箭头图标是深色线条，反相成白 */
+.schedule--dark {
+  background: #0d0d0d;
+  color: #e5e5e5;
+
+  /* ---- 顶部栏：图例 / 查看全部 / 返回 ---- */
+  .schedule__legend-text {
+    color: #b3b3b3;
+  }
+
+  .schedule__legend-chip {
+    border-color: #3a3a3a;
+    background: #1a1a1a;
+  }
+
+  .schedule__legend-chip--new {
+    border-color: #4c7396;
+    background: #1a1a1a;
+  }
+
+  .schedule__legend-chip--canceled {
+    border-color: #3a3a3a;
+    background: #141414;
+  }
+
+  .schedule__checkbox {
+    border-color: #4a4a4a;
+    background: transparent;
+  }
+
+  .schedule__checkbox--on {
+    border-color: #e5e5e5;
+    background: #e5e5e5;
+  }
+
+  .schedule__exit {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__exit-icon::before,
+  .schedule__exit-arrow::before {
+    border-color: #e5e5e5;
+  }
+
+  .schedule__exit-arrow {
+    background: #e5e5e5;
+  }
+
+  /* ---- 主体 / 左列资源 ---- */
+  .schedule__body,
+  .schedule__side,
+  .schedule__grid-wrap,
+  .schedule__grid,
+  .schedule__ruler {
+    background: #0d0d0d;
+  }
+
+  .schedule__side {
+    border-top-color: #303030;
+    border-right-color: #303030;
+  }
+
+  .schedule__side-head-text {
+    color: #b3b3b3;
+  }
+
+  .schedule__side-group {
+    border-top-color: #303030;
+  }
+
+  .schedule__side-group:last-child {
+    border-bottom-color: #303030;
+  }
+
+  .schedule__side-group--separator {
+    box-shadow: 0 1px 0 0 #303030;
+  }
+
+  .schedule__side-category {
+    color: #8e8e8e;
+  }
+
+  .schedule__side-name {
+    color: #6b6b6b;
+  }
+
+  .schedule__side-name--main {
+    color: #e5e5e5;
+  }
+
+  .schedule__side-tag {
+    border-color: #303030;
+    background: transparent;
+    color: #8e8e8e;
+  }
+
+  /* ---- 排程区：竖网格线 / 刻度 / 行分隔 ---- */
+  .schedule__grid-inner {
+    background-color: #0d0d0d;
+    background-image: repeating-linear-gradient(
+      to right,
+      #262626 0,
+      #262626 1px,
+      transparent 1px,
+      transparent var(--hour-width, 56px)
+    );
+  }
+
+  .schedule__ruler-label {
+    color: #8e8e8e;
+  }
+
+  .schedule__track--separator {
+    box-shadow: 0 1px 0 0 #303030;
+  }
+
+  /* ---- 任务条通用 ---- */
+  .schedule__bar {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__bar-title {
+    color: rgb(255 255 255 / 80%);
+  }
+
+  .schedule__bar-time {
+    color: #6b6b6b;
+  }
+
+  /* 新旧关联虚线：跟新计划描边同色 */
+  .schedule__link {
+    border-top-color: #4c7396;
+  }
+
+  /* ---- 底部提示条 / 左右隐藏任务箭头 ---- */
+  .schedule__notice {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__notice-chip {
+    background: #f2f2f2;
+    color: #1a1a1a;
+  }
+
+  .schedule__notice-text {
+    color: #e5e5e5;
+  }
+
+  .schedule__notice-close::before,
+  .schedule__notice-close::after {
+    background: #e5e5e5;
+  }
+
+  .schedule__scroll-btn {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__scroll-icon {
+    filter: invert(1);
+  }
+
+  /* ---- 重排专用：原计划 / 新计划 / 已取消 / 强调 ---- */
+  &.schedule--rep {
+    .schedule__bar {
+      border-color: #3a3a3a;
+      background: #1a1a1a;
+    }
+
+    .schedule__bar--new {
+      border-color: #4c7396;
+      background: #141414;
+    }
+
+    .schedule__bar--canceled .schedule__bar-title,
+    .schedule__bar--canceled .schedule__bar-time {
+      color: #5d5d5d;
+    }
+
+    .schedule__bar--mark {
+      border-color: #e5e5e5;
+    }
+
+    .schedule__bar--active {
+      border-color: #e5e5e5;
+      box-shadow: 0 0 0 1px #e5e5e5 inset;
+    }
+
+    /* 分组分隔线在重排稿里比普通行线深一档 */
+    .schedule__track--separator,
+    .schedule__side-group--separator {
+      box-shadow: 0 1px 0 0 #3a3a3a;
+    }
+
+    .schedule__side-group--separator {
+      border-top-color: #3a3a3a;
+    }
+  }
 }
 </style>

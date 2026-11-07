@@ -12,8 +12,11 @@ import { useSafeArea } from "@/hooks/useSafeArea";
  * 原来的游客 / 会员两套欢迎页（渐变标语、三行说明、底部光效、身份选择气泡等）
  * 全部停用；组件文件 visitor.vue、member.vue 仍保留在同一目录，需要恢复时换回引用即可。
  *
- * 点「点击说话」只抛 start-chat，飞出动画由父页面驱动：
+ * 点「点击说话」只抛 start-chat，点键盘抛 start-text，飞出动画由父页面驱动：
  * 父页面把 logo 的目标位移算好塞进 logoStyle，本组件只负责把 transition 跑完。
+ *
+ * 两条路径的区别只在 logo 的状态图：语音会先挂上 listen.gif（从第 0 帧起播，父页面据此对齐扩散峰值），
+ * 文字不换图，直接让常态图飞上去。
  */
 defineOptions({ name: "AiWelcome" });
 
@@ -26,7 +29,7 @@ const props = defineProps({
   logoStyle: { type: Object as PropType<Record<string, string>>, default: () => ({}) },
 });
 
-const emit = defineEmits<{ (e: "start-chat"): void }>();
+const emit = defineEmits<{ (e: "start-chat"): void; (e: "start-text"): void }>();
 
 const { t } = useI18n();
 const { safeAreaStyle } = useSafeArea();
@@ -74,6 +77,18 @@ function onSpeakTap() {
   beginDepart();
 }
 
+/**
+ * 点键盘：不换 listen.gif，直接抛 start-text ——
+ * 父页面照同一套抛物线把常态 logo 送上去，落位后再聚焦输入框。
+ *
+ * 这里不置 startFired：父页面没接这个事件时（如首页）键盘仍然是纯展示，
+ * 「点击说话」必须还能用；接了的话父页面会立刻进入 leaving，重复点击自然会被挡住。
+ */
+function onKeyboardTap() {
+  if (props.leaving || startFired) return;
+  emit("start-text");
+}
+
 onBeforeUnmount(() => {
   if (readyTimer) {
     clearTimeout(readyTimer);
@@ -101,7 +116,7 @@ onBeforeUnmount(() => {
         <view class="welcome__logo-fly" :style="logoStyle">
           <image
             class="welcome__logo-img"
-            :class="{ 'welcome__logo-img--out': leaving }"
+            :class="{ 'welcome__logo-img--out': leaving && listenMounted }"
             :src="saniLogo"
             mode="aspectFit"
           />
@@ -128,7 +143,7 @@ onBeforeUnmount(() => {
           {{ t("welcome-tap-to-speak") }}
         </text>
       </view>
-      <view class="welcome__composer-kb">
+      <view class="welcome__composer-kb" @tap="onKeyboardTap">
         <image
           class="welcome__composer-kb-icon"
           src="@/assets/img/icon-keyboard-dark.svg"
