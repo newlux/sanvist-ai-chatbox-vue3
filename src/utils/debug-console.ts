@@ -57,7 +57,14 @@ export async function openDebugConsole() {
   return loading;
 }
 
-export function setupDebugConsole(launchQuery: Record<string, unknown> = {}) {
-  if (!shouldEnableDebugConsole(launchQuery)) return;
-  void openDebugConsole();
+/**
+ * 开调试面板。
+ *
+ * 返回的 Promise 在面板就绪（加载失败也算就绪）后 resolve：
+ * vConsole 是动态 import，就绪前打出去的 console 收不进面板，
+ * 需要被面板看到的启动期日志要挂在 then 之后。
+ */
+export function setupDebugConsole(launchQuery: Record<string, unknown> = {}): Promise<void> {
+  if (!shouldEnableDebugConsole(launchQuery)) return Promise.resolve();
+  return openDebugConsole();
 }
