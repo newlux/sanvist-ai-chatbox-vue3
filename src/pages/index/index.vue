@@ -768,8 +768,23 @@ let nativeVoiceRecorder: VoiceRecorderInstance | null = null;
 let nativeLevelTimer: ReturnType<typeof setInterval> | null = null;
 /** 每轮只降级一次，避免两条链路互相打架 */
 let voiceDegraded = false;
+/** 原生通道这一轮听到的最大音量：排查「有没有真的收到声音」时打日志用 */
+let nativePeakLevel = 0;
 /** 原生通道整段识别的最长等待：超时就当没识别到，别把录音条一直挂在「识别中」 */
 const NATIVE_RECOGNIZE_TIMEOUT_MS = 30_000;
+/** 原生录音的硬上限：只做兜底，正常收尾靠用户点发送（↑） */
+const NATIVE_MAX_RECORD_MS = 60_000;
+
+/**
+ * 是不是安卓壳子。
+ * mPaaS 的 Android WebView 在 `onPermissionRequest` 里拒了媒体采集，
+ * getUserMedia 只会回 `NotAllowedError: Permission denied` —— 流式实时文字在安卓上不可能起得来，
+ * 所以安卓直接走原生录音（microphoneStart/End）+ 整段识别，不再白试一次。
+ */
+function isAndroidRuntime() {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent || "";
+  return /Android/i.test(ua);
+}
 
 /** 原生录音回传的音频形态：容器里一般给 audioUrl，也有的直接回 base64 */
 interface NativeRecorderAudio {
@@ -894,10 +909,11 @@ async function startVoiceQuery() {
   }, 1000);
 
   /**
-   * 没有流式通道（无 WebSocket）或没有 WebAudio 采集能力（file:// / 老容器）：
-   * 不再提示「当前环境不支持语音」，直接走原生录音那条线 —— 这类环境里它是能用的。
+   * 安卓 / 没有流式通道（无 WebSocket）/ 没有 WebAudio 采集能力（file:// / 老容器）：
+   * 一律走原生录音那条线。安卓这里不是「降级」而是「直接走」——
+   * 容器拒了 getUserMedia，试也是白试，还多等半秒、多几条报错日志。
    */
-  if (!isAsrStreamSupported() || !isPcmCaptureSupported()) {
+  if (isAndroidRuntime() || !isAsrStreamSupported() || !isPcmCaptureSupported()) {
     void startNativeVoiceQuery(seq);
     return;
   }
@@ -989,7 +1005,7 @@ function degradeToNativeVoice(reason: string) {
   if (voiceDegraded || !voiceQueryActive.value) return;
   voiceDegraded = true;
   const seq = voiceSeq;
-  logger.warn("[voice] 流式采集不可用，降级到原生录音", { reason });
+  logger.warn("[voice] 流式采集不可用，降级到原生录音", { reason, mpaasReady: isMpaasReady() });
   // 流式那一路彻底扔掉：采集停掉、WebSocket 关掉，否则两边一起抢麦克风
   voiceCapture?.stop();
   voiceCapture = null;
@@ -1034,14 +1050,22 @@ async function startNativeVoiceQuery(seq: number) {
       return;
     }
     if (!started?.success) {
-      logger.warn("native recorder start failed", started?.error);
+      logger.warn("[voice-native] 录音启动失败", started);
       failVoiceQuery(t("record-start-failed"));
       return;
     }
 
     nativeVoiceRecorder = recorder;
-    // 原生录音拿不到 partial，只能轮询电平：声纹照跳，静音 1.5s 仍然自动收尾
+    nativePeakLevel = 0;
+    logger.warn("[voice-native] 录音已开始", { seq, mpaasReady: isMpaasReady() });
+    /**
+     * 原生录音拿不到 partial，电平只用来驱动声纹。
+     * 注意这里不能喂给 onVoiceLevel：那里面带了「静音 1.5s 自动收尾」，
+     * 而 microphoneVolume 在部分容器里恒为 0 / 拿不到，一喂就等于用户话没说完就被掐掉。
+     * 收尾统一交给用户点发送（↑ → stopVoiceQuery）。
+     */
     stopNativeLevelPolling();
+    voiceLevel.value = 0;
     let polling = false;
     nativeLevelTimer = setInterval(() => {
       if (seq !== voiceSeq || polling) return;
@@ -1049,7 +1073,9 @@ async function startNativeVoiceQuery(seq: number) {
       void getMicrophoneVolume()
         .then((level) => {
           if (seq !== voiceSeq || typeof level !== "number") return;
-          onVoiceLevel(level);
+          if (level > nativePeakLevel) nativePeakLevel = level;
+          const normalized = Math.min(1, Math.max(0, level / 0.15));
+          voiceLevel.value += (normalized - voiceLevel.value) * 0.35;
         })
         .catch(() => {})
         .finally(() => {
@@ -1057,11 +1083,12 @@ async function startNativeVoiceQuery(seq: number) {
         });
     }, 120);
 
+    // 只留一个硬上限兜底：用户忘了点发送时别让麦克风一直开着
     if (voiceNoSpeechTimer) clearTimeout(voiceNoSpeechTimer);
     voiceNoSpeechTimer = setTimeout(() => {
       voiceNoSpeechTimer = null;
-      if (!voiceHeard) stopVoiceQuery();
-    }, VOICE_NO_SPEECH_MS);
+      stopVoiceQuery();
+    }, NATIVE_MAX_RECORD_MS);
   }
   catch (error) {
     logger.warn("native voice query start failed", error);
@@ -1088,10 +1115,19 @@ function requestNativeRecognition(audio: NativeRecorderAudio) {
   });
 }
 
+/** 原生录音是异步启动的：用户手快点发送时会赶上"还没 start 完"，等一下它 */
+async function waitNativeRecorderReady(timeoutMs = 800) {
+  const deadline = Date.now() + timeoutMs;
+  while (!nativeVoiceRecorder && Date.now() < deadline) {
+    await new Promise<void>(resolve => setTimeout(resolve, 50));
+  }
+  return nativeVoiceRecorder;
+}
+
 /** 原生通道收尾：停录音 → 整段识别 → 文本回填到占位气泡上再发问 */
 async function finishNativeVoiceQuery() {
   const seq = voiceSeq;
-  const recorder = nativeVoiceRecorder;
+  const recorder = nativeVoiceRecorder ?? await waitNativeRecorderReady();
   nativeVoiceRecorder = null;
   stopNativeLevelPolling();
   if (!recorder) {
@@ -1117,9 +1153,21 @@ async function finishNativeVoiceQuery() {
   }
 
   const placeholderId = voicePlaceholderId.value;
+  logger.warn("[voice-native] 录音结束", {
+    seconds: voiceSeconds.value,
+    peakLevel: Number(nativePeakLevel.toFixed(3)),
+    hasUrl: Boolean(audio.audioUrl),
+    hasBase64: Boolean(audio.audioBase64),
+    hasFile: Boolean(audio.tempFilePath),
+  });
+  const recognizeStart = Date.now();
   try {
     const result = await requestNativeRecognition(audio);
     if (seq !== voiceSeq) return;
+    logger.warn("[voice-native] 识别返回", {
+      chars: String(result?.text || "").length,
+      costMs: Date.now() - recognizeStart,
+    });
     const query = String(result?.text || "").trim();
     // 和流式那条线保持一致：占位气泡先留着，sendMessage 按 asrPending 原地替换成正式提问
     resetVoiceQuery({ keepPlaceholder: true });

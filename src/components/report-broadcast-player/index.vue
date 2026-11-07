@@ -25,8 +25,10 @@ const props = defineProps<{
   /** 识别中的过程说明：接口下发的当前执行文案（如「目标 Dify 工作流已开始。」）。 */
   qaSubtitle?: string;
   qaAnswer: string;
-  /** 按住说话录音中：字幕区先隐藏播报文字，等识别态接管。 */
+  /** 录音中：字幕区先隐藏播报文字，等实时转写/识别态接管。 */
   voiceRecording?: boolean;
+  /** 录音中的实时转写文本（点击说话走流式 ASR）。 */
+  voiceTranscript?: string;
   /** iframe 内嵌（from=sanvist_pc）时，头部露出「最小化」 */
   canMinimize?: boolean;
 }>();
@@ -197,6 +199,7 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       :qa-subtitle="qaSubtitle"
       :qa-answer="qaAnswer"
       :voice-recording="voiceRecording"
+      :voice-transcript="voiceTranscript"
       @play-pause="togglePlayback"
       @seek="seekToSegment"
     />
