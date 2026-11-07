@@ -6,6 +6,7 @@ import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { taskDetailStatusKey } from "@/components/ai-task-detail-sheet/types";
 import { useSafeArea } from "@/hooks/useSafeArea";
+import { useSystemStore } from "@/stores";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingTaskDetail } from "@/utils/task-detail-view";
 
@@ -15,6 +16,9 @@ import { consumePendingTaskDetail } from "@/utils/task-detail-view";
  *
  * 数据来源：入口卡点击时落本地存储的 gantt 整包 data，详情内容在它的 `payload` 字段里
  * （driverName / dateText / vehicleText / groups[].items[] / note），本页 onLoad 取出。
+ * 路由：`viewType=personal` 固定走本页（站内 pushWindow / navigateTo），**不进离线包容器**
+ * （见 utils/gantt-navigation），所以本页只需要处理竖屏版面。
+ * 深浅色跟随 systemStore.isDark（根节点 `.td--dark`），与对话页 / 横屏详情面板同一口径。
  * **没有的值不渲染对应元素**：司机信息为空不渲染司机卡片、路线为空不渲染标题、
  * 起止时间为空不渲染时间列（只给一端就只渲染一端）、状态认不出不渲染状态文案、备注为空不渲染备注。
  *
@@ -38,6 +42,10 @@ defineOptions({ name: "TaskDetailPage" });
 
 /** 状态栏 / 底部安全区：内嵌 webview 里拿不到真实值时 hook 会兜底 */
 const { safeAreaStyle } = useSafeArea();
+
+/** 深浅色：与对话页同一套口径（唯一数据源 systemStore.isDark），页面只负责把 --dark 类挂到根节点 */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 /** 详情内容：没有数据时是空对象，页面上除了导航不渲染任何元素 */
 const detail = ref<TaskDetailPayload>({});
@@ -111,7 +119,7 @@ function onBack() {
 </script>
 
 <template>
-  <view class="td" :style="safeAreaStyle">
+  <view class="td" :class="{ 'td--dark': isDark }" :style="safeAreaStyle">
     <!-- 顶部导航（设计稿 4637:491：返回 4637:492 + 标题 4637:494） -->
     <view class="td__nav">
       <view class="td__back" @tap="onBack">
@@ -474,5 +482,122 @@ function onBack() {
   line-height: 30rpx;
   text-align: center;
   color: #1a1a1e;
+}
+
+/* ===== 深色主题 =====
+   与同族「任务详情面板」（components/ai-task-detail-panel 的 .tdp--dark）同一套材质，
+   保证横竖两版详情在深色下观感一致：
+   - 页面底 #0D0D0D；司机卡 / 任务卡 / 备注块 #1A1A1A + 1px #303030
+   - 标题 #FFFFFF、正文 #E5E5E5、次要（车辆班组 / 时间列 / 状态）#8E8E8E
+   - 连接线 #303030、圆点外圈 #262626 内点 #6B6B6B、时间短横 #4A4A4A
+   - 任务卡状态色：已完成 #1F1F1F、待执行 #1A1A1A、已取消 #141414（文字 #5D5D5D），
+     执行中保留淡蓝语义（底 #16283C + 描边 #4C7396，状态文案提亮到 #FFFFFF）
+   尺寸 / 间距 / 字号与浅色稿完全一致，只换颜色 */
+.td--dark {
+  background: #0d0d0d;
+  color: #e5e5e5;
+
+  /* ---- 顶部导航 ---- */
+  .td__back-arrow {
+    border-color: #e5e5e5;
+  }
+
+  .td__nav-title {
+    color: #ffffff;
+  }
+
+  /* ---- 司机卡片 ---- */
+  .td__driver {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .td__driver-name {
+    color: #ffffff;
+  }
+
+  .td__driver-date {
+    color: #e5e5e5;
+  }
+
+  .td__driver-vehicle {
+    color: #8e8e8e;
+  }
+
+  /* ---- 行程分组 / 左侧时间列 ---- */
+  .td__route {
+    color: #ffffff;
+  }
+
+  .td__time {
+    color: #8e8e8e;
+  }
+
+  .td__time-tick {
+    background: #4a4a4a;
+  }
+
+  /* ---- 连接线与圆点 ---- */
+  .td__spine::before {
+    background: #303030;
+  }
+
+  .td__dot {
+    background: #262626;
+  }
+
+  .td__dot::after {
+    background: #6b6b6b;
+  }
+
+  /* ---- 任务卡 ---- */
+  .td__card {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .td__card-text {
+    color: #e5e5e5;
+  }
+
+  .td__status {
+    color: #8e8e8e;
+  }
+
+  .td__status--running {
+    color: #ffffff;
+  }
+
+  .td__card--done {
+    background: #1f1f1f;
+  }
+
+  .td__card--running {
+    border-color: #4c7396;
+    background: #16283c;
+  }
+
+  // 待执行在深色下与默认卡面同色，显式写出来避免以后改默认底色时跟着漂
+  .td__card--pending {
+    background: #1a1a1a;
+  }
+
+  .td__card--canceled {
+    background: #141414;
+  }
+
+  .td__card--canceled .td__card-text {
+    color: #5d5d5d;
+  }
+
+  /* ---- 底部备注 ---- */
+  .td__note {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .td__note-text {
+    color: #e5e5e5;
+  }
 }
 </style>

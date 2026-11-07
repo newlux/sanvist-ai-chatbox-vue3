@@ -888,13 +888,112 @@ export function setNativeTitle(title: string) {
   callNativeSilently("setTitle", { title });
 }
 
+/* ------------------------------------------------------------------ */
+/* 离线包（openH5Container）与 demo 数据握手                            */
+/* ------------------------------------------------------------------ */
+
 /**
- * 原生横屏全屏：入参 `{ enable: true }` 进入横屏全屏，`{ enable: false }` 退出（恢复竖屏）。
+ * 打开离线包 H5 容器的入参。
  *
- * 调度视图（甘特 / 预排 / 重排）优先用它切方向：原生转屏后 innerWidth > innerHeight，
- * useLandscape 里的 CSS 旋转会自动让位（rotated=false），页面按真实横屏尺寸铺开。
- * 宿主没实现这个 JSAPI 时静默失败，页面里的 CSS 旋转兜底仍然有效。
+ * 宿主约定（原生侧已确认）：
+ * - `appid`：离线包在 mPaaS 的 appid；
+ * - `path`：离线包内部路由，必须带 `/index.html#/` 前缀，可带 query，
+ *   如 `/index.html#/pages/audit/auditList/index`；
+ * - `landscape`：容器是否横屏；
+ * - `fullscreen`：容器是否全屏。
+ *
+ * 方向判定放在业务侧（utils/gantt-offline），这里只透传。
  */
-export function setLandscapeFullscreen(enable: boolean) {
-  callNativeSilently("landscapeFullscreen", { enable });
+export interface OpenH5ContainerParams {
+  appId: string;
+  path: string;
+  landscape?: boolean;
+  fullscreen?: boolean;
+  [key: string]: unknown;
+}
+
+/** 打开离线包容器；宿主未实现时抛错，由调用方回退 */
+export async function openH5Container(params: OpenH5ContainerParams) {
+  return callNative("openH5Container", { ...params }, { timeoutMs: 5000 });
+}
+
+/** demo 数据单次写入的体积告警阈值：桥对单次参数大小有上限，超了通常表现为超时或直接报错 */
+const DEMO_DATA_WARN_BYTES = 200 * 1024;
+
+/**
+ * 写入 demo 数据（宿主 → 离线包 / 离线包 → 宿主）。
+ *
+ * 原生按 key-value 存字符串，这里统一把业务对象 JSON 化。
+ * 与离线包 `utils/platform/mpaas.ts` 的 `GANTT_DEMO_KEY` 等常量必须一致。
+ *
+ * 体积是这条链路最容易踩的坑：小报文（如 `{}`）能成功，几百 KB 的整包可能超桥的单次
+ * 参数上限 —— 表现成「调用超时」或宿主返回 error。这里把字节数打出来，超阈值额外告警。
+ */
+export async function saveDemoModeData(key: string, data: unknown) {
+  let value = "";
+  try {
+    value = JSON.stringify(data);
+  }
+  catch (error) {
+    // 循环引用 / BigInt 之类：序列化就挂了，根本到不了原生
+    logger.error(`saveDemoModeData 序列化失败：${key}`, error);
+    throw error;
+  }
+
+  if (value.length > DEMO_DATA_WARN_BYTES) {
+    logger.warn(`saveDemoModeData 报文偏大：${key}`, {
+      bytes: value.length,
+      warnBytes: DEMO_DATA_WARN_BYTES,
+    });
+  }
+
+  try {
+    return await callNative("saveDemoModeData", { key, value }, { timeoutMs: 5000 });
+  }
+  catch (error) {
+    logger.error(`saveDemoModeData 失败：${key}`, {
+      bytes: value.length,
+      message: error instanceof Error ? error.message : String(error),
+    }, error);
+    throw error;
+  }
+}
+
+/** 解析 demo 数据：兼容直接字符串 / JSON 字符串 / 按 key 包一层 */
+function parseDemoModeValue<T>(raw: unknown, key: string): T | null {
+  if (raw == null) return null;
+  if (typeof raw === "object") {
+    const wrapped = (raw as Record<string, unknown>)[key];
+    if (wrapped !== undefined) return parseDemoModeValue<T>(wrapped, key);
+    return raw as T;
+  }
+  const text = String(raw);
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const wrapped = (parsed as Record<string, unknown>)[key];
+      if (wrapped !== undefined) return wrapped as T;
+    }
+    return parsed as T;
+  }
+  catch (error) {
+    logger.warn(`getDemoModeData 返回的不是合法 JSON：${key}`, error);
+    return null;
+  }
+}
+
+/** 读取 demo 数据；没有写入或宿主不支持时返回 null */
+export async function getDemoModeData<T = unknown>(key: string): Promise<T | null> {
+  try {
+    const result = await callNative("getDemoModeData", { key }, {
+      timeoutMs: 3000,
+      silentTimeout: true,
+    });
+    return parseDemoModeValue<T>(result?.data ?? result?.value, key);
+  }
+  catch (error) {
+    logger.warn("getDemoModeData 不可用", error);
+    return null;
+  }
 }

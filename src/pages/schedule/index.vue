@@ -34,8 +34,9 @@ import { backFromScene } from "@/utils/scene-navigation";
  * 双指缩放：与甘特页同一套（useScheduleGestures 接管两指手势），按两指间距比例改「每小时像素宽」
  * （28–168px，基准 56px），捏合中心的时刻保持不动；刻度、任务条、新旧连线、箭头跟着实时重排。
  *
- * 横屏方式与 pages/schedule-gantt 一致：`useLandscape()` 先让宿主原生转屏（landscapeFullscreen），
- * 原生不支持时把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
+ * 横屏方式与 pages/schedule-gantt 一致：宿主用 openH5Container 打开甘特图应用时本身就是全屏横屏，
+ * 前端不再申请转屏（不再调 landscapeFullscreen）；只有宿主没给横屏可视区时，
+ * `useLandscape()` 才把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
  *
  * 任务条样式（稿子 7229:254）：26 高、单行——原计划 #F4F4F4 + 虚线 #D9D9D9、
  * 新计划 白底 + 虚线 #9DB3CC、已取消同原计划但文案转灰、强调条为深色实线 #1A1A1A。
@@ -62,8 +63,8 @@ const { rotated, exitLandscape } = useLandscape(measureLayout);
 const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
 
 /**
- * 顶部状态栏空白：调原生 landscapeFullscreen 转屏成功后，webview 铺满横屏、
- * 状态栏压在页面顶边，顶栏要给状态栏让出这段高度；
+ * 顶部状态栏空白：宿主全屏横屏时 webview 铺满屏幕、状态栏压在页面顶边，
+ * 顶栏要给状态栏让出这段高度；
  * CSS 旋转模拟（rotated）时状态栏在设备的物理顶边（对应页面左侧），不需要留。
  */
 const { safeTopPx } = useSafeArea();
@@ -669,10 +670,8 @@ watch(() => rows.value.length, () => {
 /**
  * 退出到对话页（返回按钮 / 输入条发问共用）。
  *
- * 顺序：关掉原生横屏（`landscapeFullscreen(false)`）并**等可视区确认回到竖屏**
- * → 竖屏恢复后再写入待发送问题 → 跳回对话页。
- * 之前是 `exitLandscape()` 与 `backFromScene()` 同步连着调，原生转屏还没生效就跳页，
- * 对话页和键盘会落在横屏里；问题也会在错误的视口下发出。
+ * 顺序：撤掉 CSS 旋转兜底（`exitLandscape()`；方向由宿主容器自己管，
+ * 不再调 landscapeFullscreen） → 写入待发送问题 → 跳回对话页。
  *
  * `ask` 有值才走「发送问答」那一步，返回按钮不传，因此只收横屏不提问。
  *
@@ -680,7 +679,7 @@ watch(() => rows.value.length, () => {
  * 也要回那个会话（而不是首页），提问才落在原来的对话里。
  */
 async function leaveToChat(ask?: string) {
-  // 原生横屏置 false 之后要等屏幕真的转回来，再跳页 / 发问
+  // 先撤掉 CSS 旋转兜底，再跳页 / 发问
   await exitLandscape();
   if (ask) stashPendingScheduleAsk(ask);
   backFromScene("/pages/task/index");
@@ -1318,12 +1317,13 @@ function toggleShowAll() {
   overflow: hidden;
 }
 
+/* 条内文字按设计稿弱化：标题 11/500 #0D0D0D、时段 11/400 #8F8F8F，行高 16（1522:524 / 1522:525） */
 .schedule__bar-title {
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 500;
-  line-height: 13px;
-  color: #1a1a1e;
+  line-height: 16px;
+  color: #0d0d0d;
   white-space: nowrap;
 }
 
@@ -1331,8 +1331,8 @@ function toggleShowAll() {
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 400;
-  line-height: 13px;
-  color: #999999;
+  line-height: 16px;
+  color: #8f8f8f;
   white-space: nowrap;
 }
 

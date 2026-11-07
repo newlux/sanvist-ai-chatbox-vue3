@@ -30,10 +30,11 @@ import { useSafeArea } from "@/hooks/useSafeArea";
 import { useVoiceQuery } from "@/hooks/useVoiceQuery";
 import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
 import { provideChatScope, useChatStore, useSessionStore, useSystemStore, useUserStore } from "@/stores";
+import { probeDemoModeData } from "@/utils/demo-data-probe";
 import { openGanttView } from "@/utils/gantt-navigation";
-import { isWebEnvironment } from "@/utils/landscape-device";
+import { consumeOfflineGanttAsk, shouldUseOfflineGantt } from "@/utils/gantt-offline";
 import { createLogger } from "@/utils/logger";
-import { setLandscapeFullscreen } from "@/utils/platform/mpaas";
+import { onNativeEvent } from "@/utils/platform/mpaas";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -224,9 +225,46 @@ function applyPendingInitSession() {
  * 两条返回路径（navigateBack / 关掉场景窗口）都会走 onShow，所以在这里消费；
  * 先按需切会话再发，避免问题落到别的会话。
  */
-function startPendingScheduleAsk() {
-  const text = consumePendingScheduleAsk();
+async function startPendingScheduleAsk() {
+  // 站内甘特把问题写在本地存储；离线包跨容器只能走 demo 数据桥，两边都取一次
+  const offlineAsk = shouldUseOfflineGantt() ? await consumeOfflineGanttAsk() : "";
+  const text = consumePendingScheduleAsk() || offlineAsk;
+  if (text) {
+    sendTaskMessage({ text });
+    return;
+  }
+  // 没有待发问题：回到本页仍停在欢迎态就重拉一次入口卡（不缓存、不复用旧数据）。
+  // 与 onLoad 的请求隔开 800ms：首次进入 onShow 紧跟 onLoad，不该重复请求。
+  // 待机态是异常卡时首屏走的是「查异常」，这里不再补拉甘特图入口卡。
+  if (showSceneWelcome.value && welcomeCardKind.value !== "exception" && Date.now() - initialCardsRequestedAt > 800) void loadInitialCards();
+}
+
+/**
+ * 甘特（站内页 / 安卓离线包容器）关闭后，宿主 webview 不一定会走 onShow
+ * （独立 H5 容器与宿主是两套界面栈），因此在原生 resume / 页面重新可见时补一次：
+ * 只消费待发问题，没有就什么都不做，不像 startPendingScheduleAsk 那样顺带刷新入口卡。
+ *
+ * 两条来源都要取：站内甘特写本地存储，安卓 openH5Container 的离线包走 demo 数据桥。
+ */
+async function flushOfflineGanttAsk() {
+  const localAsk = consumePendingScheduleAsk();
+  const offlineAsk = shouldUseOfflineGantt() ? await consumeOfflineGanttAsk() : "";
+  const text = localAsk || offlineAsk;
   if (text) sendTaskMessage({ text });
+}
+
+const stopNativeResume = onNativeEvent("resume", () => {
+  void flushOfflineGanttAsk();
+});
+
+/**
+ * 安卓 WebView 里 openH5Container 关闭后，宿主页面既不必然走 onShow、也不一定收到原生 resume，
+ * 「页面重新可见」是唯一稳定的信号：用它补一次消费。
+ * 只取离线包回传的问题（取完即清 + 内部互斥），重复触发无副作用。
+ */
+function handleHostVisible() {
+  if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+  void flushOfflineGanttAsk();
 }
 const {
   iconCopyImage,
@@ -543,29 +581,14 @@ function onGanttEntryTap() {
 }
 
 /**
- * 从本页打开横屏调度视图的时间戳（0 表示没开过）。
- *
- * onShow 里要兜底把方向复原成竖屏，但「刚点开、宿主转场还没结束」时也可能收到 onShow：
- * 这时如果直接发 `landscapeFullscreen(false)`，正好会把刚申请到的横屏关掉
- * （日志里表现成 true / false 各一次）。所以只在「确实离开超过一段时间后再回来」才复原。
- */
-let landscapeSceneOpenedAt = 0;
-/** onShow 复原方向的最小间隔：小于这个时长视为「还在开窗过程中」，不动方向 */
-const LANDSCAPE_RETURN_GUARD_MS = 800;
-
-/**
  * 点甘特入口卡（AI 下发的 gantt 积木）：按 viewType 分流（见 utils/gantt-navigation）。
  * - personal → 竖屏个人任务详情页（pages/task-detail），明细挂在整包的 payload 字段里；
- * - schedule / pre / replan → 各自横屏视图；
+ * - schedule / pre / replan → 各自横屏视图（方向由宿主容器给，前端不再申请转屏）；
  * 数据一律先落本地存储、再由目标页 onLoad 取走（目标页可能是独立场景窗口）。
  */
 function onGanttOpen(payload: GanttViewPayload) {
-  // 只有横屏页需要回来时复原方向；personal 是竖屏页，不参与。
-  // 网页环境不做横屏转换（见 utils/landscape-device），也就没有「回来要复原的方向」。
-  if (String(payload?.viewType || "").trim().toLowerCase() !== "personal" && !isWebEnvironment()) {
-    landscapeSceneOpenedAt = Date.now();
-  }
-  openGanttView(payload);
+  // openGanttView 现在会先等 bridge（最多 BRIDGE_WAIT_MS）再分流，异步结果自行兜底，这里不等
+  void openGanttView(payload);
 }
 /** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
 function onTtsClick(index: number) {
@@ -818,6 +841,9 @@ async function onScrollTop() {
 }
 
 onLoad((options) => {
+  // 临时自检（排查 saveDemoModeData 异常用）：写一段几百字符的 JSON 再读回比对，
+  // 日志前缀 [demo-probe]；排查完把 utils/demo-data-probe 的开关关掉并删除这两行
+  void probeDemoModeData("task-onload");
   syncWindowHeight();
   const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("TASK");
   if (sessionId) {
@@ -833,18 +859,13 @@ onLoad((options) => {
 onMounted(() => {
   syncWindowHeight();
   loadAwakeningPrompt();
+  // 安卓离线包（openH5Container）关容器回来时靠它消费待发问题
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", handleHostVisible);
 });
 
 onShow(() => {
-  // 从横屏调度视图返回的兜底复原：正常路径由横屏页的 leaveToChat → exitLandscape 等竖屏恢复，
-  // 但宿主手势关窗 / 系统返回键 / webview 被直接销毁时那段异步流程可能没跑完，
-  // 回到这里就会停在横屏里（键盘弹出后布局全乱）。
-  // 只在本页确实开过横屏页、且已经离开超过 LANDSCAPE_RETURN_GUARD_MS 时才复原：
-  // 开窗转场期间的 onShow 不能动方向，否则会把刚申请到的横屏立刻关掉。
-  if (landscapeSceneOpenedAt && Date.now() - landscapeSceneOpenedAt > LANDSCAPE_RETURN_GUARD_MS) {
-    landscapeSceneOpenedAt = 0;
-    setLandscapeFullscreen(false);
-  }
+  // 注：横屏调度视图的方向由宿主容器自己管（openH5Container 打开就是全屏横屏），
+  // 回到本页不再需要复原方向，所以这里没有 landscapeFullscreen(false) 的兜底。
   syncWindowHeight();
   const sessionId = consumePendingHistorySession("TASK");
   // 有心跳转的会话就先切过去，再补发甘特图里问的问题，避免问错会话
@@ -867,7 +888,8 @@ onUnload(() => {
   cancelActiveStream();
   stopSceneTts();
   clearAutoOpenTimer();
-  resetVoiceQuery();
+  stopNativeResume();
+  if (typeof document !== "undefined") document.removeEventListener("visibilitychange", handleHostVisible);
 });
 </script>
 

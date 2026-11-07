@@ -31,8 +31,9 @@ import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/sched
  * - 右下角输入条（components/schedule-ask-bar）：问的问题带回作业协同对话页再发送；
  * - 点击任务条：右侧滑出任务详情面板（6832:292）。
  *
- * 横屏方式与其它调度视图一致：`useLandscape()` 先让宿主原生转屏（landscapeFullscreen），
- * 原生不支持时把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
+ * 横屏方式与其它调度视图一致：宿主用 openH5Container 打开甘特图应用时本身就是全屏横屏，
+ * 前端不再申请转屏（不再调 landscapeFullscreen）；只有宿主没给横屏可视区时，
+ * `useLandscape()` 才把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
  *
  * 任务条（稿子 6832:13）：40 高、圆角 6、条内两行（任务名 + `[状态]起止`），按状态四态配色：
  * 执行中 #ECF5FF + #FFFFFF 描边 / 已完成 #F0F0F0 / 待执行 #FFFFFF + #F2F2F2 / 已逾期 #FFFFFF + #767676 虚线。
@@ -66,8 +67,8 @@ const { rotated, exitLandscape } = useLandscape(measureLayout);
 const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
 
 /**
- * 顶部状态栏空白：调原生 landscapeFullscreen 转屏成功后，webview 铺满横屏、
- * 状态栏压在页面顶边，顶栏要给状态栏让出这段高度；
+ * 顶部状态栏空白：宿主全屏横屏时 webview 铺满屏幕、状态栏压在页面顶边，
+ * 顶栏要给状态栏让出这段高度；
  * CSS 旋转模拟（rotated）时状态栏在设备的物理顶边（对应页面左侧），不需要留。
  */
 const { safeTopPx } = useSafeArea();
@@ -482,6 +483,24 @@ const { rowHints, jumpToRow } = useTimelineEdgeHint({
 
 /** 返回对话页的退场动画时长（ms）：与 .schedule 的 transition 保持一致 */
 const LEAVE_ANIM_MS = 300;
+
+/**
+ * 当前是否安卓原生 WebView（openH5Container 横屏容器 / 宿主 WebView）。
+ *
+ * 这个环境下返回按钮要与系统级左滑返回保持一致：立刻返回上级页面，不播缩小动画
+ * （动画期间横屏容器已经开始回收，容易出现白屏 / 停在半屏）。
+ * 纯 H5（浏览器、PC 内嵌 iframe）仍沿用原来的动画流程。
+ */
+function isAndroidNativeWebview() {
+  if (isWebEnvironment()) return false;
+  try {
+    return String(uni.getSystemInfoSync().platform || "").toLowerCase() === "android";
+  }
+  catch {
+    return false;
+  }
+}
+
 /** 正在退场：缩小动画期间不再响应返回，避免重复收横屏 / 重复联网返回 */
 const leaving = ref(false);
 /** 退场缩放的起点（内联 transform-origin）：默认居中，点返回时改到返回按钮中心 */
@@ -519,10 +538,8 @@ function resolveLeaveOrigin() {
 /**
  * 退出到对话页（返回按钮 / 输入条发问 / 语音发问共用）。
  *
- * 顺序：退场动画 → 关掉原生横屏（`landscapeFullscreen(false)`）并**等可视区确认回到竖屏**
- * → 竖屏恢复后再写入待发送问题 → 跳回对话页。
- * 之前是 `exitLandscape()` 与 `backFromScene()` 同步连着调，原生转屏还没生效就跳页，
- * 对话页和键盘会落在横屏里；问题也会在错误的视口下发出。
+ * 顺序：退场动画 → 撤掉 CSS 旋转兜底（`exitLandscape()`；方向由宿主容器自己管，
+ * 不再调 landscapeFullscreen） → 写入待发送问题 → 跳回对话页。
  *
  * `ask` 有值才走「发送问答」那一步，返回按钮不传，因此只收横屏不提问。
  *
@@ -531,11 +548,21 @@ function resolveLeaveOrigin() {
  */
 async function leaveToChat(ask?: string) {
   if (leaving.value) return;
+  leaving.value = true;
+
+  // 安卓 WebView：与系统左滑返回一致 —— 先把问题落盘，再立即回上级页面，不播退场动画。
+  // 对话页（pages/task）onShow 时读取并发送（见 utils/schedule-ask）。
+  if (isAndroidNativeWebview()) {
+    if (ask) stashPendingScheduleAsk(ask);
+    await exitLandscape();
+    backFromScene("/pages/task/index");
+    return;
+  }
+
   // 缩小的落点 = 返回按钮中心（动画开始前量一次，过渡期间布局不变）
   leaveOrigin.value = resolveLeaveOrigin();
-  leaving.value = true;
   await new Promise<void>(resolve => setTimeout(resolve, LEAVE_ANIM_MS));
-  // 原生横屏置 false 之后要等屏幕真的转回来，再跳页 / 发问
+  // 先撤掉 CSS 旋转兜底，再跳页 / 发问
   await exitLandscape();
   if (ask) stashPendingScheduleAsk(ask);
   backFromScene("/pages/task/index");
@@ -841,13 +868,14 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
     <ScheduleAskBar :dark="isDark" :rotated="rotated" @send="onAskSend" />
 
     <!-- 任务详情面板（横屏右侧，点击任务条滑出，稿子 6832:292） -->
-    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" :dark="isDark" />
+    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" :rotated="rotated"/>
   </view>
 </template>
 
 <style lang="scss" scoped>
-/* 横屏稿件 6832:13：812 × 375，元素尺寸直接按稿件 px（横屏可视区宽约 812 时与稿一致，窄则横向滚动兜住）
-   版式要点：左列 140（底 #FBFBFB / 描边 #F2F2F2）、每小时 56px、行高 45、任务条 40 高按状态配色 */
+/* 横屏稿件 6832:13 / 1522:450：812 × 375，元素尺寸直接按稿件 px（横屏可视区宽约 812 时与稿一致，窄则横向滚动兜住）
+   版式要点：左列 140（底 #FBFBFB / 描边 #F2F2F2）、每小时 56px、行高 45、
+   任务条 41 高（稿子 47，行高 45 装不下）、圆角 6、左右内边距 15，四态按状态配色 */
 .schedule {
   position: relative;
   display: flex;
@@ -1196,7 +1224,9 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   height: 45px;
 }
 
-/* 任务条（稿子 6832:13）：40 高、圆角 6、条内两行；基础态按「待执行」白底 + #F2F2F2，其余状态见下方四态 */
+/* 任务条（稿子 1522:523 Group 13）：圆角 6、条内两行（标题 11/500 + 状态时段 11/400）、
+   左右内边距 15（1522:524 文字距条左边 15）、上下留白 6；
+   条高受本仓行高 45 限制取 41（稿子行高 67 / 条高 47，若要按稿子改行高需同步左列与刻度条） */
 .schedule__bar {
   position: absolute;
   top: 2px;
@@ -1205,9 +1235,11 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   justify-content: center;
   align-items: flex-start;
   box-sizing: border-box;
-  height: 40px;
-  padding: 0 8px;
-  border: 1px solid #f2f2f2;
+  height: 41px;
+  gap: 3px;
+  padding: 0 15px;
+  /* 未开始的任务条一律是虚线框（1522:477 / 1522:487 / 1522:533） */
+  border: 1px dashed #e8e8e8;
   border-radius: 6px;
   background: #ffffff;
   overflow: hidden;
@@ -1220,20 +1252,28 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   background: #ecf5ff;
 }
 
+/* 已完成：白底 + #E8E8E8 虚线，标题转灰（1522:533） */
 .schedule__bar--done {
-  border-color: #ffffff;
-  background: #f0f0f0;
-}
-
-.schedule__bar--pending {
-  border-color: #f2f2f2;
+  border-style: dashed;
+  border-color: #e8e8e8;
   background: #ffffff;
 }
 
-/* 已逾期：白底 + #767676 虚线 [2,2] */
+.schedule__bar--done .schedule__bar-title {
+  color: #8e8e8e;
+}
+
+/* 待执行：白底 + #E8E8E8 虚线，标题保持深色（1522:487） */
+.schedule__bar--pending {
+  border-style: dashed;
+  border-color: #e8e8e8;
+  background: #ffffff;
+}
+
+/* 逾期未开始：白底 + 蓝色虚线（稿子条形取 #9DB3CC，图例色块给的是 #767676，见交付说明） */
 .schedule__bar--overdue {
   border-style: dashed;
-  border-color: #767676;
+  border-color: #9db3cc;
   background: #ffffff;
 }
 
@@ -1241,24 +1281,26 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   opacity: 0.85;
 }
 
-/* 强调条：红描边 #C8201E（6464:358） */
+/* 强调条：红描边 #C8201E（6464:358），强调态用实线，不被上面的虚线框带跑 */
 .schedule__bar--mark {
+  border-style: solid;
   border-color: #c8201e;
 }
 
+/* 条内两行：标题 11/500 #0D0D0D、状态时段 11/400 #8F8F8F，行高 16、行间 3（1522:524 / 1522:525） */
 .schedule__bar-title {
   font-size: 11px;
   font-weight: 500;
-  line-height: 13px;
-  color: #1a1a1e;
+  line-height: 16px;
+  color: #0d0d0d;
   white-space: nowrap;
 }
 
 .schedule__bar-time {
   font-size: 11px;
   font-weight: 400;
-  line-height: 13px;
-  color: #999999;
+  line-height: 16px;
+  color: #8f8f8f;
   white-space: nowrap;
 }
 
