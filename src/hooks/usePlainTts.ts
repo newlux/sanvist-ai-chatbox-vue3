@@ -2,6 +2,7 @@ import type { RealtimeTtsChunk } from "@/api/chat/types";
 import type { TtsStreamHandle } from "@/api/chat/tts-stream";
 import { onBeforeUnmount, ref } from "vue";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
+import { resolveReportVoiceId } from "@/hooks/useReportVoice";
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("plain-tts");
@@ -217,8 +218,10 @@ export function usePlainTts(language = "zh") {
     };
 
     try {
+      // 音色每次现取：`<VOICE_STYLE style="…">` 标签改动后，下一句口播就用新音色
+      const voice = resolveReportVoiceId();
       handle = consumeTextToSpeechStream(
-        { text: job.text, language },
+        { text: job.text, language, ...(voice ? { voice } : {}) },
         (payload) => {
           if (id !== session || !payload || typeof payload !== "object") return;
           const chunk = payload as RealtimeTtsChunk;

@@ -2102,6 +2102,7 @@ $color-white: #ffffff;
   right: 0;
   left: 0;
   z-index: 1010;
+  height: 200rpx;
 }
 
 // 顶部毛玻璃渐隐（对应设计稿 722:152「回答」头部底板）：

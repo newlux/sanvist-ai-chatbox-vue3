@@ -1005,7 +1005,7 @@ onBeforeUnmount(() => {
 /* 悬浮头部（首页对话页）：底色交给页面顶部的毛玻璃渐隐层，
    这里完全透明，滚上来的消息才能透到图标下面，而不是被一层实底挡住 */
 .ai-chat-header--plain {
-  background: linear-gradient(180deg, #fafafa 0%, rgba(250, 250, 250, 0.92) 10%, rgba(250, 250, 250, 0) 100%);
+  background: linear-gradient(180deg, #fafafa 10%, rgba(250, 250, 250, 0.92) 90%, rgba(250, 250, 250, 0) 100%);
 }
 
 /* ===== 深色主题：首页问答态头部（Ardot 1193:2097 → 1193:2129 Component 2） =====

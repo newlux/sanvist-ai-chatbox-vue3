@@ -4,6 +4,7 @@ import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } f
 import { useI18n } from "vue-i18n";
 import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
+import tellGif from "@/assets/img/tell.gif";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import ReportWaveform from "@/components/report-waveform/index.vue";
 import { useSystemStore } from "@/stores";
@@ -29,11 +30,12 @@ const props = defineProps<{
   voiceTranscript?: string;
 }>();
 
-const emit = defineEmits<{ "play-pause": []; seek: [seq: number] }>();
+// 播放控制与进度条都已在浅色稿中移除，事件声明保留，兼容上层的 @play-pause / @seek 绑定
+defineEmits<{ "play-pause": []; seek: [seq: number] }>();
 const { t } = useI18n();
 /**
  * 外观：深色走 C 方案暗色稿 1193:2708「听播-正在播放」与 1193:3357「听播-正在回答」。
- * 声波在暗色稿里是纯白柱（浅色稿才是品牌渐变），字幕 / 进度条 / 播放按钮 / 答案卡换暗色材质。
+ * 声波在暗色稿里是纯白柱（浅色稿才是品牌渐变），字幕 / 答案卡换暗色材质。
  */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
@@ -92,8 +94,6 @@ const waveGradient = [
   { color: "#C067FA", offset: 76 },
   { color: "#FD90C4", offset: 100 },
 ];
-/** 播放/暂停图标与声波同色系，多实例同页时渐变 id 需唯一 */
-const playIconGradientId = `report-broadcast-play-gradient-${Math.random().toString(36).slice(2, 9)}`;
 const showTranscriptSkeleton = computed(
   () => props.loading && props.transcriptSegments.length === 0,
 );
@@ -124,6 +124,12 @@ const transcriptItems = computed(() => {
         : "next") as "previous" | "current" | "next",
     text: segment.text,
   }));
+  /**
+   * 浅色稿 195:1985 只有「当前播报段落」一块文字，配合打字机逐句摊开：
+   * 还没播到的段落先不渲染，字幕随播报一句一句长出来，不是一进页就把全稿摊平。
+   * 深色稿（1193:2708）保留原来的「下一句」淡显预览，不动。
+   */
+  if (!isDark.value) return items.filter(item => item.role !== "next");
   if (
     props.nextText &&
     props.currentSeq !== null &&
@@ -185,74 +191,69 @@ function updateTranscriptScroll() {
 }
 watch(() => props.currentSeq, updateTranscriptScroll);
 
-onBeforeUnmount(() => {
-  if (transcriptAutoCenterTimer) clearTimeout(transcriptAutoCenterTimer);
-  cancelTranscriptRecenter();
-});
+/* —— 打字机（设计稿 195:1985）：当前播报段落逐字出现，不一次性摊开 ——
+   只作用于「当前段」：已播完的段落保持全文，未播到的段落在浅色稿里不渲染，
+   所以视觉上是「正在念的这一句在长字」，和播报节奏一致。 */
+const TYPE_INTERVAL_MS = 50;
+/** 当前段落已打出的字数：切句归零，暂停冻结，恢复后接着打 */
+const typedLength = ref(0);
+let typingTimer: ReturnType<typeof setInterval> | null = null;
 
-/* —— 播报进度条：随播放进度走，拖动换算到分句后上抛 seek —— */
-const progressDragging = ref(false);
-const progressDragRatio = ref(0);
-/** 轨道在视口中的位置缓存：touchstart 时刷新，move 期间视图不动可直接复用。 */
-let progressTrackRect: { left: number; width: number } | null = null;
-
-const displayProgress = computed(() =>
-  progressDragging.value ? progressDragRatio.value : props.progress,
-);
-const progressPercent = computed(
-  () => `${Math.min(1, Math.max(0, displayProgress.value)) * 100}%`,
-);
-
-function measureProgressTrack() {
-  const query = uni.createSelectorQuery().in(instance?.proxy);
-  query.select(".report-broadcast-content__progress-hit").boundingClientRect();
-  query.exec((rects) => {
-    const rect = rects?.[0] as UniApp.NodeInfo | undefined;
-    if (rect && typeof rect.left === "number" && typeof rect.width === "number" && rect.width > 0) {
-      progressTrackRect = { left: rect.left, width: rect.width };
-    }
-  });
-}
-
-function ratioFromClientX(clientX: number): number | null {
-  if (!progressTrackRect) return null;
-  return Math.min(1, Math.max(0, (clientX - progressTrackRect.left) / progressTrackRect.width));
-}
-
-function onProgressTouchStart(event: TouchEvent) {
-  if (!props.transcriptSegments.length) return;
-  progressDragging.value = true;
-  progressTrackRect = null;
-  measureProgressTrack();
-  const touch = event?.touches?.[0];
-  if (touch) {
-    // rect 异步测回来前保持原值，move 里会立即跟上
-    progressDragRatio.value = ratioFromClientX(touch.clientX) ?? progressDragRatio.value;
+function stopTyping() {
+  if (typingTimer) {
+    clearInterval(typingTimer);
+    typingTimer = null;
   }
 }
 
-function onProgressTouchMove(event: TouchEvent) {
-  if (!progressDragging.value) return;
-  const touch = event?.touches?.[0];
-  if (!touch) return;
-  const ratio = ratioFromClientX(touch.clientX);
-  if (ratio != null) progressDragRatio.value = ratio;
+/** 当前段落全文长度：字幕是流式下发的，句子还可能继续变长 */
+function currentSegmentLength() {
+  if (props.currentSeq === null) return 0;
+  const segment = props.transcriptSegments.find(item => item.seq === props.currentSeq);
+  return segment ? segment.text.length : 0;
 }
 
-function onProgressTouchEnd() {
-  if (!progressDragging.value) return;
-  progressDragging.value = false;
-  const total = props.transcriptSegments.length;
-  if (!total) return;
-  const index = Math.min(total - 1, Math.max(0, Math.floor(progressDragRatio.value * total)));
-  const seq = props.transcriptSegments[index]?.seq;
-  if (typeof seq === "number") emit("seek", seq);
+/** 按播放状态启停打字机：播报中才继续吐字，暂停就停在当前字数上 */
+function syncTyping() {
+  stopTyping();
+  if (!props.playing || props.currentSeq === null) return;
+  if (typedLength.value >= currentSegmentLength()) return;
+  typingTimer = setInterval(() => {
+    if (!props.playing || typedLength.value >= currentSegmentLength()) {
+      stopTyping();
+      return;
+    }
+    typedLength.value += 1;
+  }, TYPE_INTERVAL_MS);
 }
+
+watch(() => props.currentSeq, () => {
+  typedLength.value = 0;
+  syncTyping();
+});
+watch(() => props.playing, syncTyping);
+// 句子流式变长：如果已经打到当前长度就停过计时器，这里重新接上
+watch(() => currentSegmentLength(), syncTyping);
+
+onBeforeUnmount(() => {
+  if (transcriptAutoCenterTimer) clearTimeout(transcriptAutoCenterTimer);
+  cancelTranscriptRecenter();
+  stopTyping();
+});
+
+/* 进度条已按浅色稿 195:1927 移除（画板中没有进度控件，只有头像 + 字幕）。
+   seek 能力由分句点击等其它入口承担，emit 声明保留以兼容上层绑定。 */
 </script>
 
 <template>
   <!-- Broadcast Content -->
-  <view class="report-broadcast-content" :class="{ 'report-broadcast-content--dark': isDark }">
+  <view
+    class="report-broadcast-content"
+    :class="{
+      'report-broadcast-content--dark': isDark,
+      'report-broadcast-content--light': !isDark,
+    }"
+  >
     <view class="report-broadcast-content__portrait-gap" />
     <view class="report-broadcast-content__portrait-stage">
       <view class="report-broadcast-content__wave report-broadcast-content__wave--left">
@@ -270,8 +271,13 @@ function onProgressTouchEnd() {
       </view>
       <view class="report-broadcast-content__glow report-broadcast-content__glow--blue" />
       <view class="report-broadcast-content__glow report-broadcast-content__glow--red" />
+      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 tell.gif 动图；深色稿仍用所选音色头像 -->
       <view class="report-broadcast-content__portrait-wrap">
-        <image class="report-broadcast-content__portrait" :src="portrait" mode="aspectFit" />
+        <image
+          class="report-broadcast-content__portrait"
+          :src="isDark ? portrait : tellGif"
+          mode="aspectFit"
+        />
       </view>
       <view class="report-broadcast-content__wave report-broadcast-content__wave--right">
         <ReportWaveform
@@ -286,56 +292,9 @@ function onProgressTouchEnd() {
           :origin-x="3"
         />
       </view>
-      <!-- 播放按钮（设计稿 339:1359）：白底圆形 + 同色系渐变图标 -->
-      <view class="report-broadcast-content__play-control" @tap="emit('play-pause')">
-        <svg class="report-broadcast-content__play-control-icon" viewBox="0 0 22 22" aria-hidden="true">
-          <defs>
-            <linearGradient
-              :id="playIconGradientId"
-              x1="0"
-              y1="0"
-              x2="22"
-              y2="0"
-              gradientUnits="userSpaceOnUse"
-            >
-              <stop offset="0%" stop-color="#3D21CD" />
-              <stop offset="48.72%" stop-color="#1999FE" />
-              <stop offset="76%" stop-color="#C067FA" />
-              <stop offset="100%" stop-color="#FD90C4" />
-            </linearGradient>
-          </defs>
-          <!-- 播放中显示暂停双条，暂停时显示播放三角 -->
-          <g v-if="playing" :fill="`url(#${playIconGradientId})`">
-            <rect x="6.4" y="4.6" width="3.4" height="12.8" rx="1.7" />
-            <rect x="12.2" y="4.6" width="3.4" height="12.8" rx="1.7" />
-          </g>
-          <polygon
-            v-else
-            points="7.2,4.4 17,11 7.2,17.6"
-            fill="none"
-            :stroke="`url(#${playIconGradientId})`"
-            stroke-width="1.6"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </view>
+      <!-- 暂停/播放按钮已按浅色稿 195:1927 去掉：画板头像位只有头像本身，没有播放控件 -->
     </view>
-    <!-- 头像下方播报进度条：随播放进度走，拖动跳到对应分句 -->
-    <view v-if="transcriptSegments.length" class="report-broadcast-content__progress">
-      <view
-        class="report-broadcast-content__progress-hit"
-        :class="{ 'report-broadcast-content__progress-hit--dragging': progressDragging }"
-        @touchstart.stop="onProgressTouchStart"
-        @touchmove.stop.prevent="onProgressTouchMove"
-        @touchend.stop="onProgressTouchEnd"
-        @touchcancel.stop="onProgressTouchEnd"
-      >
-        <view class="report-broadcast-content__progress-rail">
-          <view class="report-broadcast-content__progress-fill" :style="{ width: progressPercent }" />
-          <view class="report-broadcast-content__progress-thumb" :style="{ left: progressPercent }" />
-        </view>
-      </view>
-    </view>
+    <!-- 进度条按浅色稿 195:1927 去掉：画板中头像与字幕之间没有进度控件 -->
     <view class="report-broadcast-content__transcript">
       <view v-show="showTranscriptSkeleton" class="report-broadcast-content__skeleton">
         <view v-for="index in 5" :key="index" class="report-broadcast-content__skeleton-segment">
@@ -362,7 +321,8 @@ function onProgressTouchEnd() {
             class="report-broadcast-content__segment"
             :class="`report-broadcast-content__segment--${item.role}`"
           >
-            {{ item.text }}
+            <!-- 当前段走打字机（逐字出现），已播完的段落保持全文 -->
+            {{ item.role === "current" ? item.text.slice(0, typedLength) : item.text }}
           </text>
         </view>
       </scroll-view>
@@ -483,55 +443,8 @@ function onProgressTouchEnd() {
   height: 450rpx;
   // background: rgb(255 216 216 / 40%);
 }
-/* —— 头像下方进度条（设计稿 339:1247）——
-   容器 80rpx（上 48 留白让开头像底部的播放按钮，其底缘伸入 stage 下方 24rpx），
-   热区 32rpx 放底部，视觉轨道 4rpx 居中；左右 88rpx 与字幕区对齐。 */
-.report-broadcast-content__progress {
-  display: flex;
-  width: 100%;
-  height: 80rpx;
-  flex: 0 0 80rpx;
-  align-items: flex-end;
-  padding: 0 88rpx;
-  box-sizing: border-box;
-}
-.report-broadcast-content__progress-hit {
-  display: flex;
-  width: 100%;
-  height: 32rpx;
-  align-items: center;
-  cursor: pointer;
-  touch-action: none;
-}
-.report-broadcast-content__progress-rail {
-  position: relative;
-  width: 100%;
-  height: 4rpx;
-  border-radius: 2rpx;
-  background: #e7e7e7;
-}
-/* 已播部分：与声波同一套渐变，渐变随填充宽度整体铺开 */
-.report-broadcast-content__progress-fill {
-  height: 100%;
-  border-radius: 2rpx;
-  background: linear-gradient(90deg, #3d21cd 0%, #1999fe 48.72%, #c067fa 76%, #fd90c4 100%);
-}
-.report-broadcast-content__progress-thumb {
-  position: absolute;
-  top: 50%;
-  box-sizing: border-box;
-  width: 16rpx;
-  height: 16rpx;
-  border: 2rpx solid #fff;
-  border-radius: 50%;
-  background: #1166d6;
-  box-shadow: 0 2rpx 4rpx rgb(0 0 0 / 11%);
-  transform: translate(-50%, -50%);
-  transition: transform 0.15s ease;
-}
-.report-broadcast-content__progress-hit--dragging .report-broadcast-content__progress-thumb {
-  transform: translate(-50%, -50%) scale(1.35);
-}
+/* 进度条已按浅色稿 195:1927 移除（头像与字幕之间无进度控件），
+   相关轨道 / 拖拽点 / 热区样式一并删掉，避免留死代码。 */
 .report-broadcast-content__transcript {
   position: relative;
   width: 100%;
@@ -695,31 +608,9 @@ function onProgressTouchEnd() {
   left: 0;
   height: 160rpx;
   pointer-events: none;
-  background: linear-gradient(180deg, #fff 0%, rgb(255 255 255 / 86%) 52%, rgb(255 255 255 / 0%) 100%);
+  // background: linear-gradient(180deg, #fff 0%, rgb(255 255 255 / 86%) 52%, rgb(255 255 255 / 0%) 100%);
 }
-/* 播放按钮（设计稿 339:1359）：32×32 外框内 28×28 白底圆 + 1px 描边 + 柔和投影 */
-.report-broadcast-content__play-control {
-  position: absolute;
-  z-index: 3;
-  bottom: -24rpx;
-  left: 50%;
-  display: flex;
-  box-sizing: border-box;
-  width: 64rpx;
-  height: 64rpx;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #e4e4e4;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 2rpx 22rpx rgb(0 0 0 / 10%);
-  transform: translateX(-50%);
-}
-.report-broadcast-content__play-control-icon {
-  width: 48rpx;
-  height: 48rpx;
-  opacity: 0.6;
-}
+/* 播放/暂停按钮已按浅色稿 195:1927 移除（节点样式一并删掉，不留死代码） */
 .report-broadcast-content__bottom-fade {
   position: absolute;
   z-index: 2;
@@ -751,30 +642,101 @@ function onProgressTouchEnd() {
   }
 }
 
+/* ===== 浅色主题：Ardot 195:1927「日常运营助手-听播-正在播放」=====
+   只按浅色稿的坐标与材质实现，深色稿（1193:2708）继续走下面的 --dark 块：
+   - 头像位 195:2031：换成 tell.gif 动图，按素材原始 500×500 折算 1000rpx 摆放，整块可见不裁切
+   - 声波 / 光晕：浅色稿无此元素，隐藏
+   - 字幕 195:1985：左 44 / 右 48（文本宽 283），头像底 → 文字顶 49px，18/26 Medium #0D0D0D
+   - 上下渐隐：底色跟随页面底色 #FAFAFA，文字淡出不出现色块接缝 */
+.report-broadcast-content--light {
+  /**
+   * 头像位放 tell.gif：画布 500×500 等比缩到 180px（360rpx），只裁透明留白，图形不裁。
+   * 逐帧统计出的内容范围是 (60,96)-(432,396)，等比 0.36 后为 136×110px：
+   *   - 舞台高度 = 110px（220rpx），刚好放下内容，放散光效不会被切；
+   *   - 图片上移 96×0.36 ≈ 34.5px（69rpx），内容顶端对齐舞台顶端；
+   *   - 画布左右按内容中线对齐页面中线（左移 246×0.36 ≈ 88.5px = 177rpx）。
+   */
+  .report-broadcast-content__portrait-stage {
+    position: relative;
+    height: 220rpx; /* 110px：内容高度 */
+    flex: 0 0 220rpx;
+  }
+
+  .report-broadcast-content__portrait-wrap {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 360rpx; /* 180px */
+    height: 360rpx; /* 180px */
+    margin-left: -177rpx;
+  }
+
+  .report-broadcast-content__portrait {
+    position: absolute;
+    top: -69rpx;
+    left: 0;
+    width: 360rpx; /* 180px */
+    height: 360rpx; /* 180px */
+  }
+
+  .report-broadcast-content__wave,
+  .report-broadcast-content__glow {
+    display: none;
+  }
+
+  /* 头像底(195) → 文字顶(244) = 49px：进度条与播放按钮都已去掉，这里直接补满 49px */
+  .report-broadcast-content__transcript {
+    padding: 98rpx 96rpx 0 88rpx; /* 上 49 / 右 48 / 左 44 */
+  }
+
+  /* 字幕排版（设计稿 195:1985 文本样式）：
+     fontFamily Source Han Sans CN / fontSize 18 / Medium 500 / lineHeight 26 /
+     左对齐 / 顶对齐 / textCase ORIGINAL / textDecoration NONE / 字间距 0 */
+  .report-broadcast-content__segment,
+  .report-broadcast-content__segment--current {
+    color: #0d0d0d;
+    font-family: "Source Han Sans CN", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 36rpx; /* 18px */
+    font-style: normal;
+    font-weight: 500; /* Medium */
+    line-height: 52rpx; /* 26px */
+    letter-spacing: 0; /* 设计稿字间距 0 */
+    text-align: left;
+    text-decoration: none;
+    text-transform: none; /* textCase: ORIGINAL */
+    vertical-align: top;
+  }
+
+  .report-broadcast-content__top-fade {
+    // background: linear-gradient(
+    //   180deg,
+    //   #fafafa 0%,
+    //   rgb(250 250 250 / 86%) 52%,
+    //   rgb(250 250 250 / 0%) 100%
+    // );
+  }
+
+  .report-broadcast-content__bottom-fade {
+    background: linear-gradient(
+      180deg,
+      rgb(250 250 250 / 0%) 0%,
+      rgb(250 250 250 / 86%) 58%,
+      #fafafa 100%
+    );
+  }
+}
+
 /* ===== 深色主题：播报内容区（Ardot 1193:2708 正在播放 / 1193:3357 正在回答 / 1193:1864 中途提问）=====
    暗色稿与浅色稿的坐标、字号、行高、层级一一对应，这里只换材质：
    - 字幕后景 1193:1903 / 1193:2814：竖向由 #0D0D0D 47.7% 渐到 #0D0D0D，压住上下滚动的字幕
    - 段落 1193:1977：#FFFFFF；淡化段 1193:1997 / 1193:1865：rgba(255,255,255,0.2)
-   - 进度条轨道 1193:1953 / 1193:2810：#303030；拖拽点 1193:1954 / 1193:2812：描边 #303030
-   - 播放按钮 1193:1905 / 1193:2800：底 #1A1A1A + 1px #303030 描边（品牌渐变图标保留）
+   - 进度条已移除（浅色稿 195:1927 无进度控件），暗色稿同步不再渲染
+   - 播放/暂停按钮已移除，暗色稿同步不再渲染
    - 答案卡 1193:3413：底 #1A1A1A + 1px #303030 描边，正文 #FFFFFF；标题 #FFFFFF、过程说明 #8F8F8F
    - 骨架屏：浅色 #F2F3F5→#E5E7EB 的流光换成 #212121→#303030 */
 .report-broadcast-content--dark {
   .report-broadcast-content__glow--blue {
     background: rgb(17 102 214 / 35%);
-  }
-
-  .report-broadcast-content__play-control {
-    border-color: #303030;
-    background: #1a1a1a;
-  }
-
-  .report-broadcast-content__progress-rail {
-    background: #303030;
-  }
-
-  .report-broadcast-content__progress-thumb {
-    border-color: #303030;
   }
 
   .report-broadcast-content__segment {
@@ -791,12 +753,12 @@ function onProgressTouchEnd() {
   }
 
   .report-broadcast-content__top-fade {
-    background: linear-gradient(
-      180deg,
-      #0d0d0d 0%,
-      rgb(13 13 13 / 86%) 52%,
-      rgb(13 13 13 / 0%) 100%
-    );
+    // background: linear-gradient(
+    //   180deg,
+    //   #0d0d0d 0%,
+    //   rgb(13 13 13 / 86%) 52%,
+    //   rgb(13 13 13 / 0%) 100%
+    // );
   }
 
   .report-broadcast-content__bottom-fade {

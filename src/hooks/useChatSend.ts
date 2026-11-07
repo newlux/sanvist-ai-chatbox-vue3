@@ -8,8 +8,10 @@ import type {
 import { useI18n } from "vue-i18n";
 import { interruptChat } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
+import { saveReportStyleCode } from "@/hooks/useReportStyle";
+import { saveReportVoiceByStyle } from "@/hooks/useReportVoice";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { buildInitialBlocks, consumeChatStream, parseReportInteraction, parseRoleTaggedAnswer, parseWorkReportTag } from "@/utils/ai-stream";
+import { buildInitialBlocks, consumeChatStream, parseReportInteraction, parseReportStyleTag, parseRoleTaggedAnswer, parseVoiceStyleTag, parseWorkReportTag } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
@@ -163,6 +165,36 @@ function resolveWorkReportTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
     matched: parsed.matched,
     closed: parsed.closed,
     date: parsed.date,
+    text: parsed.text,
+    tagged: answerText !== parsed.text,
+  };
+}
+
+/**
+ * 音色切换标签 `<VOICE_STYLE style="…">正文</VOICE_STYLE>`：取出 style 里的音色值，并把标签源码摘掉。
+ * tagged 只表示这一拍正文被改写过；音色值拿到就落库（不等闭合标签，与身份标签同一口径）。
+ */
+function resolveVoiceStyleTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
+  const answerText = collectAnswerText(blocks);
+  const parsed = parseVoiceStyleTag(answerText);
+  return {
+    matched: parsed.matched,
+    style: parsed.style,
+    text: parsed.text,
+    tagged: answerText !== parsed.text,
+  };
+}
+
+/**
+ * 播报风格标签 `<REPORT_STYLE style="…">正文</REPORT_STYLE>`：取出 style 里的风格码，并把标签源码摘掉。
+ * 风格码落进「听播风格」的同一份存储，下次播报按它作为 styleCode 传值（音色仍取最新音色）。
+ */
+function resolveReportStyleTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
+  const answerText = collectAnswerText(blocks);
+  const parsed = parseReportStyleTag(answerText);
+  return {
+    matched: parsed.matched,
+    style: parsed.style,
     text: parsed.text,
     tagged: answerText !== parsed.text,
   };
@@ -569,6 +601,34 @@ export function useChatSend(scope?: string, handlers?: {
            */
           const reportTurn = resolveWorkReportTurn(displayBlocks);
           if (reportTurn.tagged) displayBlocks = withAnswerText(displayBlocks, reportTurn.text);
+
+          /**
+           * 音色切换标签 `<VOICE_STYLE style="…">正文</VOICE_STYLE>`：
+           * 正文留在气泡里，style 属性里的音色值按听播音色的同一份存储写进去
+           * （saveReportVoiceByStyle：先按音色 id、再按性格标签匹配 REPORT_VOICE_OPTIONS）。
+           * 开标签到齐即落库，不等闭合标签；标签源码不进气泡，也不会被流式听播念出来
+           * （下面的听播增量取的就是 displaySnapshot 里剥完标签的正文）。
+           */
+          const voiceStyleTurn = resolveVoiceStyleTurn(displayBlocks);
+          if (voiceStyleTurn.tagged) displayBlocks = withAnswerText(displayBlocks, voiceStyleTurn.text);
+          if (voiceStyleTurn.matched && voiceStyleTurn.style) {
+            const voice = saveReportVoiceByStyle(voiceStyleTurn.style);
+            if (voice) {
+              logger.info("[chat] voice style switched by answer tag", { style: voiceStyleTurn.style, voiceId: voice.id });
+            }
+          }
+
+          /**
+           * 播报风格标签 `<REPORT_STYLE style="…">正文</REPORT_STYLE>`：
+           * 正文留在气泡里，style 属性里的风格码落进「听播风格」存储，
+           * 下次播报按它作为 styleCode 传值（音色仍然取最新音色，不受这个标签影响）。
+           */
+          const reportStyleTurn = resolveReportStyleTurn(displayBlocks);
+          if (reportStyleTurn.tagged) displayBlocks = withAnswerText(displayBlocks, reportStyleTurn.text);
+          if (reportStyleTurn.matched && reportStyleTurn.style) {
+            saveReportStyleCode(reportStyleTurn.style);
+            logger.info("[chat] report style switched by answer tag", { style: reportStyleTurn.style });
+          }
 
           const displaySnapshot = displayBlocks === snapshot.blocks
             ? snapshot
