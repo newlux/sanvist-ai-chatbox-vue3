@@ -33,6 +33,7 @@ const props = defineProps({
 const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
+  "ask-slot-pick",
   "assistant-navigation-open",
   "guide-step-open",
   "guide-suggestion-open",
@@ -82,6 +83,10 @@ function onAskSlotOpen(payload) {
   emit("ask-slot-open", payload);
 }
 
+function onAskSlotPick(payload) {
+  emit("ask-slot-pick", payload);
+}
+
 function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
 }
@@ -120,6 +125,7 @@ function onGanttOpen(payload) {
         :loading="loading"
         @suggestion-tap="onSuggestionTap"
         @ask-slot-open="onAskSlotOpen"
+        @ask-slot-pick="onAskSlotPick"
         @assistant-navigation-open="onAssistantNavigationOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"

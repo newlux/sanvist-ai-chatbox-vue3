@@ -168,6 +168,7 @@ const emit = defineEmits([
   "quick-prompt",
   "suggestion-tap",
   "ask-slot-open",
+  "ask-slot-pick",
   "assistant-navigation-open",
   "assistant-callback-open",
   "guide-step-open",
@@ -840,6 +841,11 @@ function onAskSlotOpen(payload, messageIndex: number) {
   emit("ask-slot-open", payload, messageIndex);
 }
 
+/** 内联追问卡点选项：把 { slot, option } 交给页面，由页面发一次提问 */
+function onAskSlotPick(payload: { slot: Record<string, unknown>; option: Record<string, unknown> }) {
+  emit("ask-slot-pick", payload);
+}
+
 /** 跳转确认块（维修助手）：只透传 payload，由页面决定是否开弹框 */
 function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
@@ -1309,6 +1315,7 @@ watch(
               :asr-tip-ready="asrTipReady"
               @suggestion-tap="onSuggestionTap($event, index)"
               @ask-slot-open="onAskSlotOpen($event, index)"
+              @ask-slot-pick="onAskSlotPick"
               @assistant-navigation-open="onAssistantNavigationOpen"
               @assistant-callback-open="emit('assistant-callback-open', $event)"
               @guide-step-open="onGuideStepOpen"

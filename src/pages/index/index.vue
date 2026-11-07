@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type {
+  AskSlotOption,
   AskSlotPayload,
   AskSlotSubmitPayload,
   AssistantNavigationAction,
@@ -422,6 +423,15 @@ function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
   closeAskSlotDrawer();
   askSlotQueue.value = [];
   sendAskSlotSelection(payload);
+}
+
+/**
+ * 内联追问卡（气泡里排在回答下方的选项）点中某项：
+ * 不本地改选中态，直接把这一项当成一次提问再发给 chat-messages，
+ * 等接口返回后由服务端下发的数据决定选中结果。
+ */
+function onAskSlotPick(payload: { slot: AskSlotPayload; option: AskSlotOption }) {
+  sendAskSlotSelection({ slot: payload.slot, selectedOptions: [payload.option] });
 }
 
 /** 指导步骤卡片（COMPONENT scene=guide / type=step）：单步点一下进入下一轮，多步选好后确认回发。 */
@@ -1466,6 +1476,7 @@ onBeforeUnmount(() => {
         @quick-prompt="sendUserPrompt"
         @suggestion-tap="sendUserPrompt"
         @ask-slot-open="onAskSlotOpen"
+        @ask-slot-pick="onAskSlotPick"
         @assistant-navigation-open="onAssistantNavigationOpen"
         @assistant-callback-open="onAssistantCallbackOpen"
         @guide-step-open="onGuideStepOpen"
