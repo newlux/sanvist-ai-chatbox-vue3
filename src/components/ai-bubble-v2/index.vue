@@ -47,7 +47,7 @@ const props = defineProps({
   /** 语音已松手、ASR 尚未返回：展示「识别中...」占位 */
   asrPending: { type: Boolean, default: false },
   /**
-   * 顶部「识别中...」实时转写浮层是否可以出现。
+   * 「识别中...」实时转写文字（长在这条气泡里）是否可以开始铺字。
    * 首页从初始页起飞时，要等中间图标飞进灵动岛、落位动效收尾之后再出现，
    * 否则这行文字会跟图标动效叠在一起；其它入口（对话页直接说话）默认 true。
    */
@@ -394,32 +394,6 @@ function onTtsTap() {
     }"
     @tap="onSelectTap"
   >
-    <!-- 录音中的实时转写：Teleport 到 body 再 fixed 钉在头部下沿。
-         留在列表里做 fixed 不行 —— scroll-view 内部有 GPU 合成层，
-         fixed 会被那一层当成包含块并裁掉，表现就是「录音时顶部一个字都没有」。
-         钉在视口上之后位置只由安全区 + 头部高度决定，与列表滚到哪儿无关，
-         所以「停止问答 → 再次发起问答」也一定出现在顶部 -->
-    <Teleport to="body">
-      <view
-        v-if="isUser && props.asrPending && props.asrTipReady"
-        class="ai-bubble-v2-asr-tip"
-        :class="{ 'ai-bubble-v2-asr-tip--dark': props.dark }"
-      >
-        <text class="ai-bubble-v2-asr-tip__text">
-          {{ props.content }}
-        </text>
-        <text class="ai-bubble-v2-asr-tip__dot">
-          .
-        </text>
-        <text class="ai-bubble-v2-asr-tip__dot">
-          .
-        </text>
-        <text class="ai-bubble-v2-asr-tip__dot">
-          .
-        </text>
-      </view>
-    </Teleport>
-
     <!-- 长按用户消息弹出的跟随菜单（复制，后续可扩展删除） -->
     <Teleport to="body">
       <view v-if="showUserMenu" class="ai-bubble-v2-menu-mask" @tap="closeUserMenu" />
@@ -499,7 +473,10 @@ function onTtsTap() {
       }"
     >
       <template v-if="isUser">
-        <view v-if="props.asrPending" class="ai-bubble-v2__asr" aria-label="识别中">
+        <!-- 实时转写直接长在这条气泡里：列表把它顶到头部下沿，不再用 fixed 浮层，
+             浮层会压在上一条被顶到顶部的提问气泡上，表现就是两段文字重叠。
+             asrTipReady 仍是出场闸门：起飞动效落位前先不铺字，避免跟灵动岛动效打架 -->
+        <view v-if="props.asrPending && props.asrTipReady" class="ai-bubble-v2__asr" aria-label="识别中">
           <text class="ai-bubble-v2__asr-label">
             {{ props.content }}
           </text>
@@ -708,27 +685,28 @@ function onTtsTap() {
   align-items: flex-end;
   justify-content: flex-end;
 }
-/* ===== 录音中的实时转写：列表里只留一行占位 =====
-   实时文字本身由 Teleport 到 body 的浮层渲染（见 .ai-bubble-v2-asr-tip）。
-   列表里这条消息不能删：pin 定位要靠它在内容里的位置把历史顶上去；
-   高度压到一行，文字再长也不会把下面的内容顶来顶去。
-   只有 final 回来（asrPending=false）才收成右侧白底气泡，所以气泡外壳整层去掉 */
+/* ===== 录音中的实时转写：文字就长在这条气泡里 =====
+   这条消息不能删：pin 定位要靠它在内容里的位置把历史顶上去，实时文字也就跟着停在头部下沿。
+   曾经用一个 Teleport 到 body 的 fixed 浮层铺字，浮层是绝对定位、不占布局，
+   一旦列表没被顶到位（内容不足一屏 / 落点没滚上去），它就压在上一条提问气泡上，表现为两段文字重叠。
+   现在文字回到正常流里：气泡外壳整层去掉（final 回来 asrPending=false 才收成右侧白底气泡），
+   body 只留一行最小高度，增长由文字自己撑开 —— 它是列表最后一屏的顶部锚点，变高只会把下面的内容往下推 */
 .ai-bubble-v2--user.ai-bubble-v2--asr-pending {
   align-items: flex-start;
 }
 .ai-bubble-v2--user.ai-bubble-v2--asr-pending .ai-bubble-v2__body {
   flex: 1 1 auto;
   max-width: 100%;
-  height: 48rpx;
+  min-height: 48rpx;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
-  overflow: hidden;
 }
-/* 文字在顶部浮层里显示，列表里的这份只负责撑高度 */
+/* 实时转写最多铺三行：录音里说成一段也不会把下面整屏内容顶走 */
 .ai-bubble-v2--user.ai-bubble-v2--asr-pending .ai-bubble-v2__asr {
-  visibility: hidden;
+  max-height: 144rpx;
+  overflow: hidden;
 }
 .ai-bubble-v2--user.ai-bubble-v2--selected {
   flex-direction: row;
@@ -942,48 +920,7 @@ function onTtsTap() {
   color: #f2f3f5;
 }
 
-/* ===== 录音实时转写浮层（Teleport 到 body） =====
-   位置只由「安全区 + 头部高度」决定，和列表滚到哪儿、内容多长都无关：
-   停止问答后再发起，文字依然落在头部下沿，不会再掉回列表末尾。
-   top 的口径与页面上的 --chat-top-inset 完全一致（env(safe-area) + 300rpx），
-   Teleport 出去后拿不到页面变量，所以这里直接写死同一个公式 */
-.ai-bubble-v2-asr-tip {
-  position: fixed;
-  top: calc(constant(safe-area-inset-top) + 300rpx);
-  top: calc(env(safe-area-inset-top) + 300rpx);
-  right: 40rpx;
-  left: 40rpx;
-  z-index: 1005; // 盖过顶部毛玻璃（1）、低于头部（1010）与录音条（1001）
-  padding-bottom: 12rpx;
-  // 铺页面底色（下沿羽化到透明）：列表被顶上去之后这块本来就是空白；
-  // 万一 pin 没到位、旧气泡还停在原处，也不会从字的缝里透出来跟文字叠在一起
-  background: linear-gradient(180deg, #fafafa 0%, #fafafa 62%, rgba(250, 250, 250, 0) 100%);
-  color: #0d0d0d;
-  font-size: 32rpx;
-  font-weight: 500;
-  line-height: 48rpx;
-  white-space: pre-wrap;
-  word-break: break-word;
-  // 只做展示：不挡下面列表与头部的点击
-  pointer-events: none;
-}
-
-.ai-bubble-v2-asr-tip--dark {
-  background: linear-gradient(180deg, #1a1a1a 0%, #1a1a1a 62%, rgba(26, 26, 26, 0) 100%);
-  color: #f2f3f5;
-}
-
 /* 末尾三个点：与正文同字号，点与点之间留一点空，错峰呼吸 */
-.ai-bubble-v2-asr-tip__dot {
-  margin-left: 8rpx;
-  opacity: 0.3;
-  animation: asr-dot-blink 1.2s ease-in-out infinite;
-}
-
-.ai-bubble-v2-asr-tip__dot:nth-child(2) { animation-delay: 0s; }
-.ai-bubble-v2-asr-tip__dot:nth-child(3) { animation-delay: 0.2s; }
-.ai-bubble-v2-asr-tip__dot:nth-child(4) { animation-delay: 0.4s; }
-
 .ai-bubble-v2__asr-dot {
   opacity: 0.25;
   animation: asr-dot-blink 1.2s ease-in-out infinite;
