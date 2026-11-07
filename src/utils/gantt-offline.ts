@@ -52,10 +52,12 @@ export interface GanttContainerMode {
 /**
  * 宿主侧的「是否横屏 / 全屏」判定（按要求只放在 chatbox 这一侧）。
  *
- * - `personal`（个人任务详情）是竖屏页，不横屏、不全屏；
  * - `schedule` / `pre` / `replan` 三个调度视图横屏 + 全屏；
  * - 智慧屏 / 电视这类本身就是横屏画布的机型同样传 `landscape: true`：
- *   容器本来就横着，true 表示「保持横屏」，不会额外再转一次。
+ *   容器本来就横着，true 表示「保持横屏」，不会额外再转一次；
+ * - `personal`（个人任务详情）已改为**固定走站内 pages/task-detail，不再进离线包**
+ *   （见 utils/gantt-navigation），这里保留竖屏判定只作兜底 —— 万一有人直接调本文件，
+ *   也不会给它开成横屏容器。
  */
 export function resolveGanttContainerMode(viewType: string): GanttContainerMode {
   if (viewType === "personal") return { landscape: false, fullscreen: false };

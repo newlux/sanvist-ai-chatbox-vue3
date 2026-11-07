@@ -9,8 +9,8 @@ const logger = createLogger("landscape-device");
  * 是否「网页环境」：不在宿主 App 的 mPaaS 容器里打开（PC / 手机浏览器直接访问、
  * PC 端以内嵌 iframe 打开等）。
  *
- * 网页里没有原生转屏能力（`landscapeFullscreen` 不存在），横屏只能靠把 body 整体
- * CSS 旋转 90°，在浏览器上会把版面拧歪、鼠标坐标也跟着错位，所以网页环境一律不做横屏转换。
+ * 网页里没有宿主容器给的全屏横屏，横屏只能靠把 body 整体 CSS 旋转 90°，
+ * 在浏览器上会把版面拧歪、鼠标坐标也跟着错位，所以网页环境一律不做横屏转换。
  *
  * 判据（任一命中即认为仍在容器内，宁可多转一次也别把真机误判成网页）：
  * - 已经拿到 AlipayJSBridge；
@@ -28,8 +28,8 @@ export function isWebEnvironment() {
  *
  * 这类设备没有竖屏形态：可视区天生就是横的，页面按竖屏铺反而错位。
  * 所以对它们：
- * - 不调 `landscapeFullscreen`（既不开也不关，方向完全交给设备）；
- * - 不做 useLandscape 的 CSS 旋转兜底（转一次反而把版面拧歪）。
+ * - 不做 useLandscape 的 CSS 旋转兜底（转一次反而把版面拧歪）；
+ * - 方向完全交给设备 / 宿主容器。
  * 直接按当前可视区渲染调度视图即可。
  *
  * 命中规则：brand / manufacturer / model / device / product 任一字段
@@ -87,11 +87,13 @@ export function peekPhoneInfo() {
 const DEVICE_DECISION_TIMEOUT_MS = 600;
 
 /**
- * 当前环境 / 设备进入调度视图时是否还需要做横屏处理。
+ * 当前环境 / 设备进入调度视图时，是否还允许 useLandscape 用 CSS 旋转模拟横屏。
  *
- * - 网页环境 → false（先判，页面不转、也不旋转，其余机型判断不再执行）
- * - 大屏横屏设备 → false（不申请原生横屏、不旋转）
- * - 普通手机 / 拿不到设备信息 → true（原生转屏 + CSS 旋转兜底，保持原逻辑）
+ * 方向本身由宿主决定（openH5Container 打开甘特图应用就是全屏横屏），这里只决定
+ * 「可视区不是横屏时要不要把 body 转 90° 兜底」：
+ * - 网页环境 → false（先判，页面不旋转，其余机型判断不再执行）
+ * - 大屏横屏设备 → false（本身就横屏，转了反而拧歪）
+ * - 普通手机 / 拿不到设备信息 → true（宿主没给横屏时用 CSS 旋转兜底）
  */
 export async function shouldEnterLandscape(timeoutMs = DEVICE_DECISION_TIMEOUT_MS) {
   if (isWebEnvironment()) {
