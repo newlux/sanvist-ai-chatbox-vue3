@@ -21,8 +21,8 @@ import { useI18n } from "vue-i18n";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { getListenBroadcastConfig, getListenBroadcastPreference } from "@/api/listen-broadcast";
-import quickNavAskIcon from "@/assets/img/report-broadcast/quick-nav-ask.svg";
-import quickNavExceptionIcon from "@/assets/img/report-broadcast/quick-nav-exception.svg";
+import iconChipAsk from "@/assets/img/podcast-playing/icon-chip-ask.svg";
+import iconChipException from "@/assets/img/podcast-playing/icon-chip-exception.svg";
 import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
@@ -41,7 +41,7 @@ import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useReportAdjustmentActions } from "@/hooks/useReportAdjustmentActions";
 import { useReportInsights } from "@/hooks/useReportInsights";
 import { loadReportStyle, saveReportStyle } from "@/hooks/useReportStyle";
-import { loadReportVoice } from "@/hooks/useReportVoice";
+import { loadReportVoice, resolveReportVoiceId } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { provideChatScope, useChatStore, useSystemStore, useUserStore } from "@/stores";
 import { stripMarkdownTables } from "@/utils/ai-stream";
@@ -419,8 +419,9 @@ function playAnswerTts(answer: string) {
   answerTtsStreamFinished = false;
   answerTtsPlaying.value = true;
   const language = resolveAnswerTtsLanguage();
-  // 音色跟随本轮听播所选音色（偏好设置 / 已验证过的 params），没取到就不带这个字段
-  const voice = String(reportBroadcastParams.value?.voice || "").trim();
+  // 音色现取本机记忆（可能刚被「<VOICE_STYLE style="…">」标签改过），没有再退回本轮听播参数；
+  // 都没取到就不带这个字段，由后端按默认音色合成
+  const voice = resolveReportVoiceId() || String(reportBroadcastParams.value?.voice || "").trim();
   try {
     answerTtsStream = consumeTextToSpeechStream(
       { text, language, ...(voice ? { voice } : {}) },
@@ -482,10 +483,12 @@ function restoreReportBroadcast() {
     startReportVoiceSelection();
     return;
   }
-  // 本机没存过音色 / 风格（含汇报模块）→ 同样先进偏好选择，不替用户拿默认值决定
+  // 本机没存过音色 / 风格 → 同样先进偏好选择，不替用户拿默认值决定。
+  // 风格码在、模块为空（`<REPORT_STYLE>` 标签只下发风格码）不算没配过：模块由服务端偏好 /
+  // 该风格的默认模块补齐（见 applyDefaultBroadcastParams），别把用户拽回选择器。
   const savedVoice = loadReportVoice();
   const savedStyle = loadReportStyle();
-  if (!savedVoice || !savedStyle || !savedStyle.moduleCodes.length) {
+  if (!savedVoice || !savedStyle) {
     startReportVoiceSelection();
     return;
   }
@@ -553,18 +556,24 @@ function applyDefaultBroadcastParams() {
     applyReportBroadcastParams(voice, savedStyle.styleCode, savedStyle.moduleCodes);
     return;
   }
+  /**
+   * 只知道风格码、不知道汇报模块（`<REPORT_STYLE style="…">` 标签只下发风格）：
+   * 按该风格的默认模块补一次，别把标签指定的风格丢掉；风格对不上才退回第一条。
+   */
+  const savedStyleCode = String(savedStyle?.styleCode || "").trim();
   void getListenBroadcastConfig()
     .then((config) => {
-      const firstStyle = config?.styles?.[0];
-      if (!firstStyle) return;
+      const styles = Array.isArray(config?.styles) ? config.styles : [];
+      const target = styles.find(item => String(item?.code || "") === savedStyleCode) || styles[0];
+      if (!target) return;
       const nextVoice = loadReportVoice() || REPORT_VOICE_OPTIONS[0];
-      applyReportBroadcastParams(nextVoice, firstStyle.code, firstStyle.defaultModules || []);
+      applyReportBroadcastParams(nextVoice, target.code, target.defaultModules || []);
     })
     .catch((error) => {
       logger.warn("failed to load listen broadcast config for default style", error);
     });
   // 接口返回前先按空 modules 启动，让播放器先出现；模块到位后由 store 拉取刷新。
-  applyReportBroadcastParams(voice, "operation-overview", []);
+  applyReportBroadcastParams(voice, savedStyleCode || "operation-overview", []);
 }
 
 function applyReportBroadcastParams(voice: ReportVoiceOption, styleCode: string, moduleCodes: string[]) {
@@ -1548,13 +1557,13 @@ onBeforeUnmount(() => {
         :style="quickNavStyle"
       >
         <view class="podcast-page__quick-nav-button" @tap="openInsightFromQuickNav">
-          <image class="podcast-page__quick-nav-icon" :src="quickNavExceptionIcon" mode="aspectFit" />
+          <image class="podcast-page__quick-nav-icon" :src="iconChipException" mode="aspectFit" />
           <text class="podcast-page__quick-nav-text">
             {{ t("podcast-quick-nav-alerts") }}
           </text>
         </view>
         <view class="podcast-page__quick-nav-button" @tap="closeReportBroadcast">
-          <image class="podcast-page__quick-nav-icon" :src="quickNavAskIcon" mode="aspectFit" />
+          <image class="podcast-page__quick-nav-icon" :src="iconChipAsk" mode="aspectFit" />
           <text class="podcast-page__quick-nav-text">
             {{ t("podcast-quick-nav-ask") }}
           </text>
@@ -1775,7 +1784,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  background: #ffffff;
+  /* 浅色稿 195:1927 画板底色 #FAFAFA */
+  background: #fafafa;
   overflow: hidden;
 }
 
@@ -1813,43 +1823,47 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
-/* —— 播报视图底部快捷导航 —— */
+/* —— 播报视图底部快捷导航（浅色稿 195:2002 Tool Chips）——
+   第一枚 chip 距左 20px（= 容器 padding 0/20 + 第一枚自身位置），两枚间距 8px */
 .podcast-page__quick-nav {
   position: absolute;
   left: 40rpx;
   z-index: 3;
   display: flex;
-  gap: 20rpx;
+  gap: 16rpx;
 }
 
+/* Chip 195:2003 / 195:2014：82×36，圆角 16，1px 描边 #EFEFEF，
+   内边距 0/12，图标与文字间距 6；设计稿填充 visible:false，故不铺底色 */
 .podcast-page__quick-nav-button {
   display: flex;
-  height: 64rpx;
+  height: 72rpx;
   align-items: center;
-  gap: 8rpx;
-  padding: 0 32rpx;
-  border: 1px solid #e8e8e8;
-  border-radius: 999px;
+  gap: 12rpx;
+  padding: 0 24rpx;
+  border: 2rpx solid #efefef;
+  border-radius: 32rpx;
   box-sizing: border-box;
-  background: #fff;
+  background: transparent;
 }
 
 .podcast-page__quick-nav-button:active {
-  background: #f6f6f6;
+  background: rgba(13, 13, 13, 0.0361);
 }
 
-/* 按钮左侧图标（消异常 / 回问问），尺寸与文字同高，色值 #6B6B6B */
+/* 按钮左侧图标（消异常 / 回问问）：16×16，色值 #000000（设计稿矢量填充） */
 .podcast-page__quick-nav-icon {
   width: 32rpx;
   height: 32rpx;
   flex: 0 0 32rpx;
 }
 
+/* 文案：12px Medium #0D0D0D */
 .podcast-page__quick-nav-text {
-  color: #333333;
-  font-size: 26rpx;
-  font-weight: 400;
-  line-height: 36rpx;
+  color: #0d0d0d;
+  font-size: 24rpx;
+  font-weight: 500;
+  line-height: 1;
 }
 
 @keyframes podcast-broadcast-hide {
@@ -1870,12 +1884,13 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 键盘弹起时输入栏要抬到播报层之上：播报层 z-index 为 2 且是不透明白底。
-   底色保持不透明白 —— 播报字幕从输入栏上方经过时不能透出来；
-   底部不再叠「浅蓝向上淡出」的氛围渐变，整条与页面同色 */
+/* 键盘弹起时输入栏要抬到播报层之上：播报层 z-index 为 2 且是不透明底。
+   底色保持不透明 —— 播报字幕从输入栏上方经过时不能透出来；
+   底部按钮区与页面同色 #FAFAFA（浅色稿 195:1927 画板底色），不再留一条白带；
+   底部不叠「浅蓝向上淡出」的氛围渐变 */
 :deep(.chat-input) {
   z-index: 3;
-  background: #ffffff;
+  background: #fafafa;
 }
 
 /* —— 折叠屏适配 (小米 Mix Fold 18) ——

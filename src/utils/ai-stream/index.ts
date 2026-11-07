@@ -18,6 +18,8 @@ export type {
   ReportWorkflowAction,
 } from "./report-interaction";
 export { parseReportInteraction } from "./report-interaction";
+export type { ReportStyleTagResult } from "./report-style-tag";
+export { parseReportStyleTag, stripReportStyleTags } from "./report-style-tag";
 export type { RoleTagCode, RoleTagResult } from "./role-tag";
 export { parseRoleTaggedAnswer, ROLE_TAG_CODES, stripRoleTags } from "./role-tag";
 
@@ -30,5 +32,7 @@ export { consumeChatStream } from "./streamConsumer";
 export type { StreamFlusher, StreamFlusherOptions } from "./streamFlusher";
 export { createStreamFlusher } from "./streamFlusher";
 export { expandMarkdownTables, stripMarkdownTables } from "./tableFence";
+export type { VoiceStyleTagResult } from "./voice-style-tag";
+export { parseVoiceStyleTag, stripVoiceStyleTags } from "./voice-style-tag";
 export type { WorkReportTagResult } from "./work-report-tag";
 export { parseWorkReportTag } from "./work-report-tag";

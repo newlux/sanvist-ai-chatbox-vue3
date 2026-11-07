@@ -1,10 +1,11 @@
 import type { TtsStreamHandle } from "@/api/chat/tts-stream";
-import type { Identifier, RealtimeTtsChunk } from "@/api/chat/types";
+import type { Identifier, RealtimeTtsChunk, RealtimeTtsParams } from "@/api/chat/types";
 
 import type { UiChatMessage } from "@/stores/chat-types";
 import { onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
+import { resolveReportVoiceId } from "@/hooks/useReportVoice";
 import { useChatStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { markdownToPlainText } from "@/utils/markdown-to-text";
@@ -109,6 +110,15 @@ export function useRealtimeTts(scope?: string) {
   function currentLanguage() {
     const rawLanguage = String(locale.value || "zh").toLowerCase();
     return rawLanguage.startsWith("zh") ? "zh" : rawLanguage.startsWith("en") ? "en" : "zh";
+  }
+
+  /**
+   * TTS 请求参数：音色每次现取（`<VOICE_STYLE style="…">` 标签可能刚把它改掉），
+   * 没选过音色就不带这个字段，由后端按默认音色合成。
+   */
+  function buildTtsParams(text: string, language: string): RealtimeTtsParams {
+    const voice = resolveReportVoiceId();
+    return { text, language, ...(voice ? { voice } : {}) };
   }
 
   function patchMessage(messageId: Identifier, patch: { ttsLoading?: boolean; ttsPlaying?: boolean }) {
@@ -259,7 +269,7 @@ export function useRealtimeTts(scope?: string) {
       if (seq !== sessionSeq || activeSession !== session) return settle();
       try {
         activeStream = consumeTextToSpeechStream(
-          { text, language },
+          buildTtsParams(text, language),
           payload => handleChunk(payload, messageId, seq),
           () => settle(),
           () => settle(),
@@ -358,7 +368,7 @@ export function useRealtimeTts(scope?: string) {
       }
 
       activeStream = consumeTextToSpeechStream(
-        { text, language },
+        buildTtsParams(text, language),
         payload => handleChunk(payload, messageId, seq),
         (error) => {
           if (seq !== sessionSeq) return;

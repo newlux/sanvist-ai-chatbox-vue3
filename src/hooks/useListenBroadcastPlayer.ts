@@ -8,6 +8,8 @@ import { Howl } from "howler";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { consumeListenBroadcastStream } from "@/api/listen-broadcast/play-stream";
 import { loadReportPlaybackRate, saveReportPlaybackRate } from "@/hooks/useReportPlaybackRate";
+import { resolveReportStyleCode } from "@/hooks/useReportStyle";
+import { resolveReportVoiceId } from "@/hooks/useReportVoice";
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("listen-broadcast-player");
@@ -517,15 +519,29 @@ export function useListenBroadcastPlayer() {
     if (!fromRateChange) rateFallbackUsed = false;
     const id = sessionId;
     loading.value = true;
+    /**
+     * 音色 / 播报风格都按「拉流那一刻」的本机记忆现取：
+     * 进页时构建的 params 可能已经被 `<VOICE_STYLE style="…">` / `<REPORT_STYLE style="…">`
+     * 标签改过，重启播报 / 续播 / 切倍速重拉都要用上新值（音色与风格各取最新，互不覆盖）。
+     */
+    const voice = resolveReportVoiceId() || String(params.voice || "").trim();
+    const styleCode = resolveReportStyleCode() || String(params.styleCode || "").trim();
     logger.info("听播拉流开始", {
       fromSeq,
       fromRateChange,
       ttsSpeechRate: params.ttsSpeechRate,
+      voice,
+      styleCode,
     });
     activeStream = consumeListenBroadcastStream(
       // 当前播放倍速一并交给后端做 TTS 合成：显式传值优先，其次取用户选定的倍速，
       // 都没有时由接口层兜底成正常倍速。
-      { ...params, ttsSpeechRate: params.ttsSpeechRate ?? playbackRate.value },
+      {
+        ...params,
+        ...(voice ? { voice } : {}),
+        ...(styleCode ? { styleCode } : {}),
+        ttsSpeechRate: params.ttsSpeechRate ?? playbackRate.value,
+      },
       payload => handleEvent(payload, id),
       streamError => finishStream(id, streamError),
       () => finishStream(id),

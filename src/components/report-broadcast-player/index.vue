@@ -230,7 +230,8 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
   flex-direction: column;
   overflow: visible;
   box-sizing: border-box;
-  background: #fff;
+  /* 浅色稿 195:1927 画板底色 #FAFAFA */
+  background: #fafafa;
 }
 
 /**

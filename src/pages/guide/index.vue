@@ -1162,6 +1162,7 @@ $color-white: #ffffff;
   right: 0;
   left: 0;
   z-index: 1010;
+  height: 200rpx;
 }
 
 // 顶部毛玻璃渐隐（与首页对话页同一层）：透明 + 背后模糊，状态栏与头部区域是半透明的，
