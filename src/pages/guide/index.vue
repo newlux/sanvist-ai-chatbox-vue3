@@ -3,7 +3,7 @@ import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import type { GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload } from "@/api/chat/types";
+import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload, GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import { getRecommendedGuideQuestions } from "@/api/guide";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
@@ -15,15 +15,19 @@ import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
+import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
+import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
+import AiWelcome from "@/components/ai-welcome/index.vue";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
-import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { provideChatScope, useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { useVoiceQuery } from "@/hooks/useVoiceQuery";
+import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
+import { provideChatScope, useChatStore, useSessionStore, useSystemStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -46,6 +50,9 @@ const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
 // 注入 --safe-top-px：悬浮头部的高度补偿（--chat-header-height）要按真实状态栏算
 const { safeAreaStyle } = useSafeArea();
+/** 外观（设置弹层 → 深色）：与首页问答态同一套暗色底色 + 顶部渐隐，组件靠 :dark 各自切样式 */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 /**
  * 自动滚动的落点：回复内容末尾（不含参考来源）——参考来源不被贴底滚进视野，
  * 以内容块容器高度减去参考来源高度为准（见 ai-message-list 的 alignToReplyEnd）。
@@ -124,10 +131,30 @@ const {
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
+/**
+ * 欢迎态 → 对话态：与首页同一套起飞动画。
+ * 进页面先是整屏「Hey,SANI」欢迎层，点语音 / 键盘后中间 logo 飞到头部灵动岛、对话页淡入。
+ */
+const {
+  stage: pageStage,
+  leaving: welcomeLeaving,
+  landed: welcomeLanded,
+  logoStyle: welcomeLogoStyle,
+  showWelcome,
+  chatEnterDelayMs,
+  goToChat,
+  enterChatNow,
+  backToWelcome,
+} = useWelcomeStage();
+/** 对话页整体淡入：保留原有 chatViewportStyle，只加一个动画延迟变量 */
+const chatEnterStyle = computed(() => ({
+  ...chatViewportStyle.value,
+  "--chat-enter-delay": `${chatEnterDelayMs.value}ms`,
+}));
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用实时 TTS 做流式听播。
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
 const realtimeTts = useRealtimeTts(chatScope);
-const { sendMessage: sendChatMessage, sendQuickPrompt, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
   // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
   // 回复里的核对卡仍由 focusStepBlock 在卡片出现 / 翻页时顶到对话区最上方（见 onGuideStepOpen）。
@@ -183,6 +210,41 @@ function stopSceneTtsOnVoiceStart() {
   stopSceneTts();
 }
 
+/**
+ * 「点击说话」语音链路（录音条 + 实时字幕）：与首页同一套实现。
+ * 占位气泡与发送都走本页已有的 beginAsrPlaceholder / sendQuickPrompt，
+ * 录音、识别、静音收尾、流式降级原生录音全在 hook 里。
+ */
+const {
+  voiceQueryActive,
+  voiceLevel,
+  voiceSeconds,
+  voiceFinishing,
+  startVoiceQuery,
+  stopVoiceQuery,
+  cancelVoiceQuery,
+  resetVoiceQuery,
+} = useVoiceQuery({
+  beginPlaceholder: () => {
+    // 与首页一致：占位气泡一开始就钉到对话区顶部，partial 只改内容、不换位置
+    beginAsrPlaceholder();
+    const id = chatStore.messages.find(item => item.role === "user" && item.asrPending)?.id || "";
+    if (id) {
+      chatStore.setPinnedToBottom(true);
+      chatStore.setPinMessage(id);
+      chatStore.setCapRoundAtTop(true);
+      chatStore.pinMessageToTop(id);
+    }
+    return id;
+  },
+  patchPlaceholder: (id, text) => chatStore.patchMessageById(id, { content: text }),
+  pinPlaceholder: id => chatStore.pinMessageToTop(id),
+  discardPlaceholder: () => discardAsrPlaceholder(),
+  submit: text => sendQuickPrompt(text),
+  // 开口前先掐掉正在播的回答，避免外放被麦克风收进 ASR
+  onStart: () => stopSceneTts(),
+});
+
 // 「再次发起其他提问 / 切换会话 / 停止生成」时立刻停掉正在进行的听播（同首页）：
 // activeRequestSeq 在新请求开始和取消/重置时都会变化，一个 watcher 兜底覆盖全部入口。
 watch(() => chatStore.activeRequestSeq, () => {
@@ -224,11 +286,55 @@ const {
   onCopySharePoster,
 } = useChatShare(sharePosterWrap, chatScope);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback(chatScope);
-/** 步骤卡「拍照」入口专用：独立实例，选完一张图直接把文件交给 sendMessage */
-const photoPicker = useComposerAttachments();
+
+/**
+ * 追问卡（COMPONENT scene=ask / type=slot）：与首页同一套口径。
+ *
+ * - 单题选择题由答题气泡内联渲染（AskSlotBlock），点选项直接当一次提问发出去；
+ * - 多选 / 填空 / 多步骤表单在气泡里排不下，仍由页面弹底部抽屉（AiSlotDrawer）。
+ */
+const askSlotQueue = ref<AskSlotPayload[]>([]);
+const askSlotDrawerVisible = ref(false);
+const askSlotDrawerHeight = ref(0);
+
+function onAskSlotOpen(slot: AskSlotPayload) {
+  const incoming = Array.isArray(slot.slots) && slot.slots.length ? slot.slots : [slot];
+  incoming.forEach((item) => {
+    const existingIndex = askSlotQueue.value.findIndex(existing => existing.slot_name === item.slot_name);
+    askSlotQueue.value = existingIndex < 0
+      ? [...askSlotQueue.value, item]
+      : askSlotQueue.value.map((existing, index) => index === existingIndex ? item : existing);
+  });
+  askSlotDrawerVisible.value = true;
+}
+
+function closeAskSlotDrawer() {
+  askSlotDrawerVisible.value = false;
+}
+
+/** 抽屉高度量出来了：底部间距随之变化，贴一次底把内容抬到卡片上方 */
+function onAskSlotDrawerHeightChange(height: number) {
+  askSlotDrawerHeight.value = height;
+  if (askSlotDrawerVisible.value && height > 0) nextTick(() => chatStore.scrollToBottom(true));
+}
+
+function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
+  closeAskSlotDrawer();
+  askSlotQueue.value = [];
+  sendAskSlotSelection(payload);
+}
+
+/** 内联选项点中：不本地改选中态，直接把这一项当成一次提问再发出去 */
+function onAskSlotPick(payload: { slot: AskSlotPayload; option: AskSlotOption }) {
+  sendAskSlotSelection({ slot: payload.slot, selectedOptions: [payload.option] });
+}
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
+  // 追问抽屉贴底展开
+  if (askSlotDrawerVisible.value && askSlotDrawerHeight.value > 0) {
+    return `${askSlotDrawerHeight.value}px`;
+  }
   // 步骤卡 / 追问卡贴底展开：列表底部既要让开卡片高度，也要留够把核对卡顶到对话区最上方的间距
   if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) {
     return `${Math.max(guideStepSheetHeight.value, guideStepCardSpace.value)}px`;
@@ -391,14 +497,6 @@ function onGuideStepCardSpaceChange(space: number) {
  * 步骤卡的附件按钮：选完不直接发送——收起步骤卡、把附件挂到输入栏并聚焦输入框，
  * 用户补一句说明或直接点发送，都走原来的对话发送链路。
  */
-async function onGuideStepPhoto(source: AttachmentSource) {
-  const picked = await photoPicker.pickAttachmentForSend(source);
-  if (!picked) return;
-  guideStepSheetVisible.value = false;
-  chatInputRef.value?.appendAttachments(picked.meta);
-  chatInputRef.value?.focusTextInput();
-}
-
 /** 步骤卡片展开 / 翻页时，把这一步对应的核对卡（最新那一轮）顶到对话区顶部 */
 function onGuideStepChange(step: GuideStepItem | null) {
   const stepId = String(step?.id || "").trim();
@@ -552,7 +650,11 @@ const showSceneWelcome = computed(() => (
   !messages.value.length && !isSessionSwitching.value && !guideWelcomeLoading.value && hasGuideWelcome.value
 ));
 
-watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
+watch(() => chatStore.messages.length, (length) => {
+  // 会话里已经有内容（历史会话 / 推荐页带过来的问题 / 语音占位气泡）：不再停在欢迎层
+  if (length) enterChatNow();
+  void nextTick(() => chatStore.scrollToBottom());
+});
 
 watch(shareSheetVisible, async (visible) => {
   if (!visible) {
@@ -570,6 +672,21 @@ watch(shareSheetVisible, async (visible) => {
     .exec();
 });
 
+/**
+ * 欢迎层「点击说话」：起飞的同时把语音会话跑起来，
+ * 用户在飞行动画里开口也不会丢（ready 前的音频由会话自己缓存）。
+ */
+function onWelcomeStart() {
+  void startVoiceQuery();
+  void goToChat({ holdMs: WELCOME_LISTEN_HOLD_MS });
+}
+
+/** 欢迎层「键盘」：同一套抛物线把 logo 送上去，落位后再聚焦输入框（键盘由此弹出） */
+async function onWelcomeText() {
+  await goToChat();
+  chatInputRef.value?.focusTextInput?.();
+}
+
 function startNewConversation() {
   // 已经是一轮空白会话就别再重置了，重复点击给个明确反馈
   if (!chatStore.messages.length && !chatStore.aiSessionId) {
@@ -579,7 +696,13 @@ function startNewConversation() {
   // 正在生成时切走：先掐掉在途请求，否则回包会继续往新会话里写
   cancelActiveStream();
   chatStore.resetConversation();
+  // 待填的追问属于上一轮，跟着一起清掉
+  askSlotQueue.value = [];
+  askSlotDrawerVisible.value = false;
+  askSlotDrawerHeight.value = 0;
   nextTick(() => chatStore.scrollToBottom(true));
+  // 新对话重新回到整屏欢迎层（与刚进页面一致）
+  backToWelcome();
 }
 
 function onBack() {
@@ -615,6 +738,8 @@ function toggleQuickList(show: boolean) {
 async function openLocalHistory(id: string | number, force = false) {
   if (!force && String(chatStore.aiSessionId) === String(id) && chatStore.messages.length) return;
   cancelActiveStream();
+  // 打开历史会话是「直接进对话」，不播欢迎层的起飞动画
+  enterChatNow();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
   chatStore.messages = [];
@@ -717,6 +842,7 @@ const showScrollToBottom = computed(
     !shareSheetVisible.value
     && !guideStepSheetVisible.value
     && !guideSuggestionSheetVisible.value
+    && !askSlotDrawerVisible.value
     && !pinnedToBottom.value
     && (messages.value?.length || 0) > 0,
 );
@@ -850,17 +976,35 @@ onShow(() => {
 onHide(() => {
   stopSceneTts();
   clearAutoOpenTimer();
+  // 页面被盖住时正在录音：直接断流，别让麦克风在后台继续采
+  resetVoiceQuery();
 });
 onUnload(() => {
   cancelActiveStream();
   stopSceneTts();
   clearAutoOpenTimer();
+  resetVoiceQuery();
 });
 </script>
 
 <template>
-  <view class="ai-page" :style="safeAreaStyle">
-    <view class="ai-page__chat" :style="chatViewportStyle">
+  <view class="ai-page" :class="{ 'ai-page--dark': isDark }" :style="safeAreaStyle">
+    <!-- 欢迎层：与首页初始页同款（Hey,SANI + logo + 点击说话 / 键盘）；
+         起飞动画期间继续挂载，logo 滑到顶部灵动岛再收起 -->
+    <AiWelcome
+      v-if="showWelcome"
+      :leaving="welcomeLeaving"
+      :landed="welcomeLanded"
+      :logo-style="welcomeLogoStyle"
+      @start-chat="onWelcomeStart"
+      @start-text="onWelcomeText"
+    />
+    <!-- 对话页：与欢迎层同时存在，整体淡入 -->
+    <view
+      v-if="pageStage === 'chat'"
+      class="ai-page__chat ai-page__chat--enter"
+      :style="chatEnterStyle"
+    >
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
       <!-- 顶部毛玻璃渐隐：与首页对话页同一层，状态栏 / 头部区域半透明，内容滚上来只会被虚化 -->
@@ -878,6 +1022,7 @@ onUnload(() => {
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"
         :share-selected-round-count="shareSelectedRoundCount"
+        :voice-listening="voiceQueryActive"
         restartable
         @back="onBack"
         @restart="onRestartToStart"
@@ -918,6 +1063,7 @@ onUnload(() => {
       <AiMessageList
         :key="aiSessionId || 'new-conversation'"
         top-inset="var(--chat-top-inset, 300rpx)"
+        :dark="isDark"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
@@ -946,6 +1092,8 @@ onUnload(() => {
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"
+        @ask-slot-open="onAskSlotOpen"
+        @ask-slot-pick="onAskSlotPick"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
@@ -955,14 +1103,18 @@ onUnload(() => {
         @pinned-change="onPinnedChange"
       />
       <!-- 一键回到底部（与首页一致）：离底时出现，贴底自动隐藏；
-           位置 = 输入栏高（含键盘抬起）+ 72rpx 底部导航 + 24rpx 间隙，不压住输入栏 -->
+           垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙；水平居中，只放 arrow-down.png -->
       <view
         v-if="showScrollToBottom"
         class="chat-scroll-bottom"
-        :style="{ bottom: `calc(${composerBottomInset} + 96rpx)` }"
+        :style="{ bottom: `calc(${composerBottomInset} + 24rpx)` }"
         @tap="onScrollToBottomTap"
       >
-        <view class="chat-scroll-bottom__chevron" />
+        <image
+          class="chat-scroll-bottom__chevron"
+          src="@/assets/img/arrow-down.png"
+          mode="aspectFit"
+        />
       </view>
       <view v-if="isSessionSwitching" class="session-loading">
         <view class="session-loading__spinner" />
@@ -1064,13 +1216,15 @@ onUnload(() => {
       </view>
 
       <AiChatInput
-        v-else
+        v-else-if="!voiceQueryActive"
         ref="chatInputRef"
         v-model="inputText"
+        :dark="isDark"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
         :compact-voice-listening="true"
+        :tap-to-talk="true"
         :speaking="realtimeTts.playing.value"
         @send="sendMessage"
         @stop="stopGenerating"
@@ -1083,7 +1237,19 @@ onUnload(() => {
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
+        @voice-query-start="startVoiceQuery"
         @dock-height-change="setInputDockHeight"
+      />
+
+      <!-- 点击说话录音中：输入栏换成「取消 / 声纹 / 计时 + 发送」这一条（与首页同稿） -->
+      <AiVoiceQueryBar
+        v-else
+        :level="voiceLevel"
+        :seconds="voiceSeconds"
+        :busy="voiceFinishing"
+        :dark="isDark"
+        @cancel="cancelVoiceQuery"
+        @submit="stopVoiceQuery"
       />
 
       <!-- 回答里的指导步骤卡片：选中步骤后自动收起并带上选择回发下一轮 -->
@@ -1093,10 +1259,10 @@ onUnload(() => {
         :payload="guideStepPayload"
         :step-index="guideStepRequestedIndex"
         :keyboard-height="keyboardHeight"
+        :allow-extras="false"
         @submit="onGuideStepSubmit"
         @height-change="onGuideStepHeightChange"
         @step-change="onGuideStepChange"
-        @photo="onGuideStepPhoto"
       />
       <AiGuideSuggestionSheet
         v-model:visible="guideSuggestionSheetVisible"
@@ -1104,6 +1270,15 @@ onUnload(() => {
         :keyboard-height="keyboardHeight"
         @submit="onGuideSuggestionSubmit"
         @height-change="onGuideSuggestionHeightChange"
+      />
+      <!-- 追问抽屉：多选题 / 填空 / 多步骤表单在气泡里排不下，统一走底部抽屉 -->
+      <AiSlotDrawer
+        :slots="askSlotQueue"
+        :dark="isDark"
+        :visible="askSlotDrawerVisible"
+        @close="closeAskSlotDrawer"
+        @height-change="onAskSlotDrawerHeightChange"
+        @submit="onAskSlotSubmit"
       />
 
       <AiBadFeedbackSheet
@@ -1151,6 +1326,23 @@ $color-white: #ffffff;
   --chat-header-height: calc(max(var(--safe-top-px, 0px), env(safe-area-inset-top)) + 100rpx);
 }
 
+/* 欢迎层 → 对话页：整页淡入。
+   延迟由 --chat-enter-delay 控制（语音起飞会等 listen.gif 扩散），
+   让淡入跟起飞同时开始，不会出现「logo 还挂在中间、对话页已经铺满」的割裂感 */
+.ai-page__chat--enter {
+  animation: ai-page-chat-in 720ms cubic-bezier(0.22, 0.61, 0.36, 1) var(--chat-enter-delay, 0ms) both;
+}
+
+@keyframes ai-page-chat-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 // 头部悬浮（与首页对话页一致）：不占布局高度，消息可以滚到它下面，透过 .ai-page__top-fade 的毛玻璃淡出；
 // 同时要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
 // 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）。
@@ -1186,6 +1378,30 @@ $color-white: #ffffff;
     rgba(250, 250, 250, 0.18) 48%,
     rgba(250, 250, 250, 0) 100%
   );
+}
+
+/* ===== 深色主题（与首页问答态同一口径）=====
+   只替换底色与材质：页面底 #1A1A1A（对应浅色 #FAFAFA），顶部渐隐换成深色底，
+   角落光晕在深色稿里是关掉的。组件内部样式各自通过 :dark 切换。 */
+.ai-page--dark {
+  background: #1a1a1a;
+
+  .ai-page__chat {
+    background: #1a1a1a;
+  }
+
+  .ai-page__top-fade {
+    background: linear-gradient(
+      180deg,
+      rgba(26, 26, 26, 0.34) 0%,
+      rgba(26, 26, 26, 0.18) 48%,
+      rgba(26, 26, 26, 0) 100%
+    );
+  }
+
+  .ai-chat-glow {
+    display: none;
+  }
 }
 
 .ai-chat-glow {
@@ -1224,7 +1440,7 @@ $color-white: #ffffff;
    画板 375×812：标题 y=178，往下依次是 greeting（说明）、「你可以这么问」与问题列表，
    左右留白 20（40rpx）。
 
-   顶部留白与作业协同页（pages/task/index.vue 的 .task-welcome）对齐：
+   顶部留白与作业协同页（pages/task/index.vue 的待机内容）对齐：
    头部悬浮在内容之上（状态栏 + 栏高 50px，见 --chat-header-height），灵动岛（92）+ 下方
    「SANI」胶囊是绝对定位浮在内容之上，换算到内容区岛底 ≈ 84rpx、胶囊底 ≈ 136rpx。
    设计稿的 148rpx 会让标题顶只比胶囊低 12rpx（6px），视觉上贴着 logo；
@@ -1298,31 +1514,23 @@ $color-white: #ffffff;
   line-height: 40rpx; // 20
 }
 
-// 一键回到底部（与首页同一套）：白底圆钮 + 细线下箭头，浮在输入栏上方右侧。
-// bottom 由行内样式给：composerBottomInset（输入栏高 + 键盘抬起）+ 72rpx 导航高 + 24rpx 间隙
+// 一键回到底部（与首页同一套）：只剩 arrow-down.png 图本身（白底圆钮 / 阴影 / 描边全部去掉），水平居中。
+// bottom 由行内样式给：composerBottomInset（输入栏高 + 键盘抬起）+ 24rpx 间隙
 .chat-scroll-bottom {
   position: absolute;
-  right: 32rpx;
+  left: 50%;
   z-index: 20;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 76rpx;
-  height: 76rpx;
-  border: 1px solid rgba(51, 51, 51, 0.08);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 4rpx 16rpx rgba(15, 126, 238, 0.12);
-  -webkit-backdrop-filter: blur(20rpx);
-  backdrop-filter: blur(20rpx);
+  transform: translateX(-50%);
 }
 
+/* 箭头：直接用设计给的 arrow-down.png，显示框 64×64px（= 128rpx，1px = 2rpx） */
 .chat-scroll-bottom__chevron {
-  width: 20rpx;
-  height: 20rpx;
-  border-right: 1px solid #333333;
-  border-bottom: 1px solid #333333;
-  transform: translateY(-6rpx) rotate(45deg);
+  display: block;
+  width: 128rpx; // 64px
+  height: 128rpx; // 64px
 }
 
 .session-loading {

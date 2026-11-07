@@ -12,12 +12,14 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
  * 横屏甘特图右下角的输入条。三张稿子：
  *
  * - **6694:82（空态）**：240×38 胶囊，白底 + `#E6E6E6` 描边、圆角 14、阴影 `0 3px 5px -1px rgba(0,0,0,.086)`；
- *   占位文案「请输入你的问题」12px Italic `#999999`，**右侧灰色麦克风**（图标 12×14.7，`#6B6B6B`）；
+ *   占位文案「请输入你的问题」12px `#999999`（稿子是斜体，按需求不加倾斜），
+ *   **右侧语音入口图标**（与对话页输入栏同一张 `icon-voice-wave-dark.svg`，20×20，按住说话）；
  * - **4704:261（语音态）**：中间 9 颗 4px 红色圆点声纹（`#C8201E`，透明度 0.8→0.02 渐隐），
  *   右侧红色麦克风（`#C8201E`，即按住的那颗），占位文案隐藏；
- * - **4704:235（有内容态）**：正文 12px Italic `#1A1A1A`，右侧 22×22 红色圆形发送按钮（白箭头）。
+ * - **4704:235（有内容态）**：正文 12px Italic `#1A1A1A`，右侧 22×22 发送按钮
+ *   （与对话页同一张 `icon-send-up.svg`：黑圆 + 白上箭头，圆形底由切图自带）。
  *
- * 右侧是同一个按钮位：空态 = 灰色麦克风（按住说话）、语音态 = 红色麦克风、有内容 = 发送按钮。
+ * 右侧是同一个按钮位：空态 = 语音入口图标（按住说话）、语音态 = 红色麦克风、有内容 = 发送按钮。
  *
  * 另外稿子 6694:98 / 6694:109 是胶囊右侧那颗独立的键盘按钮：34×34 白底圆形 +
  * `#C8201E` 描边 + 阴影（`0 3px 5px -1px rgba(0,0,0,.086)`），内部 20×20 键盘图形（`#6B6B6B`）；
@@ -27,6 +29,20 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
  * 由页面负责收起横屏、回对话页并发送；打字则用发送按钮交给页面。
  */
 defineOptions({ name: "ScheduleAskBar" });
+
+const props = withDefaults(defineProps<{
+  /** 深色模式：与调度视图（pages/schedule / schedule-pre / schedule-gantt）的底板同步 */
+  dark?: boolean;
+  /**
+   * 页面是否走了 CSS 旋转模拟横屏：
+   * - true：键盘盖住的是「横屏的右侧」→ 胶囊沿本地 X 轴平移；
+   * - false：竖屏 / 原生横屏 → 键盘从底部升起 → 整条输入条上移。
+   */
+  rotated?: boolean;
+}>(), {
+  dark: false,
+  rotated: false,
+});
 
 const emit = defineEmits<{ (e: "send", text: string): void }>();
 
@@ -55,27 +71,163 @@ const recognizing = ref(false);
 /** 输入框是否显示：由右侧键盘图标控制（需求：键盘图标控制输入框显隐） */
 const visible = ref(true);
 const draft = ref("");
-/** 键盘高度：旋转页里键盘盖住的是「横屏的右侧」，抬升要沿本地 X 轴反向平移 */
+/**
+ * 键盘高度（CSS px）。
+ * - 旋转页（rotated=true，设备竖着拿、页面 CSS 转了 90°）：键盘盖住的是本地右侧，抬升沿本地 X；
+ * - 竖屏 / 原生横屏（rotated=false）：键盘从底部升起，整条输入条整体上移同样的高度。
+ */
 const keyboardHeight = ref(0);
+
+/** 低于这个高度不算键盘：地址栏收缩、工具条变化也会让可视视口变矮 */
+const MIN_KEYBOARD_HEIGHT_PX = 80;
+/** 收起延迟：盖过键盘动画中途插进来的那一帧 0 */
+const KEYBOARD_COLLAPSE_DELAY_MS = 160;
+
+/** 页面不随键盘压缩时，被盖住的高度只能靠可视视口反推，这里记一个基准高度 */
+let baseViewportHeight = 0;
+let collapseTimer: ReturnType<typeof setTimeout> | null = null;
+/** uni.onKeyboardHeightChange 报的高度（小程序端 / 部分容器），与视口反推取大 */
+let uniKeyboardHeight = 0;
 
 const canSend = computed(() => Boolean(draft.value.trim()) && !recording.value && !recognizing.value);
 /** 声纹圆点透明度：稿子里 0.8 起、向两侧递减 */
 const waveDots = [0.8, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1, 0.05, 0.02];
 
 /**
- * 键盘避让只作用在**输入胶囊**上：输入框显隐会开 / 收软键盘，
- * 若把整条（含键盘按钮）一起平移，键盘按钮的位置就会跟着跳；
- * 按钮固定在原处不动，抬升的只有胶囊。
+ * 旋转页（CSS 转了 90°）里键盘避让只作用在**输入胶囊**上：输入框显隐会开 / 收软键盘，
+ * 若把整条（含键盘按钮）一起平移，键盘按钮的位置就会跟着跳；按钮固定在原处不动。
  *
  * 收起 / 展开用 scale 0 → 1 的缩放（配合 opacity）：布局占位仍是 240×38，
  * 所以键盘按钮不会跟着跳；transform 只能走内联样式（键盘避让的位移也在这里），
  * CSS 里的 transform 会被它覆盖，缩放才会写在这一处。
  */
 const pillStyle = computed(() => {
-  const shift = keyboardHeight.value > 0 ? -keyboardHeight.value : 0;
+  const shift = props.rotated && keyboardHeight.value > 0 ? -keyboardHeight.value : 0;
   const scale = visible.value ? 1 : 0;
   return { transform: `translateX(${shift}px) scale(${scale})` };
 });
+
+/**
+ * 竖屏 / 原生横屏：键盘从屏幕底部升起，整条输入条（胶囊 + 键盘按钮）一起抬到键盘上方。
+ * 走 bottom 而不是 transform：胶囊的 transform 要留给展开缩放与旋转页的位移。
+ * 底边留 12px，和 CSS 里的 bottom: 12px 是同一个间距。
+ */
+const rootStyle = computed(() => {
+  const lift = !props.rotated && keyboardHeight.value > 0 ? keyboardHeight.value : 0;
+  return lift > 0 ? { bottom: `${12 + lift}px` } : undefined;
+});
+
+/** 输入条根节点：直接量和可视视口的重叠，比按视口高度猜更准（见 readCoveredByRect） */
+const rootRef = ref<unknown>(null);
+
+function readElement(target: unknown): HTMLElement | null {
+  const candidate = (target as { $el?: unknown })?.$el ?? target;
+  return candidate && typeof (candidate as HTMLElement).getBoundingClientRect === "function"
+    ? candidate as HTMLElement
+    : null;
+}
+
+/**
+ * 输入条被键盘盖住多少（CSS px），量不到返回 null。
+ *
+ * 为什么不直接按「视口缩了多少」算：Android 键盘会 resize 布局视口（页面自己就缩了、
+ * 不用再抬），iOS / WebView 则是覆盖式（页面不动、必须抬），两种用同一个公式必错一个。
+ * 改成量「根节点底边」和「可视视口底边」的差距：页面已经缩好的情况自然算出 ≤0，无需抬。
+ */
+function readCoveredByRect(): number | null {
+  if (typeof window === "undefined") return null;
+  const el = readElement(rootRef.value);
+  if (!el) return null;
+  const viewport = window.visualViewport;
+  const visibleBottom = viewport
+    ? viewport.height + viewport.offsetTop
+    : Number(window.innerHeight) || 0;
+  if (visibleBottom <= 0) return null;
+  // 量到的是「已经抬起过」的位置，先把抬升量加回去还原成未抬起的底边，
+  // 否则每量一次都会算出「已经不用抬」，输入条一抬上去又掉回来
+  const unshiftedBottom = el.getBoundingClientRect().bottom + keyboardHeight.value;
+  const lift = Math.ceil(unshiftedBottom + 12 - visibleBottom);
+  // 抬起后底边离键盘留 12px，与设计稿的 bottom 间距一致
+  return lift > 0 ? lift : 0;
+}
+
+/** 页面本身不随键盘压缩时，被键盘盖住的高度只能靠可视视口反推（量不到节点时的兜底） */
+function readViewportKeyboardHeight(): number {
+  if (typeof window === "undefined") return 0;
+  const viewport = window.visualViewport;
+  if (!viewport) {
+    const shrunk = baseViewportHeight - (Number(window.innerHeight) || 0);
+    return shrunk > MIN_KEYBOARD_HEIGHT_PX ? Math.round(shrunk) : 0;
+  }
+  const layoutHeight = Math.max(Number(window.innerHeight) || 0, baseViewportHeight);
+  const occluded = layoutHeight - viewport.height - viewport.offsetTop;
+  if (occluded > MIN_KEYBOARD_HEIGHT_PX) return Math.round(occluded);
+  baseViewportHeight = Math.max(baseViewportHeight, viewport.height);
+  return 0;
+}
+
+/** 当前该抬多少：旋转页按键盘高度，其余优先量节点与可视视口的重叠 */
+function measureKeyboardLift(): number {
+  if (props.rotated) return Math.max(readViewportKeyboardHeight(), uniKeyboardHeight);
+  const byRect = readCoveredByRect();
+  if (byRect !== null) return byRect;
+  return Math.max(readViewportKeyboardHeight(), uniKeyboardHeight);
+}
+
+/** 键盘弹出时浏览器会滚一段布局视口去露输入框，这里拉回原点，否则整页跟着漂 */
+function pinViewport() {
+  if (typeof window === "undefined") return;
+  if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
+  const scroller = document.scrollingElement || document.documentElement;
+  if (scroller && scroller.scrollTop !== 0) scroller.scrollTop = 0;
+}
+
+function applyKeyboardHeight(next: number) {
+  if (collapseTimer) {
+    clearTimeout(collapseTimer);
+    collapseTimer = null;
+  }
+  if (next > 0) {
+    if (Math.abs(next - keyboardHeight.value) >= 4) keyboardHeight.value = next;
+    return;
+  }
+  if (keyboardHeight.value === 0) return;
+  // 键盘收起动画中途会给到 0，延后一拍再确认，避免输入条先掉下去再弹回来
+  collapseTimer = setTimeout(() => {
+    collapseTimer = null;
+    keyboardHeight.value = measureKeyboardLift();
+  }, KEYBOARD_COLLAPSE_DELAY_MS);
+}
+
+function syncKeyboardHeight() {
+  const next = measureKeyboardLift();
+  if (next > 0) pinViewport();
+  applyKeyboardHeight(next);
+}
+
+/** 主动收键盘（发送 / 收起输入框 / 转语音）：容器不一定补发 blur，这里立刻把抬升收回来 */
+function dismissKeyboard() {
+  uni.hideKeyboard?.();
+  uniKeyboardHeight = 0;
+  if (collapseTimer) {
+    clearTimeout(collapseTimer);
+    collapseTimer = null;
+  }
+  keyboardHeight.value = 0;
+}
+
+function onInputFocus() {
+  pinViewport();
+  // 部分 WebView 键盘弹出不触发 resize，补两拍再量一次
+  setTimeout(syncKeyboardHeight, 120);
+  setTimeout(syncKeyboardHeight, 360);
+}
+
+function onInputBlur() {
+  // 失焦：另一路（uni）报的高度不再可信，重新按视口收敛
+  uniKeyboardHeight = 0;
+  setTimeout(syncKeyboardHeight, 60);
+}
 
 let recorder: RecorderLike | null = null;
 /** 录音器是否真的开始录了（权限申请/启动都可能是异步的） */
@@ -122,7 +274,7 @@ function onSubmit() {
   const text = draft.value.trim();
   if (!text || recording.value || recognizing.value) return;
   draft.value = "";
-  uni.hideKeyboard();
+  dismissKeyboard();
   emit("send", text);
 }
 
@@ -132,7 +284,7 @@ let focusTimer: ReturnType<typeof setTimeout> | null = null;
 
 function toggleVisible() {
   visible.value = !visible.value;
-  uni.hideKeyboard();
+  dismissKeyboard();
   if (focusTimer) {
     clearTimeout(focusTimer);
     focusTimer = null;
@@ -155,7 +307,7 @@ async function startRecording() {
   const job = ++jobSeq;
   recording.value = true;
   recordStarted = false;
-  uni.hideKeyboard();
+  dismissKeyboard();
 
   try {
     const granted = await ensureNativePermission("record_audio");
@@ -227,7 +379,7 @@ async function stopRecordingAndRecognize() {
     // 不再要求用户再看一眼、再点一次发送按钮。
     const question = `${draft.value}${text}`.trim();
     draft.value = "";
-    uni.hideKeyboard();
+    dismissKeyboard();
     emit("send", question);
   }
   catch (error) {
@@ -239,13 +391,13 @@ async function stopRecordingAndRecognize() {
   }
 }
 
-const onMicStart = () => {
+function onMicStart() {
   void startRecording();
-};
+}
 
-const onMicEnd = () => {
+function onMicEnd() {
   void stopRecordingAndRecognize();
-};
+}
 
 /**
  * 松手 / 取消的兜底：录音时右侧红麦克风是另一个 DOM 节点，
@@ -263,19 +415,36 @@ function unbindWindowEnd() {
   window.removeEventListener("touchcancel", onMicEnd);
 }
 
-/** 键盘高度变化时把输入条抬到键盘上方（旋转页里对应本地 -X） */
+/** 键盘高度变化时把输入条抬到键盘上方（旋转页里对应本地 -X，其余走 -Y） */
 let keyboardWatcher: ((res: { height: number }) => void) | null = null;
 
 onMounted(() => {
   bindWindowEnd();
+  if (typeof window !== "undefined") {
+    baseViewportHeight = Number(window.visualViewport?.height) || Number(window.innerHeight) || 0;
+    // H5 / WebView 里 uni.onKeyboardHeightChange 多半不触发，可视视口变化是更通用的一路
+    window.addEventListener("resize", syncKeyboardHeight);
+    window.visualViewport?.addEventListener("resize", syncKeyboardHeight);
+    window.visualViewport?.addEventListener("scroll", syncKeyboardHeight);
+  }
   keyboardWatcher = (res: { height: number }) => {
-    keyboardHeight.value = Math.max(0, Number(res?.height) || 0);
+    uniKeyboardHeight = Math.max(0, Number(res?.height) || 0);
+    syncKeyboardHeight();
   };
   uni.onKeyboardHeightChange?.(keyboardWatcher);
 });
 
 onBeforeUnmount(() => {
   unbindWindowEnd();
+  if (typeof window !== "undefined") {
+    window.removeEventListener("resize", syncKeyboardHeight);
+    window.visualViewport?.removeEventListener("resize", syncKeyboardHeight);
+    window.visualViewport?.removeEventListener("scroll", syncKeyboardHeight);
+  }
+  if (collapseTimer) {
+    clearTimeout(collapseTimer);
+    collapseTimer = null;
+  }
   if (keyboardWatcher) uni.offKeyboardHeightChange?.(keyboardWatcher);
   if (focusTimer) {
     clearTimeout(focusTimer);
@@ -287,7 +456,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <view class="schedule-ask">
+  <!-- rootStyle：竖屏 / 原生横屏下由键盘高度抬起来的 bottom（旋转页留空，走胶囊的 translateX） -->
+  <view
+    ref="rootRef"
+    class="schedule-ask"
+    :class="{ 'schedule-ask--dark': dark }"
+    :style="rootStyle"
+  >
     <!-- 输入胶囊：稿子 6694:279（空态）/ 4704:234（有内容）/ 4704:260（语音态）。
          收起态只是隐藏（保留占位），键盘按钮的位置才不会跟着跳 -->
     <view
@@ -320,6 +495,8 @@ onBeforeUnmount(() => {
         :hold-keyboard="true"
         confirm-type="send"
         @input="onInput"
+        @focus="onInputFocus"
+        @blur="onInputBlur"
         @confirm="onSubmit"
       >
 
@@ -327,11 +504,11 @@ onBeforeUnmount(() => {
       <view v-if="recording" class="schedule-ask__mic">
         <image src="@/assets/img/icon-mic-red.svg" mode="aspectFit" />
       </view>
-      <!-- 有内容：红色圆形发送按钮（稿子 4704:234） -->
+      <!-- 有内容：发送按钮，图标与对话页输入栏同一张（icon-send-up：黑圆 + 白上箭头） -->
       <view v-else-if="canSend" class="schedule-ask__send" @tap="onSubmit">
-        <image src="@/assets/img/icon-send.svg" mode="aspectFit" />
+        <image src="@/assets/img/icon-send-up.svg" mode="aspectFit" />
       </view>
-      <!-- 空态：灰色麦克风，按住说话（稿子 6694:281，放在胶囊右侧） -->
+      <!-- 空态：语音输入，按住说话；图标与对话页输入栏的语音入口同一张（icon-voice-wave-dark，20×20） -->
       <view
         v-else
         class="schedule-ask__mic"
@@ -339,7 +516,7 @@ onBeforeUnmount(() => {
         @touchend.stop.prevent="onMicEnd"
         @touchcancel.stop.prevent="onMicEnd"
       >
-        <image src="@/assets/img/icon-voice.svg" mode="aspectFit" />
+        <image src="@/assets/img/icon-voice-wave-dark.svg" mode="aspectFit" />
       </view>
     </view>
 
@@ -415,26 +592,23 @@ onBeforeUnmount(() => {
   min-width: 0;
   height: 100%;
   font-size: 12px;
-  font-style: italic;
   color: #1a1a1a;
 
   /* uni-app H5 把 class 留在外层，内层 input 用 :deep 兜住 */
   :deep(input) {
     font-size: 12px;
-    font-style: italic;
     color: #1a1a1a;
   }
 
   :deep(input::placeholder) {
     font-size: 12px;
-    font-style: italic;
     color: #999999;
   }
 }
 
+/* 占位文案：稿子是斜体，按需求取消倾斜，字号 / 颜色沿用 */
 .schedule-ask__placeholder {
   font-size: 12px;
-  font-style: italic;
   color: #999999;
 }
 
@@ -476,7 +650,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 发送按钮：22×22 红色实心圆 + 白箭头（稿子 4704:234） */
+/* 发送按钮：22×22，图标换成与对话页一致的 icon-send-up（黑圆 + 白上箭头，自带实心圆底） */
 .schedule-ask__send {
   flex: 0 0 22px;
   width: 22px;
@@ -511,6 +685,48 @@ onBeforeUnmount(() => {
 
   &:active {
     opacity: 0.7;
+  }
+}
+
+/* ===== 深色主题：右下角输入条 =====
+   与调度视图底板一致（页 #0D0D0D、控件 #1A1A1A + 1px #303030），
+   尺寸 / 圆角 / 阴影 / 麦克风与发送按钮的红色一律不动：
+   - 输入胶囊：白底 → #1A1A1A，描边 #E6E6E6 → #303030，正文 #1A1A1A → 80% 白，占位 #999 → #6B6B6B；
+   - 键盘按钮：白底 → #1A1A1A，品牌蓝描边保留；图标是深色线条，反相成白。 */
+.schedule-ask--dark {
+  .schedule-ask__pill {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule-ask__input {
+    color: rgb(255 255 255 / 80%);
+
+    :deep(input) {
+      color: rgb(255 255 255 / 80%);
+    }
+
+    :deep(input::placeholder) {
+      color: #6b6b6b;
+    }
+  }
+
+  .schedule-ask__placeholder,
+  .schedule-ask__hint {
+    color: #6b6b6b;
+  }
+
+  .schedule-ask__keyboard {
+    background: #1a1a1a;
+
+    image {
+      filter: invert(1);
+    }
+  }
+
+  // 语音入口图标本体是 #0D0D0D，深底上要反相
+  .schedule-ask__mic image {
+    filter: invert(1);
   }
 }
 </style>
