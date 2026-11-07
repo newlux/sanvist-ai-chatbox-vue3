@@ -10,6 +10,7 @@ import {
   getMessages,
   renameConversation,
 } from "@/api/chat";
+import { stripRoleTags } from "@/utils/ai-stream";
 import { extractDifyHistoryBlocks } from "@/utils/ai-stream/dify";
 import { parseRepairCallbackSummary } from "@/utils/repair-callback";
 import { isPodcastSession } from "@/utils/session-scene";
@@ -98,6 +99,11 @@ export function mapHistoryMessages(
     const attachments = mapHistoryAttachments(pickHistoryFileList(item));
     // 标准 Dify answer 中可能内嵌 SANVIST/ASK/GUIDE 协议，按原顺序还原文本与富内容卡片。
     const blocks = extractDifyHistoryBlocks(item?.answer)
+      // 历史正文里的 <OWNER>…</OWNER> 身份标签只剔源码、不切身份：
+      // 回看旧会话不该把当前身份改回去
+      .map(block => block.type === "answer"
+        ? { ...block, payload: { ...block.payload, content: stripRoleTags(String(block.payload.content || "")) } }
+        : block)
       .filter(block => block.type !== "answer" || String(block.payload.content || "").trim())
       .map((block, index) => ({
         id: `history-${messageId ?? "message"}-${block.type}-${index}`,

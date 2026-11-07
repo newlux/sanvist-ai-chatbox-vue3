@@ -58,7 +58,7 @@ const props = defineProps({
     default: false,
   },
   /**
-   * 顶部「识别中...」实时转写浮层的出现时机：
+   * 「识别中...」实时转写文字（回填在这轮提问气泡里）的出现时机：
    * 首页从初始页起飞时要等中间图标飞进灵动岛、落位动效收尾后再显示，
    * 其余入口不传即立即显示。
    */
@@ -484,6 +484,15 @@ function lastUserAnchorSelector() {
 }
 
 /**
+ * 列表里是否还有「识别中 / 逐字回填」的实时转写气泡。
+ * 有的话这一轮的滚动位置已经由 pin 钉住，内容只会往下生长，
+ * 任何再算一遍落点的对齐都会把视口拽得上下抖（见 alignToReplyEnd）。
+ */
+function hasAsrPendingMessage() {
+  return (props.messages || []).some(message => message?.role === "user" && message.asrPending);
+}
+
+/**
  * 最后一条回答是否已收尾。
  * 流式期间回复里随时会冒出参考来源、操作栏也还不该估高度，
  * 只有收尾后的那几次对齐才按「真末尾」贴底。
@@ -522,6 +531,13 @@ function pinnedTopGapPx() {
 function alignToReplyEnd(forceUp = false) {
   // 用户已经上翻看历史了就别再拽下去（贴底状态下才会由 store 请求这里）
   if (!props.pinnedToBottom) return;
+  /**
+   * 录音中的实时转写还在逐字回填：这条气泡每来一段 partial 就变一次高。
+   * 这时候再按「落点」对齐，等于和一个正在变高的元素抢 scrollTop ——
+   * 每改一次就整屏上下挪一下，表现为顶部实时文字和上面的历史一起抖。
+   * 这一轮的位置由 pin（alignMessageToTop）一次性钉住，增长只会往下推，不再重算。
+   */
+  if (hasAsrPendingMessage()) return;
   const userAnchor = lastUserAnchorSelector();
   const query = uni.createSelectorQuery()
     .select(".msg-list")
@@ -1386,11 +1402,16 @@ watch(
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  /* 滚动位置只由 alignMessageToTop / alignToReplyEnd 按 px 决定，
+     浏览器自己的「滚动锚定」不许插手（否则录音实时文字一变高，它就把视口来回compensate） */
+  overflow-anchor: none;
 }
 .msg-list__inner {
   box-sizing: border-box;
   /* .chat-box 的上内边距：行内样式里的 rpx 在 H5 不会被编译，只能靠变量带进去（见 listPadStyle） */
   --chat-box-top-padding: 40rpx;
+  /* 同上：整棵内容树的锚定一律关掉，内容长高不许反过来改 scrollTop */
+  overflow-anchor: none;
 }
 
 /* 短回复上翻垫的空白：只占高度，不参与 flex 伸缩（高度由行内样式给） */

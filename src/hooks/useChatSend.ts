@@ -9,9 +9,10 @@ import { useI18n } from "vue-i18n";
 import { interruptChat } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useChatStore, useSessionStore, useUserStore } from "@/stores";
-import { buildInitialBlocks, consumeChatStream, parseReportInteraction } from "@/utils/ai-stream";
+import { buildInitialBlocks, consumeChatStream, parseReportInteraction, parseRoleTaggedAnswer, parseWorkReportTag } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
+import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { navigateToScene } from "@/utils/scene-navigation";
 
@@ -37,6 +38,8 @@ const QRCODE_TAG_CLOSE = "</QRCODE>";
 const QRCODE_PLACEHOLDER_PREFIX = /^q(?:r(?:c(?:o(?:de?)?)?)?)?$/i;
 /** 二维码页路由（pages/qrcode/index） */
 const QRCODE_PAGE_ROUTE = "/pages/qrcode/index";
+/** 播报页路由（pages/podcast/index）：<WORK_REPORT> 标签命中后跳这里 */
+const PODCAST_PAGE_ROUTE = "/pages/podcast/index";
 
 interface QrcodeMetadata {
   qrcode?: boolean | string;
@@ -122,10 +125,10 @@ function collectAnswerText(blocks: ReturnType<typeof buildInitialBlocks>) {
 }
 
 /**
- * 把气泡里的答案正文换成标签正文。
- * <QRCODE> 这种标签源码不能落到气泡里，正文统一放在第一段 answer 上，其余 answer 清空。
+ * 把气泡里的答案正文换成标签正文（<QRCODE> 与 <OWNER> 这类标签共用）。
+ * 标签源码不能落到气泡里，正文统一放在第一段 answer 上，其余 answer 清空。
  */
-function withQrcodeAnswerText(blocks: ReturnType<typeof buildInitialBlocks>, text: string) {
+function withAnswerText(blocks: ReturnType<typeof buildInitialBlocks>, text: string) {
   let placed = false;
   return blocks.map((block) => {
     if (block.type !== "answer") return block;
@@ -133,6 +136,36 @@ function withQrcodeAnswerText(blocks: ReturnType<typeof buildInitialBlocks>, tex
     placed = true;
     return { ...block, payload: { ...block.payload, content } };
   });
+}
+
+/**
+ * 身份切换标签 `<OWNER>…</OWNER>`：取出角色码，并把标签源码从正文里摘掉。
+ * tagged 为 true 说明这一拍的正文被改写过，需要写回消息块（否则气泡里会露出尖括号）。
+ */
+function resolveRoleTagTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
+  const answerText = collectAnswerText(blocks);
+  const parsed = parseRoleTaggedAnswer(answerText);
+  return {
+    role: parsed.role,
+    text: parsed.text,
+    tagged: answerText !== parsed.text,
+  };
+}
+
+/**
+ * 听汇报标签 `<WORK_REPORT date="…">正文</WORK_REPORT>`：取出日期，并把标签源码摘掉。
+ * matched/closed 决定要不要跳播报页，tagged 只表示这一拍正文被改写过。
+ */
+function resolveWorkReportTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
+  const answerText = collectAnswerText(blocks);
+  const parsed = parseWorkReportTag(answerText);
+  return {
+    matched: parsed.matched,
+    closed: parsed.closed,
+    date: parsed.date,
+    text: parsed.text,
+    tagged: answerText !== parsed.text,
+  };
 }
 
 export function useChatSend(scope?: string, handlers?: {
@@ -430,6 +463,8 @@ export function useChatSend(scope?: string, handlers?: {
     let podcastAnswer = "";
     /** 二维码占位回答已经开过二维码页：避免同一轮重复跳转，也用来跳过听播出口。 */
     let qrcodeHandled = false;
+    /** 听汇报标签已经开过播报页：避免同一轮重复跳转。 */
+    let workReportHandled = false;
 
     /** 把答案增量通知给页面（首块即触发，不等 message_end / workflow_finished）。 */
     function notifyAnswerDelta(delta: string, ended: boolean) {
@@ -483,6 +518,24 @@ export function useChatSend(scope?: string, handlers?: {
       void navigateToScene(url).catch(error => logger.error("failed to open qrcode page", error));
     }
 
+    /**
+     * 听汇报标签的收尾：打开播报页（pages/podcast/index）。
+     * 播报页 onLoad 从 storage 读「当前播报日期」，所以先把标签里的 date 写进去再跳，
+     * 否则播报页拿到的还是上一次的日期。跳转同样走 navigateToScene。
+     */
+    function openWorkReportPage(turn: { date: string }) {
+      if (workReportHandled) return;
+      workReportHandled = true;
+      logger.debug("work report tag detected", { aiMsgId, date: turn.date });
+      saveCurrentListenReportDate(turn.date);
+      // 已经在播报页里问出来的标签：日期照写，但不要再跳自己一次
+      const pages = getCurrentPages();
+      const current = pages[pages.length - 1];
+      if (current && `/${String(current.route || "")}` === PODCAST_PAGE_ROUTE) return;
+      // direct=1：播报页跳过「选助手 → 选汇报内容」，直接起播
+      void navigateToScene(`${PODCAST_PAGE_ROUTE}?direct=1`).catch(error => logger.error("failed to open podcast page", error));
+    }
+
     try {
       await consumeChatStream({
         source: stream(createChatRequest(content, files, extraInputs), { idleTimeoutMs: 60_000 }),
@@ -493,13 +546,40 @@ export function useChatSend(scope?: string, handlers?: {
           // 保留气泡并展示尖括号里的正文，两种写法都会跳到二维码页。
           const qrcodeTurn = resolveQrcodeTurn(snapshot.blocks, snapshot.metadata, snapshot.ended);
           // 标签源码不落到气泡里：先把 answer 正文换成标签正文再写入消息
-          const displaySnapshot = qrcodeTurn.tagged
-            ? { ...snapshot, blocks: withQrcodeAnswerText(snapshot.blocks, qrcodeTurn.text) }
-            : snapshot;
+          let displayBlocks = qrcodeTurn.tagged
+            ? withAnswerText(snapshot.blocks, qrcodeTurn.text)
+            : snapshot.blocks;
+          /**
+           * 身份切换标签 `<OWNER>…</OWNER>`（OWNER 老板 / ADMIN 设备管理员 / OPERATOR 操作手）：
+           * 正文去掉标签，只留尖括号里的提示文字；角色码落到 userStore ——
+           * setVisitorRole 会写 uni storage（visitor_role），Guest-Role 请求头由 App.vue 对
+           * visitorRole 的 watch（flush: "sync"）在同一拍同步，这里不重复调 setGuestRole。
+           */
+          const roleTurn = resolveRoleTagTurn(displayBlocks);
+          if (roleTurn.role && userStore.visitorRole !== roleTurn.role) {
+            userStore.setVisitorRole(roleTurn.role);
+            logger.info("[chat] visitor role switched by answer tag", roleTurn.role);
+          }
+          if (roleTurn.tagged) displayBlocks = withAnswerText(displayBlocks, roleTurn.text);
+
+          /**
+           * 听汇报标签 `<WORK_REPORT date="…">正文</WORK_REPORT>`：
+           * 正文留在气泡里，标签里的日期写进「当前播报日期」后跳播报页；
+           * 等闭合标签到齐（或整轮结束）再跳，避免正文还在流就把页面切走。
+           */
+          const reportTurn = resolveWorkReportTurn(displayBlocks);
+          if (reportTurn.tagged) displayBlocks = withAnswerText(displayBlocks, reportTurn.text);
+
+          const displaySnapshot = displayBlocks === snapshot.blocks
+            ? snapshot
+            : { ...snapshot, blocks: displayBlocks };
           applySnapshot(aiMsgId, userMsgId, displaySnapshot, preserveProcessStatus, qrcodeTurn.matched);
           if (qrcodeTurn.matched) {
             openQrcodePage(qrcodeTurn);
             return;
+          }
+          if (reportTurn.matched && (reportTurn.closed || snapshot.ended)) {
+            openWorkReportPage(reportTurn);
           }
 
           // 过程小标题：接口 subtitle 事件（如「目标 Dify 工作流已开始。」），听播思考态直接展示它。
@@ -513,14 +593,15 @@ export function useChatSend(scope?: string, handlers?: {
           // 听播问答：与首页共用同一条流式接口（/proxy/v1/chat-messages + streaming），
           // 这里只聚合答案正文，流结束后按汇报交互协议解析后交给播报页（自己的 TTS 出口）。
           if (usesReportAnswerOutlet) {
-            podcastAnswer = collectAnswerText(snapshot.blocks);
+            // 用剥掉标签后的正文，避免把 <OWNER> 这类源码念出来
+            podcastAnswer = collectAnswerText(displaySnapshot.blocks);
           }
           // 普通问答：答案文字边流边播。每收到新的一块 answer 文本就增量通知页面，
           // 页面在第一块文字渲染出来的瞬间就可以起听播，后续文字持续续播。
           // 聚合全部 answer 块（而非只取第一块）：answer 中途穿插了别的块时，
           // 只取第一块会让后半段文字永远收不到增量、听播漏播。
           else if (handlers?.onAiAnswerDelta) {
-            const answerContent = collectAnswerText(snapshot.blocks);
+            const answerContent = collectAnswerText(displaySnapshot.blocks);
             // "QRCODE" 是给前端看的占位，不是给人听的：文本还是占位前缀时按住不播，
             // 一旦长成正常答案（含已压住的开头）再一次性补播，避免把字母一个个念出来。
             // <QRCODE>…</QRCODE> 这一轮同样不进听播（要跳二维码页），整段按住。

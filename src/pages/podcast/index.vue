@@ -140,6 +140,11 @@ const preferenceDark = computed(() => showReportVoiceSelector.value && systemSto
 /** 是否由播报页「偏好设置」进入配置流程：决定关闭配置页时回播报页还是退出页面。 */
 const preferenceEntry = ref(false);
 /**
+ * 是否「直接起播」（`?direct=1`）：对话里命中 <WORK_REPORT> 标签跳进来时置 true，
+ * 跳过「选助手 → 选汇报内容」两步，直接按服务端偏好 / 本机记忆 / 默认配置起播。
+ */
+let directBroadcast = false;
+/**
  * 进页拉取听播偏好过程中的 loading 态：
  * 进页不再走 localStorage / 默认值兜底，必须等服务端的偏好回包后再决定展示播报还是选择页，
  * 期间用一个轻量 loading 占位，避免在 rpx 放大屏型下出现"空白一闪"。
@@ -456,6 +461,12 @@ function startReportVoiceSelection() {
 }
 
 function restoreReportBroadcast() {
+  // 对话里由 <WORK_REPORT> 标签跳进来：中间不要偏好选择，直接起播
+  if (directBroadcast) {
+    showReportVoiceSelector.value = false;
+    loadPreferenceBroadcastParams();
+    return;
+  }
   // 游客首次收听必须重新选择；已收听状态允许直接复用上次配置。
   if (userStore.isVisitor === true && !isListenReportListened(reportBizDate.value)) {
     startReportVoiceSelection();
@@ -950,7 +961,9 @@ function onRecognizeFail() {
   discardAsrPlaceholder();
 }
 
-onLoad(() => {
+onLoad((options) => {
+  // ?direct=1 = 对话里 <WORK_REPORT> 标签直接跳进来，跳过偏好选择
+  directBroadcast = String(options?.direct || "") === "1";
   syncWindowHeight();
   reportBizDate.value = getCurrentListenReportDate();
   reportQaAnswer.value = "";
@@ -1095,7 +1108,6 @@ onBeforeUnmount(() => {
       </view>
       <AiChatInput
         v-model="inputText"
-        :attachment-disabled="true"
         :compact-voice-listening="true"
         :dark="pageDark"
         :is-loading="isLoading"

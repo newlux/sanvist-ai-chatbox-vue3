@@ -19,6 +19,7 @@ import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
 import { getConversationSummary } from "@/api/conversation-summary";
 import { getTodayListenBroadcast } from "@/api/listen-broadcast";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
@@ -47,11 +48,12 @@ import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stre
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
-import { closeWebview, ensureNativePermission, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
+import { closeWebview, ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
+import VoiceRecorder from "@/utils/voiceRecorder.js";
 
 defineOptions({ name: "AiChatPage" });
 const logger = createLogger("chat-page");
@@ -711,7 +713,7 @@ const WELCOME_LISTEN_IDLE_MS = 900;
  */
 const islandListenFromWelcome = ref(false);
 /**
- * 顶部「识别中...」浮层的出场闸门。
+ * 「识别中...」实时转写文字的出场闸门（文字长在这轮提问气泡里，不再是浮层）。
  * 从初始页起飞时先关上：这行文字要等中间图标飞进灵动岛、落位动效彻底收尾之后才出现，
  * 否则它会和图标动效叠在一起（看起来像被图标压住半截）。
  * 对话页里直接说话不经过起飞，保持 true 立即显示。
@@ -752,6 +754,41 @@ let voiceSilenceSince = 0;
 let voiceHeard = false;
 /** 录音条散开落定后再对一次落点的定时器（列表可视高这时才稳定） */
 let voicePinTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * 本轮走哪条录音链路。
+ * - stream：WebAudio 采集 + WebSocket 流式 ASR，能逐字出文字（iOS / 普通浏览器）；
+ * - native：mPaaS 原生录音（microphoneStart/End）+ 整段识别，不出 partial，但在
+ *   Android WebView 这种「拿不到可用音频」的容器里是唯一能用的那条线。
+ * 优先 stream，采集起不来（getUserMedia 失败 / 1.2s 没有回调 / 采到静音）自动降级到 native。
+ */
+let voiceBackend: "stream" | "native" = "stream";
+/** 原生录音器：只有降级后才创建 */
+let nativeVoiceRecorder: VoiceRecorderInstance | null = null;
+/** 原生通道的音量轮询：没有 partial，声纹和静音收尾全靠它 */
+let nativeLevelTimer: ReturnType<typeof setInterval> | null = null;
+/** 每轮只降级一次，避免两条链路互相打架 */
+let voiceDegraded = false;
+/** 原生通道整段识别的最长等待：超时就当没识别到，别把录音条一直挂在「识别中」 */
+const NATIVE_RECOGNIZE_TIMEOUT_MS = 30_000;
+
+/** 原生录音回传的音频形态：容器里一般给 audioUrl，也有的直接回 base64 */
+interface NativeRecorderAudio {
+  audioUrl?: string;
+  audioBase64?: string;
+  mimeType?: string;
+  tempFilePath?: string;
+}
+
+/**
+ * VoiceRecorder 在 utils 下是 .js（构造时按环境返回原生 / 浏览器实现），
+ * 声明文件里看不到实例方法，这里补一份本地结构，免得整页用 any。
+ */
+interface VoiceRecorderInstance {
+  start: (options?: { sampleRate?: number; timeSlice?: number }) => Promise<{ success?: boolean; error?: string; data?: NativeRecorderAudio } | undefined>;
+  stop: () => Promise<{ success?: boolean; error?: string; data?: NativeRecorderAudio } | undefined>;
+  cancel?: () => void;
+  release?: () => void;
+}
 
 /**
  * keepPlaceholder：final 已经回来、准备发问时置 true —— 占位气泡要留给 sendMessage 原地替换成正式提问，
@@ -783,6 +820,19 @@ function resetVoiceQuery(options?: { keepPlaceholder?: boolean }) {
   voiceCapture = null;
   voiceSession?.close();
   voiceSession = null;
+  // 降级到原生录音的那一轮：停轮询、放掉录音器（正常收尾时 finishNativeVoiceQuery 已经置空）
+  stopNativeLevelPolling();
+  if (nativeVoiceRecorder) {
+    try {
+      (nativeVoiceRecorder.release ?? nativeVoiceRecorder.cancel)?.call(nativeVoiceRecorder);
+    }
+    catch (error) {
+      logger.warn("native recorder release failed", error);
+    }
+    nativeVoiceRecorder = null;
+  }
+  voiceBackend = "stream";
+  voiceDegraded = false;
   // 没走到 final（取消 / 通道失败 / 权限被拒）：占位气泡已经没有内容可回填，撤掉
   if (!options?.keepPlaceholder) discardAsrPlaceholder();
 }
@@ -793,10 +843,14 @@ function failVoiceQuery(title: string) {
 }
 
 async function startVoiceQuery() {
-  if (!isAsrStreamSupported() || !isPcmCaptureSupported()) {
-    uni.showToast({ title: t("welcome-voice-unsupported"), icon: "none" });
-    return;
-  }
+  /**
+   * 按下「点击说话」的第一件事：把正在播的语音掐掉。
+   * 一是用户要开口了，播报继续响会盖住他；二是外放的声音会被麦克风原样收进 ASR，
+   * 识别结果里就会混进上一段回答。
+   * 「按住说话」那条入口走的是 useVoiceInput，另在 @voice-start / @voice-restart 上
+   * 挂了同样的 stopRealtimeTtsOnVoiceStart（那个入口不会经过这里）。
+   */
+  realtimeTts.stop();
 
   const seq = ++voiceSeq;
   voiceFinishing.value = false;
@@ -838,6 +892,15 @@ async function startVoiceQuery() {
   voiceTickTimer = setInterval(() => {
     voiceSeconds.value += 1;
   }, 1000);
+
+  /**
+   * 没有流式通道（无 WebSocket）或没有 WebAudio 采集能力（file:// / 老容器）：
+   * 不再提示「当前环境不支持语音」，直接走原生录音那条线 —— 这类环境里它是能用的。
+   */
+  if (!isAsrStreamSupported() || !isPcmCaptureSupported()) {
+    void startNativeVoiceQuery(seq);
+    return;
+  }
 
   try {
     // 容器里要先向原生申请麦克风权限，否则浏览器那层会被静默拒绝
@@ -887,6 +950,8 @@ async function startVoiceQuery() {
     const capture = await startPcmCapture({
       onFrame: frame => session.pushFrame(frame),
       onLevel: onVoiceLevel,
+      // 采集起来了但拿不到可用音频（没回调 / 采到静音）：这一轮降到原生录音，别让用户白说一句
+      onUnavailable: reason => degradeToNativeVoice(reason),
     });
     if (seq !== voiceSeq) {
       capture.stop();
@@ -901,8 +966,174 @@ async function startVoiceQuery() {
     }, VOICE_NO_SPEECH_MS);
   }
   catch (error) {
-    logger.warn("voice query start failed", error);
+    // getUserMedia 三档全挂（Android WebView 常见）：不掉到「录音启动失败」，先换原生录音
+    logger.warn("voice query start failed, fallback to native recorder", error);
+    if (seq === voiceSeq) degradeToNativeVoice("capture-failed");
+  }
+}
+
+/** 停掉原生通道的音量轮询 */
+function stopNativeLevelPolling() {
+  if (nativeLevelTimer) {
+    clearInterval(nativeLevelTimer);
+    nativeLevelTimer = null;
+  }
+}
+
+/**
+ * 流式这条路走不通时，把这一轮原地换成原生录音。
+ * 占位气泡已经钉在顶部了，这里只换采集通道：不撤气泡、不重置序号，
+ * 用户看到的就是「识别中…」继续在那儿，声纹继续跳，说完照样出文本。
+ */
+function degradeToNativeVoice(reason: string) {
+  if (voiceDegraded || !voiceQueryActive.value) return;
+  voiceDegraded = true;
+  const seq = voiceSeq;
+  logger.warn("[voice] 流式采集不可用，降级到原生录音", { reason });
+  // 流式那一路彻底扔掉：采集停掉、WebSocket 关掉，否则两边一起抢麦克风
+  voiceCapture?.stop();
+  voiceCapture = null;
+  voiceSession?.close();
+  voiceSession = null;
+  // 重新计时：原生录音是从现在才开始收的
+  if (voiceTickTimer) {
+    clearInterval(voiceTickTimer);
+    voiceTickTimer = null;
+  }
+  voiceSeconds.value = 0;
+  voiceLevel.value = 0;
+  voiceSilenceSince = 0;
+  voiceHeard = false;
+  voiceTickTimer = setInterval(() => {
+    voiceSeconds.value += 1;
+  }, 1000);
+  void startNativeVoiceQuery(seq);
+}
+
+/**
+ * 原生录音通道：mPaaS microphoneStart/End + 整段识别。
+ * 和「按住说话」完全同一条线（VoiceRecorder 在容器里自动选 NativeVoiceRecorder），
+ * 唯一差别是没有 partial —— 录音期间只有声纹和计时，说完才一次性出文本。
+ */
+async function startNativeVoiceQuery(seq: number) {
+  voiceBackend = "native";
+  voiceSilenceSince = 0;
+  voiceHeard = false;
+  try {
+    const granted = await ensureNativePermission("record_audio");
+    if (seq !== voiceSeq) return;
+    if (!granted) {
+      failVoiceQuery(permissionDeniedMessage("record_audio"));
+      return;
+    }
+
+    const recorder = new VoiceRecorder() as unknown as VoiceRecorderInstance;
+    const started = await recorder.start();
+    if (seq !== voiceSeq) {
+      (recorder.release ?? recorder.cancel)?.call(recorder);
+      return;
+    }
+    if (!started?.success) {
+      logger.warn("native recorder start failed", started?.error);
+      failVoiceQuery(t("record-start-failed"));
+      return;
+    }
+
+    nativeVoiceRecorder = recorder;
+    // 原生录音拿不到 partial，只能轮询电平：声纹照跳，静音 1.5s 仍然自动收尾
+    stopNativeLevelPolling();
+    let polling = false;
+    nativeLevelTimer = setInterval(() => {
+      if (seq !== voiceSeq || polling) return;
+      polling = true;
+      void getMicrophoneVolume()
+        .then((level) => {
+          if (seq !== voiceSeq || typeof level !== "number") return;
+          onVoiceLevel(level);
+        })
+        .catch(() => {})
+        .finally(() => {
+          polling = false;
+        });
+    }, 120);
+
+    if (voiceNoSpeechTimer) clearTimeout(voiceNoSpeechTimer);
+    voiceNoSpeechTimer = setTimeout(() => {
+      voiceNoSpeechTimer = null;
+      if (!voiceHeard) stopVoiceQuery();
+    }, VOICE_NO_SPEECH_MS);
+  }
+  catch (error) {
+    logger.warn("native voice query start failed", error);
     if (seq === voiceSeq) failVoiceQuery(t("record-start-failed"));
+  }
+}
+
+/** 带超时的整段识别：接口挂了也要把录音条收掉，不能一直挂在「识别中」 */
+function requestNativeRecognition(audio: NativeRecorderAudio) {
+  const request = audio.audioUrl
+    ? recognizeSpeechByUrl({ audioUrl: audio.audioUrl })
+    : audio.audioBase64
+      ? recognizeSpeechByBase64({ audioBase64: audio.audioBase64, mimeType: audio.mimeType })
+      : audio.tempFilePath
+        ? recognizeSpeechByUpload({ filePath: audio.tempFilePath, timeout: NATIVE_RECOGNIZE_TIMEOUT_MS })
+        : Promise.reject(new Error("no audio"));
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("recognize timeout")), NATIVE_RECOGNIZE_TIMEOUT_MS);
+  });
+  return Promise.race([request, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/** 原生通道收尾：停录音 → 整段识别 → 文本回填到占位气泡上再发问 */
+async function finishNativeVoiceQuery() {
+  const seq = voiceSeq;
+  const recorder = nativeVoiceRecorder;
+  nativeVoiceRecorder = null;
+  stopNativeLevelPolling();
+  if (!recorder) {
+    resetVoiceQuery();
+    return;
+  }
+
+  let audio: NativeRecorderAudio = {};
+  try {
+    const stopped = await recorder.stop();
+    if (seq !== voiceSeq) return;
+    if (!stopped?.success) {
+      logger.warn("native recorder stop failed", stopped?.error);
+      failVoiceQuery(t("no-audio-recorded"));
+      return;
+    }
+    audio = stopped.data || {};
+  }
+  catch (error) {
+    logger.warn("native recorder stop threw", error);
+    if (seq === voiceSeq) failVoiceQuery(t("no-audio-recorded"));
+    return;
+  }
+
+  const placeholderId = voicePlaceholderId.value;
+  try {
+    const result = await requestNativeRecognition(audio);
+    if (seq !== voiceSeq) return;
+    const query = String(result?.text || "").trim();
+    // 和流式那条线保持一致：占位气泡先留着，sendMessage 按 asrPending 原地替换成正式提问
+    resetVoiceQuery({ keepPlaceholder: true });
+    if (!query) {
+      discardAsrPlaceholder();
+      uni.showToast({ title: t("no-speech-recognized"), icon: "none" });
+      return;
+    }
+    sendQuickPrompt(query);
+    if (placeholderId) chatStore.pinMessageToTop(placeholderId);
+  }
+  catch (error) {
+    logger.warn("native recognition failed", error);
+    if (seq === voiceSeq) failVoiceQuery(t("asr-no-content-retry"));
   }
 }
 
@@ -914,6 +1145,11 @@ function stopVoiceQuery() {
   if (voiceTickTimer) {
     clearInterval(voiceTickTimer);
     voiceTickTimer = null;
+  }
+  // 原生通道：停录音 → 整段识别 → 回填文本（没有 finish/final 那套）
+  if (voiceBackend === "native") {
+    void finishNativeVoiceQuery();
+    return;
   }
   voiceCapture?.stop();
   voiceCapture = null;
@@ -951,7 +1187,7 @@ function onVoiceLevel(level: number) {
  * 用户在飞行动画里开口也不会丢（ready 前的音频由会话自己缓存）。
  */
 function onWelcomeStart() {
-  // 先关掉「识别中」浮层再起飞：语音链路是异步的，慢一点就会抢在动效前面冒出文字
+  // 先关掉「识别中」文字再起飞：语音链路是异步的，慢一点就会抢在动效前面冒出文字
   asrTipReady.value = false;
   void startVoiceQuery();
   void goToChat();
@@ -1033,7 +1269,7 @@ async function goToChat() {
   // 随后欢迎层让位、对话页开始渲染
   const from = readClientRect(".welcome__logo-fly");
   const startedAt = performance.now();
-  // 起飞开始就关掉「识别中」浮层，等落位动效走完再放出来
+  // 起飞开始就关掉「识别中」文字，等落位动效走完再放出来
   asrTipReady.value = false;
   welcomeLeaving.value = true;
   pageStage.value = "chat";
@@ -1061,7 +1297,7 @@ async function goToChat() {
       // 位移特效彻底走完、欢迎层也收掉了，这时才把岛内换成 listen.gif：
       // 飞行途中提前换的话，会被上层欢迎层挡住一半，露出来的那半边容易看成「两张图打架」
       islandListenFromWelcome.value = true;
-      // 同一时刻放行「识别中...」浮层：图标已经落位，文字再出现不会跟动效打架
+      // 同一时刻放行「识别中...」文字：图标已经落位，文字再出现不会跟动效打架
       asrTipReady.value = true;
       // 只延续一小段，随后交回空闲态 sani-logo-sm.gif
       if (islandListenIdleTimer) clearTimeout(islandListenIdleTimer);
