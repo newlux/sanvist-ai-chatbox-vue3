@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   AssistantNavigationPayload,
+  AskSlotOption,
   AskSlotPayload,
   GanttViewPayload,
   GuideStepPayload,
@@ -79,6 +80,7 @@ defineProps({
 const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
+  "ask-slot-pick",
   "assistant-navigation-open",
   "guide-step-open",
   "guide-suggestion-open",
@@ -95,6 +97,11 @@ function onSuggestionTap(suggestion: unknown) {
 
 function onAskSlotOpen(payload: AskSlotPayload) {
   emit("ask-slot-open", payload);
+}
+
+/** 内联追问卡点选项：整条塞回页面，由页面把选项文字再发一次给 chat-messages */
+function onAskSlotPick(payload: { slot: AskSlotPayload; option: AskSlotOption }) {
+  emit("ask-slot-pick", payload);
 }
 
 /** 跳转确认块（维修助手）：块自身不占位，只在 auto_open 时把 payload 往上抛给页面开弹框 */
@@ -157,7 +164,13 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     :layout="block.payload.layout"
     :embedded="embedded"
   />
-  <AskSlotBlock v-else-if="block.type === 'ask-slot'" :payload="block.payload" @open="onAskSlotOpen" />
+  <AskSlotBlock
+    v-else-if="block.type === 'ask-slot'"
+    :payload="block.payload"
+    :disabled="loading"
+    @open="onAskSlotOpen"
+    @pick="onAskSlotPick"
+  />
   <!-- 跳转确认块（navigation 积木）：只做 auto_open 触发，不占视觉位置 -->
   <AssistantNavigationBlock
     v-else-if="block.type === 'assistant-navigation'"

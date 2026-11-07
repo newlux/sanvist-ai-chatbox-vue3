@@ -73,6 +73,7 @@ const props = defineProps({
 const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
+  "ask-slot-pick",
   "guide-step-open",
   "guide-suggestion-open",
   "tts-click",
@@ -342,6 +343,11 @@ function onSuggestionTap(event) {
 
 function onAskSlotOpen(payload) {
   emit("ask-slot-open", payload);
+}
+
+/** 内联追问卡点选项：继续上抛，页面据此把选项文字再发一次给 chat-messages */
+function onAskSlotPick(payload) {
+  emit("ask-slot-pick", payload);
 }
 
 /** 跳转确认块（维修助手）：块只在 auto_open 时抛一次，继续上抛给页面开弹框 */
@@ -641,6 +647,7 @@ function onTtsTap() {
           :loading="props.loading"
           @suggestion-tap="onSuggestionTap"
           @ask-slot-open="onAskSlotOpen"
+          @ask-slot-pick="onAskSlotPick"
           @assistant-navigation-open="onAssistantNavigationOpen"
           @guide-step-open="onGuideStepOpen"
           @guide-suggestion-open="onGuideSuggestionOpen"
@@ -1443,6 +1450,37 @@ function onTtsTap() {
 
   .ai-bubble-v2__busy-hint-text {
     color: rgba(255, 255, 255, 0.8);
+  }
+
+  // ---- 内联追问卡（AskSlotBlock）：深色下白底胶囊换成深底描边，否则在 #212121 卡片上很扎眼 ----
+  :deep(.ask-slot__title) {
+    color: #ffffff;
+  }
+
+  // 边框同样是渐变线（设计稿只给了浅色值，深色按同一明暗关系压深：
+  // #3D3D3D → #262626 → #3D3D3D）。不能用 background 简写，会把渐变边框整层重置掉
+  :deep(.ask-slot__option) {
+    border-color: transparent;
+    background-color: transparent;
+    background-image:
+      linear-gradient(#1a1a1a, #1a1a1a),
+      linear-gradient(180deg, #3d3d3d 0%, #262626 50%, #3d3d3d 100%);
+    background-origin: border-box;
+    background-clip: padding-box, border-box;
+  }
+
+  :deep(.ask-slot__option-text) {
+    color: #ffffff;
+  }
+
+  :deep(.ask-slot__option--selected) {
+    background-image:
+      linear-gradient(#ffffff, #ffffff),
+      linear-gradient(#ffffff, #ffffff);
+  }
+
+  :deep(.ask-slot__option--selected .ask-slot__option-text) {
+    color: #0d0d0d;
   }
 }
 </style>
