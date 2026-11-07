@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type {
-  AssistantNavigationPayload,
   AskSlotOption,
   AskSlotPayload,
+  AssistantNavigationPayload,
   GanttViewPayload,
   GuideStepPayload,
   GuideStepSelectEvent,
@@ -72,6 +72,14 @@ defineProps({
     default: false,
   },
   ttsPlaying: {
+    type: Boolean,
+    default: false,
+  },
+  /**
+   * 深色：气泡内部由 ai-bubble-dark provide 管，这个开关是给「独立于气泡」的卡片用的
+   * （消息列表里单独渲染的调度视图入口卡，见 ai-message-list 的 ganttBlocks）。
+   */
+  dark: {
     type: Boolean,
     default: false,
   },
@@ -200,7 +208,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
   />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
   <!-- 调度视图入口卡（COMPONENT scene=task / type=gantt）：点它跳横屏调度视图并带上整包数据 -->
-  <GanttBlock v-else-if="block.type === 'gantt'" :payload="block.payload" @open="onGanttOpen" />
+  <GanttBlock v-else-if="block.type === 'gantt'" :payload="block.payload" :dark="dark" @open="onGanttOpen" />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
   <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />
   <GuideVideoBlock v-else-if="block.type === 'video'" :payload="block.payload" />

@@ -41,11 +41,17 @@ const props = withDefaults(defineProps<{
   keyboardHeight?: number;
   /** 外部指定要显示第几步（0 起）：点核对卡步骤条时由页面传入，展开时按它定位 */
   stepIndex?: number;
+  /**
+   * 是否显示卡片末尾的扩展入口（附件按钮 + 自定义追问输入框）。
+   * 作业指导页只需要步骤里的选项，传 false 关掉这两块。
+   */
+  allowExtras?: boolean;
 }>(), {
   payload: null,
   visible: false,
   keyboardHeight: 0,
   stepIndex: 0,
+  allowExtras: true,
 });
 
 const emit = defineEmits<{
@@ -293,13 +299,13 @@ watch([() => props.visible, currentStep], () => {
           {{ confirmText || currentStep.title }}
         </text>
       </view>
-      <view v-if="photoText" class="guide-step-sheet__option" @tap="onPhoto">
+      <view v-if="allowExtras && photoText" class="guide-step-sheet__option" @tap="onPhoto">
         <text class="guide-step-sheet__option-label">
           {{ photoText }}
         </text>
       </view>
       <!-- 其他问题：placeholder 取 steps[].question_text；右侧「发送」图标与键盘回车等效 -->
-      <view v-if="questionText" class="guide-step-sheet__input-row">
+      <view v-if="allowExtras && questionText" class="guide-step-sheet__input-row">
         <input
           v-model="draftText"
           class="guide-step-sheet__input"

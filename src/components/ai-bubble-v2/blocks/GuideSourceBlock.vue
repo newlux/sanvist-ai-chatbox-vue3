@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, inject, unref } from "vue";
+import type { Ref } from "vue";
 import copyIcon from "@/assets/img/icon-action-copy.svg";
 import documentIcon from "@/assets/img/guide-source-document.svg";
 import imageIcon from "@/assets/img/guide-source-image.svg";
@@ -11,6 +12,10 @@ defineOptions({ name: "GuideSourceBlock" });
 const props = defineProps({
   payload: { type: Object, default: () => ({}) },
 });
+
+/** 深色开关由气泡 provide 下来（见 ai-bubble-v2 的 ai-bubble-dark），参考来源跟着整条回答切换 */
+const bubbleDark = inject<Ref<boolean> | null>("ai-bubble-dark", null);
+const isDark = computed(() => Boolean(bubbleDark ? unref(bubbleDark) : false));
 
 const evidence = computed(() => (Array.isArray(props.payload?.evidence) ? props.payload.evidence : [])
   .map(item => ({
@@ -53,7 +58,11 @@ function onSourceTap(item: { fileType: string; url: string }) {
 </script>
 
 <template>
-  <view v-if="evidence.length" class="guide-source-block">
+  <view
+    v-if="evidence.length"
+    class="guide-source-block"
+    :class="{ 'guide-source-block--dark': isDark }"
+  >
     <text class="guide-source-block__title">
       参考来源
     </text>
@@ -138,5 +147,30 @@ function onSourceTap(item: { fileType: string; url: string }) {
   flex: 0 0 32rpx;
   width: 32rpx;
   height: 32rpx;
+}
+
+/* ===== 深色：参考来源整段跟着气泡走（标题 / 条目底 / 文字 / 图标一起换） ===== */
+.guide-source-block--dark {
+  .guide-source-block__title {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .guide-source-block__item {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .guide-source-block__name {
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .guide-source-block__arrow {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  /* 图标是固定色号的 svg（#6B7A90 / #9E9E9E），深底上整体提亮一档 */
+  .guide-source-block__type-icon,
+  .guide-source-block__copy-icon {
+    filter: brightness(1.7);
+  }
 }
 </style>

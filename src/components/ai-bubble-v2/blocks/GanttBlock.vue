@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import type { Ref } from "vue";
 import type { GanttViewPayload } from "@/api/chat/types";
 
-import { computed } from "vue";
+import { computed, inject, unref } from "vue";
 import AiGanttEntryCard from "@/components/ai-gantt-entry-card/index.vue";
 import { hasGanttCard, resolveGanttCardText } from "@/utils/gantt-card";
 
@@ -21,9 +22,18 @@ const props = defineProps({
   payload: { type: Object as () => GanttViewPayload | null, default: () => ({}) },
   /** 只取卡片数据渲染，缺省字段不推导 */
   cardOnly: { type: Boolean, default: false },
+  /**
+   * 深色：这张卡在消息列表里是独立于回答气泡渲染的（见 ai-message-list 的 ganttBlocks），
+   * 拿不到气泡 provide 的 ai-bubble-dark，需要由消息列表显式传下来。
+   */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{ open: [payload: GanttViewPayload] }>();
+
+/** 气泡内渲染时跟随 ai-bubble-dark（与 TableBlock / GuideSourceBlock 同一套） */
+const bubbleDark = inject<Ref<boolean> | null>("ai-bubble-dark", null);
+const isDark = computed(() => props.dark || Boolean(bubbleDark ? unref(bubbleDark) : false));
 
 const view = computed<GanttViewPayload>(() => props.payload || {});
 
@@ -47,6 +57,7 @@ function onTap() {
     :status="cardText.status"
     :devices="cardText.devices"
     :task-count="cardText.taskCount"
+    :dark="isDark"
     @tap="onTap"
   />
 </template>

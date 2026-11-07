@@ -12,12 +12,14 @@ import { useI18n } from "vue-i18n";
  *      → 键值行动态填充：标签 22rpx #999999 左对齐，值 24rpx #000000 右对齐
  *        （状态 / 设备数 / 任务数，哪项没有数据就整行不显示，全空时键值区不渲染）
  *
+ * 深色：跟随气泡主题（见 ai-bubble-v2 的 ai-bubble-dark），材质换成与回复卡同一套
+ * （底 #212121 / 描边 #303030），标题与值 #FFFFFF，标签 rgba(255,255,255,.45)，
+ * 联系人图标是纯黑切图，深色下反相成白色。
+ *
  * 只负责展示与点击上报，跳转由页面处理（emit `tap`）。
  */
 
 defineOptions({ name: "AiGanttEntryCard" });
-
-const { t } = useI18n();
 
 const props = defineProps({
   /** 卡片标题；不传用设计稿默认文案（按当前语言翻译） */
@@ -28,11 +30,15 @@ const props = defineProps({
   devices: { type: String, default: "" },
   /** 任务数描述：空则「任务数」行不显示 */
   taskCount: { type: String, default: "" },
+  /** 深色模式：材质 / 文字 / 图标一起切换 */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{
   tap: [];
 }>();
+
+const { t } = useI18n();
 
 /** 各键值行去空白后判断有无数据，没有就整行不显示 */
 const statusText = computed(() => props.status.trim());
@@ -44,7 +50,7 @@ const titleText = computed(() => props.title.trim() || t("task-entry-gantt-title
 </script>
 
 <template>
-  <view class="gantt-entry" @tap="emit('tap')">
+  <view class="gantt-entry" :class="{ 'gantt-entry--dark': dark }" @tap="emit('tap')">
     <view class="gantt-entry__head">
       <!-- 甘特图小图标：双人/联系人图形，设计稿切图（32×32 @2x → 显示 16×16） -->
       <image
@@ -173,5 +179,31 @@ const titleText = computed(() => props.title.trim() || t("task-entry-gantt-title
   /* 值过长时换行展示，不截断 */
   white-space: normal;
   word-break: break-word;
+}
+
+/* ===== 深色主题：与气泡里的回复卡同一套材质（Ardot 1193:5116）=====
+   底 #212121 / 描边 1px #303030；标题与值 #FFFFFF，标签 rgba(255,255,255,.45)，
+   箭头压成半透明白；联系人图标是纯黑切图，深底上必须反相成白色才看得见。
+   尺寸 / 间距 / 字号与浅色稿完全一致，只换颜色 */
+.gantt-entry--dark {
+  border-color: #303030;
+  background: #212121;
+
+  .gantt-entry__title,
+  .gantt-entry__value {
+    color: #ffffff;
+  }
+
+  .gantt-entry__label {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .gantt-entry__chevron {
+    border-color: rgba(255, 255, 255, 0.7);
+  }
+
+  .gantt-entry__icon {
+    filter: brightness(0) invert(1);
+  }
 }
 </style>
