@@ -4,13 +4,14 @@ import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } f
 import { useI18n } from "vue-i18n";
 import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
-import tellGif from "@/assets/img/tell.gif";
+import tellDarkGif from "@/assets/img/tell-dark.gif";
+import tellLightGif from "@/assets/img/tell-light.gif";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
-import ReportWaveform from "@/components/report-waveform/index.vue";
 import { useSystemStore } from "@/stores";
 
 const props = defineProps<{
-  portrait: string;
+  /** 所选音色头像：头像位已按主题改用 tell-dark / tell-light 动图，仅为父级传参兼容保留 */
+  portrait?: string;
   playing: boolean;
   loading: boolean;
   currentSeq: number | null;
@@ -35,7 +36,7 @@ defineEmits<{ "play-pause": []; seek: [seq: number] }>();
 const { t } = useI18n();
 /**
  * 外观：深色走 C 方案暗色稿 1193:2708「听播-正在播放」与 1193:3357「听播-正在回答」。
- * 声波在暗色稿里是纯白柱（浅色稿才是品牌渐变），字幕 / 答案卡换暗色材质。
+ * 左右声波已在两个主题下都去掉，只留光晕；字幕 / 答案卡换暗色材质。
  */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
@@ -84,16 +85,6 @@ function onTranscriptScroll(e: { detail?: { scrollTop?: number } }) {
   // 手动滚动：排定停手后回中，高亮段重新回到中间阅读带
   scheduleTranscriptRecenter();
 }
-// 与「偏好设置」音色选择页同一套声波参数（设计稿 309:2117 / 309:2155）
-const leftWaveBars = [2, 2, 18, 4, 10, 4, 16, 8, 4, 16, 4, 30, 12, 20, 2, 1, 1];
-const rightWaveBars = [2, 2, 18, 10, 18, 4, 8, 8, 10, 2, 4, 8, 22, 6, 2, 1, 1];
-// 左右声波共用同一套横向渐变：0% #3D21CD → 48.72% #1999FE → 76% #C067FA → 100% #FD90C4
-const waveGradient = [
-  { color: "#3D21CD", offset: 0 },
-  { color: "#1999FE", offset: 48.72 },
-  { color: "#C067FA", offset: 76 },
-  { color: "#FD90C4", offset: 100 },
-];
 const showTranscriptSkeleton = computed(
   () => props.loading && props.transcriptSegments.length === 0,
 );
@@ -256,40 +247,16 @@ onBeforeUnmount(() => {
   >
     <view class="report-broadcast-content__portrait-gap" />
     <view class="report-broadcast-content__portrait-stage">
-      <view class="report-broadcast-content__wave report-broadcast-content__wave--left">
-        <ReportWaveform
-          :active="playing"
-          :bars="leftWaveBars"
-          :gradient="isDark ? undefined : waveGradient"
-          :color="isDark ? '#FFFFFF' : '#C8201E'"
-          :box-width="70"
-          :box-height="70"
-          :bar-width="2"
-          :spacing="4"
-          :origin-x="3"
-        />
-      </view>
       <view class="report-broadcast-content__glow report-broadcast-content__glow--blue" />
       <view class="report-broadcast-content__glow report-broadcast-content__glow--red" />
-      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 tell.gif 动图；深色稿仍用所选音色头像 -->
+      <!-- 左右声波已去掉（深色稿同步移除，浅色稿本就没有）：头像位只剩图形本体 -->
+      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 tell 动图，按主题取素材：
+           深色 → tell-dark.gif（自带纯黑底），浅色 → tell-light.gif（自带 #FCFCFF 底） -->
       <view class="report-broadcast-content__portrait-wrap">
         <image
           class="report-broadcast-content__portrait"
-          :src="isDark ? portrait : tellGif"
+          :src="isDark ? tellDarkGif : tellLightGif"
           mode="aspectFit"
-        />
-      </view>
-      <view class="report-broadcast-content__wave report-broadcast-content__wave--right">
-        <ReportWaveform
-          :active="playing"
-          :bars="rightWaveBars"
-          :gradient="isDark ? undefined : waveGradient"
-          :color="isDark ? '#FFFFFF' : '#C8201E'"
-          :box-width="70"
-          :box-height="70"
-          :bar-width="2"
-          :spacing="4"
-          :origin-x="3"
         />
       </view>
       <!-- 暂停/播放按钮已按浅色稿 195:1927 去掉：画板头像位只有头像本身，没有播放控件 -->
@@ -395,33 +362,22 @@ onBeforeUnmount(() => {
   justify-content: center;
   overflow: visible;
 }
-.report-broadcast-content__wave {
-  position: absolute;
-  z-index: 2;
-  top: 243.707rpx;
-  width: 140rpx;
-  height: 140rpx;
-}
-.report-broadcast-content__wave--left {
-  left: 52rpx;
-}
-.report-broadcast-content__wave--right {
-  right: 52rpx;
-}
+/* 深色头像位：tell 系列素材画布 1000×1000、图形居中且满幅（无透明留白），
+   等比缩到 180px（360rpx）后由舞台 flex 居中即可，不做裁剪 */
 .report-broadcast-content__portrait-wrap {
   position: relative;
   display: flex;
-  width: 470rpx;
-  height: 470rpx;
-  flex: 0 0 470rpx;
-  align-items: flex-end;
+  width: 360rpx;
+  height: 360rpx;
+  flex: 0 0 360rpx;
+  align-items: center;
   justify-content: center;
 }
 .report-broadcast-content__portrait {
   position: relative;
   z-index: 1;
-  width: 470rpx;
-  height: 470rpx;
+  width: 360rpx;
+  height: 360rpx;
 }
 .report-broadcast-content__glow {
   position: absolute;
@@ -644,42 +600,42 @@ onBeforeUnmount(() => {
 
 /* ===== 浅色主题：Ardot 195:1927「日常运营助手-听播-正在播放」=====
    只按浅色稿的坐标与材质实现，深色稿（1193:2708）继续走下面的 --dark 块：
-   - 头像位 195:2031：换成 tell.gif 动图，按素材原始 500×500 折算 1000rpx 摆放，整块可见不裁切
-   - 声波 / 光晕：浅色稿无此元素，隐藏
+   - 头像位 195:2031：换成 tell-light.gif 动图，画布 1000×1000 等比缩到 180px 摆放
+   - 光晕：浅色稿无此元素，隐藏（声波两个主题都已去掉）
    - 字幕 195:1985：左 44 / 右 48（文本宽 283），头像底 → 文字顶 49px，18/26 Medium #0D0D0D
    - 上下渐隐：底色跟随页面底色 #FAFAFA，文字淡出不出现色块接缝 */
 .report-broadcast-content--light {
   /**
-   * 头像位放 tell.gif：画布 500×500 等比缩到 180px（360rpx），只裁透明留白，图形不裁。
-   * 逐帧统计出的内容范围是 (60,96)-(432,396)，等比 0.36 后为 136×110px：
-   *   - 舞台高度 = 110px（220rpx），刚好放下内容，放散光效不会被切；
-   *   - 图片上移 96×0.36 ≈ 34.5px（69rpx），内容顶端对齐舞台顶端；
-   *   - 画布左右按内容中线对齐页面中线（左移 246×0.36 ≈ 88.5px = 177rpx）。
+   * 头像位放 tell-light.gif：画布 1000×1000 满幅构图，等比缩到 180px（360rpx）。
+   * 图形本体约占画布中间一半（统计结果四周是浅色底 + 放散光效，没有可裁的透明留白），
+   * 所以按「画布中心 = 头像位中心」摆放：
+   *   - 舞台高度 110px（220rpx）= 设计稿头像位 112px；
+   *   - 360rpx 画布相对 220rpx 舞台上下各溢出 70rpx（35px），
+   *     溢出部分是素材自带的 #FCFCFF 底，与页面 #FAFAFA 肉眼无差，不裁也不遮字幕。
    */
   .report-broadcast-content__portrait-stage {
     position: relative;
-    height: 220rpx; /* 110px：内容高度 */
+    height: 220rpx; /* 110px：设计稿头像位高度 */
     flex: 0 0 220rpx;
   }
 
   .report-broadcast-content__portrait-wrap {
     position: absolute;
-    top: 0;
+    top: -70rpx; /* (220 - 360) / 2：画布垂直居中 */
     left: 50%;
     width: 360rpx; /* 180px */
     height: 360rpx; /* 180px */
-    margin-left: -177rpx;
+    margin-left: -180rpx;
   }
 
   .report-broadcast-content__portrait {
     position: absolute;
-    top: -69rpx;
+    top: 0;
     left: 0;
     width: 360rpx; /* 180px */
     height: 360rpx; /* 180px */
   }
 
-  .report-broadcast-content__wave,
   .report-broadcast-content__glow {
     display: none;
   }
@@ -735,6 +691,12 @@ onBeforeUnmount(() => {
    - 答案卡 1193:3413：底 #1A1A1A + 1px #303030 描边，正文 #FFFFFF；标题 #FFFFFF、过程说明 #8F8F8F
    - 骨架屏：浅色 #F2F3F5→#E5E7EB 的流光换成 #212121→#303030 */
 .report-broadcast-content--dark {
+  /* 头像位用 tell-dark.gif：素材自带纯黑（#000000）底，页面是 #0D0D0D，
+     直接铺会露出一块方形黑底。screen 叠加让纯黑完全融进页面，只剩发光图形 */
+  .report-broadcast-content__portrait {
+    mix-blend-mode: screen;
+  }
+
   .report-broadcast-content__glow--blue {
     background: rgb(17 102 214 / 35%);
   }
