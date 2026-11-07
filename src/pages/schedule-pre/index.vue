@@ -13,6 +13,7 @@ import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
+import { useSystemStore } from "@/stores";
 import { backFromScene } from "@/utils/scene-navigation";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
@@ -35,8 +36,9 @@ import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/sched
  * 双指缩放：与甘特页同一套（useScheduleGestures 接管两指手势），按两指间距比例改「每小时像素宽」
  * （28–168px，基准 56px），捏合中心的时刻保持不动；刻度、任务条、竖网格线、箭头跟着实时重排。
  *
- * 横屏方式与 pages/schedule-gantt 一致：`useLandscape()` 先让宿主原生转屏（landscapeFullscreen），
- * 原生不支持时把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
+ * 横屏方式与 pages/schedule-gantt 一致：宿主用 openH5Container 打开甘特图应用时本身就是全屏横屏，
+ * 前端不再申请转屏（不再调 landscapeFullscreen）；只有宿主没给横屏可视区时，
+ * `useLandscape()` 才把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
  *
  * 任务条样式（稿子 6464:150）：40 高、白底 + #F2F2F2 描边、圆角 6，
  * 条内两行（标题 11px Medium #1A1A1E + 时段 11px #999）；强调条为红描边 #C8201E（6464:358）。
@@ -62,13 +64,17 @@ const { rotated, exitLandscape } = useLandscape(measureLayout);
 const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
 
 /**
- * 顶部状态栏空白：原生 landscapeFullscreen 转屏成功后 webview 铺满横屏、
- * 状态栏压在页面顶边，顶栏要给状态栏让出这段高度；
+ * 顶部状态栏空白：宿主全屏横屏时 webview 铺满屏幕、状态栏压在页面顶边，
+ * 顶栏要给状态栏让出这段高度；
  * CSS 旋转模拟（rotated）时状态栏在设备的物理顶边（对应页面左侧），不需要留。
  * 与甘特页 / 重排页同一口径（模板里 schedule__header 用的是这个 headerTopStyle）。
  */
 const { safeTopPx } = useSafeArea();
 const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${safeTopPx.value}px` }));
+
+/** 深浅色：与对话页同一套口径（唯一数据源 systemStore.isDark），页面只负责把 --dark 类挂到根节点 */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 
 /**
  * 原生手势在真机不生效（旋转页面里浏览器不接管）：自己接管触摸，见 hooks/useScheduleGestures。
@@ -387,10 +393,8 @@ watch(() => rows.value.length, () => {
 /**
  * 退出到对话页（返回按钮 / 输入条发问共用）。
  *
- * 顺序：关掉原生横屏（`landscapeFullscreen(false)`）并**等可视区确认回到竖屏**
- * → 竖屏恢复后再写入待发送问题 → 跳回对话页。
- * 之前是 `exitLandscape()` 与 `backFromScene()` 同步连着调，原生转屏还没生效就跳页，
- * 对话页和键盘会落在横屏里；问题也会在错误的视口下发出。
+ * 顺序：撤掉 CSS 旋转兜底（`exitLandscape()`；方向由宿主容器自己管，
+ * 不再调 landscapeFullscreen） → 写入待发送问题 → 跳回对话页。
  *
  * `ask` 有值才走「发送问答」那一步，返回按钮不传，因此只收横屏不提问。
  *
@@ -398,7 +402,7 @@ watch(() => rows.value.length, () => {
  * 也要回那个会话（而不是首页），提问才落在原来的对话里。
  */
 async function leaveToChat(ask?: string) {
-  // 原生横屏置 false 之后要等屏幕真的转回来，再跳页 / 发问
+  // 先撤掉 CSS 旋转兜底，再跳页 / 发问
   await exitLandscape();
   if (ask) stashPendingScheduleAsk(ask);
   backFromScene("/pages/task/index");
@@ -509,7 +513,14 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 </script>
 
 <template>
-  <view class="schedule" :class="{ 'schedule--rotated': rotated, 'schedule--exit-rotate': exitIconRotated }">
+  <view
+    class="schedule"
+    :class="{
+      'schedule--rotated': rotated,
+      'schedule--exit-rotate': exitIconRotated,
+      'schedule--dark': isDark,
+    }"
+  >
     <!-- 顶部栏（6464:246 收起全部 / 10474:18 返回）：按产品要求去掉左侧标题与日期；
          原生横屏全屏时顶部留出状态栏高度（见 headerTopStyle） -->
     <view class="schedule__header" :style="headerTopStyle">
@@ -642,11 +653,13 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
     </view>
 
 
-    <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态） -->
-    <ScheduleAskBar @send="onAskSend" />
+    <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态）
+         rotated：CSS 旋转模拟横屏时键盘从本地右侧升起，抬升方向与竖屏不同（见组件内注释） -->
+    <ScheduleAskBar :dark="isDark" :rotated="rotated" @send="onAskSend" />
 
-    <!-- 任务详情面板（横屏右侧，点击任务条滑出，稿子 6832:292） -->
-    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" />
+    <!-- 任务详情面板（横屏右侧，点击任务条滑出，稿子 6832:292）；
+         rotated 透传：CSS 旋转模拟横屏时视口仍是竖的，面板要保持右侧抽屉而不是贴底弹层 -->
+    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" :rotated="rotated" :dark="isDark" />
   </view>
 </template>
 
@@ -973,11 +986,14 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 /* 任务条：40 高、圆角 6、白底 + #F2F2F2 描边、条内两行（6464:156/157/282） */
 .schedule__bar {
   position: absolute;
+  /* 条高 40 放不下设计稿的 6px 上下留白（1522:526 条高 47＝6+16+3+16+6），
+     这里改成居中 + 行间 3，两行文字视觉间距与稿子一致 */
   top: 2px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
+  gap: 3px;
   box-sizing: border-box;
   height: 40px;
   padding: 0 8px;
@@ -998,19 +1014,20 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   border-color: #c8201e;
 }
 
+/* 条内两行按设计稿弱化：标题 11/500 #0D0D0D、时段 11/400 #8F8F8F，行高 16（1522:524 / 1522:525） */
 .schedule__bar-title {
   font-size: 11px;
   font-weight: 500;
-  line-height: 13px;
-  color: #1a1a1e;
+  line-height: 16px;
+  color: #0d0d0d;
   white-space: nowrap;
 }
 
 .schedule__bar-time {
   font-size: 11px;
   font-weight: 400;
-  line-height: 13px;
-  color: #999999;
+  line-height: 16px;
+  color: #8f8f8f;
   white-space: nowrap;
 }
 
@@ -1102,5 +1119,106 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 .schedule__rows-inner {
   position: relative;
   will-change: transform;
+}
+
+/* ===== 深色主题：调度视图·预排草案 =====
+   只换材质与字色，版式 / 行高 / 手势 / 缩放与滚动一行不动：
+   - 页面与排程区底：#0D0D0D；竖网格线 #262626；行分隔线 #303030
+   - 左列：类别 #8E8E8E、资源名 #E5E5E5、车号|班次 #6B6B6B
+   - 任务条：底 #1A1A1A + 1px #303030（预排不区分状态，只有强调条保留品牌红描边），
+     条内标题 80% 白、时段 #6B6B6B
+   - 返回按钮、左右箭头同步换材质；箭头图标是深色线条，反相成白 */
+.schedule--dark {
+  background: #0d0d0d;
+  color: #e5e5e5;
+
+  /* ---- 顶部栏：返回 ---- */
+  .schedule__exit {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__exit-icon::before,
+  .schedule__exit-arrow::before {
+    border-color: #e5e5e5;
+  }
+
+  .schedule__exit-arrow {
+    background: #e5e5e5;
+  }
+
+  /* ---- 主体 / 左列资源 ---- */
+  .schedule__body,
+  .schedule__side,
+  .schedule__grid-wrap,
+  .schedule__grid,
+  .schedule__ruler {
+    background: #0d0d0d;
+  }
+
+  .schedule__side {
+    border-top-color: #303030;
+    border-right-color: #303030;
+  }
+
+  .schedule__side-head-text {
+    color: #b3b3b3;
+  }
+
+  .schedule__side-category {
+    color: #8e8e8e;
+  }
+
+  .schedule__side-name {
+    color: #6b6b6b;
+  }
+
+  .schedule__side-name--main {
+    color: #e5e5e5;
+  }
+
+  /* ---- 排程区：竖网格线 / 刻度 ---- */
+  .schedule__grid-inner {
+    background-color: #0d0d0d;
+    background-image: repeating-linear-gradient(
+      to right,
+      #262626 0,
+      #262626 1px,
+      transparent 1px,
+      transparent var(--hour-width, 56px)
+    );
+  }
+
+  .schedule__ruler-label {
+    color: #8e8e8e;
+  }
+
+  /* ---- 任务条 ---- */
+  .schedule__bar {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__bar--mark {
+    border-color: #c8201e;
+  }
+
+  .schedule__bar-title {
+    color: rgb(255 255 255 / 80%);
+  }
+
+  .schedule__bar-time {
+    color: #6b6b6b;
+  }
+
+  /* ---- 左右隐藏任务箭头 ---- */
+  .schedule__scroll-btn {
+    border-color: #303030;
+    background: #1a1a1a;
+  }
+
+  .schedule__scroll-icon {
+    filter: invert(1);
+  }
 }
 </style>

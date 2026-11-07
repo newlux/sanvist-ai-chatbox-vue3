@@ -1370,7 +1370,7 @@ watch(
               :key="`gantt-${block.id}`"
               class="chat-box__card chat-box__card--gantt"
             >
-              <AiBlockRenderer :block="block" @gantt-open="onGanttOpen" />
+              <AiBlockRenderer :block="block" :dark="props.dark" @gantt-open="onGanttOpen" />
             </view>
           </view>
         </view>
