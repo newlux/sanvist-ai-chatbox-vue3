@@ -20,8 +20,13 @@ import { onNativeEvent, waitForMpaas } from "@/utils/platform/mpaas";
  *   `/alipay-jsbridge-shim.js`），shim 在它自己的 window 上补一个同名对象，
  *   call / on 全部 postMessage 过来，本页代为调原生再把回参发回去。
  *
- *   三方页只需要在 <head> 里加一行：
- *   <script src="https://<chatbox-h5-domain>/alipay-jsbridge-shim.js"></script>
+ *   三方页只需要在 <head> 里加一行脚本：
+ *   <script src="https://<chatbox-h5-domain>/alipay-jsbridge-shim.js"><\/script>
+ *
+ *   注意：闭合标签必须写成带反斜杠的形式。SFC 解析器不区分注释与代码，
+ *   注释里出现完整的 script 闭合标签会把 <script setup> 块提前截断，
+ *   报错表现为「Element is missing end tag」（指向下面的 ref<...> 泛型）。
+ *   复制到真实 HTML 时把 `\/` 还原成 `/`。
  */
 defineOptions({ name: "AiPartsPage" });
 
