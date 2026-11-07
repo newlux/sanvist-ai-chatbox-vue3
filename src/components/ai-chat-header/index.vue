@@ -6,6 +6,8 @@ import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import listenLogoGif from "@/assets/img/listen.gif";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import saniLogoSmGif from "@/assets/img/sani-logo-sm.gif";
+import tellDarkGif from "@/assets/img/tell-dark.gif";
+import tellLightGif from "@/assets/img/tell-light.gif";
 import tellLogoGif from "@/assets/img/tell.gif";
 import thinkLogoGif from "@/assets/img/think.gif";
 import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
@@ -112,19 +114,24 @@ const telling = computed(() => answering.value || props.realtimeTtsPlaying);
 /** 录音中（按住说话 / 初始页「点击说话」那条语音链路） */
 const recording = computed(() => props.voiceListening);
 /**
- * 岛内动图按状态分四张，各自作为叠图靠 opacity 交叉溶解（绝不切常态图的 src，换源是硬切）：
+ * 岛内动图按状态分四层，各自作为叠图靠 opacity 交叉溶解（绝不切常态图的 src，换源是硬切）：
  *   空闲            → sani-logo-sm.gif（常驻底层；96×85，与旧常态图 300×267 同比例同裁切）
  *   正在思考        → think.gif
- *   正在回答 / 自动播报 → listen.gif
+ *   正在回答 / 自动播报 → tell 主题动图（深色 tell-dark.gif / 浅色 tell-light.gif）
  *   录音中          → tell.gif
  * 优先级：录音 > 回答/播报 > 思考 > 从初始页飞入那一段，同一时刻只亮一层。
  */
 const answeringGifOn = computed(() => !recording.value && telling.value);
 const thinkingGifOn = computed(() => !recording.value && !answeringGifOn.value && thinking.value);
+/**
+ * 回答中 / 自动播报用的 tell 素材按主题取：深色 tell-dark.gif（纯黑底），浅色 tell-light.gif。
+ * 跟着 darkPlain 走而不是裸 systemStore.isDark —— 素材自带的底色必须和头部实际底色一致，
+ * 否则非首页对话页（浅色头部）在深色系统下会顶出一块黑色方块。
+ */
+const tellPlayingGif = computed(() => (darkPlain.value ? tellDarkGif : tellLightGif));
 /** 从初始页飞入那一段仍走 listen.gif，落位时是同一张图在延续；有状态时让位给状态图 */
 const listeningGifOn = computed(
-  () => answeringGifOn.value
-    || (!recording.value && !thinkingGifOn.value && props.listenIdle),
+  () => !answeringGifOn.value && !recording.value && !thinkingGifOn.value && props.listenIdle,
 );
 /** 有任意状态图亮着：底层常驻图淡出 */
 const islandAnyGifOn = computed(
@@ -624,7 +631,8 @@ onBeforeUnmount(() => {
                 </svg>
               </view>
               <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），空闲 sani-logo-sm.gif；
-                   空闲 sm / 思考 think / 回答·播报 listen / 录音 tell 四张同位置叠图 淡入，不做 src / mode 切换，位置一律不动 -->
+                   空闲 sm / 思考 think / 回答·播报 tell 主题图 / 录音 tell 四层同位置叠图 淡入，
+                   不做 src / mode 切换，位置一律不动 -->
               <!-- 长按 5 秒回到初始页：只有 restartable（首页对话页）碰触摸事件，
                    其它页面的岛保持纯展示、不抢触摸；热区就是三角图本身（62×62） -->
               <!-- 空闲态动图：有状态图亮起时只淡出、不卸载，长按热区与定位基准始终挂在它身上。
@@ -649,12 +657,23 @@ onBeforeUnmount(() => {
               />
               <!-- 从初始页飞进来的那一小段走这层 listen.gif（listen-idle），落位时是同一张图在延续，
                    淡入 + 由 2.36 缓升到 2.49 倍（换算见 --listen 的样式注释）；
-                   这层同时服务「回答中 / 自动播报」，录音或思考时按优先级让位；
+                   「回答中 / 自动播报」已交给下面的 tell 主题层，这层只负责飞入那一段；
                    纯展示层，不吃触摸，避免抢走长按回首页的手势 -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--listen"
                 :class="{ 'chat-header__island-logo--listen-on': listeningGifOn }"
                 :src="listenLogoGif"
+                mode="aspectFit"
+              />
+              <!-- 回答中 / 语音播报：tell 主题动图（1000×1000 画布、图形居中，
+                   深色 tell-dark.gif 纯黑底用 screen 融进头部底色，浅色 tell-light.gif 近白底与页面对齐） -->
+              <image
+                class="chat-header__island-logo chat-header__island-logo--tell-play"
+                :class="{
+                  'chat-header__island-logo--tell-play-on': answeringGifOn,
+                  'chat-header__island-logo--tell-play-screen': darkPlain,
+                }"
+                :src="tellPlayingGif"
                 mode="aspectFit"
               />
               <!-- think.gif：正在思考（800×400 画布，留白用 aspectFill 裁掉，换算见 --think 注释） -->
@@ -1257,6 +1276,34 @@ onBeforeUnmount(() => {
   transition:
     opacity 0.34s cubic-bezier(0.22, 0.61, 0.36, 1),
     transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* 回答中 / 自动播报：tell-dark.gif（深色）/ tell-light.gif（浅色），画布 1000×1000、图形居中。
+   - 三角约占画布中间 45%~55%（listen.gif 是 40%、放大 2.49 正好铺满 62px 位），
+     按占比折回约 2.1~2.2，这里取 2.2，视觉尺寸与其余状态图一致；
+   - 素材没有透明留白（整幅带底色），投影会沿方形盒子铺成方块，所以这层不加 drop-shadow；
+   - 深色素材是纯黑底，screen 混合让黑底完全融进头部底色，只剩发光三角。 */
+.chat-header__island-logo--tell-play {
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(2rpx, 2rpx) scale(2.1);
+  filter: none;
+  transition:
+    opacity 0.22s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.chat-header__island-logo--tell-play-on {
+  opacity: 1;
+  transform: translate(2rpx, 2rpx) scale(2.2);
+  transition:
+    opacity 0.34s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.chat-header__island-logo--tell-play-screen {
+  mix-blend-mode: screen;
 }
 
 /* think.gif（正在思考）：画布 800×400，图案只占中间（宽约 42.5%、高约 75%），两侧是透明留白。

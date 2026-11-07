@@ -45,6 +45,7 @@ import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useSystemStore, useUserStore } from "@/stores";
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
+import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
@@ -909,11 +910,14 @@ async function startVoiceQuery() {
   }, 1000);
 
   /**
-   * 安卓 / 没有流式通道（无 WebSocket）/ 没有 WebAudio 采集能力（file:// / 老容器）：
-   * 一律走原生录音那条线。安卓这里不是「降级」而是「直接走」——
-   * 容器拒了 getUserMedia，试也是白试，还多等半秒、多几条报错日志。
+   * 音频从哪来：
+   * - 安卓容器有 `pcmStreamStart` 时用宿主原生推流（16k 裸 PCM 由原生抛过来），
+   *   后面的 WebSocket 流式 ASR 一点不变 —— 实时文字照常；
+   * - 其它端用 WebAudio 自己采（iOS / 浏览器）；
+   * - 两条都不行（没有 WebSocket / 没有 WebAudio 且没有原生推流）才退到整段识别。
    */
-  if (isAndroidRuntime() || !isAsrStreamSupported() || !isPcmCaptureSupported()) {
+  const useNativePcm = isAndroidRuntime() && isNativePcmStreamSupported();
+  if (!isAsrStreamSupported() || (!useNativePcm && !isPcmCaptureSupported())) {
     void startNativeVoiceQuery(seq);
     return;
   }
@@ -963,23 +967,37 @@ async function startVoiceQuery() {
     });
     voiceSession = session;
 
-    const capture = await startPcmCapture({
-      onFrame: frame => session.pushFrame(frame),
-      onLevel: onVoiceLevel,
-      // 采集起来了但拿不到可用音频（没回调 / 采到静音）：这一轮降到原生录音，别让用户白说一句
-      onUnavailable: reason => degradeToNativeVoice(reason),
-    });
+    const capture = useNativePcm
+      ? await startNativePcmCapture({
+        onFrame: frame => session.pushFrame(frame),
+        onLevel: onVoiceLevel,
+        // 原生推流中途报错：换整段识别那条线，别让这一轮白说
+        onError: message => degradeToNativeVoice(`pcm-stream:${message}`),
+      })
+      : await startPcmCapture({
+        onFrame: frame => session.pushFrame(frame),
+        onLevel: onVoiceLevel,
+        // 采集起来了但拿不到可用音频（没回调 / 采到静音）：这一轮降到原生录音，别让用户白说一句
+        onUnavailable: reason => degradeToNativeVoice(reason),
+      });
     if (seq !== voiceSeq) {
       capture.stop();
       return;
     }
     voiceCapture = capture;
 
-    // 采集就绪开始计时：一直没人说话就自己收尾，别让麦克风空转
-    voiceNoSpeechTimer = setTimeout(() => {
-      voiceNoSpeechTimer = null;
-      if (!voiceHeard) stopVoiceQuery();
-    }, VOICE_NO_SPEECH_MS);
+    /**
+     * 8s 没人说话就自己收尾，别让麦克风空转。
+     * 原生 PCM 推流这条不启用：宿主给的是哪一档音量不确定（可能偏小），
+     * 一旦电平没过阈值就会被判成「没人说话」、在你还在说的时候把录音掐掉。
+     * 这条通道的收尾交给「说过话后静音 1.5s」和用户点 ↑。
+     */
+    if (!useNativePcm) {
+      voiceNoSpeechTimer = setTimeout(() => {
+        voiceNoSpeechTimer = null;
+        if (!voiceHeard) stopVoiceQuery();
+      }, VOICE_NO_SPEECH_MS);
+    }
   }
   catch (error) {
     // getUserMedia 三档全挂（Android WebView 常见）：不掉到「录音启动失败」，先换原生录音
