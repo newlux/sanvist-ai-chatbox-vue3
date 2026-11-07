@@ -2,16 +2,17 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
+import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 
 /**
  * 听播页异常列表里发起的问答全屏覆盖层。
  *
  * 设计要点：
- * 1. 作为独立组件承载整个问答「页面」：标题/正文/按住说话，状态由父组件通过 props 传入，
+ * 1. 作为独立组件承载整个问答「页面」：标题/正文/输入栏，状态由父组件通过 props 传入，
  *    事件通过透传 emit 回父组件，不在内部持有任何业务状态、不直接访问父组件的 store。
- * 2. 正文区域水平居中、垂直靠上：识别中态与答案态都从顶部（header 下方留一点间距）开始排布。
- * 3. 底部沿用与首页同款的 AiChatInput，事件原样上抛。
+ * 2. 正文区域水平居中、垂直靠上：录音中的实时转写、识别中态与答案态都从顶部（header 下方留一点间距）开始排布。
+ * 3. 底部沿用与首页同款的 AiChatInput（点击说话），录音期间换成 AiVoiceQueryBar，事件原样上抛。
  */
 const props = defineProps({
   /** 整层覆盖层是否可见。父组件按 `insightVisible && reportQaFromInsight && (loading || answer)` 控制。 */
@@ -32,6 +33,16 @@ const props = defineProps({
   voiceKeyboardHeight: { type: Number, default: 0 },
   /** 顶部安全区像素值，header 定位用。 */
   safeTopPx: { type: Number, default: 0 },
+  /** 点击说话录音中：底部输入栏换成录音条，正文展示实时转写。 */
+  voiceQueryActive: { type: Boolean, default: false },
+  /** 本轮实时转写文本（录音中逐字刷新）。 */
+  voiceTranscript: { type: String, default: "" },
+  /** 实时音量 0~1：驱动录音条声纹。 */
+  voiceLevel: { type: Number, default: 0 },
+  /** 已录秒数。 */
+  voiceSeconds: { type: Number, default: 0 },
+  /** 已发 finish、正在等定稿。 */
+  voiceFinishing: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -41,11 +52,11 @@ const emit = defineEmits([
   "update:inputText",
   "send",
   "stop",
-  "voice-start",
-  "voice-restart",
+  /** 点击说话：把这一轮语音提问交给页面（流式 ASR 链路）。 */
+  "voice-query-start",
+  /** 录音条上的取消 / 发送。 */
   "voice-cancel",
-  "recognize-begin",
-  "recognize-fail",
+  "voice-submit",
   "input-focus",
   "input-blur",
   "voice-input-focus",
@@ -89,8 +100,14 @@ const headerTopStyle = computed(() => ({ top: `calc(${props.safeTopPx}px + 8rpx)
       - 顶部留出 header 高度 + 一点间距，避免文字贴着导航栏
     -->
     <view class="podcast-qa-overlay__body">
+      <!-- 录音中：正文展示实时转写，边说边出字（与首页提问气泡里的 partial 同源） -->
+      <view v-if="voiceQueryActive" class="podcast-qa-overlay__voice">
+        <text class="podcast-qa-overlay__voice-text">
+          {{ voiceTranscript || t("identifying") }}
+        </text>
+      </view>
       <!-- 识别中态：与播报视图内的「正在理解你的内容」同一套文案与版式 -->
-      <view v-if="loading" class="podcast-qa-overlay__loading">
+      <view v-else-if="loading" class="podcast-qa-overlay__loading">
         <text class="podcast-qa-overlay__loading-title">
           {{ t("broadcast-understanding") }}
         </text>
@@ -112,32 +129,39 @@ const headerTopStyle = computed(() => ({ top: `calc(${props.safeTopPx}px + 8rpx)
     </view>
 
     <!--
-      底部保留按住说话组件：用户看完答案可继续追问，无需先返回异常列表。
-      与页面上 AiChatInput 共用同一组 send/voice 事件，行为完全一致；
+      底部保留输入栏：用户看完答案可继续追问，无需先返回异常列表。
+      与播报视图底部一致，走「点击说话」：点一下交给页面开流式语音提问，
+      录音期间换成「取消 / 声纹 / 计时 + 发送」的录音条；
       顶部 ← 承担「确认后回到异常列表」的作用。
     -->
     <view class="podcast-qa-overlay__footer">
       <AiChatInput
+        v-if="!voiceQueryActive"
         :model-value="inputText"
         :attachment-disabled="true"
         :compact-voice-listening="true"
         :is-loading="isLoading"
         :keyboard-height="keyboardHeight"
         :voice-keyboard-height="voiceKeyboardHeight"
+        :tap-to-talk="true"
         @update:model-value="emit('update:inputText', $event)"
         @send="emit('send', $event)"
         @stop="emit('stop')"
-        @voice-start="emit('voice-start')"
-        @voice-restart="emit('voice-restart')"
-        @voice-cancel="emit('voice-cancel')"
-        @recognize-begin="emit('recognize-begin')"
-        @recognize-fail="emit('recognize-fail')"
+        @voice-query-start="emit('voice-query-start')"
         @input-focus="emit('input-focus')"
         @input-blur="emit('input-blur')"
         @voice-input-focus="emit('voice-input-focus')"
         @voice-input-blur="emit('voice-input-blur')"
         @dock-height-change="emit('dock-height-change', $event)"
         @toggle-quick-list="emit('toggle-quick-list')"
+      />
+      <AiVoiceQueryBar
+        v-else
+        :level="voiceLevel"
+        :seconds="voiceSeconds"
+        :busy="voiceFinishing"
+        @cancel="emit('voice-cancel')"
+        @submit="emit('voice-submit')"
       />
     </view>
   </view>
@@ -270,6 +294,32 @@ const headerTopStyle = computed(() => ({ top: `calc(${props.safeTopPx}px + 8rpx)
   line-height: 36rpx;
   color: #999999;
   text-align: center;
+}
+
+/* 录音中的实时转写：与答案同一块留白，居中排版，超长内容最多占满正文区 */
+.podcast-qa-overlay__voice {
+  display: flex;
+  width: 100%;
+  max-width: 640rpx;
+  max-height: 100%;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.podcast-qa-overlay__voice-text {
+  color: #1a1a1a;
+  font-family:
+    "PingFang SC",
+    "Noto Sans SC",
+    "Microsoft YaHei",
+    -apple-system,
+    sans-serif;
+  font-size: 34rpx;
+  font-weight: 500;
+  line-height: 52rpx;
+  text-align: center;
+  word-break: break-word;
 }
 
 /* 答案滚动区：限定最大宽度让水平居中有意义，超长内容在内部滚动 */

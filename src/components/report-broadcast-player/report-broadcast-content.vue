@@ -25,6 +25,8 @@ const props = defineProps<{
   qaAnswer?: string;
   /** 按住说话录音中：先隐藏播报文字，等识别态接管字幕区。 */
   voiceRecording?: boolean;
+  /** 录音中的实时转写文本（点击说话走流式 ASR）：边说边出字，为空时展示「识别中」。 */
+  voiceTranscript?: string;
 }>();
 
 const emit = defineEmits<{ "play-pause": []; seek: [seq: number] }>();
@@ -364,8 +366,17 @@ function onProgressTouchEnd() {
           </text>
         </view>
       </scroll-view>
-      <!-- 按住说话：识别中/回答结果直接占用字幕区，头像与播放控制保持不动 -->
-      <view v-if="!showTranscriptSkeleton && qaLoading" class="report-broadcast-content__qa-loading">
+      <!-- 录音中：字幕区让给实时转写，边说边出字（与首页提问气泡里的 partial 同源） -->
+      <view
+        v-if="!showTranscriptSkeleton && voiceRecording"
+        class="report-broadcast-content__voice"
+      >
+        <text class="report-broadcast-content__voice-text">
+          {{ voiceTranscript || t("identifying") }}
+        </text>
+      </view>
+      <!-- 点击说话：识别中/回答结果直接占用字幕区，头像与播放控制保持不动 -->
+      <view v-else-if="!showTranscriptSkeleton && qaLoading" class="report-broadcast-content__qa-loading">
         <!-- 思考态背景：设计稿光斑，缓慢明暗起伏做呼吸灯 -->
         <image
           class="report-broadcast-content__qa-loading-glow"
@@ -578,7 +589,26 @@ function onProgressTouchEnd() {
   font-weight: 700;
   line-height: 50rpx;
 }
-/* —— 按住说话的识别/问答态：占用字幕区，文案与呼吸灯光晕整体居中 —— */
+/* —— 录音中的实时转写：占用字幕区，排版沿用「当前句」的字号，像把播报文字换成用户的话 —— */
+.report-broadcast-content__voice {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 120rpx;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.report-broadcast-content__voice-text {
+  color: #211b1b;
+  font-size: 38rpx;
+  font-weight: 700;
+  line-height: 52rpx;
+  text-align: center;
+  word-break: break-word;
+}
+/* —— 点击说话的识别/问答态：占用字幕区，文案与呼吸灯光晕整体居中 —— */
 .report-broadcast-content__qa-loading {
   position: relative;
   display: flex;
@@ -776,6 +806,10 @@ function onProgressTouchEnd() {
       rgb(13 13 13 / 86%) 58%,
       #0d0d0d 100%
     );
+  }
+
+  .report-broadcast-content__voice-text {
+    color: #ffffff;
   }
 
   .report-broadcast-content__qa-title {

@@ -92,6 +92,25 @@ function delay(ms: number) {
 }
 
 /**
+ * 采集环境快照，只在失败日志里带上。
+ * 离线包最容易踩的两件事：页面 origin 不是 https（非安全上下文 → 压根没有 getUserMedia），
+ * 以及容器拒了媒体采集（有 getUserMedia 但抛 NotAllowedError）。两者处理方式完全不同，
+ * 所以把 origin / isSecureContext / 是否有 getUserMedia 一起打出来，端上一眼能分清。
+ */
+function captureEnv() {
+  try {
+    return {
+      origin: location.origin,
+      secure: window.isSecureContext,
+      hasGetUserMedia: Boolean(navigator.mediaDevices?.getUserMedia),
+    };
+  }
+  catch {
+    return {};
+  }
+}
+
+/**
  * 打开麦克风：按「原始采集 → 最少约束 → 老式布尔」三档依次退。
  *
  * Android WebView（离线包容器）对 audio 约束字典的支持很不统一：实测有的版本对
@@ -122,7 +141,7 @@ async function openMicrophone() {
     catch (error) {
       lastError = error;
       const detail = describeMicError(error);
-      logger.warn(`[pcm] getUserMedia 第 ${index + 1} 档（${label}）失败`, detail);
+      logger.warn(`[pcm] getUserMedia 第 ${index + 1} 档（${label}）失败`, { ...detail, env: captureEnv() });
       // NotAllowedError / SecurityError 是「WebView 层没给麦克风」，换约束也救不回来：
       // 直接抛出去让上层降级到原生录音，别再白等剩下两档
       if (detail.name === "NotAllowedError" || detail.name === "SecurityError") break;
