@@ -111,7 +111,7 @@ function onOptionTap(option: AskSlotOption) {
   display: flex;
   align-items: center;
   padding: 16rpx 32rpx; /* 8px 16px */
-  border: 2rpx solid transparent; /* 1px，颜色交给下面的渐变边框 */
+  border: 2rpx solid #efefef; /* 1px，颜色交给下面的渐变边框 */
   border-radius: 40rpx; /* 20px 胶囊 */
   /* 边框线线性渐变：#CDCAD2 → #F7F7F7 → #CDCAD2（上 → 中 → 下）。
      双层背景法：内层白底裁到 padding-box 盖住中间，

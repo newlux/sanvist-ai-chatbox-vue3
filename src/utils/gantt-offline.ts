@@ -229,10 +229,15 @@ export async function openOfflineGantt(viewType: string, view: GanttViewPayload)
   }
 
   // 深浅色随整包带给离线包：离线包 getDemoModeData 读回后据此初始化自己的 systemStore
-  const payload = { ...view, isDark: useSystemStore().isDark } as GanttViewPayload;
+  const systemStore = useSystemStore();
+  const payload = { ...view, isDark: systemStore.isDark } as GanttViewPayload;
 
   const mode = resolveGanttContainerMode(viewType);
-  const path = `${GANTT_OFFLINE_ENTRY}?target=${encodeURIComponent(viewType)}`;
+  // 入口 path 带上宿主鉴权串：离线包语音识别（/speech/asr/*）请求头要用；
+  // 没有 token 就不带（离线包请求层空 Authorization 时自动省略该头）
+  const auth = String(systemStore.header.Authorization || "");
+  const authQuery = auth ? `&Authorization=${encodeURIComponent(auth)}` : "";
+  const path = `${GANTT_OFFLINE_ENTRY}?target=${encodeURIComponent(viewType)}${authQuery}`;
   const startedAt = Date.now();
   const payloadBytes = measureBytes(payload);
   const slimBytes = measureBytes(pickGanttViewForOffline(payload));
@@ -289,13 +294,13 @@ export async function openOfflineGantt(viewType: string, view: GanttViewPayload)
   // 2) 开容器：方向（横屏 + 全屏）由容器参数决定，不再调 landscapeFullscreen
   const openedAt = Date.now();
   logger.info("离线包：调用 openH5Container", {
-    appId: GANTT_OFFLINE_APPID,
+    appid: GANTT_OFFLINE_APPID,
     path,
     landscape: mode.landscape,
     fullscreen: mode.fullscreen,
   });
   await openH5Container({
-    appId: GANTT_OFFLINE_APPID,
+    appid: GANTT_OFFLINE_APPID,
     path,
     landscape: mode.landscape,
     fullscreen: mode.fullscreen,

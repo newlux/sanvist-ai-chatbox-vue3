@@ -12,7 +12,7 @@ import type {
 } from "@/api/chat/types";
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { AttachmentSource } from "@/hooks/useComposerAttachments";
-import type { ChatMessageAttachment } from "@/stores/chat-types";
+import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
 import type { AsrStreamSession } from "@/utils/asr/asr-stream-session";
 import type { PcmCapture } from "@/utils/asr/pcm-capture";
 import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
@@ -172,6 +172,11 @@ function sendUserPrompt(query: string) {
  * 还会被录进 ASR 里，必须按下即停。
  */
 function stopRealtimeTtsOnVoiceStart() {
+  realtimeTts.stop();
+}
+
+/** 停掉本页听播：步骤卡确认完最后一步、切到小结的瞬间由消息列表触发 */
+function stopSceneTts() {
   realtimeTts.stop();
 }
 
@@ -444,6 +449,11 @@ const guideStepPayload = ref<GuideStepPayload | null>(null);
  * 按 id 从最新一轮往回找，避免新一轮的卡被算到第一张卡的位置上。
  */
 const guideStepCardStepId = ref("");
+/**
+ * 多步骤卡改为气泡内联展示（标题 + 进度 + 步骤标题 + 讲解 + 确认问题 + A/B/C 选项），
+ * 不再弹底部白板。需要回退到白板时把这里改成 false。
+ */
+const INLINE_STEP_CARD = true;
 
 /**
  * 把当前显示的那张核对卡（对话区的 .chat-box__card）顶到对话区最上方。
@@ -458,6 +468,11 @@ function focusGuideStepCardAtTop() {
 function onGuideStepOpen(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
   guideStepRequestedIndex.value = 0;
+  // 内联卡片：卡片就在对话里，只定位到第一步，不弹白板
+  if (INLINE_STEP_CARD) {
+    guideStepCardStepId.value = String(payload?.steps?.[0]?.id || "");
+    return;
+  }
   guideStepSheetVisible.value = true;
   // 这一轮的核对卡：按本轮第一步定位（每轮回答各带一套自己的卡，取最新那一轮）
   guideStepCardStepId.value = String(payload?.steps?.[0]?.id || "");
@@ -535,8 +550,14 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   guideStepPayload.value = resolved as GuideStepPayload;
   const index = Math.min(target, steps.length) - 1;
   // 先把核对卡切过去：按点击那一段的步骤 id 定位（同一份指导重复触发时切最新那一轮）
-  guideStepCardStepId.value = String(steps[index]?.id || payload?.stepId || "");
+  const nextStepId = String(steps[index]?.id || payload?.stepId || "");
+  // 真换了步骤才停旧语音：新一步的卡挂载后会按翻页标记接着播（见 GuideCheckBlock 的 onMounted）；
+  // 目标步和当前步是同一个时卡不会重挂载，停了就再也起不来，所以这里保持原语音
+  if (nextStepId && nextStepId !== String(guideStepCardStepId.value || "")) realtimeTts.stop();
+  guideStepCardStepId.value = nextStepId;
   guideStepRequestedIndex.value = index;
+  // 内联卡片模式：卡片自己翻页，只切对话里那张卡，不弹白板
+  if (INLINE_STEP_CARD) return;
   guideStepSheetVisible.value = true;
   // 白板已展开时 stepIndex 可能没变化（比如又切回上一步），用方法兜底再切一次
   nextTick(() => guideStepSheetRef.value?.goToStep(index));
@@ -566,18 +587,35 @@ function onGuideSuggestionHeightChange(height: number) {
 }
 
 /** 消息播音统一走实时 TTS。 */
-function onTtsClick(index: number) {
+/**
+ * 多步骤卡的回答只播当前这一步；翻页后换了步骤要念新的一步。
+ * 只认属于这条消息的核对卡：一个对话里有多轮步骤条时，页面级的「当前步」可能是别的一轮停留的步骤，
+ * 直接拿来用会把这条消息念成另一轮的内容。
+ */
+function resolveActiveStepId(msg: UiChatMessage | undefined) {
+  const cards = (msg?.blocks || []).filter(block => block?.type === "guide-check");
+  if (!cards.length) return "";
+  const current = String(guideStepCardStepId.value || "");
+  if (current && cards.some(card => String(card.payload?.step_id || "") === current)) return current;
+  return String(cards[0]?.payload?.step_id || "");
+}
+
+function onTtsClick(index: number, textOverride = "") {
   const msg = chatStore.messages[index];
   const messageId = msg?.messageId;
   if (messageId == null || msg?.sessionId == null) return;
+  // 小结这类「要念的文本不在消息正文里」的播报用独立判重键，免得和步骤播报互相停
+  const stepId = textOverride ? "summary" : resolveActiveStepId(msg);
 
-  if (realtimeTts.playingMessageId.value === messageId) {
+  const sameRealtimeTarget = realtimeTts.playingMessageId.value === messageId
+    && String(realtimeTts.playingStepId.value || "") === stepId;
+  if (sameRealtimeTarget) {
     realtimeTts.stop();
     return;
   }
 
   realtimeTts.stop();
-  void realtimeTts.togglePlay(msg);
+  void realtimeTts.togglePlay(msg, stepId, textOverride);
 }
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
@@ -1784,7 +1822,9 @@ onBeforeUnmount(() => {
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"
+        @step-card-ready="focusGuideStepCardAtTop"
         @tts-click="onTtsClick"
+        @tts-stop="stopSceneTts"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
         @copy-click="onCopyMessage"

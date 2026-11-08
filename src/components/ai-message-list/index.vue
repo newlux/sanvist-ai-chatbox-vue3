@@ -9,10 +9,12 @@ import iconWaveForm from "@/assets/img/icon-waveform.svg";
 import iconWaveFormDark from "@/assets/img/icon-waveform-dark.svg";
 import { useSystemStore } from "@/stores";
 import { guideStepCardDomId } from "@/utils/guide-content";
+import { requestSummaryTts } from "@/utils/guide-step-tts";
 import { chatMessageAnchorDomId } from "@/stores/modules/chat";
 import { isListenReportListened } from "@/utils/listen-report";
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import AiBlockRenderer from "../ai-bubble-v2/AiBlockRenderer.vue";
+import GuideStepFinishBlock from "../ai-bubble-v2/blocks/GuideStepFinishBlock.vue";
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
 
 defineOptions({
@@ -104,6 +106,14 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /**
+   * 核对卡精简版（作业协同 / 作业指导页）：卡片不画动作区、状态行，
+   * 也不把同一条回答的参考来源塞进卡片里。
+   */
+  compactGuideCard: {
+    type: Boolean,
+    default: false,
+  },
   awakening: {
     type: Object,
     default: null,
@@ -174,8 +184,12 @@ const emit = defineEmits([
   "guide-step-open",
   "guide-suggestion-open",
   "guide-check-step-select",
+  /** 核对卡（新的一步）挂载完成：页面据此把视图滚到这张卡 */
+  "step-card-ready",
   "gantt-open",
   "tts-click",
+  /** 步骤卡让位给小结的瞬间：页面把正在播的最后一步语音停掉 */
+  "tts-stop",
   "share-click",
   "feedback-change",
   "copy-click",
@@ -880,13 +894,64 @@ function onGuideSuggestionOpen(payload, auto = false) {
   emit("guide-suggestion-open", payload, auto);
 }
 
-/** 点核对卡步骤条某一段：交给页面切步骤 + 打开底部白板 */
-function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
+/**
+ * 点核对卡步骤条某一段：交给页面切步骤 + 打开底部白板。
+ * 先记下「这次切步来自哪一轮」：一个对话里可能有多轮步骤条（同一份指导重复生成时 step_id 会重复），
+ * 页面回传 step_id 后只作用在这一轮，新的步骤条不会被旧步骤条的进度带走。
+ */
+function onGuideCheckStepSelect(messageIndex: number, message: UiChatMessage, payload: GuideStepSelectEvent) {
+  stepCardActiveKey.value = stepCardMessageKey(message, messageIndex);
   emit("guide-check-step-select", payload);
 }
 
-function onTtsClick(index) {
-  emit("tts-click", index);
+/**
+ * 核对卡真正挂上 DOM 了（翻页时新卡是重新挂载的）：交给页面把它滚到对话区顶部。
+ * 页面在改 stepCardStepId 那一下的 nextTick 里滚，此时换卡还没发生（要等下一轮渲染），
+ * 滚的是上一张卡，所以真正的滚动时机放在这里。
+ */
+function onStepCardReady() {
+  emit("step-card-ready");
+}
+
+/**
+ * 最后一步确认完：这一轮切到完成态，整段指导的步骤卡换成「小结 + 推荐问题」。
+ * 完成标记只活在列表内部（按消息 key 记），不进 store、不弹层。
+ */
+const finishedStepCards = ref<Record<string, boolean>>({});
+
+function onGuideCheckFinish(index: number) {
+  const message = props.messages?.[index];
+  if (!message) return;
+  const key = stepCardMessageKey(message, index);
+  if (finishedStepCards.value[key]) return;
+  finishedStepCards.value = { ...finishedStepCards.value, [key]: true };
+  // 最后一步的语音可能还在念：小结出现前先掐掉（页面 stop），再让小结挂载后自动念小结
+  emit("tts-stop");
+  requestSummaryTts();
+}
+
+function isStepCardFinished(message: UiChatMessage, index: number) {
+  return Boolean(finishedStepCards.value[stepCardMessageKey(message, index)]);
+}
+
+/** 完成态里的小结：step_summary 是步骤卡的顶层字段（与 steps 分离），直接从 guide-step 块读 */
+function finishSummaryOf(message: UiChatMessage) {
+  const stepBlock = (message?.blocks || []).find(block => block?.type === "guide-step");
+  return String(stepBlock?.payload?.step_summary || "").trim();
+}
+
+/** 完成态的参考来源：步骤卡让位后来源不能丢，沿用同一份 source 块 */
+function finishSourcesOf(message: UiChatMessage) {
+  if (props.compactGuideCard) return [];
+  return hidesBody(message) ? collectSourceEvidence(message?.blocks || []) : [];
+}
+
+/**
+ * 播报：`text` 是「要念的内容不在消息正文里」时的覆盖文本（步骤小结 step_summary），
+ * 由卡片带上来，页面直接念它，不再从 blocks 里拼。
+ */
+function onTtsClick(index, text = "") {
+  emit("tts-click", index, text);
 }
 
 function onSelectToggle(index) {
@@ -1014,11 +1079,25 @@ function assignStepCard(key: string, stepId: string) {
   stepCardShownStepId.value = { ...stepCardShownStepId.value, [key]: stepId };
 }
 
-/** 把「当前这一步」落到最新那一轮上（没有那一步就保持不动） */
+/**
+ * 把「当前这一步」落到它所属的那一轮上（没有那一步就保持不动）。
+ *
+ * 优先落在最近交互过的轮次（stepCardActiveKey）：用户点的是哪一行的步骤条就切哪一行，
+ * 不能因为「新一轮的 step_id 和旧一轮一样」就把新步骤条的进度一起改掉。
+ * 找不到交互记录时，才按从新到旧兜底（初次渲染 / 只传了一个 stepId 的场景）。
+ */
 function selectStepCard(stepId: string) {
   const target = String(stepId || "").trim();
   if (!target) return;
   const rounds = stepCardMessages();
+  const activeKey = String(stepCardActiveKey.value || "");
+  if (activeKey) {
+    const active = rounds.find(item => stepCardMessageKey(item.message, item.index) === activeKey);
+    if (active && hasStepCardOf(active.message, target)) {
+      assignStepCard(activeKey, target);
+      return;
+    }
+  }
   for (let index = rounds.length - 1; index >= 0; index -= 1) {
     const { message, index: messageIndex } = rounds[index];
     if (!hasStepCardOf(message, target)) continue;
@@ -1027,10 +1106,29 @@ function selectStepCard(stepId: string) {
   }
 }
 
+/**
+ * 只跟「当前这一步」走：不再监听轮数变化。
+ * 新一轮步骤条生成时，页面里的 stepCardStepId 可能还是上一轮停留的某一步，
+ * 一旦按轮数变化重新 apply，新步骤条就会直接跳到旧步骤条的进度
+ * （同一份指导重复生成时 step_id 相同，必然命中）。新轮次没有展示记录，默认就是第一张卡。
+ */
 watch(
-  () => [props.stepCardStepId, stepCardMessages().length],
-  () => selectStepCard(String(props.stepCardStepId || "")),
+  () => props.stepCardStepId,
+  stepId => selectStepCard(String(stepId || "")),
   { immediate: true, flush: "post" },
+);
+
+/**
+ * 又冒出一轮步骤条：把「最近交互的轮次」让给最新这一轮。
+ * 否则旧轮次的交互记录还在，新一轮生成时页面回传的「第一步」会被
+ * 「优先作用于最近交互轮次」的规则带回到旧轮次上。
+ */
+watch(
+  () => stepCardMessages().length,
+  (length, prev) => {
+    if (length > (prev || 0)) stepCardActiveKey.value = "";
+  },
+  { flush: "post" },
 );
 
 /**
@@ -1050,13 +1148,16 @@ function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
   const blocks = (message?.blocks || []).filter(Boolean);
   const cards = blocks.filter(block => block.type === "guide-check");
   if (!cards.length) return [];
+  // 这一轮已经全部确认完：步骤卡让位给下方的「小结 + 推荐问题」完成块
+  if (isStepCardFinished(message, messageIndex)) return [];
 
   const shownStepId = String(stepCardShownStepId.value[stepCardMessageKey(message, messageIndex)] || "");
   const card = (shownStepId
     ? cards.find(item => String(item.payload?.step_id || "") === shownStepId)
     : null) || cards[0];
 
-  const evidence = hidesBody(message) ? collectSourceEvidence(blocks) : [];
+  // 精简版卡片不挂参考来源：正文被隐藏的这轮回答，参考来源跟着一起不展示
+  const evidence = hidesBody(message) && !props.compactGuideCard ? collectSourceEvidence(blocks) : [];
   if (!evidence.length) return [card];
   return [{ ...card, payload: { ...card.payload, sources: evidence } }];
 }
@@ -1068,6 +1169,16 @@ function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
  */
 function ganttBlocks(message: UiChatMessage) {
   return (message?.blocks || []).filter(block => block?.type === "gantt");
+}
+
+/**
+ * 同一条回答里的推荐问题（guide-suggestion 块）：
+ * 步骤卡「全部步骤确认完」后要把推荐问题接在 step_summary 下面，
+ * 而核对卡只看得到自己的 payload，所以在这里从兄弟块里取出来透传下去。
+ */
+function guideSuggestionsOf(message: UiChatMessage) {
+  const block = (message?.blocks || []).find(item => item?.type === "guide-suggestion");
+  return block?.payload || null;
 }
 
 /**
@@ -1336,7 +1447,7 @@ watch(
               @assistant-callback-open="emit('assistant-callback-open', $event)"
               @guide-step-open="onGuideStepOpen"
               @guide-suggestion-open="onGuideSuggestionOpen"
-              @guide-check-step-select="onGuideCheckStepSelect"
+              @guide-check-step-select="onGuideCheckStepSelect(index, msg, $event)"
               @gantt-open="onGanttOpen"
               @tts-click="onTtsClick(index)"
               @share-click="onShareClick(index, msg)"
@@ -1355,13 +1466,30 @@ watch(
                 :block="block"
                 :dom-id="guideStepCardDomId(msg?.id, block.id)"
                 :show-card-actions="msg?.role === 'ai' && !msg.loading && !msg.interrupted"
+                :compact-guide-card="compactGuideCard"
                 :tts-enabled="!!msg.ttsEnabled"
                 :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
                 :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
-                @guide-check-step-select="onGuideCheckStepSelect"
+                @guide-check-step-select="onGuideCheckStepSelect(index, msg, $event)"
+                @guide-check-finish="onGuideCheckFinish(index)"
+                @card-ready="onStepCardReady"
+                @suggestion-tap="onSuggestionTap($event, index)"
                 @tts-click="onTtsClick(index)"
                 @copy-click="onGuideCheckCopy(index, msg, $event)"
                 @share-click="onGuideCheckShare(index, msg, $event)"
+              />
+            </view>
+            <!-- 完成态：整段指导全部确认完，展示 step_summary + 推荐问题（独立于步骤卡） -->
+            <view v-if="isStepCardFinished(msg, index)" class="chat-box__card">
+              <GuideStepFinishBlock
+                :summary="finishSummaryOf(msg)"
+                :suggestions="guideSuggestionsOf(msg)"
+                :sources="finishSourcesOf(msg)"
+                :tts-enabled="!!msg.ttsEnabled"
+                :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
+                :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
+                @pick="onSuggestionTap($event, index)"
+                @tts-click="onTtsClick(index, finishSummaryOf(msg))"
               />
             </view>
             <!-- 调度视图入口卡：同样独立于回答气泡，紧跟在气泡下方 -->
@@ -1434,9 +1562,11 @@ watch(
 .chat-box {
   padding: var(--chat-box-top-padding) 40rpx 0;
 }
-/* 独立于回答气泡的卡片（核对/步骤卡） */
+/* 独立于回答气泡的卡片（核对/步骤卡）
+   左右补 40rpx，与回答气泡 body 的内边距对齐：卡片外框宽度和答复卡一致，
+   否则卡片会比上方的回答宽出一圈、左边缘也不齐 */
 .chat-box__card {
-  margin: 24rpx 0;
+  margin: 24rpx 40rpx;
 }
 
 /* 调度视图入口卡（4708:743）：跟随气泡时上方留 13px，左右 20px 由 .chat-box 的 padding 提供 */

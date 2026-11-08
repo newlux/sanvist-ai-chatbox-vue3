@@ -3,8 +3,8 @@ import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import type { AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideSuggestionPayload, Identifier } from "@/api/chat/types";
-import type { ChatMessageAttachment } from "@/stores/chat-types";
+import type { AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload, Identifier } from "@/api/chat/types";
+import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
@@ -233,10 +233,10 @@ async function startPendingScheduleAsk() {
     sendTaskMessage({ text });
     return;
   }
-  // 没有待发问题：回到本页仍停在欢迎态就重拉一次入口卡（不缓存、不复用旧数据）。
-  // 与 onLoad 的请求隔开 800ms：首次进入 onShow 紧跟 onLoad，不该重复请求。
-  // 待机态是异常卡时首屏走的是「查异常」，这里不再补拉甘特图入口卡。
-  if (showSceneWelcome.value && welcomeCardKind.value !== "exception" && Date.now() - initialCardsRequestedAt > 800) void loadInitialCards();
+  // 没有待发问题就什么都不用做：新版首屏不再预拉入口卡 / 异常摘要卡，
+  // 初始态只渲染 logo 等用户主动提问，这里没有需要补刷的数据。
+  // （这里原先会「重拉入口卡」，但 loadInitialCards / welcomeCardKind / initialCardsRequestedAt
+  //   在改版时已经删掉了，只留下这行引用，onShow 一进就抛 ReferenceError。）
 }
 
 /**
@@ -321,6 +321,11 @@ const guideStepSheetHeight = ref(0);
  * 按 id 定位到最新一轮，避免新一轮的卡被算到第一张卡的位置上。
  */
 const guideStepCardStepId = ref("");
+/**
+ * 多步骤卡改为气泡内联展示（标题 + 进度 + 步骤标题 + 讲解 + 确认问题 + A/B/C 选项），
+ * 不再弹底部白板。需要回退到白板时把这里改成 false。
+ */
+const INLINE_STEP_CARD = true;
 /** 核对卡要顶到对话区顶部还缺的底部间距（px，由消息列表量出来） */
 const guideStepCardSpace = ref(0);
 
@@ -443,7 +448,8 @@ function onGuideStepOpen(payload: GuideStepPayload, auto = false) {
 /** 真正打开步骤卡白板（自动 / 手动共用） */
 function openGuideStepSheet(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
-  guideStepSheetVisible.value = true;
+  // 内联卡片模式：卡片就在对话里，只定位到第一步，不弹白板
+  if (!INLINE_STEP_CARD) guideStepSheetVisible.value = true;
   // 这一轮的核对卡：按本轮第一步定位（每轮回答各带一张自己的卡）
   guideStepCardStepId.value = String(payload?.steps?.[0]?.id || "");
   // 步骤卡弹出：把这一步的核对卡滚到对话区顶部
@@ -525,6 +531,39 @@ function onGuideStepChange(step: GuideStepItem | null) {
   nextTick(() => focusGuideStepCardAtTop());
 }
 
+/** 按 step_id 取这一轮的步骤：先看本页缓存的卡，取不到再从消息里的 guide-step 块反查 */
+function resolveGuideSteps(stepId: string): GuideStepItem[] {
+  const id = String(stepId || "").trim();
+  const local = (guideStepPayload.value?.steps || []) as GuideStepItem[];
+  if (local.some(step => String(step?.id || "") === id)) return local;
+  for (let index = chatStore.messages.length - 1; index >= 0; index -= 1) {
+    const blocks = chatStore.messages[index]?.blocks || [];
+    for (const block of blocks) {
+      if (block?.type !== "guide-step") continue;
+      const steps = Array.isArray(block.payload?.steps) ? block.payload.steps as GuideStepItem[] : [];
+      if (!id || steps.some(step => String(step?.id || "") === id)) return steps;
+    }
+  }
+  return [];
+}
+
+/**
+ * 点卡片里的 A（确认学会，下一步）：只把对话里这张卡切到下一步，不发对话。
+ * 卡片是气泡内联的（不再弹白板），所以这里只更新「当前展示哪一步」。
+ */
+function onGuideCheckStepSelect(event: GuideStepSelectEvent) {
+  const target = Math.max(1, Math.round(Number(event?.index) || 1));
+  const steps = resolveGuideSteps(event?.stepId || "");
+  if (!steps.length) return;
+  const index = Math.min(target, steps.length) - 1;
+  const nextStepId = String(steps[index]?.id || event?.stepId || "");
+  // 真换了步骤才停旧语音：新一步的卡挂载后会按翻页标记接着播（见 GuideCheckBlock 的 onMounted）；
+  // 目标步和当前步是同一个时卡不会重挂载，停了就再也起不来，所以这里保持原语音
+  if (nextStepId && nextStepId !== String(guideStepCardStepId.value || "")) realtimeTts.stop();
+  guideStepCardStepId.value = nextStepId;
+  nextTick(() => focusGuideStepCardAtTop());
+}
+
 /**
  * 多轮追问卡（COMPONENT scene=guide / type=suggestion）：options 是并行分支，
  * 点哪一项就把那一项作为下一轮提问发出去（与按顺序推进的步骤卡区分开）。
@@ -590,17 +629,37 @@ function onGanttOpen(payload: GanttViewPayload) {
   // openGanttView 现在会先等 bridge（最多 BRIDGE_WAIT_MS）再分流，异步结果自行兜底，这里不等
   void openGanttView(payload);
 }
-/** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
-function onTtsClick(index: number) {
+/**
+ * 多步骤卡的回答只播当前这一步；翻页后换了步骤要念新的一步。
+ * 只认属于这条消息的核对卡：一个对话里有多轮步骤条时，页面级的「当前步」可能是别的一轮停留的步骤，
+ * 直接拿来用会把这条消息念成另一轮的内容。
+ */
+function resolveActiveStepId(msg: UiChatMessage | undefined) {
+  const cards = (msg?.blocks || []).filter(block => block?.type === "guide-check");
+  if (!cards.length) return "";
+  const current = String(guideStepCardStepId.value || "");
+  if (current && cards.some(card => String(card.payload?.step_id || "") === current)) return current;
+  return String(cards[0]?.payload?.step_id || "");
+}
+
+/**
+ * 播报入口：新生成消息走实时 TTS，历史消息播已合成的整段语音。
+ * `textOverride` 是「要念的文本不在消息正文里」时的覆盖文案（步骤小结 step_summary）。
+ */
+function onTtsClick(index: number, textOverride = "") {
   const msg = chatStore.messages[index];
   const messageId = msg?.messageId;
   if (messageId == null || msg?.sessionId == null) return;
+  // 小结这类「要念的文本不在消息正文里」的播报用独立判重键，免得和步骤播报互相停
+  const stepId = textOverride ? "summary" : resolveActiveStepId(msg);
 
-  if (realtimeTts.playingMessageId.value === messageId) {
+  const sameRealtimeTarget = realtimeTts.playingMessageId.value === messageId
+    && String(realtimeTts.playingStepId.value || "") === stepId;
+  if (sameRealtimeTarget) {
     realtimeTts.stop();
     return;
   }
-  if (historyTtsMessageId.value === messageId) {
+  if (historyTtsMessageId.value === messageId && !stepId) {
     stopHistoryTts();
     return;
   }
@@ -608,7 +667,7 @@ function onTtsClick(index: number) {
   realtimeTts.stop();
   stopHistoryTts();
   if (msg.ttsPlaybackMode === "realtime") {
-    void realtimeTts.togglePlay(msg);
+    void realtimeTts.togglePlay(msg, stepId, textOverride);
     return;
   }
   void onHistoryTtsClick(index);
@@ -961,6 +1020,7 @@ onUnload(() => {
         :bottom-inset="messageBottomInset"
         :step-card-step-id="guideStepCardStepId"
         :pin-step-card="guideStepSheetVisible"
+        :compact-guide-card="true"
         @card-space-change="onGuideStepCardSpaceChange"
         @content-grow="chatStore.scrollToBottom()"
         :awakening="userStore.awakeningPrompt"
@@ -971,10 +1031,13 @@ onUnload(() => {
         @quick-prompt="onTaskQuickPrompt"
         @suggestion-tap="onTaskSuggestionTap"
         @guide-step-open="onGuideStepOpen"
+        @guide-check-step-select="onGuideCheckStepSelect"
+        @step-card-ready="focusGuideStepCardAtTop"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @ask-slot-open="onAskSlotOpen"
         @gantt-open="onGanttOpen"
         @tts-click="onTtsClick"
+        @tts-stop="stopSceneTts"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
         @copy-click="onCopyMessage"

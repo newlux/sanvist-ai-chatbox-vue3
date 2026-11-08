@@ -905,7 +905,7 @@ export function setNativeTitle(title: string) {
  * 方向判定放在业务侧（utils/gantt-offline），这里只透传。
  */
 export interface OpenH5ContainerParams {
-  appId: string;
+  appid: string;
   path: string;
   landscape?: boolean;
   fullscreen?: boolean;

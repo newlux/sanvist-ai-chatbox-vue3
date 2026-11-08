@@ -6,7 +6,6 @@ import type {
   GanttViewPayload,
   GuideStepPayload,
   GuideStepSelectEvent,
-  GuideSuggestionPayload,
 } from "@/api/chat/types";
 import AnswerBlock from "./blocks/AnswerBlock.vue";
 import AskSlotBlock from "./blocks/AskSlotBlock.vue";
@@ -16,6 +15,7 @@ import ErrorBlock from "./blocks/ErrorBlock.vue";
 import GanttBlock from "./blocks/GanttBlock.vue";
 import GuideCheckBlock from "./blocks/GuideCheckBlock.vue";
 import GuideImageBlock from "./blocks/GuideImageBlock.vue";
+import GuideLeadBlock from "./blocks/GuideLeadBlock.vue";
 import GuideSourceBlock from "./blocks/GuideSourceBlock.vue";
 import GuideStepBlock from "./blocks/GuideStepBlock.vue";
 import GuideSuggestionBlock from "./blocks/GuideSuggestionBlock.vue";
@@ -62,6 +62,11 @@ defineProps({
     type: Boolean,
     default: true,
   },
+  /** 核对卡精简版：不画动作区、状态行、参考来源（作业协同 / 作业指导页用） */
+  compactGuideCard: {
+    type: Boolean,
+    default: false,
+  },
   /** 播报状态（由消息列表按这一轮消息透传，卡片只负责画图标） */
   ttsEnabled: {
     type: Boolean,
@@ -91,8 +96,9 @@ const emit = defineEmits([
   "ask-slot-pick",
   "assistant-navigation-open",
   "guide-step-open",
-  "guide-suggestion-open",
   "guide-check-step-select",
+  "guide-check-finish",
+  "card-ready",
   "gantt-open",
   "tts-click",
   "copy-click",
@@ -126,13 +132,19 @@ function onGuideStepOpen(payload: GuideStepPayload, auto = false) {
   emit("guide-step-open", payload, auto);
 }
 
-function onGuideSuggestionOpen(payload: GuideSuggestionPayload, auto = false) {
-  emit("guide-suggestion-open", payload, auto);
-}
-
 /** 点核对卡步骤条某一段：把步数（1 起）+ step_id 继续往上抛，由页面切步骤并打开底部白板 */
 function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   emit("guide-check-step-select", payload);
+}
+
+/** 最后一步确认完：继续往上抛，由消息列表切到「小结 + 推荐问题」完成态 */
+function onGuideCheckFinish() {
+  emit("guide-check-finish");
+}
+
+/** 核对卡挂载完成：继续往上抛，页面据此把这张卡滚到对话区顶部 */
+function onGuideCheckReady() {
+  emit("card-ready");
 }
 
 /** 核对卡动作区：播报 / 复制 / 分享都由页面复用现成能力，这里只透传 */
@@ -186,11 +198,18 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     @open="onAssistantNavigationOpen"
   />
   <GuideStepBlock v-else-if="block.type === 'guide-step'" :payload="block.payload" @open="onGuideStepOpen" />
+  <!-- 开场引导卡（scene=guide / type=lead）：一段开场白 + 一轮单选，点选项直接发出 -->
+  <GuideLeadBlock
+    v-else-if="block.type === 'guide-lead'"
+    :payload="block.payload"
+    @pick="onSuggestionTap"
+  />
   <!-- 多轮追问卡：与步骤卡分开渲染（并行分支 vs 按序推进） -->
+  <!-- 追问卡：内容就地渲染，点选项当作用户提问发出去（不再弹底部白板） -->
   <GuideSuggestionBlock
     v-else-if="block.type === 'guide-suggestion'"
     :payload="block.payload"
-    @open="onGuideSuggestionOpen"
+    @pick="onSuggestionTap"
   />
   <!-- id 落在根节点上：步骤卡片翻页时按它做 scroll-into-view 定位 -->
   <GuideCheckBlock
@@ -198,10 +217,14 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     :id="domId || block.id"
     :payload="block.payload"
     :show-actions="showCardActions"
+    :compact="compactGuideCard"
     :tts-enabled="ttsEnabled"
     :tts-loading="ttsLoading"
     :tts-playing="ttsPlaying"
     @select-step="onGuideCheckStepSelect"
+    @finish="onGuideCheckFinish"
+    @card-ready="onGuideCheckReady"
+    @pick="onSuggestionTap"
     @tts-click="onGuideCheckTts"
     @copy-click="onGuideCheckCopy"
     @share-click="onGuideCheckShare"
