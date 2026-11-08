@@ -5,5 +5,6 @@ export default store;
 
 export * from "./modules/chat";
 export * from "./modules/session";
+export * from "./modules/settings";
 export * from "./modules/system";
 export * from "./modules/user";

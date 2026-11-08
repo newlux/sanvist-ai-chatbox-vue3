@@ -2,7 +2,7 @@
 import { onLaunch } from "@dcloudio/uni-app";
 import { watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useSystemStore, useUserStore } from "@/stores";
+import { useSettingsStore, useSystemStore, useUserStore } from "@/stores";
 import { setupDebugConsole } from "@/utils/debug-console";
 import { isEmbeddedInIframe, isSanvistPcEmbedded, notifyParentReady, resolveFromParam } from "@/utils/iframe";
 import { isWebEnvironment, warmPhoneInfo } from "@/utils/landscape-device";
@@ -32,6 +32,7 @@ interface LaunchOptions {
 const { t } = useI18n();
 const systemStore = useSystemStore();
 const userStore = useUserStore();
+const settingsStore = useSettingsStore();
 
 /**
  * 驻场身份 → 请求头 `Guest-Role` 的唯一同步点。
@@ -283,6 +284,10 @@ onLaunch(async (options) => {
   void systemStore.syncSystemColorScheme();
   // 语言只有一个入口：i18n 全局 locale 与 header 的 Lang 一起写
   await systemStore.setLanguage(baseInfo.lang);
+  // 系统设置（接口文档 4.5 GET /settings）：进应用拉一次全量，
+  // 语言 / 外观 / 记忆 / 纯净模式 / 对话 / 音色 / 语速各落到自己的归属地（见 stores/modules/settings.ts）。
+  // 不 await：拉不到就用宿主注入的语言与本地默认值，不能阻塞首屏
+  void settingsStore.load();
   watchLateStartupParams();
   await systemStore.initPhoneSizesInfo();
   initializeDeviceInfo();

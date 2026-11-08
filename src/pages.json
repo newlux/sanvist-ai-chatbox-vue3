@@ -193,6 +193,18 @@
         "disableScroll": true,
         "pageOrientation": "landscape"
       }
+    },
+    {
+      "path": "pages/sound-settings/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "",
+        "transparentTitle": "always",
+        "allowsBounceVertical": "NO",
+        "enablePullDownRefresh": false,
+        "disableScroll": true
+      }
     }
   ],
   "globalStyle": {

@@ -3,12 +3,12 @@ import { useI18n } from "vue-i18n";
 import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete.svg";
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
-import listenLogoGif from "@/assets/img/listen.gif";
+import listenDarkGif from "@/assets/img/listen-dark.gif";
+import listenLightGif from "@/assets/img/listen-light.gif";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import saniLogoSmGif from "@/assets/img/sani-logo-sm.gif";
 import tellDarkGif from "@/assets/img/tell-dark.gif";
 import tellLightGif from "@/assets/img/tell-light.gif";
-import tellLogoGif from "@/assets/img/tell.gif";
 import thinkLogoGif from "@/assets/img/think.gif";
 import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
@@ -118,24 +118,31 @@ const recording = computed(() => props.voiceListening);
  *   空闲            → sani-logo-sm.gif（常驻底层；96×85，与旧常态图 300×267 同比例同裁切）
  *   正在思考        → think.gif
  *   正在回答 / 自动播报 → tell 主题动图（深色 tell-dark.gif / 浅色 tell-light.gif）
- *   录音中          → tell.gif
- * 优先级：录音 > 回答/播报 > 思考 > 从初始页飞入那一段，同一时刻只亮一层。
+ *   语音输入（点击说话 → 录音中）→ listen 主题动图（深色 listen-dark.gif / 浅色 listen-light.gif）
+ * 优先级：语音输入 > 回答/播报 > 思考 > 从初始页飞入那一段，同一时刻只亮一层。
  */
 const answeringGifOn = computed(() => !recording.value && telling.value);
 const thinkingGifOn = computed(() => !recording.value && !answeringGifOn.value && thinking.value);
 /**
- * 回答中 / 自动播报用的 tell 素材按主题取：深色 tell-dark.gif（纯黑底），浅色 tell-light.gif。
+ * 回答中 / 自动播报用的 tell 素材按主题取：深色 tell-dark.gif，浅色 tell-light.gif。
  * 跟着 darkPlain 走而不是裸 systemStore.isDark —— 素材自带的底色必须和头部实际底色一致，
  * 否则非首页对话页（浅色头部）在深色系统下会顶出一块黑色方块。
  */
 const tellPlayingGif = computed(() => (darkPlain.value ? tellDarkGif : tellLightGif));
-/** 从初始页飞入那一段仍走 listen.gif，落位时是同一张图在延续；有状态时让位给状态图 */
+/**
+ * 语音输入整段（点击说话起飞 → 录音中 → 松手结束）用 listen 主题素材，
+ * 同样是 1000×1000 不透明画布，主题必须跟头部底色一致，规则同 tellPlayingGif。
+ */
+const listeningThemeGif = computed(() => (darkPlain.value ? listenDarkGif : listenLightGif));
+/** 从初始页飞入那一段（落位时是同一张图在延续）；有状态时让位给状态图 */
 const listeningGifOn = computed(
   () => !answeringGifOn.value && !recording.value && !thinkingGifOn.value && props.listenIdle,
 );
+/** 语音输入层：录音中与飞入段共用同一张 listen 主题图 */
+const listenSayGifOn = computed(() => recording.value || listeningGifOn.value);
 /** 有任意状态图亮着：底层常驻图淡出 */
 const islandAnyGifOn = computed(
-  () => recording.value || answeringGifOn.value || thinkingGifOn.value || listeningGifOn.value,
+  () => listenSayGifOn.value || answeringGifOn.value || thinkingGifOn.value,
 );
 
 const logger = createLogger("chat-header");
@@ -655,18 +662,21 @@ onBeforeUnmount(() => {
                 @mouseup="clearIslandPressTimer"
                 @mouseleave="clearIslandPressTimer"
               />
-              <!-- 从初始页飞进来的那一小段走这层 listen.gif（listen-idle），落位时是同一张图在延续，
-                   淡入 + 由 2.36 缓升到 2.49 倍（换算见 --listen 的样式注释）；
-                   「回答中 / 自动播报」已交给下面的 tell 主题层，这层只负责飞入那一段；
+              <!-- 语音输入整段（点击说话起飞 → 录音中 → 松手结束）：listen 主题动图，
+                   深色 listen-dark.gif / 浅色 listen-light.gif，1000×1000 不透明画布，
+                   深色靠 screen + 径向遮罩把自带底色融进头部，浅色底 #FCFCFF 与头部白底对齐；
                    纯展示层，不吃触摸，避免抢走长按回首页的手势 -->
               <image
-                class="chat-header__island-logo chat-header__island-logo--listen"
-                :class="{ 'chat-header__island-logo--listen-on': listeningGifOn }"
-                :src="listenLogoGif"
+                class="chat-header__island-logo chat-header__island-logo--listen-say"
+                :class="{
+                  'chat-header__island-logo--listen-say-on': listenSayGifOn,
+                  'chat-header__island-logo--listen-say-screen': darkPlain,
+                }"
+                :src="listeningThemeGif"
                 mode="aspectFit"
               />
               <!-- 回答中 / 语音播报：tell 主题动图（1000×1000 画布、图形居中，
-                   深色 tell-dark.gif 纯黑底用 screen 融进头部底色，浅色 tell-light.gif 近白底与页面对齐） -->
+                   深色 tell-dark.gif 用 screen 融进头部底色，浅色 tell-light.gif 近白底与页面对齐） -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--tell-play"
                 :class="{
@@ -682,13 +692,6 @@ onBeforeUnmount(() => {
                 :class="{ 'chat-header__island-logo--think-on': thinkingGifOn }"
                 :src="thinkLogoGif"
                 mode="aspectFill"
-              />
-              <!-- tell.gif：录音中（按住说话 / 点击说话） -->
-              <image
-                class="chat-header__island-logo chat-header__island-logo--tell"
-                :class="{ 'chat-header__island-logo--tell-on': recording }"
-                :src="tellLogoGif"
-                mode="aspectFit"
               />
             </view>
           </view>
@@ -1250,32 +1253,34 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-/* 从初始页飞入那一段的 listen.gif：500×500 画布，图案（三角）只占中间 201×172，四周是透明留白；
-   sani-logo-sm.gif 是 96×85 已裁到图案边界，所以同一尺寸的盒子里图案会小一半多，
-   按「图案宽度对齐原图」换算：
-   1) 124rpx 的盒子 aspectFit 后图案宽 = 124 × 201/500 ≈ 49.9rpx，要撑到 124rpx → 放大 2.49 倍；
-   2) 图案中心在画布上偏左上（cx 247 / cy 246.5~247，画布 250），放大后右移、下移各约 2rpx 复位；
-   3) drop-shadow 会被 transform 一起放大，这里按 1/2.49 折回去，保证投影仍是 0 3px 9px rgba(0,0,0,.14)。
-   过渡：与常态图交叉溶解 —— 起始 2.36 倍 / 全透明，命中后淡入并缓升到 2.49 倍。 */
-.chat-header__island-logo--listen,
-.chat-header__island-logo--tell {
+/* 语音输入整段（点击说话起飞 → 录音中 → 松手结束）：listen-dark.gif / listen-light.gif。
+   素材与 tell 主题同一规格 —— 1000×1000 画布、三角居中约占 45%~55%，按占比折回 2.1~2.2；
+   整幅带底色（深色 rgb(36,36,0) 一类深蓝黑、浅色 #FCFCFF），投影会沿方形盒子铺成方块，所以不加 drop-shadow；
+   深色靠 screen 融进头部底色，两者都再用径向遮罩把画布四角羽化掉，避免露出方形边界。
+   过渡：与常态图交叉溶解 —— 起始 2.1 倍 / 全透明，命中后淡入并缓升到 2.2 倍。 */
+.chat-header__island-logo--listen-say {
   z-index: 2;
   opacity: 0;
   pointer-events: none;
-  transform: translate(2rpx, 2rpx) scale(2.36);
-  filter: drop-shadow(0 2.4rpx 7.2rpx rgba(0, 0, 0, 0.14));
+  transform: translate(2rpx, 2rpx) scale(2.1);
+  filter: none;
+  -webkit-mask-image: radial-gradient(closest-side, #000 62%, transparent 98%);
+  mask-image: radial-gradient(closest-side, #000 62%, transparent 98%);
   transition:
     opacity 0.22s cubic-bezier(0.22, 0.61, 0.36, 1),
     transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.chat-header__island-logo--listen-on,
-.chat-header__island-logo--tell-on {
+.chat-header__island-logo--listen-say-on {
   opacity: 1;
-  transform: translate(2rpx, 2rpx) scale(2.49);
+  transform: translate(2rpx, 2rpx) scale(2.2);
   transition:
     opacity 0.34s cubic-bezier(0.22, 0.61, 0.36, 1),
     transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.chat-header__island-logo--listen-say-screen {
+  mix-blend-mode: screen;
 }
 
 /* 回答中 / 自动播报：tell-dark.gif（深色）/ tell-light.gif（浅色），画布 1000×1000、图形居中。

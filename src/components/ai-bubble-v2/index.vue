@@ -2,7 +2,7 @@
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
-import { computed, nextTick, provide, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
@@ -94,13 +94,6 @@ const emit = defineEmits([
  * 未 provide 的场景（听播 / 报告 / 分享海报）自动回落浅色稿。
  */
 provide("ai-bubble-dark", computed(() => props.dark));
-
-/** 工作流结束事件的 elapsed_time 已在流层换算为毫秒；展示时统一转换为秒。 */
-const durationSeconds = computed(() => {
-  const milliseconds = Number(props.durationMs);
-  if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;
-  return (milliseconds / 1000).toFixed(2).replace(/\.00$/, "");
-});
 
 async function copyText(text) {
   const value = String(text || "").trim();
@@ -300,23 +293,75 @@ const showWaiting = computed(
 
 /**
  * 过程状态行文案随当前语言切换（英文界面下不再出现中文）：
- * 固定状态走 i18n，`status.title` 是后端下发的工作流节点名，原样保留。
+ * 进行中不再显示后端下发的节点名（如「调用运营助手...」），与完成态统一成品牌署名 SANI，
+ * 前面由模板配 sani 图标（26×26）；只有失败 / 停止保留提示文案。
  */
 const processStatusText = computed(() => {
   const status = props.processStatus as { phase?: string; title?: string } | null;
   if (!status) return "";
-  // 完成态不再显示「已完成」：改为品牌署名 SANI，前面由模板配 sani 图标（26×26）
-  if (status.phase === "succeeded") return "SANI";
   if (status.phase === "failed") return t("process-status-failed");
   if (status.phase === "stopped") return t("process-status-stopped");
-  return status.title ? `${status.title}...` : t("process-status-thinking");
+  return "SANI";
 });
 
-const showProcessStatus = computed(() => !isUser.value && Boolean(processStatusText.value));
+/** 带 sani 图标的品牌行：进行中与完成态都显示，失败 / 停止只用文字 */
+const showBrandStatus = computed(() => {
+  const phase = props.processStatus?.phase;
+  return phase !== "failed" && phase !== "stopped";
+});
+
+/** 是否还在生成（首包前 processStatus 可能为空，用 loading 兜底） */
+const isGenerating = computed(() => {
+  const phase = props.processStatus?.phase;
+  if (phase === "succeeded" || phase === "failed" || phase === "stopped") return false;
+  return Boolean(props.loading) || phase === "thinking" || phase === "running";
+});
+
+/**
+ * 生成中实时秒数：后端只在工作流结束时才下发耗时，所以这里本地计时。
+ * 一旦「可以播报」（ttsEnabled 为 true）就收掉，位置让给 SANI 后面的语音图标。
+ */
+const elapsedSeconds = ref(0);
+const showElapsed = computed(() => isGenerating.value && !props.ttsEnabled);
+const elapsedText = computed(() => (showElapsed.value ? `${elapsedSeconds.value}S` : ""));
+
+let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+let elapsedBase = 0;
+
+function stopElapsedTimer() {
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
+}
+
+function startElapsedTimer() {
+  if (elapsedTimer) return;
+  elapsedBase = Date.now();
+  // 直接从 1S 起表，避免出现「0S」
+  elapsedSeconds.value = Math.max(1, elapsedSeconds.value);
+  elapsedTimer = setInterval(() => {
+    elapsedSeconds.value = Math.max(1, Math.round((Date.now() - elapsedBase) / 1000));
+  }, 500);
+}
+
+watch(
+  showElapsed,
+  (visible) => {
+    if (visible) startElapsedTimer();
+    else stopElapsedTimer();
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(stopElapsedTimer);
+
+const showProcessStatus = computed(
+  () => !isUser.value && (Boolean(processStatusText.value) || isGenerating.value),
+);
 const hasProcessContent = computed(() => Boolean(contentBlocks.value.length || props.content));
 const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(props.processSubtitle?.trim()));
 
- 
 /** 维修助手回流卡：轮询中显示「故障诊断中…」，回流完成后展示摘要详情。 */
 const showAssistantCallbackResult = computed(
   () => Boolean(props.assistantCallbackTitle) && !props.loading && !props.interrupted,
@@ -557,9 +602,9 @@ function onTtsTap() {
             },
           ]"
         >
-          <!-- 完成态品牌署名：sani 图标 26×26（52rpx）+ 文案 SANI，替代原来的「✓ 已完成」 -->
+          <!-- 品牌署名：sani 图标 26×26（52rpx）+ 文案 SANI，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
           <image
-            v-if="props.processStatus?.phase === 'succeeded'"
+            v-if="showBrandStatus"
             class="ai-bubble-v2__process-icon-img"
             :src="saniIcon"
             mode="aspectFit"
@@ -567,7 +612,11 @@ function onTtsTap() {
           <text class="ai-bubble-v2__process-text">
             {{ processStatusText }}
           </text>
-          <!-- 语音播报按钮：从底部操作栏上移到 SANI 后面，完成态且允许操作时才可点 -->
+          <!-- 生成中实时秒数（单位 S），紧跟 SANI；可以播报后自动消失，位置让给语音图标 -->
+          <text v-if="elapsedText" class="ai-bubble-v2__process-elapsed">
+            {{ elapsedText }}
+          </text>
+          <!-- 语音播报按钮：SANI 后面常显（拉流 → spinner，播放 → 声波起伏，其余 → 静态语音图标） -->
           <view
             v-if="props.processStatus?.phase === 'succeeded' && props.showActions && props.ttsEnabled"
             class="ai-bubble-v2__action-btn ai-bubble-v2__process-tts"
@@ -585,9 +634,6 @@ function onTtsTap() {
             </view>
             <image v-else :src="iconRadioOn" mode="aspectFit" class="ai-bubble-v2__action-icon" />
           </view>
-          <!-- <text v-if="durationSeconds != null && props.processStatus?.phase === 'succeeded'" class="ai-bubble-v2__process-duration">
-            {{ t("process-duration", { seconds: durationSeconds }) }}
-          </text> -->
         </view>
         <view
           v-if="showProcessSubtitle && !props.assistantCallbackTitle"
@@ -1142,6 +1188,14 @@ function onTtsTap() {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 生成中实时秒数：紧跟 SANI（不推到右侧），11px / #8F8F8F，可以播报后整段消失 */
+.ai-bubble-v2__process-elapsed {
+  flex-shrink: 0;
+  color: #8f8f8f;
+  font-size: 22rpx;
+  line-height: 36rpx;
   white-space: nowrap;
 }
 .ai-bubble-v2__process-status--thinking .ai-bubble-v2__process-text {

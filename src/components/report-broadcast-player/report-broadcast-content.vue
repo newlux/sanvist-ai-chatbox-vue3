@@ -251,7 +251,8 @@ onBeforeUnmount(() => {
       <view class="report-broadcast-content__glow report-broadcast-content__glow--red" />
       <!-- 左右声波已去掉（深色稿同步移除，浅色稿本就没有）：头像位只剩图形本体 -->
       <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 tell 动图，按主题取素材：
-           深色 → tell-dark.gif（自带纯黑底），浅色 → tell-light.gif（自带 #FCFCFF 底） -->
+           深色 → tell-dark.gif，浅色 → tell-light.gif；两张都是 1000×1000 的不透明画布，
+           深色版四角底色实测是 rgb(36,36,0) / rgb(0,0,85) 这类深蓝黑，不是注释里原先写的纯黑 -->
       <view class="report-broadcast-content__portrait-wrap">
         <image
           class="report-broadcast-content__portrait"
@@ -691,10 +692,15 @@ onBeforeUnmount(() => {
    - 答案卡 1193:3413：底 #1A1A1A + 1px #303030 描边，正文 #FFFFFF；标题 #FFFFFF、过程说明 #8F8F8F
    - 骨架屏：浅色 #F2F3F5→#E5E7EB 的流光换成 #212121→#303030 */
 .report-broadcast-content--dark {
-  /* 头像位用 tell-dark.gif：素材自带纯黑（#000000）底，页面是 #0D0D0D，
-     直接铺会露出一块方形黑底。screen 叠加让纯黑完全融进页面，只剩发光图形 */
+  /* 头像位用 tell-dark.gif：1000×1000 不透明画布，四角底色是 rgb(36,36,0) / rgb(0,0,85) 这类深蓝黑，
+     而页面是 #0D0D0D —— 单靠 screen 只能吃掉纯黑，这类深蓝黑叠上去仍比页面亮一档（≈ #2F2F5E），
+     于是深色页上会露出一块方形色差。双管齐下：
+     ① screen：让暗部整体贴近页面底色；
+     ② 径向遮罩：把画布四周羽化到透明，方形边界彻底消失，只留中间的图形与辉光 */
   .report-broadcast-content__portrait {
     mix-blend-mode: screen;
+    -webkit-mask-image: radial-gradient(closest-side, #000 62%, transparent 98%);
+    mask-image: radial-gradient(closest-side, #000 62%, transparent 98%);
   }
 
   .report-broadcast-content__glow--blue {

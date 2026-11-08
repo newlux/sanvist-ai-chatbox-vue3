@@ -3,6 +3,7 @@ import type { ReportInsightItem } from "@/hooks/useReportInsights";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import activeLightningIcon from "@/assets/img/report-broadcast/insight-lightning-active.svg";
+import podcastLogo from "@/assets/img/podcast-logo.png";
 import defaultLightningIcon from "@/assets/img/report-broadcast/insight-lightning-default.svg";
 import operatorNextIcon from "@/assets/img/report-broadcast/insight-operator-next.svg";
 import closeIcon from "@/assets/img/voice-assistant/voice-back.svg";
@@ -28,8 +29,8 @@ const props = withDefaults(defineProps<{
   animated?: boolean;
   /**
    * 当前激活音色的主视觉头像（hero 大图）。
-   * 收敛页与播报页用同一份来源：宿主进页已经从 preference / finishHistory / finishDefault 三路对齐过，
-   * 这里再读一次 storage 会因为播报期从未 saveReportVoice 而取不到，所以直接由宿主传入。
+   * 收敛页头像位已改用品牌三角静态图 header-status-logo.png，此 props 暂不再渲染，
+   * 保留仅为宿主传参兼容（播报页仍在用）。
    */
   portrait?: string;
 }>(), {
@@ -65,7 +66,6 @@ const { t } = useI18n();
  */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
-const voicePortrait = computed(() => props.portrait);
 /**
  * 重播角标里的三角描边渐变：
  * 浅色稿 309:3319 用品牌渐变 #3D21CD → #1999FE → #C067FA → #FD90C4；
@@ -117,7 +117,8 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
     <!-- 设计稿 2582:862、2582:798、2582:867、2582:786：汇报结束摘要 -->
     <view class="report-insight__summary">
       <view class="report-insight__portrait">
-        <image v-if="voicePortrait" class="report-insight__portrait-image" :src="voicePortrait" mode="aspectFill" />
+        <!-- 头像位改用品牌三角静态图（icon-sani.png）：与头部胶囊里的图标同源 -->
+        <image class="report-insight__portrait-image" :src="podcastLogo" mode="aspectFit" />
       </view>
       <view class="report-insight__summary-copy">
         <view class="report-insight__headlines">
@@ -409,7 +410,7 @@ const urgentToastStyle = computed(() => ({ bottom: `${safeBottomPx.value + 121}p
   border: 2rpx solid #EAEAEA;
   border-radius: 50%;
   box-sizing: border-box;
-  background: #F4F4F4;
+  // background: #F4F4F4;
   transform-origin: top left;
   animation: report-insight-portrait-morph 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
