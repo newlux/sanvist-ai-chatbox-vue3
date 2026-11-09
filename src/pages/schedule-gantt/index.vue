@@ -57,14 +57,12 @@ defineOptions({ name: "ScheduleGanttPage" });
 const { rotated, exitLandscape } = useLandscape(measureLayout);
 
 /**
- * 返回图标要不要顺时针补 90°。
+ * 返回图标要不要顺时针补 90°：改由 CSS `@media (orientation: portrait)` 直接按可视区判定（见样式）。
  *
- * 图标本体画的是「托盘 + 向上箭头」，设计稿里是横置的（箭头朝右），所以竖着看时必须补 90°：
- * - 网页版（浏览器 / PC 内嵌）：版面永远不转，一律要补；
- * - 容器内只有 CSS 旋转模拟横屏（设备竖着拿、页面整体转了 90°）时才要补；
- *   宿主原生转屏成功、天猫精灵智慧屏 / 酷开大屏这类横屏画布机型，版面本身已经是横的，补了反而歪 90°。
+ * 图标本体画的是「托盘 + 向上箭头」，设计稿里是横置的（箭头朝右），竖屏版面上必须补 90°。
+ * 不用脚本算是因为方向来源有几种（原生横屏容器 / CSS 旋转兜底 / 智慧屏这类横屏画布机型
+ * 现在按竖屏容器打开），统一的判据其实就是「可视区是不是竖的」。
  */
-const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
 
 /**
  * 顶部状态栏空白：宿主全屏横屏时 webview 铺满屏幕、状态栏压在页面顶边，
@@ -206,8 +204,13 @@ function onTimelineScroll(event: { detail?: { scrollLeft?: number } }) {
 
 /**
  * 双指捏合 → 时间轴缩放（只改「每小时像素宽」，纵向行高不变）。
+ * 缩放距离由 hooks/useScheduleGestures 用两指几何直线距离算出（不区分屏幕朝向）。
  * 捏合中心对应的时刻保持不动：先记下中心的内容坐标 contentX 与可视区偏移 localX，
  * 缩放后再把 contentX × 比例 − localX 滚回去，视觉上就是「以手指为中心放大」。
+ *
+ * 注意：滚动必须走 nextTick，不能在 touchmove 事件栈里同步改 scrollLeft / 内容宽度——
+ * 事件栈内的程序滚动会让 WebView 判定手势被接管而发 touchcancel，捏合第一帧就中断
+ * （表现为「跨度很大但只缩了一点点、且不连续」）。nextTick 是微任务，渲染前完成，无可见延迟。
  */
 function onTimelinePinch({ scale, contentX, localX }: SchedulePinchEvent) {
   const prev = hourWidth.value;
@@ -709,7 +712,6 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
     :class="{
       'schedule--rotated': rotated,
       'schedule--leaving': leaving,
-      'schedule--exit-rotate': exitIconRotated,
       'schedule--dark': isDark,
     }"
     :style="{ transformOrigin: leaveOrigin }"
@@ -868,7 +870,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
     <ScheduleAskBar :dark="isDark" :rotated="rotated" @send="onAskSend" />
 
     <!-- 任务详情面板（横屏右侧，点击任务条滑出，稿子 6832:292） -->
-    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" :rotated="rotated"/>
+    <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" :rotated="rotated" :dark="isDark" />
   </view>
 </template>
 
@@ -1022,10 +1024,14 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   height: 14px;
 }
 
-/* 补 90°（页面没转的场景）：见脚本里的 exitIconRotated。
+/* 补 90°：图标本体是横置的（箭头朝右），竖屏版面上要转正。
+   直接按可视区方向判，覆盖三种来源：CSS 旋转兜底的设备竖着拿、网页版竖屏窗口、
+   本身就是横屏画布但按竖屏容器打开的机型（智慧屏 / 大屏一体机）。
    用 transform 而不是 rotate 独立属性：天猫精灵智慧屏 / 酷开大屏的 WebView 内核较老，不认 `rotate`。 */
-.schedule--exit-rotate .schedule__exit-icon {
-  transform: rotate(90deg);
+@media (orientation: portrait) {
+  .schedule__exit-icon {
+    transform: rotate(90deg);
+  }
 }
 
 .schedule__exit-icon::before {
@@ -1252,6 +1258,8 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 /* 任务条四态（稿子 6832:13）：底 / 描边按状态切换 */
 /* 执行中：#A1B2CA 描边把淡蓝底从白底上拎出来 */
 .schedule__bar--running {
+  /* 执行中：实线描边（其余状态仍是虚线框） */
+  border-style: solid;
   border-color: #a1b2ca;
   background: #ecf5ff;
 }
@@ -1408,25 +1416,27 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   bottom: 0;
   z-index: 3;
   width: 1px;
+  /* 与「+1天」跨天分界统一口径：浅/深色都用 #2F64CF（30% 透明度画虚线） */
   background-image: repeating-linear-gradient(
     to bottom,
-    rgba(17, 102, 214, 0.3) 0,
-    rgba(17, 102, 214, 0.3) 2px,
+    rgba(47, 100, 207, 0.3) 0,
+    rgba(47, 100, 207, 0.3) 2px,
     transparent 2px,
     transparent 4px
   );
   pointer-events: none;
 }
 
-/* 时间胶囊（稿子 1522:680 / 1522:679）：32×14、圆角 7、#1166D6 底、Inter 10/12 白字居中；
-   贴刻度条下沿、以时间线为中心（padding 1×4 让「11:45」24 宽 + 8 = 稿子的 32） */
+/* 时间胶囊（稿子 1522:680 / 1522:679）：32×14、圆角 7、Inter 10/12 白字居中；
+   贴刻度条下沿、以时间线为中心（padding 1×4 让「11:45」24 宽 + 8 = 稿子的 32）；
+   底色跟时间线统一 #2F64CF，白字 */
 .schedule__now-capsule {
   position: absolute;
   top: 2px;
   left: 0;
   padding: 1px 4px;
   border-radius: 7px;
-  background: #1166d6;
+  background: #2f64cf;
   color: #ffffff;
   font-family: Inter, "PingFang SC", sans-serif;
   font-size: 10px;
@@ -1437,7 +1447,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 
 /* ---------- 跨天分界（24:00 / 次日 00:00）：红色细虚线 + 顶部「+1天」 ---------- */
 /* 与当前时间虚线同起点、同长度、同段长（1px、实 2 / 空 2）：从刻度条下沿一直拉到排程区底部；
-   z-index 低于任务条，不挡内容。颜色仍取跨天分界的红 30%，与当前时间线的蓝区分开 */
+   z-index 低于任务条，不挡内容。与当前时间线同色 #2F64CF（30%） */
 .schedule__day-end {
   position: absolute;
   top: 0;
@@ -1446,21 +1456,21 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   width: 1px;
   background-image: repeating-linear-gradient(
     to bottom,
-    rgba(200, 32, 30, 0.3) 0,
-    rgba(200, 32, 30, 0.3) 2px,
+    rgba(47, 100, 207, 0.3) 0,
+    rgba(47, 100, 207, 0.3) 2px,
     transparent 2px,
     transparent 4px
   );
   pointer-events: none;
 }
 
-/* 「+1天」：稿子 6694:277 —— 12px Inter Italic #C8201E、无胶囊底；
+/* 「+1天」：稿子 6694:277 —— 12px Inter Italic、无胶囊底；
    压在线顶并水平居中（刻度条已移到滚动容器外，文案留在排程区内，避免被裁掉上半截） */
 .schedule__day-end-label {
   position: absolute;
   top: 4px;
   left: 0;
-  color: #c8201e;
+  color: #2f64cf;
   font-family: Inter, "PingFang SC", sans-serif;
   font-size: 12px;
   font-style: italic;
@@ -1573,6 +1583,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   }
 
   .schedule__bar--running {
+    border-style: solid;
     border-color: #a1b2ca;
     background: #16283c;
   }

@@ -27,7 +27,7 @@ import { onBeforeUnmount, onMounted } from "vue";
  * 拖到哪跟到哪；拖动越过阈值后吞掉松手补出来的 click，点任务条仍然照常打开详情。
  * 方向映射与触摸共用同一套（旋转模拟横屏时屏幕竖向 = 时间轴）。
  *
- * 每一步都打 `[schedule-gesture]` 日志（debug 关掉即静音），真机上可看：
+ * 双指缩放只打 `[zoom]` 短日志（console.warn，发布包可见），真机上可看：
  * 有没有绑上、方向判定成哪一路、容器尺寸、上限（max）与滚动前后位置。
  */
 /** 双指捏合的一次增量：只需按比例缩放，不做绝对尺寸 */
@@ -49,22 +49,20 @@ export interface ScheduleGesturesOptions {
   rowsInnerSelector?: string;
   /** 左列需要同步平移的元素选择器，默认 `.schedule__side-list` */
   sideSelector?: string;
-  /** 是否打印排查日志，默认 true；排查完传 false 即可 */
+  /** 兼容保留：手势日志已精简为固定的 `[zoom]` 短日志，该开关不再生效 */
   debug?: boolean;
   /** 判定成拖动所需的最小位移（px），默认 6 */
   threshold?: number;
-  /** 页面是否处于 CSS 旋转横屏：决定双指间距与捏合中心映射到时间轴的哪个屏幕轴，默认 false */
+  /**
+   * 时间轴在屏幕上是否沿竖向：CSS 旋转模拟横屏（页面整体转了 90°）时为 true。
+   * 为 true 时双指间距 / 捏合中心 / 拖动增量都改用 clientY，否则用 clientX。
+   */
   isRotated?: () => boolean;
   /**
-   * 触摸事件坐标系是否与页面坐标系互换了 90°（只影响触摸 / 双指手势，鼠标拖动不受影响）。
-   *
-   * 背景：宿主容器给甘特图的「横屏」是把 webview 层旋转后铺到屏幕上的
-   * （viewport 报横屏、页面不做 CSS 旋转），但触摸事件仍按物理竖屏坐标系上报——
-   * 时间轴视觉上沿屏幕竖向（clientY），而页面坐标里它沿横向（clientX）。
-   * 此时手势轴向要按「旋转页」的同一套方式取（间距 / 拖动增量取 clientY）。
-   * 不传时跟随 isRotated（chatbox 主工程行为：CSS 旋转页两轴天然互换）。
+   * 是否只在「内容行区」内才接管双指捏合（默认 false：整块网格都响应）。
+   * 为 true 时，双指落在刻度条 / 空白区不会触发缩放——按 rowsSelector 命中的元素做包含判断。
    */
-  touchAxesSwapped?: () => boolean;
+  pinchOnlyInRows?: boolean;
   /** 双指捏合回调（不传则不接管双指手势）：返回缩放后的目标横向滚动位置（页面维护缩放锚点）；
    *  不返回（或返回 undefined）则本次缩放不改变滚动位置 */
   onPinch?: (event: SchedulePinchEvent) => number | void;
@@ -77,20 +75,21 @@ export interface ScheduleGesturesOptions {
 }
 
 /**
- * 双指间距：只量「时间轴方向」上的投影。
+ * 双指间距 —— 捏合缩放的唯一度量：两指**直线距离**，不投影到某根屏幕轴。
  *
- * 旋转模拟横屏时页面整体转了 90°，时间轴沿屏幕竖向；宿主原生转屏 / 竖屏网页时沿屏幕横向。
- * 不能直接用两指的直线距离 —— 那样在旋转页面里左右开合也会被当成缩放时间轴，
- * 而捏合中心的时间轴坐标几乎不动，表现出来就是「缩放位置乱跳」。
+ * 曾经按「时间轴方向的投影」取间距，斜向张开时只有一部分位移参与计算，
+ * 体感就是不跟手（沿时间轴张开的响应反而最差）。直线距离与手指位移一一对应，
+ * 无论朝哪个方向张开都 1:1 跟随；缩放方向仍是时间轴（页面改每小时像素宽），
+ * 锚点也仍沿时间轴方向取（见 pinchFocus），只是手势度量不再区分屏幕朝向。
  */
-function pinchSpan(touches: TouchList, rotated: boolean) {
+function pinchDistanceOf(touches: TouchList) {
   const [a, b] = [touches[0], touches[1]];
   if (!a || !b) return 0;
-  return Math.abs(rotated ? a.clientY - b.clientY : a.clientX - b.clientX);
+  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
 
-/** 时间轴方向上两指至少要拉开这么多才认作「在捏合时间轴」，
- *  否则垂直于时间轴开合时投影接近 0，缩放比例会乱跳 */
+/** 两指至少要拉开这么多才认作「在捏合」：手指刚落下时距离很小，
+ *  用它当基准会让第一帧的比例失真（画面猛跳一下） */
 const MIN_PINCH_SPAN = 12;
 
 export function useScheduleGestures(options: ScheduleGesturesOptions) {
@@ -98,10 +97,13 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
   const rowsInnerSelector = options.rowsInnerSelector || ".schedule__rows-inner";
   const sideSelector = options.sideSelector || ".schedule__side-list";
   const threshold = options.threshold ?? 6;
-  const debug = options.debug ?? true;
 
-  function log(...args: unknown[]) {
-    if (debug) console.log("[schedule-gesture]", ...args);
+  /**
+   * 缩放排查日志：只保留双指相关的几行，短、单行，用 console.warn 保证
+   * 发布包 / vConsole 都留得住（console.log 在产物里可能被裁掉）。
+   */
+  function zoomLog(...args: unknown[]) {
+    console.warn("[zoom]", ...args);
   }
 
   let cleanup: (() => void) | null = null;
@@ -123,7 +125,6 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
     // #ifdef H5
     const gridRoot = document.getElementById(options.gridId);
     if (!gridRoot) {
-      log("未找到时间轴容器，稍后重试", { gridId: options.gridId });
       return false;
     }
     const grid = resolveScroller(gridRoot, "x");
@@ -136,11 +137,14 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
     const rowsMax = () => Math.max(0, (rowsInner?.scrollHeight || 0) - (rowsBox?.clientHeight || 0));
 
     /**
-     * 手势（触摸 / 双指）用的旋转判定：宿主容器把 webview 层旋转铺屏、触摸坐标仍按
-     * 物理竖屏上报时，两轴等效互换，要按「旋转页」的同一套映射取轴。
-     * 鼠标事件坐标系永远与页面一致，不走这里（见 onMouseDown 用 options.isRotated）。
+     * 时间轴在屏幕上是否竖向：CSS 旋转模拟横屏时为 true。
+     * 捏合间距、捏合锚点、拖动增量全部由它决定，避免多处各判一套导致方向不一致。
      */
-    const gestureRotated = () => options.touchAxesSwapped?.() ?? options.isRotated?.() ?? false;
+    const timelineVertical = () => options.isRotated?.() ?? false;
+
+    /** 缩放区域限制：只认落在内容行区（任务条区域）里的双指 */
+    const pinchAllowed = (event: TouchEvent) =>
+      !options.pinchOnlyInRows || !rowsBox || rowsBox.contains(event.target as Node);
     let rowsOffset = 0;
     /** 平移内容区，并让左列同步（返回实际生效的偏移） */
     const applyRowsOffset = (offset: number) => {
@@ -152,19 +156,6 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       return next;
     };
 
-    log("绑定手势", {
-      gridId: options.gridId,
-      gridIsRoot: grid === gridRoot,
-      gridClientWidth: grid.clientWidth,
-      gridScrollWidth: grid.scrollWidth,
-      rowsBox: rowsBox?.className,
-      rowsBoxClientHeight: rowsBox?.clientHeight,
-      rowsInner: rowsInner?.className,
-      rowsInnerScrollHeight: rowsInner?.scrollHeight,
-      rowsMax: rowsMax(),
-      sideList: sideList?.className,
-    });
-
     let startX = 0;
     let startY = 0;
     let startLeft = 0;
@@ -172,97 +163,103 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
     let axis: "time" | "rows" | null = null;
     /** 本次手势开始时页面是否处于 CSS 旋转（决定屏幕方向与内容方向的映射） */
     let startRotated = false;
-    /** 上一次的双指间距（0 = 当前不在捏合中） */
-    let pinchDistance = 0;
-    /** 本次捏合会话开始时的旋转状态：决定双指间距与捏合中心取屏幕哪个轴（两者必须同一套映射） */
-    let pinchRotated = false;
-    /** 捏合会话的理论横向滚动位置：缩放中用它算中心锚点，避免连续缩放时 DOM 滚动位置尚未生效导致的漂移 */
+    /** 上一次的时间轴方向间距（0 = 当前不在捏合中） */
+    let pinchSpanValue = 0;
+    /** 本次捏合是否沿屏幕竖向取时间轴（开始时定一次，间距与锚点共用同一套映射） */
+    let pinchVertical = false;
+    /** 捏合会话的理论滚动位置：缩放中用它算中心锚点，避免连续缩放时 DOM scrollLeft 尚未生效导致的漂移 */
     let pinchScrollLeft = 0;
     /** 当前是否处于双指捏合会话（用于触发 onPinchStart / onPinchEnd） */
     let pinching = false;
 
     /**
-     * 捏合中心 → 时间轴可视区偏移 / 内容坐标。
-     * 旋转 90° 后屏幕竖向才是时间轴方向（layout x = screen y），所以取中心点的 Y；
-     * 未旋转（宿主真转屏 / 竖屏网页）时直接取 X。两种情况下 rect 的对应边都是可视区左缘。
+     * 捏合中心 → 时间轴可视区偏移 / 内容坐标：与间距取同一根轴。
+     * 竖向时间轴取两指中心的 Y（扣可视区上边），横向取 X（扣可视区左边）。
      */
     const pinchFocus = (touches: TouchList) => {
       const a = touches[0];
       const b = touches[1];
       if (!a || !b) return { localX: 0, contentX: pinchScrollLeft };
-      const centerX = (a.clientX + b.clientX) / 2;
-      const centerY = (a.clientY + b.clientY) / 2;
       const rect = grid.getBoundingClientRect();
-      const raw = pinchRotated ? centerY - rect.top : centerX - rect.left;
-      const localX = Math.min(Math.max(raw, 0), grid.clientWidth);
+      const center = pinchVertical
+        ? (a.clientY + b.clientY) / 2 - rect.top
+        : (a.clientX + b.clientX) / 2 - rect.left;
+      const localX = Math.min(Math.max(center, 0), grid.clientWidth);
       return { localX, contentX: pinchScrollLeft + localX };
     };
 
     const onStart = (event: TouchEvent) => {
-      // 双指按下：进入捏合，先把单指拖动的方向状态清掉
+      // ② 双指：进入捏合缩放（清掉单指拖动的方向状态）
       if (options.onPinch && event.touches.length >= 2) {
+        if (!pinchAllowed(event)) {
+          zoomLog("skip", "outside-rows", (event.target as HTMLElement | null)?.className);
+          if (event.cancelable) event.preventDefault();
+          return;
+        }
+        const [t0, t1] = [event.touches[0], event.touches[1]];
         axis = null;
-        pinchRotated = gestureRotated();
-        const span = pinchSpan(event.touches, pinchRotated);
-        // 垂直于时间轴按下（如旋转横屏里的左右双指）：先不取基准，等真正沿时间轴张开时再取
-        pinchDistance = span >= MIN_PINCH_SPAN ? span : 0;
+        pinchVertical = timelineVertical();
+        pinchSpanValue = pinchDistanceOf(event.touches);
         pinchScrollLeft = grid.scrollLeft;
         pinching = true;
         options.onPinchStart?.();
-        // 双指一落下就拦掉默认行为：iOS 上浏览器原生的放大镜 / 页面缩放会抢手势
+        // 双指落下即拦默认行为：原生页面缩放 / 放大镜 / 回弹不能抢手势
         if (event.cancelable) event.preventDefault();
-        log("双指按下", { distance: pinchDistance });
+        zoomLog(
+          "start",
+          `anchor=${pinchVertical ? "Y" : "X"}`,
+          `span=${Math.round(pinchSpanValue)}`,
+          `t0=(${Math.round(t0?.clientX ?? 0)},${Math.round(t0?.clientY ?? 0)})`,
+          `t1=(${Math.round(t1?.clientX ?? 0)},${Math.round(t1?.clientY ?? 0)})`,
+        );
         return;
       }
+
+      // ① 单指：拖动平移（沿时间轴方向滚时间轴，另一方向滚内容区）
       const touch = event.touches?.[0];
       if (!touch) return;
-      pinchDistance = 0;
+      pinchSpanValue = 0;
       pinching = false;
       startX = touch.clientX;
       startY = touch.clientY;
       startLeft = grid.scrollLeft;
       startTop = rowsOffset;
       axis = null;
-      startRotated = gestureRotated();
-      log("touchstart", {
-        x: startX,
-        y: startY,
-        scrollLeft: startLeft,
-        rowsOffset: startTop,
-        rotated: startRotated,
-        target: (event.target as HTMLElement | null)?.className,
-      });
+      startRotated = timelineVertical();
     };
 
     const onMove = (event: TouchEvent) => {
-      // 双指捏合：按两指间距的变化比例缩放时间轴（页面自己改每小时像素宽）
+      // ② 双指：按「时间轴方向间距」的变化比例缩放（页面改每小时像素宽）
+      // 注意：捏合会话一旦开始就不再检查区域——touchmove 的 target 可能因缩放重渲染
+      // 被替换，逐帧检查会让会话在第一帧后静默中断（跨度很大却只缩一点点）
       if (options.onPinch && event.touches.length >= 2) {
-        // 第二根手指可能是在单指拖动途中落下的（onStart 没走到捏合分支）：这里补一次旋转状态，
-        // 保证间距取的轴与 pinchFocus 用的轴始终一致
-        if (!pinchDistance) pinchRotated = gestureRotated();
-        const distance = pinchSpan(event.touches, pinchRotated);
-        if (distance < MIN_PINCH_SPAN) {
-          // 两指在时间轴方向上没张开（旋转横屏里左右开合就是这种）：这次不算缩放。
-          // 清掉基准，等真正沿时间轴张开时重新取，避免用接近 0 的间距算比例导致突变。
-          pinchDistance = 0;
+        // 第二根手指可能是在单指拖动途中落下的：这一刻重新定轴（间距与锚点必须同轴）
+        if (!pinchSpanValue) {
+          pinchVertical = timelineVertical();
+          pinchScrollLeft = grid.scrollLeft;
+        }
+        const span = pinchDistanceOf(event.touches);
+        if (span < MIN_PINCH_SPAN) {
+          // 沿时间轴方向还没张开：不算缩放；清基准，等真正张开时重取，避免接近 0 的间距导致比例突变
+          zoomLog("skip", `span<${MIN_PINCH_SPAN}`, `anchor=${pinchVertical ? "Y" : "X"}`, `span=${Math.round(span)}`);
+          pinchSpanValue = 0;
           if (event.cancelable) event.preventDefault();
           return;
         }
-        // 第二根手指可能是在拖动途中落下的，或刚从「垂直于时间轴」转过来：以这一刻为新基准，避免比例突变
-        if (!pinchDistance) {
-          pinchDistance = distance;
-          pinchScrollLeft = grid.scrollLeft;
+        // 首次取得基准（或被清掉后刚张开）：以这一刻为零点
+        if (!pinchSpanValue) {
+          pinchSpanValue = span;
           pinching = true;
           options.onPinchStart?.();
           axis = null;
         }
-        const scale = distance / pinchDistance;
-        pinchDistance = distance;
+        const scale = span / pinchSpanValue;
+        pinchSpanValue = span;
         if (Math.abs(scale - 1) > 0.001) {
           const focus = pinchFocus(event.touches);
           const next = options.onPinch({ scale, ...focus });
           if (typeof next === "number") pinchScrollLeft = next;
-          if (debug) log("双指缩放", { scale, ...focus });
+          zoomLog("step", `scale=${scale.toFixed(3)}`, `span=${Math.round(span)}`);
         }
         if (event.cancelable) event.preventDefault();
         return;
@@ -278,7 +275,6 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
         // 宿主原生转屏全屏（未旋转）：屏幕方向与内容方向一致（横滑滚时间轴、竖滑滚内容区）
         const vertical = Math.abs(dy) >= Math.abs(dx);
         axis = (startRotated ? vertical : !vertical) ? "time" : "rows";
-        log("方向判定", { axis, dx, dy, rotated: startRotated });
       }
       if (axis === "time") {
         const max = Math.max(0, grid.scrollWidth - grid.clientWidth);
@@ -286,24 +282,23 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
         const delta = startRotated ? dy : dx;
         const next = Math.min(Math.max(0, startLeft - delta), max);
         grid.scrollLeft = next;
-        if (debug) log("滚时间轴", { delta, from: startLeft, to: next, max });
       } else {
         // 旋转时内容区沿屏幕横向（+），未旋转时沿屏幕竖向（跟手即取反）
         const delta = startRotated ? dx : -dy;
         const to = applyRowsOffset(startTop + delta);
-        if (debug) log("滚内容区", { delta, from: startTop, to, max: rowsMax() });
       }
       // 命中方向后阻止默认行为，避免和浏览器原生滚动叠加（双倍滚动/回弹）
       if (event.cancelable) event.preventDefault();
     };
 
     const onEnd = (event: TouchEvent) => {
-      log("touchend", { scrollLeft: grid.scrollLeft, rowsOffset });
       if (pinching) {
         pinching = false;
+        // 事件类型打出来：touchcancel（浏览器/宿主接管手势）与 touchend 一眼区分
+        zoomLog("end", event.type);
         options.onPinchEnd?.();
       }
-      pinchDistance = 0;
+      pinchSpanValue = 0;
       axis = null;
       // 双指抬起一根后剩下那根继续单指拖动：以当前位置为新起点，避免画面跳一下
       const touch = event.touches?.[0];
@@ -352,7 +347,7 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       startLeft = grid.scrollLeft;
       startTop = rowsOffset;
       axis = null;
-      startRotated = options.isRotated?.() ?? false;
+      startRotated = timelineVertical();
       // 阻止文字选中 / 原生图片拖拽；不影响随后的 click（点任务条仍然能打开详情）
       event.preventDefault();
       if (document.body) {
@@ -360,7 +355,6 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
         document.body.style.userSelect = "none";
       }
       gridRoot.style.cursor = "grabbing";
-      log("mousedown", { x: startX, y: startY, scrollLeft: startLeft, rowsOffset: startTop, rotated: startRotated });
     };
 
     const onMouseMove = (event: MouseEvent) => {
@@ -370,7 +364,6 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       if (!mouseMoved) {
         if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
         mouseMoved = true;
-        log("鼠标拖动开始", { dx, dy, rotated: startRotated });
       }
       // 与触摸同一套映射：旋转模拟横屏时屏幕方向与内容方向互换
       const timeDelta = startRotated ? dy : dx;
@@ -387,7 +380,6 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       if (document.body) document.body.style.userSelect = restoreUserSelect;
       if (mouseMoved) guardClick();
       mouseMoved = false;
-      log("mouseup", { scrollLeft: grid.scrollLeft, rowsOffset });
     };
 
     // 挂在外层容器上：横向滚动容器可能被拆成「固定刻度条 + 滚动区」两层，
@@ -441,14 +433,13 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
     if (bind()) return;
     // 首屏偶尔晚一帧，延迟再试一次
     setTimeout(() => {
-      if (bind()) log("延迟绑定成功");
+      bind();
     }, 300);
   });
 
   onBeforeUnmount(() => {
     cleanup?.();
     cleanup = null;
-    log("解绑手势");
   });
 
   return { bind };

@@ -1,7 +1,7 @@
 import type { GanttViewPayload } from "@/api/chat/types";
 
 import { useSystemStore } from "@/stores";
-import { isWebEnvironment } from "@/utils/landscape-device";
+import { isWebEnvironment, resolveNativeLandscapeDevice } from "@/utils/landscape-device";
 import { createLogger } from "@/utils/logger";
 import { getDemoModeData, isMpaasReady, openH5Container, saveDemoModeData, waitForMpaas } from "@/utils/platform/mpaas";
 
@@ -52,15 +52,20 @@ export interface GanttContainerMode {
 /**
  * 宿主侧的「是否横屏 / 全屏」判定（按要求只放在 chatbox 这一侧）。
  *
- * - `schedule` / `pre` / `replan` 三个调度视图横屏 + 全屏；
- * - 智慧屏 / 电视这类本身就是横屏画布的机型同样传 `landscape: true`：
- *   容器本来就横着，true 表示「保持横屏」，不会额外再转一次；
+ * - `schedule` / `pre` / `replan` 三个调度视图在普通手机上横屏 + 全屏；
+ * - 智慧屏 / 电视这类本身就是横屏画布的机型按**竖屏容器**打开：设备没有竖屏形态，
+ *   再给横屏容器只会把版面拉成一条扁的，产品的诉求是竖版甘特（见 resolveNativeLandscapeDevice）；
  * - `personal`（个人任务详情）已改为**固定走站内 pages/task-detail，不再进离线包**
  *   （见 utils/gantt-navigation），这里保留竖屏判定只作兜底 —— 万一有人直接调本文件，
  *   也不会给它开成横屏容器。
  */
-export function resolveGanttContainerMode(viewType: string): GanttContainerMode {
+export function resolveGanttContainerMode(
+  viewType: string,
+  options: { nativeLandscapeDevice?: boolean } = {},
+): GanttContainerMode {
   if (viewType === "personal") return { landscape: false, fullscreen: false };
+  // 本身就是横屏画布的机型：竖屏容器（不全屏），页面自己按竖版铺
+  if (options.nativeLandscapeDevice) return { landscape: false, fullscreen: false };
   return { landscape: true, fullscreen: true };
 }
 
@@ -232,7 +237,10 @@ export async function openOfflineGantt(viewType: string, view: GanttViewPayload)
   const systemStore = useSystemStore();
   const payload = { ...view, isDark: systemStore.isDark } as GanttViewPayload;
 
-  const mode = resolveGanttContainerMode(viewType);
+  // 方向按机型定：本身就是横屏画布的机型（智慧屏 / 电视 / 大屏一体机）走竖屏容器，
+  // 其余（普通手机）仍是横屏 + 全屏。设备信息在 App 启动时预热过，这里基本不耗时。
+  const nativeLandscapeDevice = await resolveNativeLandscapeDevice();
+  const mode = resolveGanttContainerMode(viewType, { nativeLandscapeDevice });
   // 入口 path 带上宿主鉴权串：离线包语音识别（/speech/asr/*）请求头要用；
   // 没有 token 就不带（离线包请求层空 Authorization 时自动省略该头）
   const auth = String(systemStore.header.Authorization || "");

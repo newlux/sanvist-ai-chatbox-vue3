@@ -87,12 +87,27 @@ export function peekPhoneInfo() {
 const DEVICE_DECISION_TIMEOUT_MS = 600;
 
 /**
+ * 当前设备是否「本身就是横屏画布」（智慧屏 / 电视 / 大屏一体机）。
+ *
+ * 与 shouldEnterLandscape 共用同一份设备信息缓存，区别是只看设备、不看环境：
+ * 离线包方向（openH5Container 的 landscape 参数）用它决定「按竖屏容器打开」。
+ * 拿不到设备信息时按「不是」处理，维持横屏容器的原行为。
+ */
+export async function resolveNativeLandscapeDevice(timeoutMs = DEVICE_DECISION_TIMEOUT_MS) {
+  const info = await Promise.race([
+    warmPhoneInfo(),
+    new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+  return isNativeLandscapeDevice(info);
+}
+
+/**
  * 当前环境 / 设备进入调度视图时，是否还允许 useLandscape 用 CSS 旋转模拟横屏。
  *
- * 方向本身由宿主决定（openH5Container 打开甘特图应用就是全屏横屏），这里只决定
+ * 方向本身由宿主决定（openH5Container 打开甘特图应用时按 landscape 参数定方向），这里只决定
  * 「可视区不是横屏时要不要把 body 转 90° 兜底」：
  * - 网页环境 → false（先判，页面不旋转，其余机型判断不再执行）
- * - 大屏横屏设备 → false（本身就横屏，转了反而拧歪）
+ * - 大屏横屏设备 → false（方向已按竖屏容器给到，再转反而拧歪）
  * - 普通手机 / 拿不到设备信息 → true（宿主没给横屏时用 CSS 旋转兜底）
  */
 export async function shouldEnterLandscape(timeoutMs = DEVICE_DECISION_TIMEOUT_MS) {
@@ -100,9 +115,5 @@ export async function shouldEnterLandscape(timeoutMs = DEVICE_DECISION_TIMEOUT_M
     logger.info("网页环境：跳过横屏转换（不调原生转屏，也不做 CSS 旋转）");
     return false;
   }
-  const info = await Promise.race([
-    warmPhoneInfo(),
-    new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs)),
-  ]);
-  return !isNativeLandscapeDevice(info);
+  return !(await resolveNativeLandscapeDevice(timeoutMs));
 }

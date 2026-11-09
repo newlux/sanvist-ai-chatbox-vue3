@@ -7,9 +7,10 @@ interface ImportMetaEnv {
   readonly VITE_AI_QUESTION_BASE_URL: string;
   readonly VITE_STATIC_BASE_URL: string;
   readonly VITE_GANTT_OFFLINE_APPID: number;
+  readonly VITE_SANVIST_H5_FRONTEND: string;
   readonly VITE_CJS_IGNORE_WARNING: boolean;
-  readonly VITE_ROOT_DIR: string;
   readonly VITE_USER_NODE_ENV: string;
+  readonly VITE_ROOT_DIR: string;
 }
 
 declare interface ImportMeta {
