@@ -74,6 +74,7 @@ const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
   "ask-slot-pick",
+  "ask-slot-submit",
   "guide-step-open",
   "guide-suggestion-open",
   "tts-click",
@@ -395,6 +396,11 @@ function onAskSlotPick(payload) {
   emit("ask-slot-pick", payload);
 }
 
+/** 内联追问卡（多选）确认提交：继续上抛给页面拼提问 */
+function onAskSlotSubmit(payload) {
+  emit("ask-slot-submit", payload);
+}
+
 /** 跳转确认块（维修助手）：块只在 auto_open 时抛一次，继续上抛给页面开弹框 */
 function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
@@ -671,6 +677,7 @@ function onTtsTap() {
           @suggestion-tap="onSuggestionTap"
           @ask-slot-open="onAskSlotOpen"
           @ask-slot-pick="onAskSlotPick"
+          @ask-slot-submit="onAskSlotSubmit"
           @assistant-navigation-open="onAssistantNavigationOpen"
           @guide-step-open="onGuideStepOpen"
           @guide-suggestion-open="onGuideSuggestionOpen"
@@ -1375,6 +1382,15 @@ function onTtsTap() {
      分隔线 1193:5139 / 5117 = 1px #303030；
      操作栏图标 1193:5120 = #8F8F8F 线框 */
 .ai-bubble-v2--dark {
+  /**
+   * 相邻消息之间的上下间距：10px = 20rpx。
+   *
+   * 浅色下气泡是白底 + 描边、回复卡是浅灰底，贴在一起也分得清；
+   * 深色下气泡 #1A1A1A 和回复卡 #212121 贴在一起会糊成一整块，发起与回复就看着没有间距了。
+   * 上下各 20rpx：相邻两条的外边距会合并，实际缝隙正好 20rpx = 10px。
+   */
+  margin: 20rpx 0;
+
   // ---- 发问：气泡 1193:5111 ----
   &.ai-bubble-v2--user .ai-bubble-v2__body {
     border-color: #303030;
@@ -1449,13 +1465,14 @@ function onTtsTap() {
   }
 
   // 边框同样是渐变线（设计稿只给了浅色值，深色按同一明暗关系压深：
-  // #3D3D3D → #262626 → #3D3D3D）。不能用 background 简写，会把渐变边框整层重置掉
+  // #3D3D3D → #262626 → #3D3D3D，角度与峰值位置跟浅色一致：145° / 28%）。
+  // 不能用 background 简写，会把渐变边框整层重置掉
   :deep(.ask-slot__option) {
     border-color: transparent;
     background-color: transparent;
     background-image:
       linear-gradient(#1a1a1a, #1a1a1a),
-      linear-gradient(180deg, #3d3d3d 0%, #262626 50%, #3d3d3d 100%);
+      linear-gradient(145deg, #3d3d3d 0%, #262626 28%, #3d3d3d 100%);
     background-origin: border-box;
     background-clip: padding-box, border-box;
   }
@@ -1472,6 +1489,41 @@ function onTtsTap() {
 
   :deep(.ask-slot__option--selected .ask-slot__option-text) {
     color: #0d0d0d;
+  }
+
+  // ---- 内联追问卡的多选行：与胶囊同一道 145° 渐变边线，内层底色换成暗色行底 ----
+  :deep(.ask-slot--multiple .ask-slot__option) {
+    background-color: transparent;
+    background-image:
+      linear-gradient(#212121, #212121),
+      linear-gradient(145deg, #3d3d3d 0%, #262626 28%, #3d3d3d 100%);
+    box-shadow: none;
+  }
+
+  :deep(.ask-slot--multiple .ask-slot__option--selected) {
+    background-image:
+      linear-gradient(#303030, #303030),
+      linear-gradient(145deg, #3d3d3d 0%, #262626 28%, #3d3d3d 100%);
+  }
+
+  :deep(.ask-slot__remark-placeholder-text) {
+    color: #8f8f8f;
+  }
+
+  :deep(.ask-slot__remark-filled),
+  :deep(.ask-slot__remark-input) {
+    color: #ffffff;
+  }
+
+  // 主按钮与浅色稿黑白反转：#FFFFFF 底 + #1A1A1A 字；禁用 #212121 + #5D5D5D
+  :deep(.ask-slot__submit) {
+    background: #ffffff;
+    color: #1a1a1a;
+  }
+
+  :deep(.ask-slot__submit--disabled) {
+    background: #212121;
+    color: #5d5d5d;
   }
 }
 </style>

@@ -50,6 +50,14 @@ export function setRequestAuth(value: string) {
   authorization = String(value || "").trim();
 }
 
+/**
+ * 当前生效的鉴权串（= 全局 Authorization 头的值）。
+ * 个别接口（如 `/settings`）要求把 token 显式写进请求头，用它取同一份值，不要另建来源。
+ */
+export function getRequestAuth() {
+  return authorization;
+}
+
 export function setRequestBaseURL(value: string) {
   if (value) baseURL = value;
 }

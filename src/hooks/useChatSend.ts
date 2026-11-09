@@ -10,7 +10,7 @@ import { interruptChat } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { saveReportStyleCode } from "@/hooks/useReportStyle";
 import { saveReportVoiceByStyle } from "@/hooks/useReportVoice";
-import { useChatStore, useSessionStore, useUserStore } from "@/stores";
+import { useChatStore, useSessionStore, useSettingsStore, useUserStore } from "@/stores";
 import { buildInitialBlocks, consumeChatStream, parseReportInteraction, parseReportStyleTag, parseRoleTaggedAnswer, parseVoiceStyleTag, parseWorkReportTag } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
@@ -42,6 +42,14 @@ const QRCODE_PLACEHOLDER_PREFIX = /^q(?:r(?:c(?:o(?:de?)?)?)?)?$/i;
 const QRCODE_PAGE_ROUTE = "/pages/qrcode/index";
 /** 播报页路由（pages/podcast/index）：<WORK_REPORT> 标签命中后跳这里 */
 const PODCAST_PAGE_ROUTE = "/pages/podcast/index";
+/**
+ * 工作流 `workflow_finished` 下发的跳转目标（target）→ 站内助手页。
+ * 只认这两个：作业指导 / 任务协同；其余取值不跳转（避免被无关工作流带去别的页面）。
+ */
+const ASSISTANT_TARGET_ROUTES: Record<string, string> = {
+  work_guidance_assistant: "/pages/guide/index",
+  task_coordination_assistant: "/pages/task/index",
+};
 
 interface QrcodeMetadata {
   qrcode?: boolean | string;
@@ -259,6 +267,7 @@ export function useChatSend(scope?: string, handlers?: {
   const chatStore = useChatStore(scope);
   const sessionStore = useSessionStore();
   const userStore = useUserStore();
+  const settingsStore = useSettingsStore();
   const { stream, cancel } = useChatStream({
     onError: (error) => {
       if (!isAbortError(error)) logger.error("stream request failed", error);
@@ -497,6 +506,29 @@ export function useChatSend(scope?: string, handlers?: {
     let qrcodeHandled = false;
     /** 听汇报标签已经开过播报页：避免同一轮重复跳转。 */
     let workReportHandled = false;
+    /** 工作流跳转目标已经切过页：避免同一轮重复跳转。 */
+    let assistantSceneHandled = false;
+    /** 本轮已经落过的音色标签值：标签会随每一拍快照重复出现，只处理第一次 */
+    let appliedVoiceStyle = "";
+
+    /**
+     * 音色切换标签落库：本机存储 + `/settings.voiceCode` 两处都写。
+     *
+     * 只写本机存储的话，服务端合成仍按 `/settings` 里的 voiceCode 取音色，
+     * 听感上就是「说了切换音色但没切」；反过来只写服务端，听播页 / 内嵌页读本机存储的那几处又对不上。
+     * 两处写同一个值（saveReportVoiceByStyle 返回最终生效的音色码）。
+     */
+    function applyVoiceStyle(styleValue: string) {
+      if (!styleValue || styleValue === appliedVoiceStyle) return;
+      const voiceCode = saveReportVoiceByStyle(styleValue);
+      if (!voiceCode) return;
+      appliedVoiceStyle = styleValue;
+      logger.info("[chat] voice style switched by answer tag", { style: styleValue, voiceCode });
+      if (settingsStore.voiceCode === voiceCode) return;
+      // 先改本地（下一句 TTS 立刻用新音色），再落服务端；失败由 store 自己回滚
+      settingsStore.voiceCode = voiceCode;
+      void settingsStore.save({ voiceCode });
+    }
 
     /** 把答案增量通知给页面（首块即触发，不等 message_end / workflow_finished）。 */
     function notifyAnswerDelta(delta: string, ended: boolean) {
@@ -568,6 +600,26 @@ export function useChatSend(scope?: string, handlers?: {
       void navigateToScene(`${PODCAST_PAGE_ROUTE}?direct=1`).catch(error => logger.error("failed to open podcast page", error));
     }
 
+    /**
+     * 工作流结束事件（workflow_finished）带上跳转目标时的收尾：直接切到对应助手页。
+     *
+     * 与其它页面跳转一致走 navigateToScene（mPaaS 下开新场景窗口，Web 下退化为 navigateTo）。
+     * 已经停在目标页时不重复跳自己；同一轮只处理一次。
+     *
+     * @returns 是否已经触发跳转，调用方据此跳过本轮后续的听播出口
+     */
+    function openAssistantScene(target?: string) {
+      const route = ASSISTANT_TARGET_ROUTES[String(target || "").trim()];
+      if (!route || assistantSceneHandled) return false;
+      assistantSceneHandled = true;
+      const pages = getCurrentPages();
+      const current = pages[pages.length - 1];
+      if (current && `/${String(current.route || "")}` === route) return false;
+      logger.info("[chat] assistant target switched scene", { target, route });
+      void navigateToScene(route).catch(error => logger.error("failed to open assistant scene", error));
+      return true;
+    }
+
     try {
       await consumeChatStream({
         source: stream(createChatRequest(content, files, extraInputs), { idleTimeoutMs: 60_000 }),
@@ -612,10 +664,7 @@ export function useChatSend(scope?: string, handlers?: {
           const voiceStyleTurn = resolveVoiceStyleTurn(displayBlocks);
           if (voiceStyleTurn.tagged) displayBlocks = withAnswerText(displayBlocks, voiceStyleTurn.text);
           if (voiceStyleTurn.matched && voiceStyleTurn.style) {
-            const voice = saveReportVoiceByStyle(voiceStyleTurn.style);
-            if (voice) {
-              logger.info("[chat] voice style switched by answer tag", { style: voiceStyleTurn.style, voiceId: voice.id });
-            }
+            applyVoiceStyle(voiceStyleTurn.style);
           }
 
           /**
@@ -630,12 +679,26 @@ export function useChatSend(scope?: string, handlers?: {
             logger.info("[chat] report style switched by answer tag", { style: reportStyleTurn.style });
           }
 
+          /**
+           * 跳转目标有两个来源，任一命中就切页（不弹「是否进入」确认框）：
+           * - 协议块 `<COMPONENT type="navigation" target=…>` → snapshot.assistantScene（流中即到）；
+           * - 工作流结束事件 `workflow_finished.target` → metadata.assistant_target（随 message_end 到）。
+           * 同一轮只跳一次；已在目标页时不跳自己（见 openAssistantScene）。
+           */
+          const sceneTarget = snapshot.assistantScene
+            || (snapshot.ended ? snapshot.metadata?.assistant_target : "");
           const displaySnapshot = displayBlocks === snapshot.blocks
             ? snapshot
             : { ...snapshot, blocks: displayBlocks };
-          applySnapshot(aiMsgId, userMsgId, displaySnapshot, preserveProcessStatus, qrcodeTurn.matched);
+          // 要跳页的这一轮不触发「回答完成」回调（页面会据此起自动听播，跳走就白播了）
+          applySnapshot(aiMsgId, userMsgId, displaySnapshot, preserveProcessStatus, qrcodeTurn.matched || Boolean(sceneTarget));
           if (qrcodeTurn.matched) {
             openQrcodePage(qrcodeTurn);
+            return;
+          }
+          if (openAssistantScene(sceneTarget)) {
+            // 跳页前把本轮流式听播收尾，避免旧页面在后台继续念
+            notifyAnswerDelta("", true);
             return;
           }
           if (reportTurn.matched && (reportTurn.closed || snapshot.ended)) {

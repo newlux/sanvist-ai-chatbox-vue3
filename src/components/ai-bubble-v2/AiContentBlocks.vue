@@ -34,6 +34,7 @@ const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
   "ask-slot-pick",
+  "ask-slot-submit",
   "assistant-navigation-open",
   "guide-step-open",
   "guide-suggestion-open",
@@ -87,6 +88,11 @@ function onAskSlotPick(payload) {
   emit("ask-slot-pick", payload);
 }
 
+/** 内联追问卡（多选）确认提交：继续上抛给页面拼提问 */
+function onAskSlotSubmit(payload) {
+  emit("ask-slot-submit", payload);
+}
+
 function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
 }
@@ -126,6 +132,7 @@ function onGanttOpen(payload) {
         @suggestion-tap="onSuggestionTap"
         @ask-slot-open="onAskSlotOpen"
         @ask-slot-pick="onAskSlotPick"
+        @ask-slot-submit="onAskSlotSubmit"
         @assistant-navigation-open="onAssistantNavigationOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"

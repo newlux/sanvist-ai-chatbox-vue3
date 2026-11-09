@@ -2,6 +2,7 @@
 import type {
   AskSlotOption,
   AskSlotPayload,
+  AskSlotSubmitPayload,
   AssistantNavigationPayload,
   GanttViewPayload,
   GuideStepPayload,
@@ -89,6 +90,7 @@ const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
   "ask-slot-pick",
+  "ask-slot-submit",
   "assistant-navigation-open",
   "guide-step-open",
   "guide-suggestion-open",
@@ -110,6 +112,11 @@ function onAskSlotOpen(payload: AskSlotPayload) {
 /** 内联追问卡点选项：整条塞回页面，由页面把选项文字再发一次给 chat-messages */
 function onAskSlotPick(payload: { slot: AskSlotPayload; option: AskSlotOption }) {
   emit("ask-slot-pick", payload);
+}
+
+/** 内联追问卡（多选）确认提交：与底部抽屉 submit 同一份 payload */
+function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
+  emit("ask-slot-submit", payload);
 }
 
 /** 跳转确认块（维修助手）：块自身不占位，只在 auto_open 时把 payload 往上抛给页面开弹框 */
@@ -178,6 +185,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     :disabled="loading"
     @open="onAskSlotOpen"
     @pick="onAskSlotPick"
+    @submit="onAskSlotSubmit"
   />
   <!-- 跳转确认块（navigation 积木）：只做 auto_open 触发，不占视觉位置 -->
   <AssistantNavigationBlock

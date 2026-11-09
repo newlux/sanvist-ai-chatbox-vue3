@@ -3,6 +3,19 @@ import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("ai-stream-protocol");
 
+/**
+ * 需要「直接切页」的助手跳转目标，两个来源都按这套口径判定：
+ * - Dify `workflow_finished` 的 `target`（outputs.target / 顶层 target）
+ * - 协议块 `<COMPONENT type="navigation">` 的 `data.target`
+ *
+ * - work_guidance_assistant → 作业指导页 `/pages/guide/index`
+ * - task_coordination_assistant → 任务协同页 `/pages/task/index`
+ *
+ * 维修助手 / 配件助手仍走 assistant-navigation 的确认弹框，不在此列。
+ * 具体路由映射在 `useChatSend`（ASSISTANT_TARGET_ROUTES）。
+ */
+const ASSISTANT_SCENE_TARGETS = new Set(["work_guidance_assistant", "task_coordination_assistant"]);
+
 /** Dify `/chat-messages` 的请求体；只在网络边界使用 snake_case。 */
 export interface DifyChatMessagesRequest {
   /** Dify 要求非空，用于标识同一用户的会话。 */
@@ -386,6 +399,16 @@ function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockD
 
 /** 流式事件只差事件名（ask-slot → ask_slot）与 auto_open 标记。 */
 function parseAskStreamEvent(value: Record<string, unknown> | null) {
+  /**
+   * 跳转指令（`<COMPONENT type="navigation" data.target=...>`）：
+   * 作业指导 / 任务协同这两个目标不弹确认框，直接以 assistant_scene 事件切页。
+   * 先于 parseAskBlock 判定，避免被 navigation 白名单当未知卡片丢掉。
+   */
+  const directData = asRecord(value?.data) || {};
+  const directTarget = String(directData.target || "").trim();
+  if (String(value?.type || "").toLowerCase() === "navigation" && ASSISTANT_SCENE_TARGETS.has(directTarget)) {
+    return { event: "assistant_scene" as const, data: { target: directTarget } };
+  }
   const block = parseAskBlock(value);
   if (block?.type === "table") return { event: "table" as const, data: block.payload };
   if (block?.type === "chart") return { event: "chart" as const, data: block.payload };
@@ -707,6 +730,12 @@ export function createDifyEventNormalizer() {
           }
         } else if (difyEvent === "workflow_finished") {
           receivedSanvistEvent = true;
+          // 包装在协议块里的 workflow_finished 也可能带跳转目标（口径与顶层事件一致）
+          const wrappedOutputs = asRecord(customData.outputs) || {};
+          const wrappedTarget = String(wrappedOutputs.target ?? customData.target ?? "").trim();
+          if (ASSISTANT_SCENE_TARGETS.has(wrappedTarget)) {
+            events.push({ event: "assistant_scene", ...references, data: { target: wrappedTarget } });
+          }
           events.push({ event: "subtitle", ...references, message: "" });
         } else if (customEvent?.event === "status") {
           receivedSanvistEvent = true;
@@ -775,8 +804,18 @@ export function createDifyEventNormalizer() {
     // 标准事件顺序可能为 message_end -> workflow_finished，因此不能在收到 message_end 时立即结束消费。
     if (event === "workflow_paused" || event === "workflow_finished") {
       const workflow = asRecord(data.data) || {};
+      const workflowOutputs = asRecord(workflow.outputs) || {};
       // 部分工作流只在 workflow_finished 里给最终答案（正文流里没有），带上它供占位回答判定使用
-      const outputsAnswer = String((asRecord(workflow.outputs) || {}).answer || "");
+      const outputsAnswer = String(workflowOutputs.answer || "");
+      /**
+       * 跳转目标：工作流结束时在 `outputs.target` 下发（兼容 `data.data.target` / 事件顶层 `target`）。
+       * - work_guidance_assistant → 作业指导页
+       * - task_coordination_assistant → 任务协同页
+       * 由消费侧（useChatSend）映射成站内路由并直接切页。
+       */
+      const assistantTarget = String(
+        workflowOutputs.target ?? workflow.target ?? data.target ?? "",
+      ).trim();
       const status = String(workflow.status || "");
       const elapsedSeconds = Number(workflow.elapsed_time);
       const durationMs = Number.isFinite(elapsedSeconds)
@@ -803,6 +842,7 @@ export function createDifyEventNormalizer() {
             duration_ms: durationMs,
             message,
             outputs_answer: outputsAnswer || undefined,
+            assistant_target: assistantTarget || undefined,
           },
         };
       }

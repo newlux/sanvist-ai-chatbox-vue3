@@ -20,6 +20,8 @@ export interface ChatStreamSnapshot {
   messageId?: Identifier;
   taskId?: Identifier;
   metadata?: MessageEndEvent["metadata"];
+  /** 本轮出现的「直接切页」目标（assistant_scene 事件），为空表示不跳转 */
+  assistantScene?: string;
   processSubtitle?: string | null;
   processStatus?: {
     phase: "thinking" | "succeeded" | "failed" | "stopped";
@@ -59,6 +61,7 @@ export async function consumeChatStream(
     if (update.messageId) snapshot.messageId = update.messageId;
     if (update.taskId) snapshot.taskId = update.taskId;
     if (update.metadata) snapshot.metadata = update.metadata;
+    if (update.assistantScene) snapshot.assistantScene = update.assistantScene;
     if (update.processSubtitle !== undefined) snapshot.processSubtitle = update.processSubtitle;
     if (update.processStatus) snapshot.processStatus = update.processStatus;
     if (event.event === "message_end") snapshot.ended = true;

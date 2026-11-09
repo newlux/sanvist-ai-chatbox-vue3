@@ -73,8 +73,8 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     icon: iconHelp,
     subagent: "guide",
     mode: "page",
-    // 先选体验的设备（独立页），再进讲解模式选择页（新老手），最后进作业指导
-    url: "/pages/guide-init/index",
+    // 直达作业指导对话页；引导页 /pages/guide-init/index 保留，但不再作为入口
+    url: "/pages/guide/index",
   },
   {
     key: "ai-form",
@@ -82,7 +82,8 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     icon: iconForm,
     subagent: "task",
     mode: "page",
-    url: "/pages/task-init/index",
+    // 直达任务协同对话页；引导页 /pages/task-init/index 保留，但不再作为入口
+    url: "/pages/task/index",
   },
   {
     key: "repair-master-ai",

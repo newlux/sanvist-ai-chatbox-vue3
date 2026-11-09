@@ -215,15 +215,18 @@ const secondsText = computed(() => `${props.seconds}s`);
   animation: voice-query-spread 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
-/* 起点约等于「点击说话」胶囊的宽度（60% 上下），向左右两侧各推开到满宽 */
+/* 起点约等于「点击说话」胶囊的宽度（60% 上下），向左右两侧各推开到满宽。
+   clip-path 必须带 round 90rpx：不加 round 时，部分 WebView 会直接按矩形裁切、
+   忽略元素自身的 border-radius，散开中/散开完的左右端头都是直角方块；
+   补上 round 后两端始终是半圆，与展开态（编辑面板）的胶囊端头一致 */
 @keyframes voice-query-spread {
   from {
-    clip-path: inset(0 20%);
+    clip-path: inset(0 20% round 90rpx);
     opacity: 0.55;
   }
 
   to {
-    clip-path: inset(0 0);
+    clip-path: inset(0 0 round 90rpx);
     opacity: 1;
   }
 }

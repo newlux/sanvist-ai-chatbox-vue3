@@ -1094,6 +1094,7 @@ onUnload(() => {
         @guide-check-step-select="onGuideCheckStepSelect"
         @ask-slot-open="onAskSlotOpen"
         @ask-slot-pick="onAskSlotPick"
+        @ask-slot-submit="onAskSlotSubmit"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"

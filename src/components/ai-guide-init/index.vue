@@ -52,7 +52,11 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
  * 所以标题只定左边距、右边留白；胶囊与气泡「按最小宽度撑开 + 最大宽度约束」，换行变高而不溢出。
  *
  * 结束时把机型写进 store（inputs.device_model），并按经验答案映射新老手讲解模式
- * （inputs.operator_role，见 api/user-role/operator-roles），随后进作业指导对话。
+ * （inputs.operator_role，见 api/user-role/operator-roles），随后进作业指导对话
+ * （终点页 /pages/guide/index，机型 / 经验 / 新老手一并带在 query 上，见 buildGuideUrl）。
+ *
+ * 入口：/pages/guide-init/index 薄壳页直接渲染本组件；当前 ai-chat-nav 的「作业指导」
+ * 已直连 /pages/guide/index，本组件暂无页面引用。
  */
 defineOptions({ name: "AiGuideInit" });
 

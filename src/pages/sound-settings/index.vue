@@ -8,6 +8,7 @@ import backIcon from "@/assets/img/icon-sound-settings-back.svg";
 import waveActiveIcon from "@/assets/img/icon-sound-settings-wave-active.svg";
 import waveIcon from "@/assets/img/icon-sound-settings-wave.svg";
 import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
+import { saveReportVoiceByStyle } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useSettingsStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
@@ -234,6 +235,8 @@ function selectVoice(voice: SoundVoice) {
   if (voice.code !== selectedVoiceCode.value) {
     const previous = pickedVoiceCode.value;
     pickedVoiceCode.value = voice.code;
+    // 本机存储同步一份：TTS / 听播取音色读的就是它（与 `<VOICE_STYLE>` 标签写的是同一处）
+    saveReportVoiceByStyle(voice.code);
     void settingsStore.save({ voiceCode: voice.code }).then((ok) => {
       if (!ok) pickedVoiceCode.value = previous;
       showToast(ok ? t("save-success") : t("settings-save-failed"));

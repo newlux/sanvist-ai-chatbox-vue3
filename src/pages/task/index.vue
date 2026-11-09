@@ -973,6 +973,7 @@ onUnload(() => {
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @ask-slot-open="onAskSlotOpen"
+        @ask-slot-submit="onAskSlotSubmit"
         @gantt-open="onGanttOpen"
         @tts-click="onTtsClick"
         @feedback-change="onFeedbackChange"

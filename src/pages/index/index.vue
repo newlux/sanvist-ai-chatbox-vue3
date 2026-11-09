@@ -714,7 +714,7 @@ const WELCOME_LISTEN_IDLE_MS = 900;
  */
 const islandListenFromWelcome = ref(false);
 /**
- * 「识别中...」实时转写文字的出场闸门（文字长在这轮提问气泡里，不再是浮层）。
+ * 「识别中...」实时转写文字的出场闸门（文字铺在问答页顶部那一条上，不再是消息气泡）。
  * 从初始页起飞时先关上：这行文字要等中间图标飞进灵动岛、落位动效彻底收尾之后才出现，
  * 否则它会和图标动效叠在一起（看起来像被图标压住半截）。
  * 对话页里直接说话不经过起飞，保持 true 立即显示。
@@ -724,15 +724,21 @@ const asrTipReady = ref(true);
 let islandListenIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * 初始页「点击说话」→ 立刻起飞，同时在问答页顶部落一条「识别中」的用户气泡（WS 流式 ASR）。
+ * 初始页「点击说话」→ 立刻起飞，录音期间的实时转写（WS 流式 ASR）铺在问答页顶部那一条上。
  *
- * 这条气泡就是本轮的提问：一开始就顶到头部下沿（与文字提问同一个落点），
- * partial 逐字回填到气泡里，说完（静音 1.5s）自动收尾，final 原地变成正式提问、回答从下面长出来。
- * 不再用浮层字幕铺字——浮层是绝对定位，会压在上一条被顶到顶部的提问气泡上（表现为两段文字重叠）。
+ * 不往消息列表插「识别中」用户气泡，改成一条浮在提问落点上的纯文字（见 .voice-live）：
+ * - 开口先把上一轮的提问顶到头部下沿（历史回复整体往上拉走），
+ *   再让列表把那条提问临时隐藏、把位置让给实时文字 —— 实时文字背后不会压着任何正文；
+ * - 文字从左往右长出来，跟打字一样，说完才收成正式提问气泡；
+ * - 让位的高度跟着实时文字走（voiceTopPad），文字多长就把下面的回答往下挤多少；
+ * - 说完（静音 1.5s / 点 ↑）后按原有规则把提问气泡顶到头部下沿，回答从它下面长出来。
  */
 const voiceQueryActive = ref(false);
-/** 本轮 ASR 占位气泡的 id：partial / final 都按 id 回填，不用下标 */
-const voicePlaceholderId = ref("");
+/** 本轮实时转写文本：录音期间逐字刷新，只长在顶部那条文字上，不进消息列表 */
+const voiceTranscript = ref("");
+/** 实时文字的实测高度（px）：列表把上一条提问气泡临时隐藏、让出同样的高度，下方回复只按需往下让位 */
+const voiceLiveHeight = ref(0);
+let voiceLiveObserver: ResizeObserver | null = null;
 /** 实时音量 0~1（已平滑）：驱动底部录音条的声纹长短 */
 const voiceLevel = ref(0);
 /** 已录秒数：底部录音条右侧那枚 4s */
@@ -753,8 +759,6 @@ let voiceNoSpeechTimer: ReturnType<typeof setTimeout> | null = null;
 const VOICE_LEVEL_THRESHOLD = 0.015;
 let voiceSilenceSince = 0;
 let voiceHeard = false;
-/** 录音条散开落定后再对一次落点的定时器（列表可视高这时才稳定） */
-let voicePinTimer: ReturnType<typeof setTimeout> | null = null;
 /**
  * 本轮走哪条录音链路。
  * - stream：WebAudio 采集 + WebSocket 流式 ASR，能逐字出文字（iOS / 普通浏览器）；
@@ -807,18 +811,51 @@ interface VoiceRecorderInstance {
 }
 
 /**
- * keepPlaceholder：final 已经回来、准备发问时置 true —— 占位气泡要留给 sendMessage 原地替换成正式提问，
- * 这里不能删，否则会先撤掉再 push 一条新的，顶部位置会闪一下。
+ * 实时文字的高度观测：列表按这个高度在顶部让位（见 AiMessageList 的 voiceTopPad）。
+ * 用 ResizeObserver 而不是每次 partial 都量一次 —— 逐字刷新时每拍量 DOM 太费。
  */
-function resetVoiceQuery(options?: { keepPlaceholder?: boolean }) {
+function stopVoiceLiveObserver() {
+  if (voiceLiveObserver) {
+    voiceLiveObserver.disconnect();
+    voiceLiveObserver = null;
+  }
+  voiceLiveHeight.value = 0;
+}
+
+function startVoiceLiveObserver() {
+  stopVoiceLiveObserver();
+  // #ifdef H5
+  if (typeof ResizeObserver === "undefined") return;
+  const node = document.querySelector(".voice-live") as HTMLElement | null;
+  if (!node) return;
+  voiceLiveObserver = new ResizeObserver(() => {
+    voiceLiveHeight.value = Math.ceil(node.getBoundingClientRect().height);
+  });
+  voiceLiveObserver.observe(node);
+  voiceLiveHeight.value = Math.ceil(node.getBoundingClientRect().height);
+  // #endif
+}
+
+/**
+ * 实时文字随「录音中 + 起飞已落位」出现 / 消失：
+ * 出现时开始量高，收起时把列表让出的那段高度一起收回。
+ */
+watch(
+  () => voiceQueryActive.value && asrTipReady.value,
+  (visible) => {
+    if (visible) startVoiceLiveObserver();
+    else stopVoiceLiveObserver();
+  },
+  { flush: "post" },
+);
+
+/** 收掉这一轮录音：实时文字与底部录音条一起退场，列表让出的高度同时归零 */
+function resetVoiceQuery() {
   // 序号自增：正在 await 权限 / 采集的启动流程据此自行作废
   voiceSeq += 1;
-  if (voicePinTimer) {
-    clearTimeout(voicePinTimer);
-    voicePinTimer = null;
-  }
   voiceQueryActive.value = false;
-  voicePlaceholderId.value = "";
+  voiceTranscript.value = "";
+  stopVoiceLiveObserver();
   voiceFinishing.value = false;
   voiceLevel.value = 0;
   voiceSeconds.value = 0;
@@ -849,13 +886,35 @@ function resetVoiceQuery(options?: { keepPlaceholder?: boolean }) {
   }
   voiceBackend = "stream";
   voiceDegraded = false;
-  // 没走到 final（取消 / 通道失败 / 权限被拒）：占位气泡已经没有内容可回填，撤掉
-  if (!options?.keepPlaceholder) discardAsrPlaceholder();
+  // 「按住说话」那条入口仍会在列表里落占位气泡：收尾时一并撤掉（录音提问这条路已经没有占位了）
+  discardAsrPlaceholder();
+  // 一句话都没发出去（取消 / 识别失败 / 权限被拒）：把问候与快捷提问放回来，
+  // 口径与撤销占位气泡时一致 —— 录音期间只是暂时收起，不代表真的发了消息
+  if (!chatStore.messages.length) {
+    chatStore.showQuickPrompts = true;
+    chatStore.showQuickList = true;
+  }
 }
 
 function failVoiceQuery(title: string) {
   resetVoiceQuery();
   uni.showToast({ title, icon: "none" });
+}
+
+/**
+ * 实时文字的落点锚：上一轮登记过的那条提问（`pinMessageId`），
+ * 取不到（或已经不在当前会话里）就退回最后一条用户消息。
+ * 拿不到锚点时（第一次提问 / 空会话）不滚动：落点本来就是空的。
+ */
+function resolveVoiceAnchorId() {
+  const pinned = String(chatStore.pinMessageId || "");
+  const messages = chatStore.messages || [];
+  if (pinned && messages.some(item => String(item?.id ?? "") === pinned)) return pinned;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user" && !message.asrPending) return String(message.id || "");
+  }
+  return "";
 }
 
 async function startVoiceQuery() {
@@ -875,33 +934,26 @@ async function startVoiceQuery() {
   voiceSilenceSince = 0;
   voiceHeard = false;
   voiceQueryActive.value = true;
+  voiceTranscript.value = "";
+  // 开口了就把问候 / 快捷提问收起（以前是插占位气泡时顺带清掉的）
+  chatStore.showQuickPrompts = false;
+  chatStore.showQuickList = false;
 
-  // 本轮提问一开始就落成真实气泡并顶到头部下沿（beginAsrPlaceholder 内部走 alignAfterUserMessage）：
-  // 已生成的问答往上走，新提问每次都落在同一个顶部位置，partial 回填只改内容、不换位置
-  beginAsrPlaceholder();
-  voicePlaceholderId.value = chatStore.messages.find(item => item.role === "user" && item.asrPending)?.id || "";
   /**
-   * 显式再钉一次。
-   * beginAsrPlaceholder 发现「已经有占位气泡」会直接 return（不重新登记本轮提问），
-   * 这种情况下 pin 就没人做了 —— 实时文字会老老实实长在列表末尾（屏幕下方）。
-   * 这里按 id 无条件再登记一次，重复登记是幂等的。
+   * 开口第一件事：把上一轮的提问顶到头部下沿。
+   *
+   * 不这么做的话，多轮对话里实时文字会压在上面那些历史正文上 ——
+   * 文字是浮在落点上的，落点下面原本就是上一轮的回复文字。
+   * 顶上去之后，落点上只剩那条提问气泡，列表再把它临时隐藏（voiceTopPad），
+   * 实时文字背后就干净了；上方的历史整体被拉走、留在头部渐隐里。
+   * 不插消息、不改内容，只借用 pin 的那套滚动定位。
    */
-  if (voicePlaceholderId.value) {
+  const anchorId = resolveVoiceAnchorId();
+  if (anchorId) {
     chatStore.setPinnedToBottom(true);
-    chatStore.setPinMessage(voicePlaceholderId.value);
     chatStore.setCapRoundAtTop(true);
-    chatStore.pinMessageToTop(voicePlaceholderId.value);
+    chatStore.pinMessageToTop(anchorId);
   }
-  /**
-   * 点下去到录音条散开落定（约 300ms）之间，列表可视高还会变一次，
-   * 那之后可滚量变小、之前的落点可能被 clamp 掉。等它落定再对一次落点，
-   * 实时文字才会自始至终钉在同一个顶部位置。
-   */
-  if (voicePinTimer) clearTimeout(voicePinTimer);
-  voicePinTimer = setTimeout(() => {
-    voicePinTimer = null;
-    if (voicePlaceholderId.value) chatStore.pinMessageToTop(voicePlaceholderId.value);
-  }, 360);
 
   // 底部录音条的计时：从进入问答页就开始走，和真实录音时长对齐
   if (voiceTickTimer) clearInterval(voiceTickTimer);
@@ -933,31 +985,21 @@ async function startVoiceQuery() {
 
     const session = openAsrStreamSession({
       onPartial(text) {
-        if (seq !== voiceSeq || !voicePlaceholderId.value) return;
-        // partial 是「完整文本的当前版本」：整体替换气泡内容，不要自己拼接
-        chatStore.patchMessageById(voicePlaceholderId.value, { content: text });
+        if (seq !== voiceSeq) return;
+        // partial 是「完整文本的当前版本」：整体替换顶部那条实时文字，不要自己拼接
+        voiceTranscript.value = text;
       },
       onFinal(text) {
         if (seq !== voiceSeq) return;
         const query = String(text).trim();
-        // 占位气泡的 id 要在 resetVoiceQuery 清空之前留住：final 之后它要接着停在顶部
-        const placeholderId = voicePlaceholderId.value;
-        // 占位气泡先留着：sendMessage 按 asrPending 找到它，原地改成正式提问，顶部位置不动
-        resetVoiceQuery({ keepPlaceholder: true });
-        // 静音 / 误触时服务端回空串：撤掉占位，提示重说，别拿空问题去提问
+        // 实时文字先收（列表让出的高度同时归零），紧接着 push 正式提问气泡：两者在同一拍完成，位置不跳
+        resetVoiceQuery();
+        // 静音 / 误触时服务端回空串：提示重说，别拿空问题去提问
         if (!query) {
-          discardAsrPlaceholder();
           uni.showToast({ title: t("no-speech-recognized"), icon: "none" });
           return;
         }
         sendQuickPrompt(query);
-        /**
-         * 停止问答后立刻再问：列表还停在上一轮的落点，sendMessage 那次 pin 会和
-         * 「上一轮短回复 + 录音条换回输入栏」的布局变化撞在一起，可能滚不到目标位置，
-         * 气泡就停在屏幕中间。这里按 id 再钉一次（重复钉是幂等的），
-         * 文字从浮层收成气泡时位置不跳。
-         */
-        if (placeholderId) chatStore.pinMessageToTop(placeholderId);
       },
       onError() {
         // 通道层失败（握手被网关拦、服务未部署）和「没听清」要分开提示，
@@ -1016,7 +1058,7 @@ function stopNativeLevelPolling() {
 
 /**
  * 流式这条路走不通时，把这一轮原地换成原生录音。
- * 占位气泡已经钉在顶部了，这里只换采集通道：不撤气泡、不重置序号，
+ * 顶部那条实时文字和列表让位都不动，这里只换采集通道：不撤文字、不重置序号，
  * 用户看到的就是「识别中…」继续在那儿，声纹继续跳，说完照样出文本。
  */
 function degradeToNativeVoice(reason: string) {
@@ -1170,7 +1212,6 @@ async function finishNativeVoiceQuery() {
     return;
   }
 
-  const placeholderId = voicePlaceholderId.value;
   logger.warn("[voice-native] 录音结束", {
     seconds: voiceSeconds.value,
     peakLevel: Number(nativePeakLevel.toFixed(3)),
@@ -1187,15 +1228,13 @@ async function finishNativeVoiceQuery() {
       costMs: Date.now() - recognizeStart,
     });
     const query = String(result?.text || "").trim();
-    // 和流式那条线保持一致：占位气泡先留着，sendMessage 按 asrPending 原地替换成正式提问
-    resetVoiceQuery({ keepPlaceholder: true });
+    // 和流式那条线保持一致：先收顶部实时文字，再照原有规则把提问气泡顶到头部下沿
+    resetVoiceQuery();
     if (!query) {
-      discardAsrPlaceholder();
       uni.showToast({ title: t("no-speech-recognized"), icon: "none" });
       return;
     }
     sendQuickPrompt(query);
-    if (placeholderId) chatStore.pinMessageToTop(placeholderId);
   }
   catch (error) {
     logger.warn("native recognition failed", error);
@@ -1763,6 +1802,7 @@ onBeforeUnmount(() => {
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
         :bottom-inset="messageBottomInset"
+        :voice-top-pad="voiceLiveHeight"
         :step-card-step-id="guideStepCardStepId"
         :pin-step-card="guideStepSheetVisible"
         @card-space-change="onGuideStepCardSpaceChange"
@@ -1779,6 +1819,7 @@ onBeforeUnmount(() => {
         @suggestion-tap="sendUserPrompt"
         @ask-slot-open="onAskSlotOpen"
         @ask-slot-pick="onAskSlotPick"
+        @ask-slot-submit="onAskSlotSubmit"
         @assistant-navigation-open="onAssistantNavigationOpen"
         @assistant-callback-open="onAssistantCallbackOpen"
         @guide-step-open="onGuideStepOpen"
@@ -1793,8 +1834,16 @@ onBeforeUnmount(() => {
         @scroll-top="onScrollTop"
         @pinned-change="onPinnedChange"
       />
-      <!-- 语音提问不再用浮层提词：实时文本直接回填到列表里那条「识别中」的用户气泡上，
-           由消息列表把它顶到头部下沿，避免浮层与上一条提问气泡重叠（见 startVoiceQuery） -->
+      <!-- 录音中的实时转写：铺在提问气泡的同一个落点（头部下沿）上，纯文字、没有气泡外壳，
+           文字从左往右长出来；说完才收成正式提问气泡。
+           点下说话时会先把上一轮提问顶到这个落点（历史回复整体往上拉走），
+           再由列表把那条提问临时隐藏、把位置让给这段文字（voiceTopPad 同步它的高度），
+           所以实时文字背后不会有任何正文，下面的回复也只按文字长短往下让位 -->
+      <view v-if="voiceQueryActive && asrTipReady" class="voice-live">
+        <text class="voice-live__text">
+          {{ voiceTranscript || $t("identifying") }}
+        </text>
+      </view>
       <!-- 一键回到底部：离底时出现，贴底自动隐藏；
            垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙；
            水平居中，只放 arrow-down.png（无白底 / 阴影，见 .chat-scroll-bottom） -->
@@ -2080,6 +2129,47 @@ $color-white: #ffffff;
 }
 
 @keyframes ai-page-chat-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* ===== 录音中的实时转写 =====
+   落点与「提问气泡顶到头部下沿」完全同一口径（max(头部留白, 150px)，见 ai-message-list 的
+   PIN_MESSAGE_TOP_MIN_Y_PX），所以说完收成气泡时位置不跳。
+   左右 40rpx 与 .chat-box 的内边距一致，文字左对齐、从左往右长。
+   高度由消息列表按 voiceTopPad 让出同样的空档，文字变长只会把下面的回复往下挤，不会盖住它 */
+.voice-live {
+  position: absolute;
+  top: calc(max(var(--chat-top-inset, 300rpx), 150px));
+  right: 40rpx;
+  left: 40rpx;
+  z-index: 3; // 压在消息列表之上、顶部毛玻璃（1）与悬浮头部（1010）之下
+  pointer-events: none;
+  animation: voice-live-in 160ms ease-out both;
+}
+
+/* 字号 / 行高沿用原来「识别中」提词的口径：32rpx / 48rpx，读起来像自己刚说的话 */
+.voice-live__text {
+  color: #0d0d0d;
+  font-size: 32rpx;
+  font-weight: 500;
+  line-height: 48rpx;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.ai-page--dark .voice-live__text {
+  color: #f2f3f5;
+}
+
+@keyframes voice-live-in {
   from {
     opacity: 0;
   }

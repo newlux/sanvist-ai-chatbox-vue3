@@ -160,6 +160,15 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /**
+   * 录音中顶部那条实时文字占用的高度（px）。
+   * 那段文字浮在提问落点上、不在列表里，列表把被钉住的那条提问（上一轮的提问气泡）
+   * 临时隐藏、让出同样的高度：文字只有实时文字，下面的回复只按需往下让位。
+   */
+  voiceTopPad: {
+    type: Number,
+    default: 0,
+  },
 });
 
 const emit = defineEmits([
@@ -169,6 +178,7 @@ const emit = defineEmits([
   "suggestion-tap",
   "ask-slot-open",
   "ask-slot-pick",
+  "ask-slot-submit",
   "assistant-navigation-open",
   "assistant-callback-open",
   "guide-step-open",
@@ -532,12 +542,13 @@ function alignToReplyEnd(forceUp = false) {
   // 用户已经上翻看历史了就别再拽下去（贴底状态下才会由 store 请求这里）
   if (!props.pinnedToBottom) return;
   /**
-   * 录音中的实时转写还在逐字回填：这条气泡每来一段 partial 就变一次高。
+   * 录音中的实时转写还在逐字刷新：顶部那条文字每来一段 partial 就变一次高，
+   * 让位那条提问的高度（voiceTopPad）也跟着变。
    * 这时候再按「落点」对齐，等于和一个正在变高的元素抢 scrollTop ——
-   * 每改一次就整屏上下挪一下，表现为顶部实时文字和上面的历史一起抖。
-   * 这一轮的位置由 pin（alignMessageToTop）一次性钉住，增长只会往下推，不再重算。
+   * 每改一次就整屏上下挪一下，表现为顶部实时文字和下面的回复一起抖。
+   * 录音期间只让下面按需往下让位，不重算落点；说完之后才恢复对齐。
    */
-  if (hasAsrPendingMessage()) return;
+  if (hasAsrPendingMessage() || props.voiceTopPad > 0) return;
   const userAnchor = lastUserAnchorSelector();
   const query = uni.createSelectorQuery()
     .select(".msg-list")
@@ -862,6 +873,11 @@ function onAskSlotPick(payload: { slot: Record<string, unknown>; option: Record<
   emit("ask-slot-pick", payload);
 }
 
+/** 内联追问卡（多选）确认提交：把与底部抽屉同一份 payload 交给页面 */
+function onAskSlotSubmit(payload: unknown) {
+  emit("ask-slot-submit", payload);
+}
+
 /** 跳转确认块（维修助手）：只透传 payload，由页面决定是否开弹框 */
 function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
@@ -1128,6 +1144,36 @@ const listPadStyle = computed(() => {
 });
 
 /**
+ * 录音中让位的那条消息：被钉到顶部的那条提问（= 上一轮的提问气泡）。
+ *
+ * 录音时它要**整个隐藏掉**，把位置让给顶部那条实时文字（见页面的 .voice-live）：
+ * 用户要看到的是「我说的新话」，而不是上一条提问还挂在那儿。
+ * 隐藏时高度换成实时文字的高度，所以下面回复的位置只随文字长短变化，不会先空一块再被填上。
+ */
+const voiceSlotIndex = computed(() => {
+  const list = props.messages || [];
+  if (!list.length) return -1;
+  const target = props.pinMessageId;
+  if (!target) return -1;
+  return list.findIndex(message => String(message?.id ?? "") === target);
+});
+
+/** 只在录音中改写锚点那条消息的占位；其余时候不写内联样式（Vue 会把之前写过的样式收回去） */
+function voicePadStyle(index: number) {
+  if (props.voiceTopPad <= 0) return undefined;
+  const pad = Math.round(props.voiceTopPad);
+  const slot = voiceSlotIndex.value;
+  if (slot < 0) {
+    // 没有钉住的目标（刚从历史会话进来就问）：只能在第一条消息前面垫，不能把内容藏掉
+    return index === 0 ? { marginTop: `${pad}px` } : undefined;
+  }
+  // 有钉住的那条提问：临时隐藏它，高度跟着实时文字走，下面的回复按需往下挤
+  return index === slot
+    ? { height: `${pad}px`, overflow: "hidden", visibility: "hidden" }
+    : undefined;
+}
+
+/**
  * 当前要顶到对话区顶部的那张核对卡的 DOM id：切卡落在哪一轮，就顶那一轮正在展示的那张。
  * 与 standaloneBlocks 用同一份选择状态，保证「量高度的那张」就是「滚上去的那张」。
  */
@@ -1300,6 +1346,7 @@ watch(
             :id="chatMessageAnchorDomId(msg?.id ?? `idx-${index}`)"
             v-show="!msg.hidden"
             :key="index"
+            :style="voicePadStyle(index)"
           >
             <AiBubbleV2
               :role="msg.role"
@@ -1332,6 +1379,7 @@ watch(
               @suggestion-tap="onSuggestionTap($event, index)"
               @ask-slot-open="onAskSlotOpen($event, index)"
               @ask-slot-pick="onAskSlotPick"
+              @ask-slot-submit="onAskSlotSubmit"
               @assistant-navigation-open="onAssistantNavigationOpen"
               @assistant-callback-open="emit('assistant-callback-open', $event)"
               @guide-step-open="onGuideStepOpen"

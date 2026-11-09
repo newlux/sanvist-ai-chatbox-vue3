@@ -1218,11 +1218,13 @@ function finish() {
   const roleCode = normalizeStep(pickedRole.value?.hitValue || answers.value[STEP_IDENTITY] || "");
   applyVisitorRole(roleCode);
   // 记下这次选的身份（接口下发的身份码，如 DISPATCH-02）：
-  // 任务协同页据此判断首屏是问「查异常」还是拉甘特图入口卡，跨页 / 独立窗口都要能取到 → 落本地存储
+  // 写 uni storage，跨页 / 宿主独立窗口都能取到；当前任务页还没有读它（getTaskIdentity 暂无调用方），
+  // 保留给后续「按身份决定首屏铺异常卡还是甘特图入口卡」用
   setTaskIdentity(roleCode ? { code: roleCode, label: pickedRole.value?.label || roleCode } : null);
-  // 身份信息帧说「开始体验」→ 正式进入任务协同。
-  // 带上 from=init：任务协同页靠这个参数区分「引导流程进来」与「新建页面 / 宿主独立窗口直接进」——
-  // 只有前者铺异常摘要卡，后者铺初始化「今天任务有哪些」拉到的甘特图入口卡
+  // 身份信息帧说「开始体验」→ 正式进入任务协同（终点页 /pages/task/index）。
+  // from=init 只是来源标记：任务页 onLoad 目前不消费它（首屏仍走「今天任务有哪些」），
+  // 留着便于以后区分「引导流程进来」与「宿主独立窗口直接进」；
+  // 注意不要复用 PC 内嵌的 from 取值（utils/iframe 的 FROM_SANVIST_PC）
   emit("finish", "/pages/task/index?from=init");
 }
 

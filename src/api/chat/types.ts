@@ -403,7 +403,7 @@ export interface GanttViewPayload extends Record<string, unknown> {
 
 export interface RichContentEvent {
   event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source" | "ask_slot"
-    | "assistant_navigation" | "guide_step" | "guide_check" | "guide_suggestion" | "gantt";
+    | "assistant_navigation" | "assistant_scene" | "guide_step" | "guide_check" | "guide_suggestion" | "gantt";
   conversationId: Identifier;
   messageId: Identifier;
   taskId?: Identifier;
@@ -435,6 +435,13 @@ export interface MessageEndEvent {
     qrcode?: boolean | string;
     /** `qrcode` 为 true 时可选下发的二维码内容（链接 / 口令），缺失时二维码页展示空态 */
     qrcode_content?: string;
+    /**
+     * 工作流 `workflow_finished` 下发的跳转目标（`data.outputs.target`，兼容事件顶层 `target`）：
+     * `work_guidance_assistant` → 作业指导页 `/pages/guide/index`；
+     * `task_coordination_assistant` → 任务协同页 `/pages/task/index`。
+     * 出现时该轮回答直接切页，不弹确认框；其余取值忽略。
+     */
+    assistant_target?: string;
   };
 }
 
