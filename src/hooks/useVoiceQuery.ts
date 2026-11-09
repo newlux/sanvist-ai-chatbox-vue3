@@ -4,6 +4,7 @@ import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl 
 import type { AsrStreamSession } from "@/utils/asr/asr-stream-session";
 import type { PcmCapture } from "@/utils/asr/pcm-capture";
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
+import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission, getMicrophoneVolume, permissionDeniedMessage } from "@/utils/platform/mpaas";
@@ -19,6 +20,8 @@ const VOICE_NO_SPEECH_MS = 8000;
 const VOICE_LEVEL_THRESHOLD = 0.015;
 /** 原生通道整段识别的最长等待：超时就当没识别到，别把录音条一直挂在「识别中」 */
 const NATIVE_RECOGNIZE_TIMEOUT_MS = 30_000;
+/** 原生录音的硬上限：只做兜底，正常收尾靠用户点发送（↑） */
+const NATIVE_MAX_RECORD_MS = 60_000;
 /** 录音条散开落定后再对一次落点（列表可视高这时才稳定） */
 const PLACEHOLDER_PIN_DELAY_MS = 360;
 
@@ -87,6 +90,8 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
   let voiceBackend: "stream" | "native" = "stream";
   let nativeVoiceRecorder: VoiceRecorderInstance | null = null;
   let nativeLevelTimer: ReturnType<typeof setInterval> | null = null;
+  /** 原生通道这一轮听到的最大音量：排查「有没有真的收到声音」时打日志用 */
+  let nativePeakLevel = 0;
   let voiceDegraded = false;
 
   function stopNativeLevelPolling() {
@@ -139,6 +144,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
     }
     voiceBackend = "stream";
     voiceDegraded = false;
+    nativePeakLevel = 0;
     // 没走到 final（取消 / 通道失败 / 权限被拒）：占位气泡已经没有内容可回填，撤掉
     if (!resetOptions?.keepPlaceholder) options.discardPlaceholder();
   }
@@ -208,6 +214,11 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
         return;
       }
       audio = stopped.data || {};
+      logger.info("native recorder stop", {
+        seconds: voiceSeconds.value,
+        peakLevel: Number(nativePeakLevel.toFixed(3)),
+        hasUrl: Boolean(audio.audioUrl),
+      });
     }
     catch (error) {
       logger.warn("native recorder stop threw", error);
@@ -262,8 +273,15 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
       }
 
       nativeVoiceRecorder = recorder;
-      // 原生录音拿不到 partial，只能轮询电平：声纹照跳，静音 1.5s 仍然自动收尾
+      nativePeakLevel = 0;
+      /**
+       * 原生录音拿不到 partial，电平只用来驱动声纹。
+       * 注意这里不能喂给 onVoiceLevel：那里面带了「静音 1.5s 自动收尾」，
+       * 而 microphoneVolume 在部分容器里恒为 0 / 拿不到，一喂就等于用户话没说完就被掐掉。
+       * 收尾统一交给用户点发送（↑ → stopVoiceQuery）。
+       */
       stopNativeLevelPolling();
+      voiceLevel.value = 0;
       let polling = false;
       nativeLevelTimer = setInterval(() => {
         if (seq !== voiceSeq || polling) return;
@@ -271,7 +289,9 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
         void getMicrophoneVolume()
           .then((level) => {
             if (seq !== voiceSeq || typeof level !== "number") return;
-            onVoiceLevel(level);
+            if (level > nativePeakLevel) nativePeakLevel = level;
+            const normalized = Math.min(1, Math.max(0, level / 0.15));
+            voiceLevel.value += (normalized - voiceLevel.value) * 0.35;
           })
           .catch(() => {})
           .finally(() => {
@@ -279,11 +299,12 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
           });
       }, 120);
 
+      // 只留一个硬上限兜底：用户忘了点发送时别让麦克风一直开着
       if (voiceNoSpeechTimer) clearTimeout(voiceNoSpeechTimer);
       voiceNoSpeechTimer = setTimeout(() => {
         voiceNoSpeechTimer = null;
-        if (!voiceHeard) stopVoiceQuery();
-      }, VOICE_NO_SPEECH_MS);
+        stopVoiceQuery();
+      }, NATIVE_MAX_RECORD_MS);
     }
     catch (error) {
       logger.warn("native voice query start failed", error);
@@ -380,10 +401,18 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
     }, 1000);
 
     /**
-     * 没有流式通道（无 WebSocket）或没有 WebAudio 采集能力（file:// / 老容器）：
-     * 不提示「环境不支持」，直接走原生录音那条线 —— 这类环境里它是能用的。
+     * 音频从哪来（Android 与 iOS 同一口径，与首页一致）：
+     * - 容器里有 `pcmStreamStart`（mPaaS bridge 已注入）：用宿主原生推流，
+     *   16k 裸 PCM 由原生抛过来，后面的 WebSocket 流式 ASR 一点不变 —— 实时文字照常；
+     * - 没有 bridge（浏览器 / 宿主未注入）才用 WebAudio 自己采；
+     * - 两条都不行（没有 WebSocket / 没有 WebAudio 且没有原生推流）才退到整段识别。
+     *
+     * 之前这里只看 WebAudio：Android WebView 拿不到可用音频时会整轮降到「原生整段识别」，
+     * 期间没有实时字幕，声纹也依赖 microphoneVolume（部分容器恒为 0 / 拿不到），
+     * 表现就是「语音输入异常 + 没有声纹」。
      */
-    if (!isAsrStreamSupported() || !isPcmCaptureSupported()) {
+    const useNativePcm = isNativePcmStreamSupported();
+    if (!isAsrStreamSupported() || (!useNativePcm && !isPcmCaptureSupported())) {
       void startNativeVoiceQuery(seq);
       return;
     }
@@ -427,23 +456,37 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
       });
       voiceSession = session;
 
-      const capture = await startPcmCapture({
-        onFrame: frame => session.pushFrame(frame),
-        onLevel: onVoiceLevel,
-        // 采集起来了但拿不到可用音频（没回调 / 采到静音）：这一轮降到原生录音
-        onUnavailable: reason => degradeToNativeVoice(reason),
-      });
+      const capture = useNativePcm
+        ? await startNativePcmCapture({
+          onFrame: frame => session.pushFrame(frame),
+          onLevel: onVoiceLevel,
+          // 原生推流中途报错：换整段识别那条线，别让这一轮白说
+          onError: message => degradeToNativeVoice(`pcm-stream:${message}`),
+        })
+        : await startPcmCapture({
+          onFrame: frame => session.pushFrame(frame),
+          onLevel: onVoiceLevel,
+          // 采集起来了但拿不到可用音频（没回调 / 采到静音）：这一轮降到原生录音
+          onUnavailable: reason => degradeToNativeVoice(reason),
+        });
       if (seq !== voiceSeq) {
         capture.stop();
         return;
       }
       voiceCapture = capture;
 
-      // 采集就绪开始计时：一直没人说话就自己收尾，别让麦克风空转
-      voiceNoSpeechTimer = setTimeout(() => {
-        voiceNoSpeechTimer = null;
-        if (!voiceHeard) stopVoiceQuery();
-      }, VOICE_NO_SPEECH_MS);
+      /**
+       * 8s 没人说话就自己收尾，别让麦克风空转。
+       * 原生 PCM 推流这条不启用：宿主给的是哪一档音量不确定（可能偏小），
+       * 一旦电平没过阈值就会被判成「没人说话」、在你还在说的时候把录音掐掉。
+       * 这条通道的收尾交给「说过话后静音 1.5s」和用户点 ↑。
+       */
+      if (!useNativePcm) {
+        voiceNoSpeechTimer = setTimeout(() => {
+          voiceNoSpeechTimer = null;
+          if (!voiceHeard) stopVoiceQuery();
+        }, VOICE_NO_SPEECH_MS);
+      }
     }
     catch (error) {
       // getUserMedia 三档全挂（Android WebView 常见）：不掉到「录音启动失败」，先换原生录音
