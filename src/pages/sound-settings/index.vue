@@ -10,7 +10,7 @@ import waveIcon from "@/assets/img/icon-sound-settings-wave.svg";
 import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
 import { saveReportVoiceByStyle } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useSettingsStore } from "@/stores";
+import { useSettingsStore, useSystemStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 
 /**
@@ -38,12 +38,22 @@ import { createLogger } from "@/utils/logger";
  *   播放中图标换成蓝色音波条并做呼吸动效，再点一次停止；
  * - 倍率每次切档（松手 / 点击档位）立即落库，不做节流；
  * - 落库成功「保存成功」、失败「保存失败，请稍后重试」，统一用页面正中的白底蓝边胶囊提示。
+ *
+ * 深色模式（203:1093 深色稿）：页面 #1A1A1A、卡片 #303030、文字 #FFFFFF / #8E8E8E、
+ * 数值 #5D5D5D、强调 #1166D6、轨道 #F3F3F3；外观为深色时由 .sound-settings--dark 覆盖配色，
+ * 结构与尺寸完全沿用浅色稿，不额外改布局。
  */
 const logger = createLogger("sound-settings");
 
 const { t, te } = useI18n();
 const { safeAreaStyle } = useSafeArea();
 const settingsStore = useSettingsStore();
+/**
+ * 深色模式：外观选深色（或跟随系统且系统为深色）时命中，
+ * 命中后整页按 Ardot 203:1093「声音设置」深色稿渲染（只换配色，布局不变）。
+ */
+const systemStore = useSystemStore();
+const pageDark = computed(() => systemStore.isDark);
 
 /**
  * 语速档位：只允许 1.0 / 1.2 / 1.5 / 1.8 / 2.0 五档（与设置里「语音倍率」面板一致），
@@ -383,7 +393,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <view class="sound-settings" :style="safeAreaStyle">
+  <!-- 深色模式按 Ardot 203:1093 深色稿：页面 #1A1A1A、卡片 #303030 -->
+  <view class="sound-settings" :class="{ 'sound-settings--dark': pageDark }" :style="safeAreaStyle">
     <!-- 设计稿 180:144 Status Bar：真机由系统状态栏显示，这里只占安全区高度 -->
     <view class="sound-settings__status" />
 
@@ -790,5 +801,101 @@ onMounted(async () => {
     opacity: 0.45;
     transform: scale(0.86);
   }
+}
+
+/* ==========================================================================
+   深色模式：Ardot 203:1093「声音设置」深色稿（375×831）
+   配色链路：#1A1A1A 页面 → #303030 卡片 → 主要文字 #FFFFFF / 次要 #8E8E8E /
+   数值 #5D5D5D / 强调 #1166D6 / 轨道 #F3F3F3 / 图标描边 #9E9E9E。
+   这里只覆盖颜色与深色才有的圆角（203:1111 列表面板），所有尺寸、间距沿用浅色稿。
+   ========================================================================== */
+.sound-settings--dark {
+  /* 203:1093 页面底色 */
+  background: #1a1a1a;
+
+  /* 203:1097 标题「声音设置」：18px Regular #FFFFFF */
+  .sound-settings__title {
+    color: #ffffff;
+  }
+
+  /* 203:1095 Collapse：设计稿是白色描边箭头（#FFFFFF / 1.5），
+     原图标为 #0D0D0D，深底下反相成白 */
+  .sound-settings__back-icon {
+    filter: brightness(0) invert(1);
+  }
+
+  /* 203:1202 Rectangle 180：播放速度卡 #303030，圆角 12（24rpx） */
+  .sound-settings__speed {
+    background: #303030;
+  }
+
+  /* 203:1203 播放速度：12px Regular #FFFFFF */
+  .sound-settings__speed-label {
+    color: #ffffff;
+  }
+
+  /* 203:1201 1.00x（默认）：12px Regular #5D5D5D（与浅色一致，保留以便核对） */
+  .sound-settings__speed-value {
+    color: #5d5d5d;
+  }
+
+  /* 203:1205 Rectangle 181：轨道 299×4 #F3F3F3，圆角 4 —— 深色稿仍是近白轨道 */
+  .sound-settings__slider-track {
+    background: #f3f3f3;
+  }
+
+  /* 203:1200 Rectangle 182：已播进度 #1166D6，圆角 4 */
+  .sound-settings__slider-progress {
+    background: #1166d6;
+  }
+
+  /* 中间三档刻度点：深色稿 203:1198 同样没有画（与浅色稿一致），
+     沿用现有实现的 #D6D6D6 / 白点，轨道是同一个 #F3F3F3，两套主题观感一致 */
+
+  /* 203:1204 Ellipse 76：滑块 10×10，白底 + 2px（4rpx）#1166D6 描边 */
+  .sound-settings__slider-thumb {
+    border-color: #1166d6;
+    background: #ffffff;
+  }
+
+  /* 203:1206 / 203:1199 刻度文字：12px Regular #8E8E8E */
+  .sound-settings__tick {
+    color: #8e8e8e;
+  }
+
+  /* 203:1111 Frame 135：列表面板 #303030，圆角 12（24rpx）、内边距 16（浅色稿是直角） */
+  .sound-settings__list {
+    border-radius: 24rpx;
+    background: #303030;
+  }
+
+  /* 203:1126 等 Rectangle 185：音色卡 #303030，圆角 12（24rpx） */
+  .sound-settings__voice {
+    background: #303030;
+  }
+
+  /* 203:1123 Group 183（当前选中）：1px（2rpx）#1166D6 描边，其余卡片无描边 */
+  .sound-settings__voice--active {
+    border-color: #1166d6;
+  }
+
+  /* 203:1127 等：类型 14px Medium #FFFFFF */
+  .sound-settings__voice-name {
+    color: #ffffff;
+  }
+
+  /* 203:1128 等：说明 12px Regular #8E8E8E */
+  .sound-settings__voice-desc {
+    color: #8e8e8e;
+  }
+
+  /* 203:1124 Frame 18：「默认」徽标深色稿是白底 #FFFFFF + #1166D6 文字
+     （浅色稿为 10% 蓝底 + 蓝字），圆角 5（10rpx）、内边距 1/5/1/5 */
+  .sound-settings__voice-badge {
+    background: #ffffff;
+    color: #1166d6;
+  }
+
+  /* 203:1129 等 Frame 117：波形图标描边 #9E9E9E，与现有 SVG 色值一致，无需覆盖 */
 }
 </style>

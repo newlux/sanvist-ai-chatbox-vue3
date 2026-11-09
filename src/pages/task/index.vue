@@ -1415,6 +1415,23 @@ $color-white: #ffffff;
   animation: session-spin 0.9s linear infinite;
 }
 
+/* 切历史会话时弹出的那个 loading 环：配色对齐播报页「正在加载偏好」的环
+   （pages/podcast/index.vue 的 .preference-loading__indicator），同一套四色渐变
+   #3D21CD → #1999FE → #C067FA → #FD90C4；环宽仍保持 6rpx（3px），
+   用 padding 留环宽、mask 挖空中间。选择器限定在 .session-loading 内，
+   分享海报复用同一个环时不跟着变色 */
+.session-loading .session-loading__spinner {
+  box-sizing: border-box;
+  padding: 6rpx;
+  border: 0;
+  background-image: linear-gradient(90deg, #3d21cd 0%, #1999fe 48.72%, #c067fa 76%, #fd90c4 100%);
+  /* 先写标准属性、再用 -webkit- 兜底：老 WebView 只认前缀版本 */
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+}
+
 @keyframes session-spin {
   from {
     transform: rotate(0deg);

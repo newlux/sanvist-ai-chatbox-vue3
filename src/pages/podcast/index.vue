@@ -155,8 +155,9 @@ const preferenceDark = computed(() => showReportVoiceSelector.value && systemSto
 /** 是否由播报页「偏好设置」进入配置流程：决定关闭配置页时回播报页还是退出页面。 */
 const preferenceEntry = ref(false);
 /**
- * 是否「直接起播」（`?direct=1`）：对话里命中 <WORK_REPORT> 标签跳进来时置 true，
- * 跳过「选助手 → 选汇报内容」两步，直接按服务端偏好 / 本机记忆 / 默认配置起播。
+ * 是否「直接起播」（`?direct=1`）：对话里命中 <WORK_REPORT> 标签、首页概览卡「去收听」、
+ * 底部胶囊「听汇报」这些入口都带它，跳过「选助手 → 选汇报内容」两步，
+ * 直接按服务端偏好 / 本机记忆 / 默认配置起播（也就是不再经过风格设置页）。
  */
 let directBroadcast = false;
 /**
@@ -485,7 +486,7 @@ function startReportVoiceSelection() {
 }
 
 function restoreReportBroadcast() {
-  // 对话里由 <WORK_REPORT> 标签跳进来：中间不要偏好选择，直接起播
+  // 带 ?direct=1 进来（<WORK_REPORT> 标签 / 去收听 / 听汇报入口）：中间不要偏好选择，直接起播
   if (directBroadcast) {
     showReportVoiceSelector.value = false;
     loadPreferenceBroadcastParams();
@@ -1441,7 +1442,8 @@ function onVoiceLevel(level: number) {
 }
 
 onLoad((options) => {
-  // ?direct=1 = 对话里 <WORK_REPORT> 标签直接跳进来，跳过偏好选择
+  // ?direct=1 = 直接进播报页：<WORK_REPORT> 标签 / 概览卡「去收听」/ 底部「听汇报」都走它，
+  // 跳过「选助手 → 选汇报内容」的风格设置页
   directBroadcast = String(options?.direct || "") === "1";
   syncWindowHeight();
   reportBizDate.value = getCurrentListenReportDate();

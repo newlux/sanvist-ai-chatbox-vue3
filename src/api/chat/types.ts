@@ -313,6 +313,13 @@ export interface AssistantNavigationAction {
 /** 首页问答建议跳转到指定业务助手的确认弹层。 */
 export interface AssistantNavigationPayload extends Record<string, unknown> {
   target: AssistantNavigationTarget;
+  /**
+   * 跳转意图（维修助手用）：
+   * - `MAINT_FAULT_CODE`：故障码场景，先弹「是否进入维修助手」确认卡，用户点确定后把确认发回对话；
+   * - `ENTER_ASSISTANT`：后端已确认进入，直接跳维修助手页，不再给确认卡。
+   * 两个都不是时不弹卡也不跳转（见 AssistantNavigationBlock / 首页 onAssistantNavigationConfirm）。
+   */
+  intent?: string;
   title?: string;
   confirm_text?: string;
   cancel_text?: string;

@@ -11,6 +11,14 @@ export const VISITOR_ROLE_CACHE_KEY = "visitor_role";
 export const TASK_IDENTITY_CACHE_KEY = "task_identity";
 
 /**
+ * 维修助手跳转（COMPONENT type=navigation，target=maintenance_assistant）的 intent 取值：
+ * - MAINT_FAULT_CODE：故障码场景，先弹「是否进入维修助手」确认卡，点确定只把确认发回对话；
+ * - ENTER_ASSISTANT：后端已确认进入，直接跳维修助手页（不再出确认卡）。
+ */
+export const REPAIR_NAV_INTENT_FAULT_CODE = "MAINT_FAULT_CODE";
+export const REPAIR_NAV_INTENT_ENTER = "ENTER_ASSISTANT";
+
+/**
  * 配件助手内嵌的三方 H5 地址。
  * 与维修助手保持一致：入口另开独立场景页 `/pages/parts/index`（不在首页内联），
  * 由该页全屏 iframe 加载这个地址，并把 AlipayJSBridge 代理给内嵌页。

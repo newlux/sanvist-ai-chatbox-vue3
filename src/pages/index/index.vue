@@ -40,7 +40,14 @@ import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
-import { AI_ASK_WELCOME_DONE_KEY, LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY, PARTS_ASSISTANT_EMBED_URL } from "@/config";
+import {
+  AI_ASK_WELCOME_DONE_KEY,
+  LISTEN_REPORT_CURRENT_DATE_KEY,
+  LISTEN_REPORT_DATE_KEY,
+  PARTS_ASSISTANT_EMBED_URL,
+  REPAIR_NAV_INTENT_ENTER,
+  REPAIR_NAV_INTENT_FAULT_CODE,
+} from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
@@ -304,21 +311,15 @@ function onAssistantCallbackOpen(conversationId: string) {
 }
 
 /**
- * 「进入助手」的去向按 target 分流：
- * - maintenance_assistant：消息流内联卡点的「确定，进入维修助手」→ 上下文落盘 → 另开维修助手页
- *   （/pages/repair/index），返回后靠 pending 回调拉一次 summary；
- * - parts_assistant：底部弹层点「进入配件助手」→ 另开配件助手页
- *   （/pages/parts/index，全屏内嵌三方 H5）。
+ * 故障码确认卡点「确定」时回给后端的那句话。
+ * 卡片本身不跳页，只把这句话当成一条提问发出去，由后端下发
+ * target=maintenance_assistant && intent=ENTER_ASSISTANT 的 navigation 再跳维修助手页。
+ * 后端若约定别的措辞，只改这一个常量即可。
  */
-async function onAssistantNavigationConfirm(
-  payload: AssistantNavigationPayload,
-  action?: AssistantNavigationAction,
-) {
-  if (payload.target === "parts_assistant") {
-    enterPartsAssistant();
-    return;
-  }
-  if (payload.target !== "maintenance_assistant") return;
+const REPAIR_ENTER_CONFIRM_TEXT = "确认进入维修助手";
+
+/** 真正进维修助手页：上下文落盘 → 另开维修助手页（/pages/repair/index），返回后靠 pending 回调拉 summary */
+function enterRepairAssistant(payload: AssistantNavigationPayload) {
   stashPendingRepairNavigationContext({
     ...payload.context,
     userId: userStore.userId,
@@ -331,6 +332,39 @@ async function onAssistantNavigationConfirm(
     stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
   }
   void navigateToScene("/pages/repair/index");
+}
+
+/**
+ * 「进入助手」的去向按 target + intent 分流：
+ * - parts_assistant：底部弹层点「进入配件助手」→ 另开配件助手页
+ *   （/pages/parts/index，全屏内嵌三方 H5）；
+ * - maintenance_assistant + intent=ENTER_ASSISTANT：确认可进入 → 直接跳维修助手页；
+ * - maintenance_assistant + intent=MAINT_FAULT_CODE：故障码确认卡，点「确定」不直接跳，
+ *   而是把「确认进入维修助手」发回对话，等后端回 ENTER_ASSISTANT；
+ * - 其它 intent（或没有）：不跳页。
+ */
+async function onAssistantNavigationConfirm(
+  payload: AssistantNavigationPayload,
+  action?: AssistantNavigationAction,
+) {
+  if (payload.target === "parts_assistant") {
+    enterPartsAssistant();
+    return;
+  }
+  if (payload.target !== "maintenance_assistant") return;
+
+  const intent = String(payload.intent || "").trim().toUpperCase();
+  logger.debug("assistant navigation confirm", { target: payload.target, intent, action: action?.key });
+
+  if (intent === REPAIR_NAV_INTENT_ENTER) {
+    enterRepairAssistant(payload);
+    return;
+  }
+
+  if (intent === REPAIR_NAV_INTENT_FAULT_CODE) {
+    // 故障码确认卡：走一轮「确认」对话，跳转交给后端返回的 ENTER_ASSISTANT
+    sendUserPrompt(REPAIR_ENTER_CONFIRM_TEXT);
+  }
 }
 
 /**
@@ -687,10 +721,14 @@ function startNewConversation() {
 /**
  * 快捷入口：听汇报 / 作业指导 / 任务协同都走专属页（url 优先）。
  * 听汇报跳转前先记下当天早报日期，供播报页判断是否已收听。
+ *
+ * 带 `?direct=1`：概览卡「去收听」与底部胶囊「听汇报」都直接进播报页起播，
+ * 跳掉播报页里「选助手 → 选汇报内容」那一步（风格设置页）。
+ * 播报页的偏好设置入口仍在，用户想改偏好可以自己进去。
  */
 function enterListenReport() {
   saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
-  void navigateToScene("/pages/podcast/index");
+  void navigateToScene("/pages/podcast/index?direct=1");
 }
 
 /**
@@ -2427,6 +2465,23 @@ $color-white: #ffffff;
   border: 6rpx solid rgba(95, 103, 117, 0.2);
   border-top-color: #c8201e;
   animation: session-spin 0.9s linear infinite;
+}
+
+/* 切历史会话时弹出的那个 loading 环：配色对齐播报页「正在加载偏好」的环
+   （pages/podcast/index.vue 的 .preference-loading__indicator），同一套四色渐变
+   #3D21CD → #1999FE → #C067FA → #FD90C4；环宽仍保持 6rpx（3px），
+   用 padding 留环宽、mask 挖空中间。选择器限定在 .session-loading 内，
+   分享海报复用同一个环时不跟着变色 */
+.session-loading .session-loading__spinner {
+  box-sizing: border-box;
+  padding: 6rpx;
+  border: 0;
+  background-image: linear-gradient(90deg, #3d21cd 0%, #1999fe 48.72%, #c067fa 76%, #fd90c4 100%);
+  /* 先写标准属性、再用 -webkit- 兜底：老 WebView 只认前缀版本 */
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
 }
 
 @keyframes session-spin {

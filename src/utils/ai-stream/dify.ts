@@ -484,6 +484,8 @@ function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockD
       type: "assistant-navigation",
       payload: {
         target: navigationTarget,
+        // 维修助手靠 intent 区分「故障码场景先弹确认卡」与「已确认直接进入」（见块内与首页的处理）
+        intent: String(data.intent || "").trim() || undefined,
         title: String(data.title || "").trim() || undefined,
         confirm_text: String(data.confirm_text || "").trim() || undefined,
         cancel_text: String(data.cancel_text || "").trim() || undefined,
