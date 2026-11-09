@@ -190,6 +190,7 @@ const emit = defineEmits([
   "ask-slot-pick",
   "ask-slot-submit",
   "assistant-navigation-open",
+  "assistant-navigation-confirm",
   "assistant-callback-open",
   "guide-step-open",
   "guide-suggestion-open",
@@ -892,9 +893,14 @@ function onAskSlotSubmit(payload: unknown) {
   emit("ask-slot-submit", payload);
 }
 
-/** 跳转确认块（维修助手）：只透传 payload，由页面决定是否开弹框 */
+/** 跳转确认块（配件助手）：只透传 payload，由页面决定是否开弹框 */
 function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
+}
+
+/** 内联跳转卡（维修助手）选了进入方式：payload + action 一起交给页面做跳转 */
+function onAssistantNavigationConfirm(payload, action) {
+  emit("assistant-navigation-confirm", payload, action);
 }
 
 /** 点调度视图入口卡：整包数据交给页面（存数据 + 跳横屏调度视图） */
@@ -1492,6 +1498,7 @@ watch(
               @ask-slot-pick="onAskSlotPick"
               @ask-slot-submit="onAskSlotSubmit"
               @assistant-navigation-open="onAssistantNavigationOpen"
+              @assistant-navigation-confirm="onAssistantNavigationConfirm"
               @assistant-callback-open="emit('assistant-callback-open', $event)"
               @guide-step-open="onGuideStepOpen"
               @guide-suggestion-open="onGuideSuggestionOpen"

@@ -11,7 +11,7 @@ const logger = createLogger("ai-stream-protocol");
  * - work_guidance_assistant → 作业指导页 `/pages/guide/index`
  * - task_coordination_assistant → 任务协同页 `/pages/task/index`
  *
- * 维修助手 / 配件助手仍走 assistant-navigation 的确认弹框，不在此列。
+ * 维修助手走 assistant-navigation 的内联确认卡、配件助手走底部确认层，都不在此列。
  * 具体路由映射在 `useChatSend`（ASSISTANT_TARGET_ROUTES）。
  */
 const ASSISTANT_SCENE_TARGETS = new Set(["work_guidance_assistant", "task_coordination_assistant"]);
@@ -473,9 +473,9 @@ function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockD
     return { type: "ask-slot", payload: { ...slots[0], slots } };
   }
   /**
-   * 跳转确认：navigation 卡片统一走 assistant-navigation 块，弹框由页面按 target 决定去向。
-   * - maintenance_assistant：维修助手（独立页 /pages/repair/index）
-   * - parts_assistant：配件助手（首页内联智能体，切换 subagent=parts）
+   * 跳转确认：navigation 卡片统一走 assistant-navigation 块，块按 target 决定形态与去向。
+   * - maintenance_assistant：维修助手（独立页 /pages/repair/index）→ 气泡里内联成确认卡；
+   * - parts_assistant：配件助手（独立页 /pages/parts/index）→ 仍由页面弹底部确认层。
    * 其它 target 不认，别把无关卡片也弹成确认框。
    */
   const navigationTarget = String(data.target || "").trim();

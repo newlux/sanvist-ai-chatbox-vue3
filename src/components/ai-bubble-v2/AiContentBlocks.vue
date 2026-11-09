@@ -36,6 +36,7 @@ const emit = defineEmits([
   "ask-slot-pick",
   "ask-slot-submit",
   "assistant-navigation-open",
+  "assistant-navigation-confirm",
   "guide-step-open",
   "guide-suggestion-open",
   "guide-check-step-select",
@@ -97,6 +98,11 @@ function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
 }
 
+/** 内联跳转卡（维修助手）选了进入方式：继续上抛给页面 */
+function onAssistantNavigationConfirm(payload, action) {
+  emit("assistant-navigation-confirm", payload, action);
+}
+
 function onGuideStepOpen(payload, auto = false) {
   emit("guide-step-open", payload, auto);
 }
@@ -134,6 +140,7 @@ function onGanttOpen(payload) {
         @ask-slot-pick="onAskSlotPick"
         @ask-slot-submit="onAskSlotSubmit"
         @assistant-navigation-open="onAssistantNavigationOpen"
+        @assistant-navigation-confirm="onAssistantNavigationConfirm"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"

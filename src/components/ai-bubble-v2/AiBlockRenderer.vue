@@ -3,6 +3,7 @@ import type {
   AskSlotOption,
   AskSlotPayload,
   AskSlotSubmitPayload,
+  AssistantNavigationAction,
   AssistantNavigationPayload,
   GanttViewPayload,
   GuideStepPayload,
@@ -97,6 +98,7 @@ const emit = defineEmits([
   "ask-slot-pick",
   "ask-slot-submit",
   "assistant-navigation-open",
+  "assistant-navigation-confirm",
   "guide-step-open",
   "guide-check-step-select",
   "guide-check-finish",
@@ -125,9 +127,14 @@ function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
   emit("ask-slot-submit", payload);
 }
 
-/** 跳转确认块（维修助手）：块自身不占位，只在 auto_open 时把 payload 往上抛给页面开弹框 */
+/** 跳转确认块（配件助手）：块自身不占位，只在 auto_open 时把 payload 往上抛给页面开弹框 */
 function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
   emit("assistant-navigation-open", payload);
+}
+
+/** 内联跳转卡（维修助手）选了某个进入方式：整包继续上抛，由页面落盘上下文并跳转 */
+function onAssistantNavigationConfirm(payload: AssistantNavigationPayload, action: AssistantNavigationAction) {
+  emit("assistant-navigation-confirm", payload, action);
 }
 
 /** 点调度视图入口卡：整包数据继续往上抛，由页面存数据并跳横屏调度视图 */
@@ -199,11 +206,12 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     @pick="onAskSlotPick"
     @submit="onAskSlotSubmit"
   />
-  <!-- 跳转确认块（navigation 积木）：只做 auto_open 触发，不占视觉位置 -->
+  <!-- 跳转确认块（navigation 积木）：维修助手就地内联成卡；配件助手只做 auto_open 触发，不占视觉位置 -->
   <AssistantNavigationBlock
     v-else-if="block.type === 'assistant-navigation'"
     :payload="block.payload"
     @open="onAssistantNavigationOpen"
+    @confirm="onAssistantNavigationConfirm"
   />
   <GuideStepBlock v-else-if="block.type === 'guide-step'" :payload="block.payload" @open="onGuideStepOpen" />
   <!-- 开场引导卡（scene=guide / type=lead）：一段开场白 + 一轮单选，点选项直接发出 -->

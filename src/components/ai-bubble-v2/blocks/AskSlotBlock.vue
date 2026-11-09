@@ -268,7 +268,7 @@ function onSubmitTap() {
   display: flex;
   align-items: center;
   padding: 16rpx 32rpx; /* 8px 16px */
-  border: 2rpx solid #efefef; /* 1px，颜色交给下面的渐变边框 */
+  /* border: 2rpx solid #efefef; /* 1px，颜色交给下面的渐变边框 */
   border-radius: 40rpx; /* 20px 胶囊 */
   /**
    * 边框线线性渐变（按设计稿逐像素取样还原，取样点见下）：
@@ -285,6 +285,8 @@ function onSubmitTap() {
   background-origin: border-box;
   background-clip: padding-box, border-box;
   box-sizing: border-box;
+  border: 2rpx solid;
+  border-image-source: linear-gradient(108deg, #CDCAD2 0.66%, #F7F7F7 29.15%, #CDCAD2 89.97%);
 }
 
 .ask-slot__option-text {

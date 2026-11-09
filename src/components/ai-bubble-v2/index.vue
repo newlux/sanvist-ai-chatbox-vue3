@@ -85,6 +85,7 @@ const emit = defineEmits([
   "longpress-copy",
   "assistant-callback-open",
   "assistant-navigation-open",
+  "assistant-navigation-confirm",
   "guide-check-step-select",
   "gantt-open",
 ]);
@@ -401,9 +402,14 @@ function onAskSlotSubmit(payload) {
   emit("ask-slot-submit", payload);
 }
 
-/** 跳转确认块（维修助手）：块只在 auto_open 时抛一次，继续上抛给页面开弹框 */
+/** 跳转确认块（配件助手）：块只在 auto_open 时抛一次，继续上抛给页面开弹框 */
 function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
+}
+
+/** 内联跳转卡（维修助手）选了进入方式：继续上抛给页面做跳转 */
+function onAssistantNavigationConfirm(payload, action) {
+  emit("assistant-navigation-confirm", payload, action);
 }
 
 function onGuideStepOpen(payload, auto = false) {
@@ -679,6 +685,7 @@ function onTtsTap() {
           @ask-slot-pick="onAskSlotPick"
           @ask-slot-submit="onAskSlotSubmit"
           @assistant-navigation-open="onAssistantNavigationOpen"
+          @assistant-navigation-confirm="onAssistantNavigationConfirm"
           @guide-step-open="onGuideStepOpen"
           @guide-suggestion-open="onGuideSuggestionOpen"
           @guide-check-step-select="onGuideCheckStepSelect"

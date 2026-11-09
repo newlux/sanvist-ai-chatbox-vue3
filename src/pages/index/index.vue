@@ -281,8 +281,12 @@ let repairSummaryPollingAttempts = 0;
 const REPAIR_SUMMARY_POLL_INTERVAL_MS = 5_000;
 const REPAIR_SUMMARY_MAX_ATTEMPTS = 30;
 
+/**
+ * 只有配件助手还会抛 open：维修助手（target=maintenance_assistant）已改成
+ * 消息流里的内联卡，点按钮直接走 onAssistantNavigationConfirm，不再弹底部白板。
+ */
 function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
-  if (payload.target !== "maintenance_assistant" && payload.target !== "parts_assistant") return;
+  if (payload.target !== "parts_assistant") return;
   assistantNavigationPayload.value = payload;
   assistantNavigationVisible.value = true;
 }
@@ -296,9 +300,11 @@ function onAssistantCallbackOpen(conversationId: string) {
 }
 
 /**
- * 弹层确认后的去向按 target 分流：
- * - maintenance_assistant：把上下文落盘 → 另开维修助手页（/pages/repair/index）；
- * - parts_assistant：与维修助手一致，另开配件助手页（/pages/parts/index，全屏内嵌三方 H5）。
+ * 「进入助手」的去向按 target 分流：
+ * - maintenance_assistant：消息流内联卡点的「确定，进入维修助手」→ 上下文落盘 → 另开维修助手页
+ *   （/pages/repair/index），返回后靠 pending 回调拉一次 summary；
+ * - parts_assistant：底部弹层点「进入配件助手」→ 另开配件助手页
+ *   （/pages/parts/index，全屏内嵌三方 H5）。
  */
 async function onAssistantNavigationConfirm(
   payload: AssistantNavigationPayload,
@@ -1902,6 +1908,7 @@ onBeforeUnmount(() => {
         @ask-slot-pick="onAskSlotPick"
         @ask-slot-submit="onAskSlotSubmit"
         @assistant-navigation-open="onAssistantNavigationOpen"
+        @assistant-navigation-confirm="onAssistantNavigationConfirm"
         @assistant-callback-open="onAssistantCallbackOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
@@ -1950,6 +1957,7 @@ onBeforeUnmount(() => {
         @submit="onAskSlotSubmit"
         @height-change="onAskSlotDrawerHeightChange"
       />
+      <!-- 跳转确认层：维修助手已改成消息流内联卡，这里只剩配件助手（拍照 / 上传 / 首页） -->
       <AiAssistantNavigationSheet
         v-model:visible="assistantNavigationVisible"
         :payload="assistantNavigationPayload"
