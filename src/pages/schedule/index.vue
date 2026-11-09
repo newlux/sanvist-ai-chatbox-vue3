@@ -12,7 +12,6 @@ import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
 import { useSystemStore } from "@/stores";
-import { isWebEnvironment } from "@/utils/landscape-device";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -53,14 +52,12 @@ defineOptions({ name: "SchedulePage" });
 const { rotated, exitLandscape } = useLandscape(measureLayout);
 
 /**
- * 返回图标要不要顺时针补 90°。
+ * 返回图标要不要顺时针补 90°：改由 CSS `@media (orientation: portrait)` 直接按可视区判定（见样式）。
  *
- * 图标本体画的是「托盘 + 向上箭头」，设计稿里是横置的（箭头朝右），所以竖着看时必须补 90°：
- * - 网页版（浏览器 / PC 内嵌）：版面永远不转，一律要补；
- * - 容器内只有 CSS 旋转模拟横屏（设备竖着拿、页面整体转了 90°）时才要补；
- *   宿主原生转屏成功、天猫精灵智慧屏 / 酷开大屏这类横屏画布机型，版面本身已经是横的，补了反而歪 90°。
+ * 图标本体画的是「托盘 + 向上箭头」，设计稿里是横置的（箭头朝右），竖屏版面上必须补 90°。
+ * 不用脚本算是因为方向来源有几种（原生横屏容器 / CSS 旋转兜底 / 智慧屏这类横屏画布机型
+ * 现在按竖屏容器打开），统一的判据其实就是「可视区是不是竖的」。
  */
-const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
 
 /**
  * 顶部状态栏空白：宿主全屏横屏时 webview 铺满屏幕、状态栏压在页面顶边，
@@ -708,7 +705,7 @@ function toggleShowAll() {
 <template>
   <view
     class="schedule"
-    :class="['schedule--rep', { 'schedule--rotated': rotated, 'schedule--exit-rotate': exitIconRotated, 'schedule--dark': isDark }]"
+    :class="['schedule--rep', { 'schedule--rotated': rotated, 'schedule--dark': isDark }]"
   >
     <!-- 顶部栏（7229:254：图例、查看全部任务、返回对话）：按产品要求去掉左侧标题与日期 -->
     <view class="schedule__header" :style="headerTopStyle">
@@ -1053,10 +1050,14 @@ function toggleShowAll() {
   height: 14px;
 }
 
-/* 补 90°（页面没转的场景）：见脚本里的 exitIconRotated。
+/* 补 90°：图标本体是横置的（箭头朝右），竖屏版面上要转正。
+   直接按可视区方向判，覆盖三种来源：CSS 旋转兜底的设备竖着拿、网页版竖屏窗口、
+   本身就是横屏画布但按竖屏容器打开的机型（智慧屏 / 大屏一体机）。
    用 transform 而不是 rotate 独立属性：天猫精灵智慧屏 / 酷开大屏的 WebView 内核较老，不认 `rotate`。 */
-.schedule--exit-rotate .schedule__exit-icon {
-  transform: rotate(90deg);
+@media (orientation: portrait) {
+  .schedule__exit-icon {
+    transform: rotate(90deg);
+  }
 }
 
 /* 托盘：左、下、右三边，底部两角圆一点 */

@@ -8,7 +8,6 @@ import arrowNextIcon from "@/assets/img/schedule-arrow-next.svg";
 import arrowPrevIcon from "@/assets/img/schedule-arrow-prev.svg";
 import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
 import { useLandscape } from "@/hooks/useLandscape";
-import { isWebEnvironment } from "@/utils/landscape-device";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
@@ -54,14 +53,12 @@ defineOptions({ name: "SchedulePrePage" });
 const { rotated, exitLandscape } = useLandscape(measureLayout);
 
 /**
- * 返回图标要不要顺时针补 90°。
+ * 返回图标要不要顺时针补 90°：由 CSS `@media (orientation: portrait)` 直接按可视区判定（见样式）。
  *
- * 图标本体画的是「托盘 + 向上箭头」，设计稿里是横置的（箭头朝右），所以竖着看时必须补 90°：
- * - 网页版（浏览器 / PC 内嵌）：版面永远不转，一律要补；
- * - 容器内只有 CSS 旋转模拟横屏（设备竖着拿、页面整体转了 90°）时才要补；
- *   宿主原生转屏成功、天猫精灵智慧屏 / 酷开大屏这类横屏画布机型，版面本身已经是横的，补了反而歪 90°。
+ * 图标本体画的是「托盘 + 向上箭头」，设计稿里是横置的（箭头朝右），竖屏版面上必须补 90°。
+ * 不用脚本算是因为方向来源有几种（原生横屏容器 / CSS 旋转兜底 / 智慧屏这类横屏画布机型
+ * 现在按竖屏容器打开），统一的判据其实就是「可视区是不是竖的」。
  */
-const exitIconRotated = computed(() => rotated.value || isWebEnvironment());
 
 /**
  * 顶部状态栏空白：宿主全屏横屏时 webview 铺满屏幕、状态栏压在页面顶边，
@@ -517,7 +514,6 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
     class="schedule"
     :class="{
       'schedule--rotated': rotated,
-      'schedule--exit-rotate': exitIconRotated,
       'schedule--dark': isDark,
     }"
   >

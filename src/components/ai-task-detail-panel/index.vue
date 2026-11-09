@@ -768,4 +768,33 @@ function close() {
     color: #8e8e8e;
   }
 }
+
+/* ===== 竖屏贴底弹层的深色 =====
+   竖屏版式用的是 `.tdp:not(.tdp--rotated) .xxx`（三级选择器）声明亮色，
+   上面 `.tdp--dark .xxx` 只有两级、打不过它，这里用同级选择器 + 更靠后的位置重写一遍。 */
+@media (orientation: portrait) {
+  .tdp--dark:not(.tdp--rotated) {
+    /* 标题在竖屏里独占一行且是纯黑，深色下要转白 */
+    .tdp__title {
+      color: #ffffff;
+    }
+
+    /* 站点卡 / 现场配合行：竖屏给的是 #F2F2F2 亮描边，换成深色分隔色 */
+    .tdp__site,
+    .tdp__support {
+      border-color: #303030;
+    }
+
+    /* 逾期提示标题：竖屏是 #C8201E 红字，深色底上按抽屉口径转灰 */
+    .tdp__warning-title {
+      color: #e5e5e5;
+    }
+
+    /* 逾期胶囊：竖屏的 #767676 虚线描边深色下过亮 */
+    .tdp__status--overdue {
+      border-color: #4a4a4a;
+    }
+  }
+}
+
 </style>
