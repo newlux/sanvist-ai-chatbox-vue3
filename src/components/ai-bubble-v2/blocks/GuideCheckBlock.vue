@@ -34,6 +34,11 @@ const props = defineProps({
    * 不画底部动作区（复制/分享）、状态行和参考来源。
    */
   compact: { type: Boolean, default: false },
+  /**
+   * 深色：这张卡由消息列表在气泡外独立渲染，拿不到气泡 provide 的 ai-bubble-dark，
+   * 需要外层显式传下来（与 GanttBlock 的 dark 同一套）。
+   */
+  dark: { type: Boolean, default: false },
 });
 
 /**
@@ -192,7 +197,7 @@ function resolveRootElement(): HTMLElement | null {
 </script>
 
 <template>
-  <view ref="rootRef" class="guide-check-block">
+  <view ref="rootRef" class="guide-check-block" :class="{ 'guide-check-block--dark': dark }">
     <!-- 卡片左上角品牌署名：sani logo + SANI + 语音播报控制（与气泡里的完成态同一套观感） -->
     <view class="guide-check-block__brand">
       <image class="guide-check-block__brand-icon" :src="saniIcon" mode="aspectFit" />
@@ -294,6 +299,7 @@ function resolveRootElement(): HTMLElement | null {
     <GuideSourceBlock
       v-if="!compact && sources.length"
       class="guide-check-block__sources"
+      :dark="dark"
       :payload="{ evidence: sources }"
     />
 
@@ -627,6 +633,84 @@ function resolveRootElement(): HTMLElement | null {
   50% {
     transform: scaleY(1);
     opacity: 1;
+  }
+}
+
+/* ===== 深色：与气泡内其它块同一套材质（正文 #E5E5E5、次要 45% 白、块底 6% 白） ===== */
+.guide-check-block--dark {
+  .guide-check-block__brand-text {
+    color: #e5e5e5;
+  }
+
+  .guide-check-block__title {
+    color: #e5e5e5;
+  }
+
+  .guide-check-block__step {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  /* 进度轨道：浅色底改成 12% 白；高亮段用更亮的蓝，深底上不至于糊成一团 */
+  .guide-check-block__progress {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .guide-check-block__progress-fill {
+    background: #4c8dff;
+  }
+
+  .guide-check-block__step-title,
+  .guide-check-block__content,
+  .guide-check-block__question {
+    color: #e5e5e5;
+  }
+
+  .guide-check-block__option {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .guide-check-block__option-letter,
+  .guide-check-block__option-label {
+    color: #e5e5e5;
+  }
+
+  .guide-check-block__option-divider {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .guide-check-block__status {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .guide-check-block__actions {
+    border-top-color: rgba(255, 255, 255, 0.12);
+  }
+
+  /* 复制的 svg 在深底上接近隐形，整体提亮一档（与 GuideSourceBlock 同做法） */
+  .guide-check-block__action-icon {
+    filter: brightness(1.7);
+  }
+
+  .guide-check-block__image-item {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .guide-check-block__image {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .guide-check-block__image-caption {
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .guide-check-block__tts-spinner {
+    border-color: rgba(255, 255, 255, 0.22);
+    border-top-color: rgba(255, 255, 255, 0.72);
+  }
+
+  .guide-check-block__tts-wave-bar {
+    background: #4c8dff;
   }
 }
 </style>

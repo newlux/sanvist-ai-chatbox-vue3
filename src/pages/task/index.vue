@@ -974,6 +974,7 @@ onUnload(() => {
       :leaving="welcomeLeaving"
       :landed="welcomeLanded"
       :logo-style="welcomeLogoStyle"
+      :dark="isDark"
       @start-chat="onWelcomeStart"
       @start-text="onWelcomeText"
     />

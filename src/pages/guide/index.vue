@@ -177,12 +177,12 @@ const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beg
     ...(selectedDeviceModel.value ? { device_model: selectedDeviceModel.value } : {}),
     ...(userStore.operatorRole?.roleKey ? { operator_role: userStore.operatorRole.roleKey } : {}),
   }),
-  // 同首页：问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
+  // 与首页同一套：答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
   // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
   //
-  // 多步骤卡（guide-step）的回答例外：正文既不渲染（见 ai-bubble-v2 的 hideBody），也不生成正文语音
-  // —— 播报交给多步骤卡自己（展开 / 切步只念当前步骤的 action）。步骤卡一到就把已经开播的这一轮掐掉，
-  // 后续增量不再喂给 TTS；useRealtimeTts.stop 会把这条消息记成「手动停止」，之后的增量不会自动重启。
+  // 多步骤卡（guide-step）的回答保留原逻辑：正文既不渲染（见 ai-bubble-v2 的 hideBody）也不播报，
+  // 播报交给卡片自己（展开 / 切步只念当前步骤）；卡片一到就把已开播的这一轮掐掉，
+  // 后续增量不再喂给 TTS（stop 会把这条消息记成「手动停止」，之后不会自动重启）。
   onAiAnswerDelta({ aiMsgId, delta, ended }) {
     const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
     if (index < 0) return;
@@ -193,6 +193,23 @@ const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beg
       return;
     }
     realtimeTts.feedAnswerDelta(message, delta, ended);
+  },
+  /**
+   * 开场引导卡（COMPONENT scene=guide / type=lead）：「你好，我是 SANI…」这段正文是整块下发的，
+   * 不走 answer delta，流式那条线永远拿不到它 —— 回答完成时补一次自动播报，把正文念出来。
+   *
+   * 多步骤卡的消息不在这里补（播报归卡片管）；已经有 answer 正文的也不补（流式那条线念过了，
+   * 再播一次会把刚播的打断重来）。
+   */
+  onAiMessageComplete({ aiMsgId }) {
+    const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
+    if (index < 0) return;
+    const message = chatStore.messages[index];
+    const blocks = message.blocks || [];
+    if (!blocks.some(block => block?.type === "guide-lead")) return;
+    if (blocks.some(block => block?.type === "guide-step")) return;
+    if (blocks.some(block => block?.type === "answer" && String(block.payload?.content || "").trim())) return;
+    void realtimeTts.togglePlay(message);
   },
   // 与首页同一套滚动：发送时只登记本轮的提问（消息列表据此加大顶部呼吸位），
   // 回答边写边贴底跟随，本轮提问顶到头部下沿就停住（见 ai-message-list 的 alignToReplyEnd）
@@ -1041,6 +1058,7 @@ onUnload(() => {
       :leaving="welcomeLeaving"
       :landed="welcomeLanded"
       :logo-style="welcomeLogoStyle"
+      :dark="isDark"
       @start-chat="onWelcomeStart"
       @start-text="onWelcomeText"
     />
@@ -1065,6 +1083,7 @@ onUnload(() => {
         :load-sessions="getAISessionList"
         :selected-session-id="aiSessionId"
         :generating="isLoading"
+        :realtime-tts-playing="realtimeTts.playing.value"
         :share-mode="shareSheetVisible"
         :share-select-all-disabled="shareSelectAllDisabled"
         :share-all-checked="shareAllChecked"

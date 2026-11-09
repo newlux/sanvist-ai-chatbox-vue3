@@ -9,7 +9,7 @@ import { isWebEnvironment, warmPhoneInfo } from "@/utils/landscape-device";
 import { describeLaunchSources, readBridgeStartupParams, resolveLaunchQuery, subscribeStartupParams } from "@/utils/launch-query";
 import { createLogger } from "@/utils/logger";
 import { isMpaasReady, notifyTokenExpiration, waitForMpaas } from "@/utils/platform/mpaas";
-import { setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
+import { describeRequestAuth, setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
 import { setSceneStartupQuery } from "@/utils/scene-navigation";
 
@@ -85,14 +85,31 @@ async function waitBridgeReady(): Promise<boolean> {
  * `startupParams.query` 既可能是对象也可能是查询串（`Authorization=xx&Lang=zh_CN`），
  * readBridgeStartupParams 已统一解析并摊平到顶层，顶层与嵌套两种取法都认。
  */
-function readHostAuthorization(): string {
+type HostAuthPath = "query.Authorization" | "query.authorization" | "Authorization" | "authorization" | "none";
+
+/**
+ * 宿主 token + 它是从哪一层取到的。
+ *
+ * 带上命中路径是为了排查「宿主到底把 token 传在哪」：
+ * 之前只返回字符串，取不到时日志只能看到空串，分不清是没传、传在顶层没摊平、
+ * 还是 key 大小写不一致。
+ */
+function readHostAuthorization(): { value: string; path: HostAuthPath } {
   const bridge = readBridgeStartupParams();
   // query 是对象时直接看它（摊平后顶层也有，双保险）；字符串形态已由 readBridgeStartupParams 解析并摊平
   const nestedRaw = bridge.query;
   const nested = nestedRaw && typeof nestedRaw === "object" ? (nestedRaw as StartupQuery) : {};
-  return String(
-    nested.Authorization || nested.authorization || bridge.Authorization || bridge.authorization || "",
-  ).trim();
+  const candidates: Array<[HostAuthPath, unknown]> = [
+    ["query.Authorization", nested.Authorization],
+    ["query.authorization", nested.authorization],
+    ["Authorization", bridge.Authorization],
+    ["authorization", bridge.authorization],
+  ];
+  for (const [path, raw] of candidates) {
+    const value = String(raw || "").trim();
+    if (value) return { value, path };
+  }
+  return { value: "", path: "none" };
 }
 
 function initializeSystem(query: StartupQuery, launchOptions?: LaunchOptions) {
@@ -104,8 +121,27 @@ function initializeSystem(query: StartupQuery, launchOptions?: LaunchOptions) {
 
   // token 只认宿主启动参数 query 下那份：bridge → startupParams.query.Authorization；
   // 取不到就用本地配置的 token，两者都没有则置空（请求不带 Authorization 头）。
-  const hostAuthorization = readHostAuthorization();
+  const host = readHostAuthorization();
+  const hostAuthorization = host.value;
   const authorization = hostAuthorization || LOCAL_AUTHORIZATION_FALLBACK;
+
+  /**
+   * token 获取流程日志（同步打，不依赖 vConsole 就绪）。
+   *
+   * 之前只在 debugReady.then 里打：调试面板没加载出来时（生产包 / 面板加载失败），
+   * 日志里完全看不到 token 从哪来、宿主到底传没传，排查只能靠猜。
+   * 这里把「bridge 就绪 / 是否网页环境 / 命中哪一层 / 是否用了本地兜底」一次打全。
+   */
+  logger.warn("[auth] 启动 token 流程", {
+    bridgeReady: isMpaasReady(),
+    webEnvironment: isWebEnvironment(),
+    hostPath: host.path,
+    hostHasToken: Boolean(hostAuthorization),
+    fallbackTokenLen: hostAuthorization ? 0 : LOCAL_AUTHORIZATION_FALLBACK.length,
+    tokenLen: authorization.length,
+    tokenPrefix: authorization.slice(0, 16),
+    bridgeKeys: Object.keys(readBridgeStartupParams()),
+  });
 
   // 联调：面板就绪后再打，否则真机上根本看不到
   void debugReady.then(() => {
@@ -120,9 +156,12 @@ function initializeSystem(query: StartupQuery, launchOptions?: LaunchOptions) {
     // 用 warn 打：生产默认级别是 warn，联调时要能在控制台看到最终生效的 token
     logger.warn("[auth] token", {
       source: hostAuthorization ? "host" : "local",
+      hostPath: host.path,
       authorization: authorization || "",
       // 当前实际生效的（补正后应与宿主一致）
       current: String(systemStore.header.Authorization || ""),
+      // 请求层真正会发出去的那份（与 systemStore 是两条独立通道，对不上就是这里漏了）
+      requestLayer: describeRequestAuth(),
       bridgeAuthorization: sources.bridgeAuthorization,
       bridgeQueryType: sources.bridgeQueryType,
     });
@@ -137,7 +176,7 @@ function initializeSystem(query: StartupQuery, launchOptions?: LaunchOptions) {
   // 宿主传的值出现过缺网关前缀（只有域名）的情况，请求会 503 routeNotFound。
   const baseUrl = String(import.meta.env.VITE_AI_QUESTION_BASE_URL || "");
 
-  setRequestAuth(authorization);
+  setRequestAuth(authorization, hostAuthorization ? "host" : authorization ? "local-fallback" : "empty");
   setRequestBaseURL(baseUrl);
   // 联调：确认请求实际打到哪个地址（现在只由 VITE_AI_QUESTION_BASE_URL 决定）
   void debugReady.then(() => {
@@ -175,12 +214,21 @@ function initializeSystem(query: StartupQuery, launchOptions?: LaunchOptions) {
  * token 由宿主通过启动参数注入，前端自己换不了，
  * 只能通知宿主重新下发；拿不到 bridge 时至少让用户知道要重进。
  */
-function handleAuthFailure(_statusCode: number, message: string) {
-  logger.error("auth failed", message);
+function handleAuthFailure(statusCode: number, message: string) {
+  // 带上当前 token 的状态：只有知道请求那一刻带的是谁的 token，才能判断是「宿主没下发」还是「下发的是过期 token」
+  logger.error("[auth] 鉴权失败", {
+    statusCode,
+    message,
+    bridgeReady: isMpaasReady(),
+    webEnvironment: isWebEnvironment(),
+    token: describeRequestAuth(),
+  });
   if (isMpaasReady()) {
+    logger.warn("[auth] 已通过 tokenExpiration 通知宿主重新下发");
     notifyTokenExpiration();
     return;
   }
+  logger.warn("[auth] 无 bridge，无法通知宿主，提示用户重进");
   uni.showToast({ title: t("auth-expired-reenter"), icon: "none", duration: 3000 });
 }
 
@@ -228,15 +276,33 @@ function initializeIframeBridge(query: StartupQuery) {
  * bridge 就绪后立刻换成宿主下发的 token（请求头与 systemStore.header 一起更新）。
  */
 function syncHostAuthorization(reason: string) {
-  const hostAuth = readHostAuthorization();
-  if (!hostAuth) return;
-
+  const host = readHostAuthorization();
   const currentAuth = String(systemStore.header.Authorization || "");
-  if (hostAuth === currentAuth) return;
+  // 每条分支都留痕：之前「拿不到宿主 token」直接 return，日志里看不到补正到底跑没跑
+  if (!host.value) {
+    logger.warn("[auth] 补正跳过：宿主未下发 token", {
+      reason,
+      currentLen: currentAuth.length,
+      requestLayer: describeRequestAuth(),
+    });
+    return;
+  }
+  if (host.value === currentAuth) {
+    logger.debug("[auth] 补正跳过：与当前一致", { reason, hostPath: host.path });
+    return;
+  }
 
-  logger.warn("[auth] 改用宿主 token", { reason, authorization: hostAuth, previous: currentAuth });
-  setRequestAuth(hostAuth);
-  systemStore.setHeader({ ...systemStore.header, Authorization: hostAuth });
+  logger.warn("[auth] 改用宿主 token", {
+    reason,
+    hostPath: host.path,
+    hostLen: host.value.length,
+    hostPrefix: host.value.slice(0, 16),
+    previousLen: currentAuth.length,
+    previousPrefix: currentAuth.slice(0, 16),
+  });
+  setRequestAuth(host.value, `late-${reason}`);
+  systemStore.setHeader({ ...systemStore.header, Authorization: host.value });
+  logger.warn("[auth] 补正完成", { reason, requestLayer: describeRequestAuth() });
 }
 
 /**

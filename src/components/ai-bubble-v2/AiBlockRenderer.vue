@@ -234,6 +234,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     :payload="block.payload"
     :show-actions="showCardActions"
     :compact="compactGuideCard"
+    :dark="dark"
     :tts-enabled="ttsEnabled"
     :tts-loading="ttsLoading"
     :tts-playing="ttsPlaying"

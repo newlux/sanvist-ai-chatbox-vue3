@@ -34,6 +34,17 @@ function extractAnswerText(message: UiChatMessage, stepId = ""): string {
     ? ""
     : blocks.filter(block => block.type === "answer").map(block => String(block.payload?.content || "")).join("");
   if (fromBlocks) return fromBlocks;
+  /**
+   * 开场引导卡（guide-lead，scene=guide / type=lead）：「你好，我是 SANI…」这段正文是整块下发的，
+   * 不经过 answer delta（流式喂数拿不到），只存在于卡片的 text 上。
+   * 不带它的话，点播报按钮会因为 answer 为空而「没声音」。
+   */
+  const fromLeadBlocks = blocks
+    .filter(block => block.type === "guide-lead")
+    .map(block => String(block.payload?.text || "").trim())
+    .filter(Boolean)
+    .join("\n");
+  if (fromLeadBlocks) return fromLeadBlocks;
   // 核对卡（guide-check）场景：气泡正文隐藏 / 为空时，用核对卡的「标题 + 步骤正文」当播报文本，
   // 否则点播报按钮会因为 answer 为空而「没声音」。
   // 传了 stepId 就只念当前这一步（多步骤卡翻页后不能把 5 步全念一遍）；

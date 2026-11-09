@@ -1827,6 +1827,7 @@ onBeforeUnmount(() => {
       :leaving="welcomeLeaving"
       :landed="welcomeLanded"
       :logo-style="welcomeLogoStyle"
+      :dark="isDark"
       @start-chat="onWelcomeStart"
     />
 
