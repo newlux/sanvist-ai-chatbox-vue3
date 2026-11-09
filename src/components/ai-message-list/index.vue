@@ -1625,7 +1625,7 @@ watch(
 }
 
 .msg-list__inner--docked .chat-box {
-  margin-top: auto;
+  margin-top: 0;
 }
 .chat-box {
   padding: var(--chat-box-top-padding) 40rpx 0;

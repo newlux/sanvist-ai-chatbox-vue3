@@ -160,7 +160,15 @@ const chatEnterStyle = computed(() => ({
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用实时 TTS 做流式听播。
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
 const realtimeTts = useRealtimeTts(chatScope);
-const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+/**
+ * 是否正在语音播报（页面左右下边缘流光的显示时机）：
+ * 实时流式听播（realtimeTts.playing）或整段播报（消息上的 ttsPlaying）任一在播都算。
+ */
+const isTtsPlaying = computed(() =>
+  Boolean(realtimeTts.playing.value)
+  || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
+);
+const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, sendSilentMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
   // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
   // 回复里的核对卡仍由 focusStepBlock 在卡片出现 / 翻页时顶到对话区最上方（见 onGuideStepOpen）。
@@ -335,6 +343,43 @@ function onAskSlotOpen(slot: AskSlotPayload) {
 
 function closeAskSlotDrawer() {
   askSlotDrawerVisible.value = false;
+}
+
+/**
+ * 进入页面自动触发一次「选择机型」的静默请求：不往消息列表落用户气泡，
+ * 只把返回的开场引导卡（guide-lead）塞进消息列表，让用户一进页面就能看到机型选择。
+ * 已选过机型就不再触发；重复进入（onShow）也只触发一次。
+ */
+let initAskSlotHandled = false;
+function triggerInitAskSlot() {
+  if (initAskSlotHandled) return;
+  initAskSlotHandled = true;
+  // 已选机型就不再触发（用户已经选过，直接进对话）
+  if (userStore.selectedDeviceModelKey) return;
+  void sendSilentMessage({
+    // 触发后端返回机型选择引导卡的固定提问文案（与后端约定）
+    text: "选择机型",
+    onBlocks(blocks, ended) {
+      if (!ended) return;
+      const leadBlock = (blocks || []).find(block => block?.type === "guide-lead");
+      if (!leadBlock?.payload) return;
+      // 手动把引导卡塞进消息列表（作为一条 AI 消息的 blocks），
+      // 卡片通过 AiBlockRenderer 内联渲染，点选项走 sendQuickPrompt 发对话。
+      chatStore.messages.push({
+        id: `guide-lead-${Date.now()}`,
+        role: "ai",
+        content: "",
+        blocks: [leadBlock],
+        loading: false,
+        sessionId: chatStore.aiSessionId,
+        messageId: null,
+        hideActions: true,
+        ttsEnabled: false,
+        processStatus: { phase: "succeeded" },
+      });
+      nextTick(() => chatStore.scrollToBottom(true));
+    },
+  });
 }
 
 /** 抽屉高度量出来了：底部间距随之变化，贴一次底把内容抬到卡片上方 */
@@ -585,7 +630,13 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   nextTick(() => guideStepSheetRef.value?.goToStep(index));
 }
 
-/** 点击追问后先移除它所属回答的追问列表，再按普通问题走完整发送链路。 */
+/**
+ * 点击追问后先移除它所属回答的追问列表，再按普通问题走完整发送链路。
+ * 开场引导卡（guide-lead）点选后**不做任何改动**：卡片保留在对话上下文里
+ * （选项仍可点），既不隐藏也不转只读态——它作为「选择机型」的常驻入口，
+ * 每一轮对话都留在消息列表中。只对 suggestion / guide-suggestion 的
+ * suggestion 块维持原逻辑（点选后移除该块）。
+ */
 function onGuideSuggestionTap(suggestion: string, messageIndex: number) {
   const message = chatStore.messages[messageIndex];
   if (message?.role === "ai" && Array.isArray(message.blocks)) {
@@ -696,9 +747,12 @@ watch(
     const key = String(last.messageId ?? last.id);
     if (autoSpokenCheckMessageIds.has(key)) return;
     autoSpokenCheckMessageIds.add(key);
+    // 只播当前这一步（默认第一步）：不传 stepId 会把多步骤卡的每一张核对卡
+    // 标题+正文全部拼在一起念（见 useRealtimeTts 的 extractAnswerText），
+    // 与手动点播报只念当前步骤的口径不一致，表现为「第一次播报内容比手动点击长一大截」。
     // 语音播报总开关关掉：核对卡出来后不再自动念
     if (!settingsStore.autoTtsEnabled) return;
-    void realtimeTts.togglePlay(last);
+    void realtimeTts.togglePlay(last, resolveActiveStepId(last));
   },
 );
 
@@ -1014,6 +1068,8 @@ onLoad((options) => {
   pendingQuestion = readQueryValue(options, "question");
   guideRecommendContext.value = readGuideRecommendContext(options);
   void loadGuideRecommend();
+  // 进入即自动触发「选择机型」：把机型选择追问卡弹出来（不落消息气泡）
+  triggerInitAskSlot();
 });
 
 onMounted(() => {
