@@ -14,7 +14,7 @@ import { useChatStore, useSessionStore, useSettingsStore, useUserStore } from "@
 import { buildInitialBlocks, consumeChatStream, parseReportInteraction, parseReportStyleTag, parseRoleTaggedAnswer, parseVoiceStyleTag, parseWorkReportTag } from "@/utils/ai-stream";
 
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
-import { saveCurrentListenReportDate } from "@/utils/listen-report";
+import { saveCurrentListenReportDate, saveCurrentListenReportLanguage } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { navigateToScene } from "@/utils/scene-navigation";
 
@@ -163,7 +163,8 @@ function resolveRoleTagTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
 }
 
 /**
- * 听汇报标签 `<WORK_REPORT date="…">正文</WORK_REPORT>`：取出日期，并把标签源码摘掉。
+ * 听汇报标签 `<WORK_REPORT date="…" language="…">正文</WORK_REPORT>`：
+ * 取出日期与播报语言，并把标签源码摘掉。
  * matched/closed 决定要不要跳播报页，tagged 只表示这一拍正文被改写过。
  */
 function resolveWorkReportTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
@@ -173,6 +174,7 @@ function resolveWorkReportTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
     matched: parsed.matched,
     closed: parsed.closed,
     date: parsed.date,
+    language: parsed.language,
     text: parsed.text,
     tagged: answerText !== parsed.text,
   };
@@ -584,14 +586,16 @@ export function useChatSend(scope?: string, handlers?: {
 
     /**
      * 听汇报标签的收尾：打开播报页（pages/podcast/index）。
-     * 播报页 onLoad 从 storage 读「当前播报日期」，所以先把标签里的 date 写进去再跳，
-     * 否则播报页拿到的还是上一次的日期。跳转同样走 navigateToScene。
+     * 播报页 onLoad 从 storage 读「当前播报日期」与「播报语言」，所以先把标签里的
+     * date / language 写进去再跳，否则播报页拿到的还是上一次的值。
+     * language 会原样进 `/listen-broadcast/play` 的入参。跳转同样走 navigateToScene。
      */
-    function openWorkReportPage(turn: { date: string }) {
+    function openWorkReportPage(turn: { date: string; language?: string }) {
       if (workReportHandled) return;
       workReportHandled = true;
-      logger.debug("work report tag detected", { aiMsgId, date: turn.date });
+      logger.debug("work report tag detected", { aiMsgId, date: turn.date, language: turn.language });
       saveCurrentListenReportDate(turn.date);
+      saveCurrentListenReportLanguage(turn.language);
       // 已经在播报页里问出来的标签：日期照写，但不要再跳自己一次
       const pages = getCurrentPages();
       const current = pages[pages.length - 1];

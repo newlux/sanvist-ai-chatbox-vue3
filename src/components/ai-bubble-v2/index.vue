@@ -17,7 +17,7 @@ import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const props = defineProps({
   role: { type: String, default: "ai" },
@@ -362,7 +362,34 @@ const showProcessStatus = computed(
   () => !isUser.value && (Boolean(processStatusText.value) || isGenerating.value),
 );
 const hasProcessContent = computed(() => Boolean(contentBlocks.value.length || props.content));
-const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(props.processSubtitle?.trim()));
+
+/**
+ * 过程副标题（接口 subtitle 事件）的展示文案。
+ *
+ * 后端会把中英两套节点名用「|」拼成一条（如「前置直接回复 | Direct Reply正在执行」），
+ * 这里按当前语言只留对应那一半：中文取带汉字的那段，英文取不带汉字的那段；
+ * 再把尾部的执行状态（正在执行 / 执行完成 / 已完成…）摘掉 —— 状态已经由上面那行 SANI 表达，
+ * 副标题只留节点名本身。
+ */
+const SUBTITLE_STATUS_SUFFIX = /[\s·,，—-]*(正在执行|执行完成|执行中|已完成|进行中|is running|is executing|executing|running|completed|in progress)\s*$/i;
+
+const processSubtitleText = computed(() => {
+  const raw = String(props.processSubtitle || "").trim();
+  if (!raw) return "";
+  // 「|」是后端约定的「中文 | 英文」分隔符，全角竖线一并认
+  const parts = raw
+    .split(/[|｜]/)
+    .map(part => part.replace(SUBTITLE_STATUS_SUFFIX, "").trim())
+    .filter(Boolean);
+  if (!parts.length) return "";
+  if (parts.length === 1) return parts[0];
+  const isEnglish = locale.value.toLowerCase().startsWith("en");
+  const chinese = parts.find(part => /[\u4E00-\u9FFF]/.test(part));
+  const english = parts.find(part => !/[\u4E00-\u9FFF]/.test(part));
+  return (isEnglish ? english : chinese) || parts[0];
+});
+
+const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(processSubtitleText.value));
 
 /** 维修助手回流卡：轮询中显示「故障诊断中…」，回流完成后展示摘要详情。 */
 const showAssistantCallbackResult = computed(
@@ -652,8 +679,8 @@ function onTtsTap() {
           class="ai-bubble-v2__process-subtitle"
           :class="{ 'ai-bubble-v2__process-subtitle--with-content': hasProcessContent }"
         >
-          <text :key="props.processSubtitle" class="ai-bubble-v2__process-subtitle-text">
-            {{ props.processSubtitle }}
+          <text :key="processSubtitleText" class="ai-bubble-v2__process-subtitle-text">
+            {{ processSubtitleText }}
           </text>
         </view>
         <view
@@ -1144,8 +1171,8 @@ function onTtsTap() {
 }
 /* ===== 过程状态行：设计稿 1187:14「✓ 已完成 0.5m」=====
    12px / 18px / #5D5D5D，图标与文字间距 4px；
-   下面有正文时跟一条 1px #E8E8E8 分隔线（对应 1187:40 Divider），
-   文字到线的间距 12px，线到正文的间距由卡片父级 gap 给 */
+   状态行与下方正文之间不再画 1px #E8E8E8 分隔线（1187:40 Divider 已按需求去掉），
+   只靠 12px 间距和卡片父级 gap 拉开 */
 .ai-bubble-v2__process-status {
   display: flex;
   align-items: center;
@@ -1161,7 +1188,6 @@ function onTtsTap() {
 }
 .ai-bubble-v2__process-status--with-subtitle {
   padding-bottom: 24rpx;
-  border-bottom: 1px solid #e8e8e8;
 }
 .ai-bubble-v2__process-subtitle {
   display: block;

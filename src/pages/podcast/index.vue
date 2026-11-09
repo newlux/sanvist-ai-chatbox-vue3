@@ -48,7 +48,7 @@ import { stripMarkdownTables } from "@/utils/ai-stream";
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
 import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
-import { getCurrentListenReportDate, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
+import { getCurrentListenReportDate, getCurrentListenReportLanguage, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
@@ -70,8 +70,8 @@ const chatScope = provideChatScope("podcast");
 const chatStore = useChatStore(chatScope);
 const userStore = useUserStore();
 /**
- * 纯净模式：打开后底部才露出「消异常 / 回问问」快捷导航；
- * 关闭时这两个入口整条不渲染（与首页底部快捷入口同一套开关）。
+ * 纯净模式：关闭时底部才露出「消异常 / 回问问」快捷导航；
+ * 打开时这两个入口整条不渲染（与首页底部快捷入口同一套开关）。
  */
 const settingsStore = useSettingsStore();
 const { pureMode } = storeToRefs(settingsStore);
@@ -168,6 +168,12 @@ const preferenceLoading = ref(true);
 const reportBroadcastParams = ref<PlayListenBroadcastParams | null>(null);
 const reportBroadcastPortrait = ref("");
 const reportBizDate = ref("");
+/**
+ * 播报语言：来自对话里 `<WORK_REPORT language="…">` 标签，进页从 storage 取，
+ * 随 `/listen-broadcast/play` 的入参下发。标签没带 language 时为空，
+ * 入参里就不出现该字段，由后端按默认语言处理。
+ */
+const reportTagLanguage = ref("");
 /** 播报结束后改为页内展示洞察，不再跳转独立路由。 */
 const insightVisible = ref(false);
 /**
@@ -589,6 +595,8 @@ function applyReportBroadcastParams(voice: ReportVoiceOption, styleCode: string,
     styleCode,
     checkedModules: moduleCodes,
     bizDate: reportBizDate.value,
+    // 对话里 <WORK_REPORT language="…"> 指定的播报语言，原样交给 /listen-broadcast/play
+    ...(reportTagLanguage.value ? { language: reportTagLanguage.value } : {}),
   };
   reportBroadcastPortrait.value = voice.hero;
   showReportVoiceSelector.value = false;
@@ -622,6 +630,8 @@ function confirmReportVoice(voice: ReportVoiceOption, style: ListenBroadcastStyl
     styleCode: style.code,
     checkedModules: moduleCodes,
     bizDate: reportBizDate.value,
+    // 沿用本轮从 <WORK_REPORT> 标签带进来的播报语言（手动改偏好不该把它丢掉）
+    ...(reportTagLanguage.value ? { language: reportTagLanguage.value } : {}),
   };
   reportBroadcastPortrait.value = voice.hero;
   showReportVoiceSelector.value = false;
@@ -1435,6 +1445,8 @@ onLoad((options) => {
   directBroadcast = String(options?.direct || "") === "1";
   syncWindowHeight();
   reportBizDate.value = getCurrentListenReportDate();
+  // 对话里 <WORK_REPORT language="…"> 指定的播报语言（没被标签设置过就是空，play 入参里就不带）
+  reportTagLanguage.value = getCurrentListenReportLanguage();
   reportQaAnswer.value = "";
   reportQaSubtitle.value = "";
   reportQaLoading.value = false;
@@ -1562,9 +1574,9 @@ onBeforeUnmount(() => {
       </view>
       <!-- 播报视图底部快捷导航：消异常 → 异常列表，回问问 → 回首页；洞察态隐藏避免盖住列表；
            进页偏好加载中（骨架屏）与播报准备中（字幕骨架屏）也隐藏；
-           受纯净模式控制：只有打开纯净模式才出现，关闭则整条不渲染 -->
+           受纯净模式控制：纯净模式关闭才出现，打开则整条不渲染 -->
       <view
-        v-if="pureMode && !insightVisible && !preferenceLoading && !broadcastPreparing && !voiceQueryActive"
+        v-if="!pureMode && !insightVisible && !preferenceLoading && !broadcastPreparing && !voiceQueryActive"
         class="podcast-page__quick-nav"
         :style="quickNavStyle"
       >

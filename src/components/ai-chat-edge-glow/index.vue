@@ -9,6 +9,9 @@ defineOptions({ name: "AiChatEdgeGlow" });
  * - 右竖边 203:5926：#8F6DEB → #F0B5FD，13px 宽，blur 8px
  * - 底部光雾 203:5916：449×118px，x=-37.8、y=769（底边比画布低 75px），#295DC3 → #0D7ABA，blur 84px
  *
+ * 三条边统一 13px（26rpx）厚；四角用 45° 斜切对接（clip-path），
+ * 竖边与底部光雾在斜线上严丝合缝，不会叠成双倍浓度的色块。
+ *
  * 显示时机由页面控制（生成中才出现）；深色稿没有这三层，页面在 .ai-page--dark 里隐藏本组件。
  */
 defineProps<{
@@ -21,7 +24,8 @@ defineProps<{
   <view v-if="visible" class="ai-chat-edge-glow" aria-hidden="true">
     <view class="ai-chat-edge-glow__side ai-chat-edge-glow__side--left" />
     <view class="ai-chat-edge-glow__side ai-chat-edge-glow__side--right" />
-    <!-- 底部光雾只保留页面最底下一条：外层裁切 + 上沿蒙版，模糊不会爬到输入栏上 -->
+    <!-- 底部光雾只保留页面最底下一条 26rpx（与两侧竖边同厚）：
+         外层裁切 + 上沿蒙版，模糊不会爬到输入栏上 -->
     <view class="ai-chat-edge-glow__bottom-clip">
       <view class="ai-chat-edge-glow__bottom" />
     </view>
@@ -58,51 +62,73 @@ defineProps<{
   will-change: opacity;
 }
 
-/* 左竖边：紫 → 蓝 */
+/* 左竖边：紫 → 蓝。
+   底部最后 26rpx 沿 45° 切给底部光雾（竖边只留斜线上方），两条边在斜线上对接。
+   色值流动：渐变做成「紫 → 蓝 → 紫」的对称图案、背景高取 200%，
+   再让 background-position 纵向滚过一个完整图案，这两个色值就会沿着竖边往上爬；
+   位移正好一个图案周期，循环首尾同色，看不到接缝 */
 .ai-chat-edge-glow__side--left {
   left: 0;
-  background: linear-gradient(180deg, #8f6deb 0%, #0f7eee 100%);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 26rpx), 0 100%);
+  background-image: linear-gradient(180deg, #8f6deb 0%, #0f7eee 50%, #8f6deb 100%);
+  background-repeat: repeat-y;
+  background-size: 100% 200%;
   -webkit-mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0) 100%);
   mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0) 100%);
-  animation: ai-chat-edge-breathe 2600ms ease-in-out infinite;
+  animation:
+    ai-chat-edge-breathe 2600ms ease-in-out infinite,
+    ai-chat-edge-flow-y 14000ms linear infinite;
 }
 
-/* 右竖边：紫 → 粉 */
+/* 右竖边：紫 → 粉（斜切方向镜像，色值流动同左） */
 .ai-chat-edge-glow__side--right {
   right: 0;
-  background: linear-gradient(180deg, #8f6deb 0%, #f0b5fd 100%);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 calc(100% - 26rpx));
+  background-image: linear-gradient(180deg, #8f6deb 0%, #f0b5fd 50%, #8f6deb 100%);
+  background-repeat: repeat-y;
+  background-size: 100% 200%;
   -webkit-mask-image: linear-gradient(270deg, #000 0%, rgba(0, 0, 0, 0) 100%);
   mask-image: linear-gradient(270deg, #000 0%, rgba(0, 0, 0, 0) 100%);
-  animation: ai-chat-edge-breathe 2600ms ease-in-out infinite;
-  // 与左侧错开半个周期，两侧不同步地一明一暗，形成流动感
-  animation-delay: -1300ms;
+  // 周期比左侧长一点，两个动画的相位都错开：一明一暗不同步、色带一快一慢
+  animation:
+    ai-chat-edge-breathe 2600ms ease-in-out infinite,
+    ai-chat-edge-flow-y 18000ms linear infinite;
+  animation-delay: -1300ms, -4500ms;
 }
 
-/* 底部光雾的可见窗口：只占页面最底下 36px（= 画布 812 - 输入栏底 776），
-   超出这个高度的模糊全部裁掉 —— 输入栏（设计稿 y=732→776）及其上方不会再被染色。
-   上沿再用蒙版淡出，避免裁切出一条硬边 */
+/* 底部光雾的可见窗口：厚度与左右竖边一致（13px → 26rpx），
+   三条边看起来一样粗；超出这个高度的模糊全部裁掉 —— 输入栏及其上方不会再被染色。
+   两端再做 45° 斜切，与竖边底部的斜切共用同一条斜线，既不留缝也不叠出双倍浓度。
+   斜切是硬边，但光雾本身 blur 84px、上沿又有蒙版淡出，实际看不到折线 */
 .ai-chat-edge-glow__bottom-clip {
   position: absolute;
   right: 0;
   bottom: 0;
   left: 0;
-  height: 72rpx; // 36px
+  height: 26rpx; // 13px，与两侧竖边同厚
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, #000 60%, #000 100%);
-  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, #000 60%, #000 100%);
+  clip-path: polygon(0 100%, 26rpx 0, calc(100% - 26rpx) 0, 100% 100%);
+  -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, #000 40%, #000 100%);
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, #000 40%, #000 100%);
 }
 
 /* 底部光雾（设计稿 203:5916）：449×118px，模糊 84px；
-   元素底边比画布低 75px（设计稿 y=769、画布高 812），在 clip 内只露出最下面一段 */
+   元素底边比画布低 75px（设计稿 y=769、画布高 812），在 clip 内只露出最下面一段。
+   色值流动同理：横向做「#295DC3 → #0D7ABA → #295DC3」的对称图案、背景宽取 200%，
+   再横向滚过一个周期，光雾里深浅两种蓝会缓慢左右游动 */
 .ai-chat-edge-glow__bottom {
   position: absolute;
   left: -76rpx; // -37.8px
   bottom: -150rpx; // 底边溢出 75px
   width: 898rpx; // 449px
   height: 236rpx; // 118px
-  background: linear-gradient(90deg, #295dc3 0%, #0d7aba 100%);
+  background-image: linear-gradient(90deg, #295dc3 0%, #0d7aba 50%, #295dc3 100%);
+  background-repeat: repeat-x;
+  background-size: 200% 100%;
   filter: blur(168rpx); // 84px
-  animation: ai-chat-edge-wave 3200ms ease-in-out infinite;
+  animation:
+    ai-chat-edge-wave 3200ms ease-in-out infinite,
+    ai-chat-edge-flow-x 10000ms linear infinite;
   will-change: opacity, transform;
 }
 
@@ -129,6 +155,29 @@ defineProps<{
   50% {
     opacity: 0.95;
     transform: translateX(3%) scaleX(1.04);
+  }
+}
+
+/* 律动：色值沿竖边纵向流动。背景图高 200%（图案高 = 2 个自身高度），
+   y 位移 200% 恰好等于一个图案高度，滚完一圈首尾同色，循环处不会跳色 */
+@keyframes ai-chat-edge-flow-y {
+  0% {
+    background-position: 0 0;
+  }
+
+  100% {
+    background-position: 0 200%;
+  }
+}
+
+/* 律动：底部光雾色值横向流动（横位移 200% 同样是一个完整图案宽） */
+@keyframes ai-chat-edge-flow-x {
+  0% {
+    background-position: 0 0;
+  }
+
+  100% {
+    background-position: 200% 0;
   }
 }
 

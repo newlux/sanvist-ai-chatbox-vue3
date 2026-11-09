@@ -294,9 +294,20 @@ const UNPIN_SCROLL_UP_PX = 12;
  *
  * 头部留白 = 安全区 + 300rpx，刘海 / 灵动岛机型本身更大，所以实际取 max(留白, 150)；
  * 再减掉 .chat-box 自己的上内边距（见样式里的 --chat-box-top-padding），气泡顶边才真落在目标位置上，
- * 否则会白白低 20px。
+ * 否则会白白低 20px。最后再上提 PIN_MESSAGE_TOP_LIFT_PX，把上一条消息的尾巴顶进头部渐隐里。
  */
 const PIN_MESSAGE_TOP_MIN_Y_PX = 150;
+/**
+ * 提问落点再往上提的量（px）。
+ *
+ * 头部是透明的（只做毛玻璃渐隐、不铺底色），提问正好贴在留白条下沿时，
+ * 上一条消息的尾巴（上一轮的提问胶囊、推荐追问 chip）会露在气泡上方。
+ * 整条提问再往上抬这段高度，尾巴跟着往上走、进到头部渐隐更浓的一段里淡掉，
+ * 视觉上气泡上方就干净了 —— 只挪位置，不额外盖遮罩。
+ *
+ * 值是「视觉手感」参数：抬得越多，上一轮露出来的越少，但气泡也越贴近灵动岛。
+ */
+const PIN_MESSAGE_TOP_LIFT_PX = 48;
 /**
  * 把提问顶到头部下沿时，允许在内容末尾垫的空白上限（px）。
  *
@@ -1247,7 +1258,7 @@ const listPadStyle = computed(() => {
   // 顶部留白给悬浮头部让位：留白在滚动内容里，所以内容往上滚时能穿到头部毛玻璃下面
   if (props.topInset) {
     style.paddingTop = pinnedTopGap.value
-      ? `calc(max(${props.topInset}, ${PIN_MESSAGE_TOP_MIN_Y_PX}px) - ${CHAT_BOX_TOP_PADDING_VAR})`
+      ? `calc(max(${props.topInset}, ${PIN_MESSAGE_TOP_MIN_Y_PX}px) - ${CHAT_BOX_TOP_PADDING_VAR} - ${PIN_MESSAGE_TOP_LIFT_PX}px)`
       : props.topInset;
   }
   if (props.bottomInset) {

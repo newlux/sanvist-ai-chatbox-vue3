@@ -134,8 +134,9 @@ const {
   setVoiceInputFocused,
 } = useChatViewport();
 /**
- * 纯净模式（设置弹层 → 纯净模式）：打开后底部才露出快捷入口胶囊
- * （作业指导 / 任务协同 / 维修助手 / 配件助手 / 听汇报），关闭时整条导航不渲染。
+ * 纯净模式（设置弹层 → 纯净模式）：关闭时底部才露出快捷入口胶囊
+ * （作业指导 / 任务协同 / 维修助手 / 配件助手 / 听汇报），打开后整条导航不渲染
+ * —— 纯净模式即「界面只留对话」，胶囊入口属于要收起来的那部分。
  */
 const settingsStore = useSettingsStore();
 const { pureMode } = storeToRefs(settingsStore);
@@ -245,8 +246,11 @@ const photoPicker = useComposerAttachments();
  * 否则它们会盖在水面上（AiChatNav / .chat-scroll-bottom 的层级都在面板之上）。
  */
 const voicePanelOpen = ref(false);
-/** 底部快捷入口是否展示：只看纯净模式（关掉就整条不渲染），录音面板 / 录音条展开时让位 */
-const navVisible = computed(() => pureMode.value && !voicePanelOpen.value && !voiceQueryActive.value);
+/**
+ * 底部快捷入口是否展示：纯净模式关闭才显示（打开就整条不渲染），
+ * 录音面板 / 录音条展开时让位
+ */
+const navVisible = computed(() => !pureMode.value && !voicePanelOpen.value && !voiceQueryActive.value);
 
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
@@ -258,7 +262,7 @@ const messageBottomInset = computed(() => {
   if (askSlotDrawerVisible.value && askSlotDrawerHeight.value > 0) {
     return `${askSlotDrawerHeight.value}px`;
   }
-  // 纯净模式打开时底部多了一条快捷入口：给列表多留 88rpx（导航 72rpx + 顶部间距 16rpx）
+  // 纯净模式关闭时底部多了一条快捷入口：给列表多留 88rpx（导航 72rpx + 顶部间距 16rpx）
   if (navVisible.value) return `calc(${composerBottomInset.value} + 88rpx)`;
   // 底部只剩输入栏
   return composerBottomInset.value;
@@ -706,7 +710,7 @@ function onGoListenReport() {
 }
 
 /**
- * 底部快捷入口点击（仅纯净模式打开时可见）：
+ * 底部快捷入口点击（仅纯净模式关闭时可见）：
  * - mode=inline（配件助手）：就地切换智能体，再点一次取消；
  * - 听汇报：先固定当天早报日期，再进播报页（与卡片入口同一套逻辑）；
  * - 其余 page 入口：navigateToScene 到对应的场景页。
@@ -823,13 +827,15 @@ let islandListenIdleTimer: ReturnType<typeof setTimeout> | null = null;
  * - 开口先把上一轮的提问顶到头部下沿（历史回复整体往上拉走），
  *   再让列表把那条提问临时隐藏、把位置让给实时文字 —— 实时文字背后不会压着任何正文；
  * - 文字从左往右长出来，跟打字一样，说完才收成正式提问气泡；
- * - 让位的高度跟着实时文字走（voiceTopPad），文字多长就把下面的回答往下挤多少；
+ * - 只露最后两行（定高裁顶、文字压底），再长就把旧的顶走；整块上提一行并铺一层页面底色渐隐，
+ *   把头部留白条里透出来的上一条回答一起盖住；
+ * - 让位的高度跟着实时文字走（voiceTopPad），两行封顶后是固定值；
  * - 说完（静音 1.5s / 点 ↑）后按原有规则把提问气泡顶到头部下沿，回答从它下面长出来。
  */
 const voiceQueryActive = ref(false);
 /** 本轮实时转写文本：录音期间逐字刷新，只长在顶部那条文字上，不进消息列表 */
 const voiceTranscript = ref("");
-/** 实时文字的实测高度（px）：列表把上一条提问气泡临时隐藏、让出同样的高度，下方回复只按需往下让位 */
+/** 实时文字的实测高度（px）：两行封顶后是定值（含底部渐隐带），列表按它让位 */
 const voiceLiveHeight = ref(0);
 let voiceLiveObserver: ResizeObserver | null = null;
 /** 实时音量 0~1（已平滑）：驱动底部录音条的声纹长短 */
@@ -1928,11 +1934,15 @@ onBeforeUnmount(() => {
            文字从左往右长出来；说完才收成正式提问气泡。
            点下说话时会先把上一轮提问顶到这个落点（历史回复整体往上拉走），
            再由列表把那条提问临时隐藏、把位置让给这段文字（voiceTopPad 同步它的高度），
-           所以实时文字背后不会有任何正文，下面的回复也只按文字长短往下让位 -->
+           所以实时文字背后不会有任何正文，下面的回复也只按文字长短往下让位。
+           只露最后两行：超出的旧文字被裁在框顶外，最新的始终贴在下面；
+           外框那层页面底色渐隐负责盖住头部留白条里透出来的上一条回答 -->
       <view v-if="voiceQueryActive && asrTipReady" class="voice-live">
-        <text class="voice-live__text">
-          {{ voiceTranscript || $t("identifying") }}
-        </text>
+        <view class="voice-live__box">
+          <text class="voice-live__text">
+            {{ voiceTranscript || $t("identifying") }}
+          </text>
+        </view>
       </view>
       <!-- 一键回到底部：离底时出现，贴底自动隐藏；
            垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙；
@@ -2124,8 +2134,8 @@ onBeforeUnmount(() => {
         @submit="stopVoiceQuery"
       />
 
-      <!-- 纯净模式打开时的底部快捷入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手；
-           关闭（或录音面板展开）时整条导航不渲染 -->
+      <!-- 纯净模式关闭时的底部快捷入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手；
+           打开纯净模式（或录音面板展开）时整条导航不渲染 -->
       <AiChatNav
         :visible="navVisible"
         :active-key="navActiveKey"
@@ -2240,22 +2250,40 @@ $color-white: #ffffff;
 }
 
 /* ===== 录音中的实时转写 =====
-   落点与「提问气泡顶到头部下沿」完全同一口径（max(头部留白, 150px)，见 ai-message-list 的
-   PIN_MESSAGE_TOP_MIN_Y_PX），所以说完收成气泡时位置不跳。
+   落点与「提问气泡顶到头部下沿」同一口径（max(头部留白, 150px)，见 ai-message-list 的
+   PIN_MESSAGE_TOP_MIN_Y_PX），再上提 48rpx：头部是透明的，上一条回答的尾巴会从头部的留白条里
+   透出来，这一条要连它一起盖住 —— 上提一行（48rpx = 1 个行高）正好压掉那一行。
    左右 40rpx 与 .chat-box 的内边距一致，文字左对齐、从左往右长。
-   高度由消息列表按 voiceTopPad 让出同样的空档，文字变长只会把下面的回复往下挤，不会盖住它 */
+   只露最后两行：文字块定高 96rpx（2 × 48rpx），文字底部对齐，多出来的旧文字被裁在框顶外，
+   最新的始终贴在框底；框下 40rpx 是页面底色的渐隐，压住紧随其后的回复，不做硬切。
+   高度由消息列表按 voiceTopPad 让出同样的空档（定高后不再随文字变长） */
 .voice-live {
   position: absolute;
-  top: calc(max(var(--chat-top-inset, 300rpx), 150px));
+  top: calc(max(var(--chat-top-inset, 300rpx), 150px) - 48rpx);
   right: 40rpx;
   left: 40rpx;
   z-index: 3; // 压在消息列表之上、顶部毛玻璃（1）与悬浮头部（1010）之下
+  box-sizing: content-box;
+  padding-bottom: 40rpx; // 面板底部的渐隐带
+  // 页面底色铺满文字区，往下渐透：上面盖住上一条回答，下面托住这一次的回复
+  background: linear-gradient(180deg, #fafafa 0%, #fafafa 80%, rgba(250, 250, 250, 0) 100%);
   pointer-events: none;
   animation: voice-live-in 160ms ease-out both;
 }
 
+/* 两行视窗：高度 = 2 个行高，超出的内容裁掉（裁在上沿），文字再用绝对定位压到底 */
+.voice-live__box {
+  position: relative;
+  height: 96rpx;
+  overflow: hidden;
+}
+
 /* 字号 / 行高沿用原来「识别中」提词的口径：32rpx / 48rpx，读起来像自己刚说的话 */
 .voice-live__text {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
   color: #0d0d0d;
   font-size: 32rpx;
   font-weight: 500;
@@ -2264,6 +2292,10 @@ $color-white: #ffffff;
   word-break: break-word;
   -webkit-user-select: none;
   user-select: none;
+}
+
+.ai-page--dark .voice-live {
+  background: linear-gradient(180deg, #1a1a1a 0%, #1a1a1a 80%, rgba(26, 26, 26, 0) 100%);
 }
 
 .ai-page--dark .voice-live__text {

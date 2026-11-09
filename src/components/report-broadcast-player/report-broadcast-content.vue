@@ -4,13 +4,12 @@ import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } f
 import { useI18n } from "vue-i18n";
 import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
-import tellDarkGif from "@/assets/img/tell-dark.gif";
-import tellLightGif from "@/assets/img/tell-light.gif";
+import tellGif from "@/assets/img/tell.gif";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { useSystemStore } from "@/stores";
 
 const props = defineProps<{
-  /** 所选音色头像：头像位已按主题改用 tell-dark / tell-light 动图，仅为父级传参兼容保留 */
+  /** 所选音色头像：头像位已统一改用 tell.gif 动图，仅为父级传参兼容保留 */
   portrait?: string;
   playing: boolean;
   loading: boolean;
@@ -250,13 +249,12 @@ onBeforeUnmount(() => {
       <view class="report-broadcast-content__glow report-broadcast-content__glow--blue" />
       <view class="report-broadcast-content__glow report-broadcast-content__glow--red" />
       <!-- 左右声波已去掉（深色稿同步移除，浅色稿本就没有）：头像位只剩图形本体 -->
-      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 tell 动图，按主题取素材：
-           深色 → tell-dark.gif，浅色 → tell-light.gif；两张都是 1000×1000 的不透明画布，
-           深色版四角底色实测是 rgb(36,36,0) / rgb(0,0,85) 这类深蓝黑，不是注释里原先写的纯黑 -->
+      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 tell 动图，深浅色共用 tell.gif，
+           画布 3840×3840 透明底、图形居中，两种主题都直接叠 -->
       <view class="report-broadcast-content__portrait-wrap">
         <image
           class="report-broadcast-content__portrait"
-          :src="isDark ? tellDarkGif : tellLightGif"
+          :src="tellGif"
           mode="aspectFit"
         />
       </view>
@@ -363,7 +361,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   overflow: visible;
 }
-/* 深色头像位：tell 系列素材画布 1000×1000、图形居中且满幅（无透明留白），
+/* 头像位：tell.gif 画布 3840×3840、透明底且图形居中（三角约占中间 40%），
    等比缩到 180px（360rpx）后由舞台 flex 居中即可，不做裁剪 */
 .report-broadcast-content__portrait-wrap {
   position: relative;
@@ -601,18 +599,16 @@ onBeforeUnmount(() => {
 
 /* ===== 浅色主题：Ardot 195:1927「日常运营助手-听播-正在播放」=====
    只按浅色稿的坐标与材质实现，深色稿（1193:2708）继续走下面的 --dark 块：
-   - 头像位 195:2031：换成 tell-light.gif 动图，画布 1000×1000 等比缩到 180px 摆放
+   - 头像位 195:2031：换成 tell.gif 动图，画布 3840×3840 等比缩到 180px 摆放
    - 光晕：浅色稿无此元素，隐藏（声波两个主题都已去掉）
    - 字幕 195:1985：左 44 / 右 48（文本宽 283），头像底 → 文字顶 49px，18/26 Medium #0D0D0D
    - 上下渐隐：底色跟随页面底色 #FAFAFA，文字淡出不出现色块接缝 */
 .report-broadcast-content--light {
   /**
-   * 头像位放 tell-light.gif：画布 1000×1000 满幅构图，等比缩到 180px（360rpx）。
-   * 图形本体约占画布中间一半（统计结果四周是浅色底 + 放散光效，没有可裁的透明留白），
-   * 所以按「画布中心 = 头像位中心」摆放：
+   * 头像位放 tell.gif：画布 3840×3840、透明底，等比缩到 180px（360rpx），
+   * 图形本体约占画布中间 40%（其余是透明留白），按「画布中心 = 头像位中心」摆放：
    *   - 舞台高度 110px（220rpx）= 设计稿头像位 112px；
-   *   - 360rpx 画布相对 220rpx 舞台上下各溢出 70rpx（35px），
-   *     溢出部分是素材自带的 #FCFCFF 底，与页面 #FAFAFA 肉眼无差，不裁也不遮字幕。
+   *   - 360rpx 画布相对 220rpx 舞台上下各溢出 70rpx（35px），溢出部分全透明，不遮字幕。
    */
   .report-broadcast-content__portrait-stage {
     position: relative;
@@ -692,16 +688,8 @@ onBeforeUnmount(() => {
    - 答案卡 1193:3413：底 #1A1A1A + 1px #303030 描边，正文 #FFFFFF；标题 #FFFFFF、过程说明 #8F8F8F
    - 骨架屏：浅色 #F2F3F5→#E5E7EB 的流光换成 #212121→#303030 */
 .report-broadcast-content--dark {
-  /* 头像位用 tell-dark.gif：1000×1000 不透明画布，四角底色是 rgb(36,36,0) / rgb(0,0,85) 这类深蓝黑，
-     而页面是 #0D0D0D —— 单靠 screen 只能吃掉纯黑，这类深蓝黑叠上去仍比页面亮一档（≈ #2F2F5E），
-     于是深色页上会露出一块方形色差。双管齐下：
-     ① screen：让暗部整体贴近页面底色；
-     ② 径向遮罩：把画布四周羽化到透明，方形边界彻底消失，只留中间的图形与辉光 */
-  .report-broadcast-content__portrait {
-    mix-blend-mode: screen;
-    -webkit-mask-image: radial-gradient(closest-side, #000 62%, transparent 98%);
-    mask-image: radial-gradient(closest-side, #000 62%, transparent 98%);
-  }
+  /* 头像位同样用 tell.gif：透明底素材直接叠在 #0D0D0D 上，
+     不再需要 screen 混合或径向遮罩去消方形色差 */
 
   .report-broadcast-content__glow--blue {
     background: rgb(17 102 214 / 35%);
