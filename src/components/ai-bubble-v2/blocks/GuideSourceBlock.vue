@@ -11,11 +11,16 @@ defineOptions({ name: "GuideSourceBlock" });
 
 const props = defineProps({
   payload: { type: Object, default: () => ({}) },
+  /**
+   * 深色覆盖：气泡内由 ai-bubble-dark provide 下来即够用；
+   * 独立于气泡渲染（步骤卡 / 小结卡）时拿不到 provide，由外层显式传。
+   */
+  dark: { type: Boolean, default: false },
 });
 
 /** 深色开关由气泡 provide 下来（见 ai-bubble-v2 的 ai-bubble-dark），参考来源跟着整条回答切换 */
 const bubbleDark = inject<Ref<boolean> | null>("ai-bubble-dark", null);
-const isDark = computed(() => Boolean(bubbleDark ? unref(bubbleDark) : false));
+const isDark = computed(() => props.dark || Boolean(bubbleDark ? unref(bubbleDark) : false));
 
 const evidence = computed(() => (Array.isArray(props.payload?.evidence) ? props.payload.evidence : [])
   .map(item => ({

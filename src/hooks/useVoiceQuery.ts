@@ -8,6 +8,7 @@ import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/n
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission, getMicrophoneVolume, permissionDeniedMessage } from "@/utils/platform/mpaas";
+import { describeRequestAuth } from "@/utils/request";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
 const logger = createLogger("voice-query");
@@ -412,6 +413,12 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
      * 表现就是「语音输入异常 + 没有声纹」。
      */
     const useNativePcm = isNativePcmStreamSupported();
+    // 语音链路排查入口：这一轮走哪条采集通道、ASR 流式可不可用、带的是哪条 token
+    logger.warn("[voice-query] 开始一轮", {
+      backend: useNativePcm ? "native-pcm-stream" : "web-audio",
+      asrStream: isAsrStreamSupported(),
+      token: describeRequestAuth(),
+    });
     if (!isAsrStreamSupported() || (!useNativePcm && !isPcmCaptureSupported())) {
       void startNativeVoiceQuery(seq);
       return;

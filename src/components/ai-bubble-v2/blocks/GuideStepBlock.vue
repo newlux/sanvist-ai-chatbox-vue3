@@ -1,12 +1,17 @@
 <script setup lang="ts">
+import type { Ref } from "vue";
 import type { GuideStepPayload } from "@/api/chat/types";
-import { computed, onMounted, ref } from "vue";
+import { computed, inject, onMounted, ref, unref } from "vue";
 
 defineOptions({ name: "GuideStepBlock" });
 
 const props = defineProps({
   payload: { type: Object as () => GuideStepPayload, required: true },
 });
+
+/** 深色：这张卡在气泡内渲染，跟随气泡 provide 的主题（与 GuideLeadBlock 同一套取法） */
+const bubbleDark = inject<Ref<boolean> | null>("ai-bubble-dark", null);
+const isDark = computed(() => Boolean(bubbleDark ? unref(bubbleDark) : false));
 
 const emit = defineEmits<{
   /** auto=true 表示卡片自动弹起，由页面决定延时；手动点击 auto=false */
@@ -38,7 +43,12 @@ function open() {
 </script>
 
 <template>
-  <view v-if="steps.length" class="guide-step-block" @tap.stop="open">
+  <view
+    v-if="steps.length"
+    class="guide-step-block"
+    :class="{ 'guide-step-block--dark': isDark }"
+    @tap.stop="open"
+  >
     <view class="guide-step-block__main">
       <text class="guide-step-block__title">
         {{ title }}
@@ -97,5 +107,23 @@ function open() {
   font-size: 36rpx;
   line-height: 40rpx;
   color: #cccccc;
+}
+
+/* ===== 深色：与其它块同一套材质（正文 #E5E5E5、次要 45% 白、块底 6% 白） ===== */
+.guide-step-block--dark {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+
+  .guide-step-block__title {
+    color: #e5e5e5;
+  }
+
+  .guide-step-block__subtitle {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .guide-step-block__arrow {
+    color: rgba(255, 255, 255, 0.3);
+  }
 }
 </style>

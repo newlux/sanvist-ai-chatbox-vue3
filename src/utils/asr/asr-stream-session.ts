@@ -1,5 +1,5 @@
 import { createLogger } from "@/utils/logger";
-import { getRequestBaseURL, getRequestHeaders } from "@/utils/request";
+import { describeRequestAuth, getRequestBaseURL, getRequestHeaders } from "@/utils/request";
 
 const logger = createLogger("asr-stream");
 
@@ -50,6 +50,18 @@ export function buildAsrStreamUrl(language = "zh") {
   const { Authorization } = getRequestHeaders();
   if (Authorization) base.searchParams.set("token", Authorization.replace(/^Bearer\s+/i, ""));
   else base.searchParams.set("guestRole", "OWNER");
+
+  /**
+   * 建链凭证日志：语音「没反应 / 连上就断」时，先看有没有 token。
+   * 只打长度与前缀，不打明文（token 是 query 参数，日志外泄风险比请求头高）。
+   */
+  logger.warn("[asr-stream] 建链凭证", {
+    language,
+    hasToken: Boolean(Authorization),
+    fallbackGuestRole: !Authorization,
+    token: describeRequestAuth(),
+    endpoint: `${base.protocol}//${base.host}${base.pathname}`,
+  });
 
   return base.toString();
 }

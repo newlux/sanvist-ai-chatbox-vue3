@@ -42,12 +42,30 @@ interface UploadOptions {
 }
 
 let authorization = "";
+/** 这份 token 从哪来：host / local-fallback / late-<原因>，只用于日志排查 */
+let authorizationSource = "";
 let guestRole = "";
 let baseURL = import.meta.env.VITE_AI_QUESTION_BASE_URL;
 
-/** 宿主下发的鉴权串（Authorization 头原值，通常形如 `bearer xxx`），由 App.vue 启动时写入 */
-export function setRequestAuth(value: string) {
-  authorization = String(value || "").trim();
+/**
+ * 宿主下发的鉴权串（Authorization 头原值，通常形如 `bearer xxx`），由 App.vue 启动时写入。
+ *
+ * `source` 只进日志：排查「现在用的是宿主下发的还是本地兜底那条」时看它，
+ * 值没变就不重复打，避免启动期刷屏。
+ */
+export function setRequestAuth(value: string, source = "") {
+  const next = String(value || "").trim();
+  const previous = authorization;
+  authorization = next;
+  if (source) authorizationSource = source;
+  if (next === previous) return;
+  logger.warn("[auth] 写入 token", {
+    source: authorizationSource || "unknown",
+    hasToken: Boolean(next),
+    tokenLen: next.length,
+    tokenPrefix: next.slice(0, 16),
+    bearer: /^bearer\s/i.test(next),
+  });
 }
 
 /**
@@ -56,6 +74,18 @@ export function setRequestAuth(value: string) {
  */
 export function getRequestAuth() {
   return authorization;
+}
+
+/**
+ * token 现状（不打明文）：请求层 / ASR 建链 / 语音链路排查「到底带没带、带的是哪条」时用。
+ */
+export function describeRequestAuth() {
+  return {
+    hasToken: Boolean(authorization),
+    tokenLen: authorization.length,
+    tokenPrefix: authorization.slice(0, 16),
+    source: authorizationSource || "unknown",
+  };
 }
 
 export function setRequestBaseURL(value: string) {
@@ -147,7 +177,12 @@ export function setAuthFailureHandler(handler: AuthFailureHandler | null) {
 function notifyAuthFailure(statusCode: number, message: string) {
   if (statusCode !== 401) return;
   const now = Date.now();
-  if (now - authFailureNotifiedAt < 1000) return;
+  if (now - authFailureNotifiedAt < 1000) {
+    // 并发 401 被节流：也要留痕，否则排查时只看到「有一条 401」却不知道还有几条
+    logger.warn("[auth] 401 忽略（1s 内已通知过）", { message });
+    return;
+  }
+  logger.warn("[auth] 收到 401", { message, token: describeRequestAuth() });
   authFailureNotifiedAt = now;
   authFailureHandler?.(statusCode, message);
 }

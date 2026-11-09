@@ -26,6 +26,11 @@ const props = defineProps({
   ttsEnabled: { type: Boolean, default: false },
   ttsLoading: { type: Boolean, default: false },
   ttsPlaying: { type: Boolean, default: false },
+  /**
+   * 深色：这张卡由消息列表在气泡外独立渲染，拿不到气泡 provide 的 ai-bubble-dark，
+   * 需要外层显式传下来（与步骤卡 / GanttBlock 的 dark 同一套）。
+   */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{
@@ -68,7 +73,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <view v-if="summary || suggestionOptions.length || sources.length" class="guide-finish">
+  <view
+    v-if="summary || suggestionOptions.length || sources.length"
+    class="guide-finish"
+    :class="{ 'guide-finish--dark': dark }"
+  >
     <!-- 左上角品牌署名：与步骤卡保持同一套观感（sani logo + SANI + 播报按钮） -->
     <view class="guide-finish__brand">
       <image class="guide-finish__brand-icon" :src="saniIcon" mode="aspectFit" />
@@ -123,6 +132,7 @@ onMounted(() => {
     <GuideSourceBlock
       v-if="sources.length"
       class="guide-finish__sources"
+      :dark="dark"
       :payload="{ evidence: sources }"
     />
   </view>
@@ -303,5 +313,40 @@ onMounted(() => {
   font-weight: 400;
   line-height: 40rpx;
   color: #1a1a1a;
+}
+
+/* ===== 深色：与步骤卡 / 气泡内其它块同一套材质 ===== */
+.guide-finish--dark {
+  .guide-finish__brand-text {
+    color: #e5e5e5;
+  }
+
+  .guide-finish__summary,
+  .guide-finish__question {
+    color: #e5e5e5;
+  }
+
+  .guide-finish__option {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .guide-finish__option-letter,
+  .guide-finish__option-label {
+    color: #e5e5e5;
+  }
+
+  .guide-finish__option-divider {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .guide-finish__tts-spinner {
+    border-color: rgba(255, 255, 255, 0.22);
+    border-top-color: rgba(255, 255, 255, 0.72);
+  }
+
+  .guide-finish__tts-wave-bar {
+    background: #4c8dff;
+  }
 }
 </style>

@@ -27,6 +27,12 @@ const props = defineProps({
   landed: { type: Boolean, default: false },
   /** logo 的目标 transform（由父页面按灵动岛实际坐标算出） */
   logoStyle: { type: Object as PropType<Record<string, string>>, default: () => ({}) },
+  /**
+   * 深色模式：由页面传 systemStore.isDark（宿主 getColorScheme 决定）。
+   * 初始页原来只有浅色一套样式，深色宿主下会闪出一整屏 #FAFAFA，
+   * 与对话页的 #1A1A1A 之间有一刀切的白块。
+   */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{ (e: "start-chat"): void; (e: "start-text"): void }>();
@@ -100,7 +106,7 @@ onBeforeUnmount(() => {
 <template>
   <view
     class="welcome"
-    :class="{ 'welcome--leaving': leaving, 'welcome--landed': landed }"
+    :class="{ 'welcome--leaving': leaving, 'welcome--landed': landed, 'welcome--dark': dark }"
     :style="safeAreaStyle"
   >
     <view class="welcome__hero">
@@ -383,5 +389,61 @@ onBeforeUnmount(() => {
   font-weight: 400;
   line-height: 34rpx; // 17px
   text-align: center;
+}
+
+/* ===== 深色模式（宿主 getColorScheme = dark）=====
+   与对话页 .ai-page--dark 同一套底色 #1A1A1A（不是纯黑），
+   只换底色与材质，间距 / 字号 / 圆角与浅色稿一致；
+   初始页原来只有一套浅色样式，深色宿主下会先闪一整屏 #FAFAFA 再切到深色对话页。 */
+.welcome--dark {
+  background: #1a1a1a;
+  color: #f2f3f5;
+}
+
+/* 起飞态仍然要让位给下面的问答页：深色底不能把它盖住 */
+.welcome--dark.welcome--leaving {
+  background: transparent;
+}
+
+/* 「Hey,」跟随正文反色 */
+.welcome--dark .welcome__title {
+  color: #f2f3f5;
+}
+
+/* SANI 渐变字换深色稿那一组（1193:1848，与 report-insight 的重播角标同一套）：
+   浅色稿的起始色 #3D21CD 打在 #1A1A1A 上第一段几乎糊成一片 */
+.welcome--dark .welcome__title-brand {
+  background-image: linear-gradient(
+    90deg,
+    #a7aaf9 0%,
+    #75b6fa 48.72%,
+    #a8a9f9 75.995%,
+    #f08fc2 100%
+  );
+}
+
+/* 输入条控件的材质换成「白色 8%」：浅色稿的 #0D0D0D 3.61% 在深底上等于没有 */
+.welcome--dark .welcome__composer-voice,
+.welcome--dark .welcome__composer-kb {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.welcome--dark .welcome__composer-voice-label {
+  color: #f2f3f5;
+}
+
+/* 加号 / 键盘图标本身是深色图形：深底上反色，圆底与十字一起变浅 */
+.welcome--dark .welcome__composer-plus,
+.welcome--dark .welcome__composer-kb-icon {
+  filter: invert(1);
+}
+
+/* 主视觉的投影：浅色稿是黑 14%，深底上等于没有，加浓一档让三角浮起来 */
+.welcome--dark .welcome__logo-img {
+  filter: drop-shadow(0 6rpx 24rpx rgba(0, 0, 0, 0.55));
+}
+
+.welcome--dark .welcome__disclaimer-text {
+  color: rgba(255, 255, 255, 0.45);
 }
 </style>
