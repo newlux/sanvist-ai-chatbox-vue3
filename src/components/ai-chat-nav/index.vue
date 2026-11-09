@@ -6,6 +6,7 @@ import iconHelp from "@/assets/img/icon-help.svg";
 import iconParts from "@/assets/img/icon-parts.svg";
 import iconRepair from "@/assets/img/icon-repair.svg";
 import iconVox from "@/assets/img/icon-vox.svg";
+import { PARTS_ASSISTANT_EMBED_URL } from "@/config";
 import { usePcMode } from "@/hooks/usePcMode";
 
 /** 快捷入口。mode=page 另开专属页面（url 指向对应场景页） */
@@ -57,7 +58,7 @@ const { t } = useI18n();
 
 const { isPc } = usePcMode();
 
-// 入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手（配件助手暂为首页内联，其余另开专属页）
+// 入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手，全部另开专属场景页
 const DEFAULT_NAV_ITEMS: NavItem[] = [
   {
     key: "vox-core",
@@ -98,10 +99,9 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     titleKey: "nav-parts",
     icon: iconParts,
     subagent: "parts",
-    // 配件助手暂时没有独立页面：先作为首页内联智能体挂上去（点击切换 / 高亮，
-    // 后续提问带上 subagent=parts）。等配件页就绪，改成 mode: "page" + url 即可，
-    // 点击分发在 index 页的 onNavItemClick 里，不用另写。
-    mode: "inline",
+    // 与维修助手一致：另开独立场景页 /pages/parts/index，由该页全屏内嵌三方 H5
+    mode: "page",
+    url: `/pages/parts/index?url=${encodeURIComponent(PARTS_ASSISTANT_EMBED_URL)}`,
   },
 ];
 

@@ -68,6 +68,17 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       const data = await getSettings();
       apply(data);
+      /**
+       * 外观字段缺失 / 空值 / 非法值一律按浅色：
+       * `apply` 里只在有值时才分发，这里补一条兜底，避免服务端没给 appearance 时
+       * 沿用本地可能残留的深色（手动选过 dark 的机器）。
+       *
+       * 有值时走 `setAppearance`：
+       * - `system` → 宿主 `getColorScheme` 拿系统深浅色，拿不到（未注入 bridge / 失败 / 超时 /
+       *   success 不为 true）在 `syncSystemColorScheme` 里回落浅色；
+       * - `light` / `dark` 直接用。
+       */
+      if (!data?.appearance) systemStore.setAppearance("light");
       loaded.value = true;
       return data;
     }

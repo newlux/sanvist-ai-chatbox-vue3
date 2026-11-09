@@ -1264,13 +1264,14 @@ function onTtsTap() {
   padding-left: 8rpx;
 }
 /* ===== 空回答兜底提示 =====
-   （设计稿无此状态，沿用回答正文的字号/行高规范：14px / 20px / #1A1A1E） */
+   （设计稿无此状态，沿用回答正文的字号/行高规范：14px / 20px / #1A1A1E）
+   与正文同一口径：只留文字，不铺底、不加圆角/内边距，避免正文边上多出一块底色 */
 .ai-bubble-v2__busy-hint {
   box-sizing: border-box;
   width: 100%;
-  padding: 24rpx 32rpx;
-  border-radius: 20rpx;
-  background: #f9f9f9;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .ai-bubble-v2__busy-hint-text {
   color: #1a1a1e;
@@ -1407,11 +1408,13 @@ function onTtsTap() {
     background: rgba(254, 0, 0, 0.16);
   }
 
-  // ---- 回复：卡片 1193:5116 ----
+  // ---- 回复：正文直接铺在页面底上，不再画卡片外壳 ----
+  // 之前这里给 #212121 深底 + 阴影，正文周围会多出一块与文字不等高的深色块
+  //（浅色稿对应的是 answer-block 的 #F9F9F9 灰底，已一并去掉），两种主题都保持透明
   &:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
-    border-color: #303030;
-    background: #212121;
-    box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04); // 0 2px 8px rgba(0,0,0,.04)
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
   }
 
   // 无正文 / 回流卡 / 分享海报：本来就不画卡片外壳，深色下同样保持透明
@@ -1450,9 +1453,9 @@ function onTtsTap() {
     background: #303030;
   }
 
-  // 空回答兜底（设计稿无此态）：底压到 #1A1A1A，文字跟随正文
+  // 空回答兜底（设计稿无此态）：不铺底，只让文字跟随正文色
   .ai-bubble-v2__busy-hint {
-    background: #1a1a1a;
+    background: transparent;
   }
 
   .ai-bubble-v2__busy-hint-text {

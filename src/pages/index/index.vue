@@ -23,11 +23,15 @@ import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl 
 import { getConversationSummary } from "@/api/conversation-summary";
 import { getTodayListenBroadcast } from "@/api/listen-broadcast";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
+import arrowDownIcon from "@/assets/img/arrow-down.png";
+import arrowDownDarkIcon from "@/assets/img/arrow-down-dark.png";
 import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
+import AiChatEdgeGlow from "@/components/ai-chat-edge-glow/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
+import AiChatNav from "@/components/ai-chat-nav/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
@@ -36,14 +40,14 @@ import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
-import { AI_ASK_WELCOME_DONE_KEY, LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY } from "@/config";
+import { AI_ASK_WELCOME_DONE_KEY, LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY, PARTS_ASSISTANT_EMBED_URL } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
-import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useSystemStore, useUserStore } from "@/stores";
+import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
 import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
@@ -72,6 +76,8 @@ const sessionStore = useSessionStore();
 /** 外观（设置弹层 → 深色）：首页问答态走 C 方案暗色 1193:2097 的底色与顶部渐隐 */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
+/** 一键回到底部的箭头：深色模式换 arrow-down-dark.png（浅色箭头压在暗底上看不清） */
+const scrollBottomIcon = computed(() => (isDark.value ? arrowDownDarkIcon : arrowDownIcon));
 const sharePosterWrap = ref<unknown>(null);
 /** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送 */
 const chatInputRef = ref<{
@@ -121,13 +127,32 @@ const {
   keyboardHeight,
   voiceKeyboardHeight,
   composerBottomInset,
+  composerDockOffset,
   syncWindowHeight,
   setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
+/**
+ * 纯净模式（设置弹层 → 纯净模式）：打开后底部才露出快捷入口胶囊
+ * （作业指导 / 任务协同 / 维修助手 / 配件助手 / 听汇报），关闭时整条导航不渲染。
+ */
+const settingsStore = useSettingsStore();
+const { pureMode } = storeToRefs(settingsStore);
+/** 底部快捷入口当前高亮的智能体 key（内联智能体如配件助手点一下切换） */
+const navActiveKey = ref("");
+/** 快捷入口贴输入栏正上方：输入栏高度（含键盘抬起）由 useChatViewport 给 */
+const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用它做流式听播。
 const realtimeTts = useRealtimeTts();
+/**
+ * 是否正在语音播报（页面左右下边缘流光的显示时机）：
+ * 实时流式听播（realtimeTts.playing）或整段播报（消息上的 ttsPlaying）任一在播都算。
+ */
+const isTtsPlaying = computed(() =>
+  Boolean(realtimeTts.playing.value)
+  || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
+);
 const {
   sendMessage: sendChatMessage,
   sendQuickPrompt,
@@ -214,6 +239,15 @@ const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFe
 /** 步骤卡「拍照」入口专用：独立实例，选完一张图直接把文件交给 sendMessage */
 const photoPicker = useComposerAttachments();
 
+/**
+ * 录音态底部面板（设计稿 1204:467 录动态）是否展开。
+ * 设计稿这一屏底部只有「水面 + 提示行 + 声纹」，底部导航与「一键回到底部」都要让位，
+ * 否则它们会盖在水面上（AiChatNav / .chat-scroll-bottom 的层级都在面板之上）。
+ */
+const voicePanelOpen = ref(false);
+/** 底部快捷入口是否展示：只看纯净模式（关掉就整条不渲染），录音面板 / 录音条展开时让位 */
+const navVisible = computed(() => pureMode.value && !voicePanelOpen.value && !voiceQueryActive.value);
+
 const messageBottomInset = computed(() => {
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
   // 步骤卡贴底展开：列表底部既要让开卡片高度，也要留够把核对卡顶到对话区最上方的间距
@@ -224,15 +258,11 @@ const messageBottomInset = computed(() => {
   if (askSlotDrawerVisible.value && askSlotDrawerHeight.value > 0) {
     return `${askSlotDrawerHeight.value}px`;
   }
-  // 底部只剩输入栏：不再给已移除的快捷入口条预留高度
+  // 纯净模式打开时底部多了一条快捷入口：给列表多留 88rpx（导航 72rpx + 顶部间距 16rpx）
+  if (navVisible.value) return `calc(${composerBottomInset.value} + 88rpx)`;
+  // 底部只剩输入栏
   return composerBottomInset.value;
 });
-/**
- * 录音态底部面板（设计稿 1204:467 录动态）是否展开。
- * 设计稿这一屏底部只有「水面 + 提示行 + 声纹」，底部导航与「一键回到底部」都要让位，
- * 否则它们会盖在水面上（AiChatNav / .chat-scroll-bottom 的层级都在面板之上）。
- */
-const voicePanelOpen = ref(false);
 /**
  * 「按住说话」录音中：输入栏把录音态透出来，顶部灵动岛据此把常态动图换成 sani-logo-sm.gif。
  * 只在录音期间为 true（松手进识别 / 取消 / 发送都会回落），思考 / 回答的状态图逻辑不受影响。
@@ -268,8 +298,7 @@ function onAssistantCallbackOpen(conversationId: string) {
 /**
  * 弹层确认后的去向按 target 分流：
  * - maintenance_assistant：把上下文落盘 → 另开维修助手页（/pages/repair/index）；
- * - parts_assistant：配件助手还没独立页，就地切到首页内联智能体（subagent=parts），不跳页；
- *   其中「启动拍照 / 启动上传」再把对应选择器拉起来，选完挂在输入栏（与步骤卡拍照同一套）。
+ * - parts_assistant：与维修助手一致，另开配件助手页（/pages/parts/index，全屏内嵌三方 H5）。
  */
 async function onAssistantNavigationConfirm(
   payload: AssistantNavigationPayload,
@@ -277,13 +306,6 @@ async function onAssistantNavigationConfirm(
 ) {
   if (payload.target === "parts_assistant") {
     enterPartsAssistant();
-    if (action?.key === "camera" || action?.key === "upload") {
-      const picked = await photoPicker.pickAttachmentForSend(action.key === "camera" ? "camera" : "album");
-      if (picked) {
-        chatInputRef.value?.appendAttachments(picked.meta);
-        chatInputRef.value?.focusTextInput();
-      }
-    }
     return;
   }
   if (payload.target !== "maintenance_assistant") return;
@@ -301,10 +323,12 @@ async function onAssistantNavigationConfirm(
   void navigateToScene("/pages/repair/index");
 }
 
-/** 确认进入配件助手：就地切到内联智能体（subagent=parts）。 */
+/**
+ * 进入配件助手：与维修助手一致，另开独立场景页 `/pages/parts/index`，
+ * 由该页全屏内嵌三方 H5（地址见 config 的 PARTS_ASSISTANT_EMBED_URL）。
+ */
 function enterPartsAssistant() {
-  chatStore.setSubagent("parts");
-  nextTick(() => chatStore.scrollToBottom(true));
+  void navigateToScene(`/pages/parts/index?url=${encodeURIComponent(PARTS_ASSISTANT_EMBED_URL)}`);
 }
 
 function clearRepairSummaryPolling() {
@@ -676,6 +700,31 @@ function onGoListenReport() {
 }
 
 /**
+ * 底部快捷入口点击（仅纯净模式打开时可见）：
+ * - mode=inline（配件助手）：就地切换智能体，再点一次取消；
+ * - 听汇报：先固定当天早报日期，再进播报页（与卡片入口同一套逻辑）；
+ * - 其余 page 入口：navigateToScene 到对应的场景页。
+ */
+function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; url?: string }) {
+  if (item?.mode === "inline") {
+    const subagent = String(item?.subagent || "");
+    if (!subagent) return;
+    const nextKey = navActiveKey.value === item.key ? "" : String(item.key || "");
+    navActiveKey.value = nextKey;
+    chatStore.setSubagent(nextKey ? subagent : "");
+    return;
+  }
+
+  const targetUrl = String(item?.url || "");
+  if (!targetUrl) return;
+  if (targetUrl === "/pages/podcast/index") {
+    enterListenReport();
+    return;
+  }
+  void navigateToScene(targetUrl);
+}
+
+/**
  * 历史抽屉分页取数。z-paging 每翻一页回调一次，实现落在 sessionStore 里。
  */
 function getAISessionList(pageNo = 1, pageSize = 20) {
@@ -817,17 +866,6 @@ let nativePeakLevel = 0;
 const NATIVE_RECOGNIZE_TIMEOUT_MS = 30_000;
 /** 原生录音的硬上限：只做兜底，正常收尾靠用户点发送（↑） */
 const NATIVE_MAX_RECORD_MS = 60_000;
-
-/**
- * 是不是安卓壳子。
- * mPaaS 的 Android WebView 在 `onPermissionRequest` 里拒了媒体采集，
- * getUserMedia 只会回 `NotAllowedError: Permission denied` —— 流式实时文字在安卓上不可能起得来，
- * 所以安卓直接走原生录音（microphoneStart/End）+ 整段识别，不再白试一次。
- */
-function isAndroidRuntime() {
-  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent || "";
-  return /Android/i.test(ua);
-}
 
 /** 原生录音回传的音频形态：容器里一般给 audioUrl，也有的直接回 base64 */
 interface NativeRecorderAudio {
@@ -1000,13 +1038,16 @@ async function startVoiceQuery() {
   }, 1000);
 
   /**
-   * 音频从哪来：
-   * - 安卓容器有 `pcmStreamStart` 时用宿主原生推流（16k 裸 PCM 由原生抛过来），
-   *   后面的 WebSocket 流式 ASR 一点不变 —— 实时文字照常；
-   * - 其它端用 WebAudio 自己采（iOS / 浏览器）；
+   * 音频从哪来（Android 与 iOS 同一口径）：
+   * - 容器里有 `pcmStreamStart`（mPaaS bridge 已注入）：用宿主原生推流，
+   *   16k 裸 PCM 由原生抛过来，后面的 WebSocket 流式 ASR 一点不变 —— 实时文字照常；
+   * - 没有 bridge（浏览器 / 宿主未注入）才用 WebAudio 自己采；
    * - 两条都不行（没有 WebSocket / 没有 WebAudio 且没有原生推流）才退到整段识别。
+   *
+   * 之前这里按 UA 限定 Android，iOS 只能走 WebAudio；宿主两端现在都实现了同一套
+   * `pcmStreamStart` / `pcmStreamData`，改为只按 bridge 是否就绪判断，两端行为一致。
    */
-  const useNativePcm = isAndroidRuntime() && isNativePcmStreamSupported();
+  const useNativePcm = isNativePcmStreamSupported();
   if (!isAsrStreamSupported() || (!useNativePcm && !isPcmCaptureSupported())) {
     void startNativeVoiceQuery(seq);
     return;
@@ -1791,6 +1832,8 @@ onBeforeUnmount(() => {
     >
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
+      <!-- 问答回复中的页面边缘流光：左右竖边 + 底部光雾（设计稿 77:10750 的 203:5920 / 203:5926 / 203:5916） -->
+      <AiChatEdgeGlow :visible="isTtsPlaying" />
       <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车）；深色下隐藏（见 .ai-page--dark） -->
       <AiChatBackdrop class="ai-page__backdrop" />
       <!-- 顶部白色渐变：页面上沿由白向下渐隐，压住线稿背景与滚上来的内容 -->
@@ -1895,7 +1938,7 @@ onBeforeUnmount(() => {
       >
         <image
           class="chat-scroll-bottom__chevron"
-          src="@/assets/img/arrow-down.png"
+          :src="scrollBottomIcon"
           mode="aspectFit"
         />
       </view>
@@ -2071,6 +2114,16 @@ onBeforeUnmount(() => {
         :dark="isDark"
         @cancel="cancelVoiceQuery"
         @submit="stopVoiceQuery"
+      />
+
+      <!-- 纯净模式打开时的底部快捷入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手；
+           关闭（或录音面板展开）时整条导航不渲染 -->
+      <AiChatNav
+        :visible="navVisible"
+        :active-key="navActiveKey"
+        :dark="isDark"
+        :style="navOffsetStyle"
+        @item-click="onNavItemClick"
       />
 
       <AiBadFeedbackSheet
@@ -2658,6 +2711,11 @@ $color-white: #ffffff;
 
   // 浅色底上的彩色雾放到深底上会泛白，深色稿里这两个光晕本身就是关掉的
   .ai-chat-glow {
+    display: none;
+  }
+
+  // 边缘流光同样只在浅色稿里出现（深色稿 1193:2097 没有这三层渐变装饰）
+  .ai-chat-edge-glow {
     display: none;
   }
 

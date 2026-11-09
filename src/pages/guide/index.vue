@@ -7,8 +7,11 @@ import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload, GuideStepItem
 import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
 import { getRecommendedGuideQuestions } from "@/api/guide";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
+import arrowDownIcon from "@/assets/img/arrow-down.png";
+import arrowDownDarkIcon from "@/assets/img/arrow-down-dark.png";
 import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
+import AiChatEdgeGlow from "@/components/ai-chat-edge-glow/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
@@ -53,6 +56,8 @@ const { safeAreaStyle } = useSafeArea();
 /** 外观（设置弹层 → 深色）：与首页问答态同一套暗色底色 + 顶部渐隐，组件靠 :dark 各自切样式 */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
+/** 一键回到底部的箭头：深色模式换 arrow-down-dark.png（浅色箭头压在暗底上看不清） */
+const scrollBottomIcon = computed(() => (isDark.value ? arrowDownDarkIcon : arrowDownIcon));
 /**
  * 自动滚动的落点：回复内容末尾（不含参考来源）——参考来源不被贴底滚进视野，
  * 以内容块容器高度减去参考来源高度为准（见 ai-message-list 的 alignToReplyEnd）。
@@ -154,6 +159,14 @@ const chatEnterStyle = computed(() => ({
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用实时 TTS 做流式听播。
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
 const realtimeTts = useRealtimeTts(chatScope);
+/**
+ * 是否正在语音播报（页面左右下边缘流光的显示时机）：
+ * 实时流式听播（realtimeTts.playing）或整段播报（消息上的 ttsPlaying）任一在播都算。
+ */
+const isTtsPlaying = computed(() =>
+  Boolean(realtimeTts.playing.value)
+  || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
+);
 const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
   // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
@@ -1039,6 +1052,8 @@ onUnload(() => {
     >
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
+      <!-- 问答回复中的页面边缘流光：左右竖边 + 底部光雾（设计稿 77:10750 的 203:5920 / 203:5926 / 203:5916） -->
+      <AiChatEdgeGlow :visible="isTtsPlaying" />
       <!-- 顶部毛玻璃渐隐：与首页对话页同一层，状态栏 / 头部区域半透明，内容滚上来只会被虚化 -->
       <view class="ai-page__top-fade" />
       <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
@@ -1148,7 +1163,7 @@ onUnload(() => {
       >
         <image
           class="chat-scroll-bottom__chevron"
-          src="@/assets/img/arrow-down.png"
+          :src="scrollBottomIcon"
           mode="aspectFit"
         />
       </view>
@@ -1436,6 +1451,11 @@ $color-white: #ffffff;
   }
 
   .ai-chat-glow {
+    display: none;
+  }
+
+  // 边缘流光同样只在浅色稿里出现（深色稿没有这三层渐变装饰）
+  .ai-chat-edge-glow {
     display: none;
   }
 }

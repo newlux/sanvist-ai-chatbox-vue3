@@ -43,7 +43,7 @@ import { useReportInsights } from "@/hooks/useReportInsights";
 import { loadReportStyle, saveReportStyle } from "@/hooks/useReportStyle";
 import { loadReportVoice, resolveReportVoiceId } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { provideChatScope, useChatStore, useSystemStore, useUserStore } from "@/stores";
+import { provideChatScope, useChatStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
 import { stripMarkdownTables } from "@/utils/ai-stream";
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
 import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
@@ -69,6 +69,12 @@ const { locale, t } = useI18n();
 const chatScope = provideChatScope("podcast");
 const chatStore = useChatStore(chatScope);
 const userStore = useUserStore();
+/**
+ * 纯净模式：打开后底部才露出「消异常 / 回问问」快捷导航；
+ * 关闭时这两个入口整条不渲染（与首页底部快捷入口同一套开关）。
+ */
+const settingsStore = useSettingsStore();
+const { pureMode } = storeToRefs(settingsStore);
 const { inputText, isLoading } = storeToRefs(chatStore);
 const { safeAreaStyle, safeTopPx } = useSafeArea();
 /** PC 端内嵌时播报头部露出「最小化」 */
@@ -1013,18 +1019,6 @@ const NATIVE_MAX_RECORD_MS = 60_000;
 /** 原生通道这一轮听到的最大音量：排查「有没有真的收到声音」时打日志用 */
 let nativePeakLevel = 0;
 
-/**
- * 是不是安卓壳子。
- * mPaaS 的 Android WebView 在 `onPermissionRequest` 里拒了媒体采集，
- * getUserMedia 只会回 `NotAllowedError: Permission denied` —— 流式实时文字在安卓上不可能起得来，
- * 所以安卓直接走原生录音（microphoneStart/End）+ 整段识别，不再白试一次。
- * 与首页同一口径。
- */
-function isAndroidRuntime() {
-  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent || "";
-  return /Android/i.test(ua);
-}
-
 /** 原生录音回传的音频形态：容器里一般给 audioUrl，也有的直接回 base64 */
 interface NativeRecorderAudio {
   audioUrl?: string;
@@ -1133,13 +1127,13 @@ async function startVoiceQuery() {
   }, 1000);
 
   /**
-   * 音频从哪来（与首页同一口径）：
-   * - 安卓容器有 `pcmStreamStart` 时用宿主原生推流（16k 裸 PCM 由原生抛过来），
+   * 音频从哪来（与首页同一口径，Android / iOS 一致）：
+   * - 容器里有 `pcmStreamStart`（mPaaS bridge 已注入）用宿主原生推流（16k 裸 PCM 由原生抛过来），
    *   后面的 WebSocket 流式 ASR 不变 —— 实时文字照常；
-   * - 其它端用 WebAudio 自己采（iOS / 浏览器）；
+   * - 没有 bridge（浏览器 / 宿主未注入）才用 WebAudio 自己采；
    * - 两条都不行（没有 WebSocket / 没有 WebAudio 且没有原生推流）才退到整段识别。
    */
-  const useNativePcm = isAndroidRuntime() && isNativePcmStreamSupported();
+  const useNativePcm = isNativePcmStreamSupported();
   if (!isAsrStreamSupported() || (!useNativePcm && !isPcmCaptureSupported())) {
     void startNativeVoiceQuery(seq);
     return;
@@ -1567,9 +1561,10 @@ onBeforeUnmount(() => {
         />
       </view>
       <!-- 播报视图底部快捷导航：消异常 → 异常列表，回问问 → 回首页；洞察态隐藏避免盖住列表；
-           进页偏好加载中（骨架屏）与播报准备中（字幕骨架屏）也隐藏 -->
+           进页偏好加载中（骨架屏）与播报准备中（字幕骨架屏）也隐藏；
+           受纯净模式控制：只有打开纯净模式才出现，关闭则整条不渲染 -->
       <view
-        v-if="!insightVisible && !preferenceLoading && !broadcastPreparing && !voiceQueryActive"
+        v-if="pureMode && !insightVisible && !preferenceLoading && !broadcastPreparing && !voiceQueryActive"
         class="podcast-page__quick-nav"
         :style="quickNavStyle"
       >

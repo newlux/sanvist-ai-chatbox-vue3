@@ -61,47 +61,56 @@ function pick(source: "camera" | "album" | "file") {
 </script>
 
 <template>
-  <view
-    v-if="visible"
-    class="attachment-picker-mask"
-    :class="{ 'attachment-picker-mask--sheet': isDesign }"
-    @tap.stop="close"
-  >
-    <!-- 设计稿 1321:39：底部面板，无标题、无取消，点空白处收起 -->
-    <view v-if="isDesign" class="attachment-sheet" @tap.stop>
-      <view
-        v-for="item in designOptions"
-        :key="item.source"
-        class="attachment-sheet__item"
-        @tap="pick(item.source)"
-      >
-        <image class="attachment-sheet__icon" :src="item.icon" mode="aspectFit" />
-        <view class="attachment-sheet__text">
-          <text class="attachment-sheet__title">{{ item.title }}</text>
-          <text class="attachment-sheet__desc">{{ item.desc }}</text>
+  <!--
+    挂到 body：弹窗必须真正压在页面最上层。
+    调用方（.chat-input 输入栏、步骤卡）自己都是层叠上下文（fixed + z-index），
+    弹窗留在里面时下面的 1020 只在该上下文内比大小 —— 底部输入栏胶囊、快捷入口胶囊
+    （AiChatNav）都是它的兄弟节点，会反过来盖住白色面板。
+  -->
+  <Teleport to="body">
+    <view
+      v-if="visible"
+      class="attachment-picker-mask"
+      :class="{ 'attachment-picker-mask--sheet': isDesign }"
+      @tap.stop="close"
+    >
+      <!-- 设计稿 1321:39：底部面板，无标题、无取消，点空白处收起 -->
+      <view v-if="isDesign" class="attachment-sheet" @tap.stop>
+        <view
+          v-for="item in designOptions"
+          :key="item.source"
+          class="attachment-sheet__item"
+          @tap="pick(item.source)"
+        >
+          <image class="attachment-sheet__icon" :src="item.icon" mode="aspectFit" />
+          <view class="attachment-sheet__text">
+            <text class="attachment-sheet__title">{{ item.title }}</text>
+            <text class="attachment-sheet__desc">{{ item.desc }}</text>
+          </view>
         </view>
       </view>
-    </view>
 
-    <!-- 步骤卡沿用的居中弹窗，样式与文案保持原样 -->
-    <view v-else class="attachment-picker" @tap.stop>
-      <view class="attachment-picker__title"> 添加附件 </view>
-      <view class="attachment-picker__btn" @tap="pick('camera')"> 拍照 </view>
-      <view class="attachment-picker__btn" @tap="pick('album')">
-        从相册选择
+      <!-- 步骤卡沿用的居中弹窗，样式与文案保持原样 -->
+      <view v-else class="attachment-picker" @tap.stop>
+        <view class="attachment-picker__title"> 添加附件 </view>
+        <view class="attachment-picker__btn" @tap="pick('camera')"> 拍照 </view>
+        <view class="attachment-picker__btn" @tap="pick('album')">
+          从相册选择
+        </view>
+        <view class="attachment-picker__btn" @tap="pick('file')"> 选择文件 </view>
+        <view class="attachment-picker__cancel" @tap="close"> 取消 </view>
       </view>
-      <view class="attachment-picker__btn" @tap="pick('file')"> 选择文件 </view>
-      <view class="attachment-picker__cancel" @tap="close"> 取消 </view>
     </view>
-  </view>
+  </Teleport>
 </template>
 
 <style lang="scss" scoped>
 /* ---------- 附件来源弹窗 ---------- */
-/* z-index 必须高于底部卡片（步骤卡 / 追问卡 / 多选项抽屉都是 1002）：
-   从卡片里唤起时要压住卡片，遮罩才能真正挡住卡上的其它按钮。
-   另外要高于 ai-chat-header（1010，历史抽屉的层叠上下文）——
-   否则遮罩盖不住顶部头部，弹窗出现时头部仍是亮的 */
+/* 弹窗已 Teleport 到 body，这里的 z-index 是在页面层参与比较：
+   必须高于底部卡片（步骤卡 / 追问卡 / 多选项抽屉都是 1002），从卡片里唤起时要压住卡片；
+   也必须高于 ai-chat-header（1010）与输入栏 / 底部导航（1）——
+   否则遮罩盖不住头部，白色面板还会被底部的快捷入口胶囊压住。
+   仍低于全屏弹窗（分享 1030 / 设置 1200），那些场景由它们自己置顶 */
 .attachment-picker-mask {
   position: fixed;
   z-index: 1020;
