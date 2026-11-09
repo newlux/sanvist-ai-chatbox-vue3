@@ -94,10 +94,10 @@ function pick(option: string) {
 .guide-lead__label {
   display: block;
   font-family: "PingFang SC", sans-serif;
-  font-size: 24rpx;
+  font-size: 28rpx;
   font-weight: 400;
   line-height: 34rpx;
-  color: #999999;
+  // color: #999999;
 }
 
 /* 选项胶囊：与首页追问卡（blocks/AskSlotBlock）同一套 —— 白底 + 20px 圆角，
