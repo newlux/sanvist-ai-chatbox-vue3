@@ -4,7 +4,7 @@ import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload, GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload } from "@/api/chat/types";
-import type { ChatMessageAttachment } from "@/stores/chat-types";
+import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
 import { getRecommendedGuideQuestions } from "@/api/guide";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
@@ -448,6 +448,13 @@ function openGuideStepSheet(payload: GuideStepPayload) {
  * 同一个问题问两次会拿到一模一样的块 id，只用块 id 会把第二次的卡当成「已经弹过」，
  * 结果白板还停在上一次那张卡翻到的步骤上（下标、语音、滚动全错位）。
  */
+/**
+ * 多步骤卡改为气泡内联展示（标题 + 进度 + 步骤标题 + 讲解 + 确认问题 + A/B/C 选项），
+ * 不再弹底部白板：白板里的「确认 / 拍照 / 输入框」三块能力都已经搬到卡片里。
+ * 需要回退到白板时把这里改成 false。
+ */
+const INLINE_STEP_CARD = true;
+
 const autoOpenedStepCardIds = new Set<string>();
 watch(
   () => {
@@ -462,6 +469,8 @@ watch(
     return { key: `${messageKey}::${blockKey}`, payload: block.payload as GuideStepPayload };
   },
   (current) => {
+    // 内联卡片模式：卡片就在对话里，不再自动弹底部白板
+    if (INLINE_STEP_CARD) return;
     if (!current || !current.key) return;
     // 键里带消息身份：块 id 撞车（同一个问题问两次）也不能被当成弹过
     if (autoOpenedStepCardIds.has(current.key)) return;
@@ -538,8 +547,14 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   guideStepPayload.value = resolved as GuideStepPayload;
   const index = Math.min(target, steps.length) - 1;
   // 先把核对卡切过去：按点击那一段的步骤 id 定位（同一份指导重复触发时切最新那一轮）
-  guideStepCardStepId.value = String(steps[index]?.id || payload?.stepId || "");
+  const nextStepId = String(steps[index]?.id || payload?.stepId || "");
+  // 真换了步骤才停旧语音：新一步的卡挂载后会按翻页标记接着播（见 GuideCheckBlock 的 onMounted）；
+  // 目标步和当前步是同一个时卡不会重挂载，停了就再也起不来，所以这里保持原语音
+  if (nextStepId && nextStepId !== String(guideStepCardStepId.value || "")) realtimeTts.stop();
+  guideStepCardStepId.value = nextStepId;
   guideStepRequestedIndex.value = index;
+  // 内联卡片模式：卡片自己翻页，只切对话里那张卡，不弹白板
+  if (INLINE_STEP_CARD) return;
   guideStepSheetVisible.value = true;
   // 白板已展开时 stepIndex 可能没变化（比如又切回上一步），用方法兜底再切一次
   nextTick(() => guideStepSheetRef.value?.goToStep(index));
@@ -587,17 +602,34 @@ function onGuideSuggestionHeightChange(height: number) {
   guideSuggestionSheetHeight.value = height;
 }
 
+/**
+ * 这条消息正在播报的步骤：多步骤卡的回答只播当前这一步，
+ * 翻页后同一条消息换了步骤，点播报要念新的一步（不是把 5 步全念一遍）。
+ */
+function resolveActiveStepId(msg: UiChatMessage | undefined) {
+  const cards = (msg?.blocks || []).filter(block => block?.type === "guide-check");
+  if (!cards.length) return "";
+  const current = String(guideStepCardStepId.value || "");
+  if (current && cards.some(card => String(card.payload?.step_id || "") === current)) return current;
+  return String(cards[0]?.payload?.step_id || "");
+}
+
 /** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
-function onTtsClick(index: number) {
+function onTtsClick(index: number, textOverride = "") {
   const msg = chatStore.messages[index];
   const messageId = msg?.messageId;
   if (messageId == null || msg?.sessionId == null) return;
+  // 小结这类「要念的文本不在消息正文里」的播报用独立判重键，免得和步骤播报互相停
+  const stepId = textOverride ? "summary" : resolveActiveStepId(msg);
 
-  if (realtimeTts.playingMessageId.value === messageId) {
+  // 同一目标再点一次 = 停止；换了步骤（卡片翻页）不算重复点击
+  const sameRealtimeTarget = realtimeTts.playingMessageId.value === messageId
+    && String(realtimeTts.playingStepId.value || "") === stepId;
+  if (sameRealtimeTarget) {
     realtimeTts.stop();
     return;
   }
-  if (historyTtsMessageId.value === messageId) {
+  if (historyTtsMessageId.value === messageId && !stepId) {
     stopHistoryTts();
     return;
   }
@@ -605,7 +637,7 @@ function onTtsClick(index: number) {
   realtimeTts.stop();
   stopHistoryTts();
   if (msg.ttsPlaybackMode === "realtime") {
-    void realtimeTts.togglePlay(msg);
+    void realtimeTts.togglePlay(msg, stepId, textOverride);
     return;
   }
   void onHistoryTtsClick(index);
@@ -1080,6 +1112,7 @@ onUnload(() => {
         :bottom-inset="messageBottomInset"
         :step-card-step-id="guideStepCardStepId"
         :pin-step-card="guideStepSheetVisible"
+        :compact-guide-card="true"
         @card-space-change="onGuideStepCardSpaceChange"
         @content-grow="chatStore.scrollToBottom()"
         :awakening="userStore.awakeningPrompt"
@@ -1092,10 +1125,12 @@ onUnload(() => {
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"
+        @step-card-ready="focusGuideStepCardAtTop"
         @ask-slot-open="onAskSlotOpen"
         @ask-slot-pick="onAskSlotPick"
         @ask-slot-submit="onAskSlotSubmit"
         @tts-click="onTtsClick"
+        @tts-stop="stopSceneTts"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
         @copy-click="onCopyMessage"

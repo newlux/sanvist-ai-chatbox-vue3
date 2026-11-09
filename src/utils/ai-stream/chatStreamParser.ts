@@ -5,7 +5,7 @@ import type {
 } from "@/api/chat/types";
 
 export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-suggestion"
-  | "guide-check" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error"
+  | "guide-check" | "guide-lead" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error"
   // assistant-navigation 解析层一直在产出（历史/流式都走它），之前漏在联合类型里导致两处 TS 报错；
   // gantt 是调度视图入口卡（scene=task / type=gantt）。
   | "assistant-navigation" | "gantt";
@@ -158,6 +158,18 @@ export function applyEventToBlocks(
       return {
         ...base,
         blocks: upsertBlock(blocks, stablePayloadId("guide-check", [stepId], checkIndex), "guide-check", event.data, true),
+        receivedContent: true,
+      };
+    }
+    case "guide_lead": {
+      // 开场引导（COMPONENT scene=guide / type=lead）：正文 + 一轮单选，正文与选项都可能缺一项
+      const text = String(event.data?.text || "").trim();
+      const options = Array.isArray(event.data?.options) ? event.data.options : [];
+      if (!text && !options.length) return base;
+      const leadIndex = blocks.filter(block => block.type === "guide-lead").length;
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, stablePayloadId("guide-lead", [text], leadIndex), "guide-lead", event.data, true),
         receivedContent: true,
       };
     }

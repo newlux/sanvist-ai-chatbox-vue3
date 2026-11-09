@@ -156,11 +156,12 @@ export function splitMarkdownTables(source: string): DifyHistoryBlockData[] {
 
 export interface DifyHistoryBlockData {
   type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion" | "ask-slot"
-    | "assistant-navigation" | "guide-step" | "guide-check" | "guide-suggestion" | "gantt";
+    | "assistant-navigation" | "guide-step" | "guide-check" | "guide-suggestion" | "guide-lead" | "gantt";
   payload: Record<string, unknown>;
 }
 
-type GuideBlockType = "image" | "video" | "source" | "suggestion" | "guide-step" | "guide-check" | "guide-suggestion";
+type GuideBlockType = "image" | "video" | "source" | "suggestion" | "guide-step" | "guide-check"
+  | "guide-suggestion" | "guide-lead";
 
 /** 步骤配图：兼容 [{url,caption}] 与 ["url"] 两种写法 */
 function parseGuideImages(value: unknown) {
@@ -192,6 +193,28 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
     const evidence = Array.isArray(data.evidence) ? data.evidence.filter(item => asRecord(item)?.url) : [];
     return evidence.length ? { type: "source", payload: { evidence } } : null;
   }
+  /**
+   * 开场引导（scene=guide / type=lead）：一段开场白 + 一轮单选（如「选择哪个设备」）。
+   *
+   * 协议：`{ text, lead_text, options: [{ option }] }`。这里只做归一化：
+   * - `text` 原样保留（含 \n，由块组件按 pre-line 渲染）；
+   * - `lead_text` 是选项上方的引导语（「可以和我说选择哪个设备（单选）」）；
+   * - 选项可能是 `{ option }` / `{ label }` / 纯字符串三种写法，统一成文案数组，
+   *   点一条就当作用户提问发出去（与 suggestion 的交互一致）。
+   */
+  if (type === "lead") {
+    const text = String(data.text || "").trim();
+    const leadText = String(data.lead_text || "").trim();
+    const options = (Array.isArray(data.options) ? data.options : [])
+      .map((item) => {
+        if (typeof item === "string") return item.trim();
+        const record = asRecord(item);
+        return String(record?.option || record?.label || record?.text || "").trim();
+      })
+      .filter(Boolean);
+    if (!text && !options.length) return null;
+    return { type: "guide-lead", payload: { text, lead_text: leadText, options } };
+  }
   if (type === "options") {
     const items = Array.isArray(data.items)
       ? data.items.filter(item => String(asRecord(item)?.label || "").trim()).slice(0, 4)
@@ -220,23 +243,36 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
   }
   // 指导步骤卡片：每步自带确认问题与三个选项文案（确认 / 提问 / 拍照）。
   if (type === "step") {
-    const steps = Array.isArray(data.steps)
-      ? data.steps
-        .map(asRecord)
-        .filter((item): item is Record<string, unknown> => Boolean(item))
-        .map(item => ({
-          id: String(item.id || "").trim(),
-          title: String(item.title || "").trim(),
-          action: String(item.action || "").trim(),
-          verification: String(item.verification || "").trim(),
-          confirmation_question: String(item.confirmation_question || "").trim(),
-          confirm_text: String(item.confirm_text || "").trim(),
-          question_text: String(item.question_text || "").trim(),
-          photo_text: String(item.photo_text || "").trim(),
-          images: parseGuideImages(item.images),
-        }))
-        .filter(item => item.title)
+    // steps 里可能混着「步骤小结」这一条：先把它拆出来，剩下的才是真正的步骤。
+    // 小结不算步骤，不参与步骤条 / 进度 / 完成态的计算。
+    const rawSteps = Array.isArray(data.steps)
+      ? data.steps.map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item))
       : [];
+    // 顶层 step_summary 只做老协议兼容，优先用 steps 里拆出来的小结
+    let stepSummary = String(data.step_summary || "").trim();
+    const realSteps: Record<string, unknown>[] = [];
+    for (const item of rawSteps) {
+      const extracted = extractStepSummary(item);
+      if (extracted) {
+        stepSummary = stepSummary || extracted;
+        continue;
+      }
+      realSteps.push(item);
+    }
+
+    const steps = realSteps
+      .map(item => ({
+        id: String(item.id || "").trim(),
+        title: String(item.title || "").trim(),
+        action: String(item.action || "").trim(),
+        verification: String(item.verification || "").trim(),
+        confirmation_question: String(item.confirmation_question || "").trim(),
+        confirm_text: String(item.confirm_text || "").trim(),
+        question_text: String(item.question_text || "").trim(),
+        photo_text: String(item.photo_text || "").trim(),
+        images: parseGuideImages(item.images),
+      }))
+      .filter(item => item.title);
     if (!steps.length) return null;
     return {
       type: "guide-step",
@@ -246,6 +282,8 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
         // 步骤卡左上角灰色小标签；老数据没有 note 时由页面退回 title
         note: String(data.note || "").trim(),
         overview: String(data.overview || "").trim(),
+        /** 整段指导的小结：从 steps 里拆出来的小结（全部确认完后展示） */
+        step_summary: stepSummary,
         steps,
       },
     };
@@ -293,19 +331,83 @@ function expandStepBlocks(block: { type: GuideBlockType; payload: Record<string,
   const steps = Array.isArray(block.payload.steps)
     ? block.payload.steps as Record<string, unknown>[]
     : [];
+  /** 卡片顶部那行标题（如「随车教练 — 司机上岗」）：协议放在 note，老数据没有就退回 title */
+  const note = String(block.payload.note || "").trim() || String(block.payload.title || "").trim();
   const detailBlocks = steps.map((step, index) => ({
     type: "guide-check" as const,
     payload: {
+      note,
       title: String(step.title || "").trim(),
       step_id: String(step.id || "").trim(),
       step_index: index + 1,
       step_total: steps.length,
       content: String(step.action || "").trim(),
+      /** 这一步的确认问题（「请确认当前步骤是否学会？」），渲染在选项上方 */
+      confirmation_question: String(step.confirmation_question || "").trim(),
+      /** 选项：优先 steps[].options，其次按 确认 / 换个方式 / 拍照 三段老字段拼 */
+      options: resolveStepOptions(step),
+      /** 最后一步：确认完就进「完成态」，展示 step_summary 与推荐问题 */
+      is_last: index === steps.length - 1,
       images: Array.isArray(step.images) ? step.images : [],
       status: "✓ 询问用户",
     },
   }));
   return [block, ...detailBlocks];
+}
+
+/**
+ * 一步的选项文案（A / B / C）。
+ *
+ * 新协议 `steps[].options` 直接给（字符串或 `{ label }`）；老协议没有这个字段，
+ * 就按 `confirm_text`（确认学会，下一步）/ `question_text`（换个方式讲解）/ `photo_text`（拍照）
+ * 三段拼出来，保证老数据也能出三行选项。空文案直接跳过，序号由渲染端按顺序补 A/B/C。
+ */
+function resolveStepOptions(step: Record<string, unknown>): string[] {
+  const raw = Array.isArray(step.options) ? step.options : [];
+  const labels = raw
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      const record = asRecord(item);
+      return String(record?.label ?? record?.text ?? record?.option ?? "").trim();
+    })
+    .filter(Boolean);
+  if (labels.length) return labels;
+  return [step.confirm_text, step.question_text, step.photo_text]
+    .map(value => String(value ?? "").trim())
+    .filter(Boolean);
+}
+
+/**
+ * 判断 steps 里某一条是不是「步骤小结」，是就返回小结文本，不是返回空串。
+ *
+ * 实际协议里小结是 steps 的最后一条，形如：
+ * `{ id: "step_summary", title: "步骤小结", action: "<小结正文>", ... }`
+ * —— 它有 title / action，长得和正常步骤一样，所以必须先按 id / title 认出来，
+ * 否则会被当成第 N 步渲染在步骤条上（进度变成 6/6、步骤条多一段）。
+ *
+ * 判定（任一生效）：
+ * 1. id === "step_summary"，或 title === "步骤小结"；
+ * 2. type === "summary" / is_summary 为真；
+ * 3. 只带 step_summary 字符串字段、没有正常步骤内容的条目。
+ * 文本按 step_summary → action → content → text → summary 依次取。
+ *
+ * 小结条目会被从 steps 里拆走，不参与步骤条 / 进度 / 完成态的计算。
+ */
+function extractStepSummary(item: Record<string, unknown>): string {
+  const id = String(item.id || "").trim();
+  const title = String(item.title || "").trim();
+  const summaryField = String(item.step_summary || "").trim();
+  const isSummaryItem = id === "step_summary"
+    || title === "步骤小结"
+    || item.type === "summary"
+    || Boolean(item.is_summary);
+
+  if (!isSummaryItem) return summaryField;
+  return summaryField
+    || String(item.action || "").trim()
+    || String(item.content || "").trim()
+    || String(item.text || "").trim()
+    || String(item.summary || "").trim();
 }
 
 /** 正文协议标签；历史解析与 SSE 流式解析共用同一份标记表。 */
@@ -633,6 +735,11 @@ export function createDifyEventNormalizer() {
       }
       if (guideBlock.type === "guide-suggestion") {
         events.push({ event: "guide_suggestion", ...references, data: { ...guideBlock.payload, auto_open: true } });
+        return;
+      }
+      // 开场引导卡：正文 + 选项，就地渲染，不弹层
+      if (guideBlock.type === "guide-lead") {
+        events.push({ event: "guide_lead", ...references, data: guideBlock.payload });
         return;
       }
       if (guideBlock.type === "guide-check") {

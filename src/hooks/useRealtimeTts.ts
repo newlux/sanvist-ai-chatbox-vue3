@@ -23,7 +23,7 @@ function guessAudioMime(base64: string) {
   return "audio/mpeg";
 }
 
-function extractAnswerText(message: UiChatMessage): string {
+function extractAnswerText(message: UiChatMessage, stepId = ""): string {
   const blocks = message.blocks || [];
   /**
    * 多步骤卡（guide-step）的回答：正文既不渲染也不播报（见 ai-bubble-v2 的 hideBody），
@@ -35,9 +35,14 @@ function extractAnswerText(message: UiChatMessage): string {
     : blocks.filter(block => block.type === "answer").map(block => String(block.payload?.content || "")).join("");
   if (fromBlocks) return fromBlocks;
   // 核对卡（guide-check）场景：气泡正文隐藏 / 为空时，用核对卡的「标题 + 步骤正文」当播报文本，
-  // 否则点播报按钮会因为 answer 为空而「没声音」
-  const fromCheckBlocks = blocks
-    .filter(block => block.type === "guide-check")
+  // 否则点播报按钮会因为 answer 为空而「没声音」。
+  // 传了 stepId 就只念当前这一步（多步骤卡翻页后不能把 5 步全念一遍）；
+  // 找不到对应步骤时退回全部，避免出现「点了没声音」。
+  const checkBlocks = blocks.filter(block => block.type === "guide-check");
+  const scopedBlocks = stepId
+    ? checkBlocks.filter(block => String(block.payload?.step_id || "") === stepId)
+    : checkBlocks;
+  const fromCheckBlocks = (scopedBlocks.length ? scopedBlocks : checkBlocks)
     .map(block => [
       String(block.payload?.title || "").trim(),
       String(block.payload?.content || "").trim(),
@@ -83,6 +88,8 @@ export function useRealtimeTts(scope?: string) {
   const playing = ref(false);
   const playingMessageId = ref<Identifier | null>(null);
   const playingMessageKey = ref<string | null>(null);
+  /** 正在播的是哪一步（多步骤卡翻页时用来判断「同一消息、不同步骤」要不要重播） */
+  const playingStepId = ref("");
 
   let sessionSeq = 0;
   let streamFinished = false;
@@ -340,12 +347,19 @@ export function useRealtimeTts(scope?: string) {
     enqueueTtsBatch(batch, messageId, seq, session);
   }
 
-  /** 点击播音按钮：同一条消息再点一次则停止；否则取当前消息 content 并流式播放。 */
-  async function togglePlay(message: UiChatMessage) {
+  /**
+   * 点击播音按钮：同一目标再点一次则停止；否则取当前消息 content 并流式播放。
+   * `stepId` 传多步骤卡的当前步骤：同一条消息换了步骤（卡片翻页）时不算「再点一次」，
+   * 而是停掉旧语音、接着念新一步的正文。
+   * `textOverride` 用于「要念的内容不在消息正文里」的场景（如步骤小结 step_summary）：
+   * 有值时直接念它，不再从 blocks 里拼文本。
+   */
+  async function togglePlay(message: UiChatMessage, stepId = "", textOverride = "") {
     const messageId = message?.messageId;
     if (messageId == null || message?.sessionId == null) return;
 
-    if (playingMessageId.value === messageId) {
+    const sameTarget = playingMessageId.value === messageId && playingStepId.value === stepId;
+    if (sameTarget) {
       stop();
       return;
     }
@@ -357,9 +371,10 @@ export function useRealtimeTts(scope?: string) {
     const language = rawLanguage.startsWith("zh") ? "zh" : rawLanguage.startsWith("en") ? "en" : "zh";
     playingMessageId.value = messageId;
     playingMessageKey.value = String(message.id ?? messageId);
+    playingStepId.value = stepId;
     patchMessage(messageId, { ttsLoading: true, ttsPlaying: false });
     try {
-      const text = cleanAnswerText(extractAnswerText(message));
+      const text = cleanAnswerText(textOverride || extractAnswerText(message, stepId));
       if (!text) {
         finishRequest(messageId, seq);
         playingMessageId.value = null;
@@ -405,6 +420,7 @@ export function useRealtimeTts(scope?: string) {
     }
     playingMessageId.value = null;
     playingMessageKey.value = null;
+    playingStepId.value = "";
     playing.value = false;
   }
 
@@ -417,5 +433,6 @@ export function useRealtimeTts(scope?: string) {
     playing,
     playingMessageId,
     playingMessageKey,
+    playingStepId,
   };
 }

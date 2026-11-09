@@ -55,6 +55,16 @@ export interface ScheduleGesturesOptions {
   threshold?: number;
   /** 页面是否处于 CSS 旋转横屏：决定双指间距与捏合中心映射到时间轴的哪个屏幕轴，默认 false */
   isRotated?: () => boolean;
+  /**
+   * 触摸事件坐标系是否与页面坐标系互换了 90°（只影响触摸 / 双指手势，鼠标拖动不受影响）。
+   *
+   * 背景：宿主容器给甘特图的「横屏」是把 webview 层旋转后铺到屏幕上的
+   * （viewport 报横屏、页面不做 CSS 旋转），但触摸事件仍按物理竖屏坐标系上报——
+   * 时间轴视觉上沿屏幕竖向（clientY），而页面坐标里它沿横向（clientX）。
+   * 此时手势轴向要按「旋转页」的同一套方式取（间距 / 拖动增量取 clientY）。
+   * 不传时跟随 isRotated（chatbox 主工程行为：CSS 旋转页两轴天然互换）。
+   */
+  touchAxesSwapped?: () => boolean;
   /** 双指捏合回调（不传则不接管双指手势）：返回缩放后的目标横向滚动位置（页面维护缩放锚点）；
    *  不返回（或返回 undefined）则本次缩放不改变滚动位置 */
   onPinch?: (event: SchedulePinchEvent) => number | void;
@@ -124,6 +134,13 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
 
     /** 纵向可滚上限 = 内容高度 - 裁剪视口高度（实时算，数据/折叠变化后依然准） */
     const rowsMax = () => Math.max(0, (rowsInner?.scrollHeight || 0) - (rowsBox?.clientHeight || 0));
+
+    /**
+     * 手势（触摸 / 双指）用的旋转判定：宿主容器把 webview 层旋转铺屏、触摸坐标仍按
+     * 物理竖屏上报时，两轴等效互换，要按「旋转页」的同一套映射取轴。
+     * 鼠标事件坐标系永远与页面一致，不走这里（见 onMouseDown 用 options.isRotated）。
+     */
+    const gestureRotated = () => options.touchAxesSwapped?.() ?? options.isRotated?.() ?? false;
     let rowsOffset = 0;
     /** 平移内容区，并让左列同步（返回实际生效的偏移） */
     const applyRowsOffset = (offset: number) => {
@@ -185,7 +202,7 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       // 双指按下：进入捏合，先把单指拖动的方向状态清掉
       if (options.onPinch && event.touches.length >= 2) {
         axis = null;
-        pinchRotated = options.isRotated?.() ?? false;
+        pinchRotated = gestureRotated();
         const span = pinchSpan(event.touches, pinchRotated);
         // 垂直于时间轴按下（如旋转横屏里的左右双指）：先不取基准，等真正沿时间轴张开时再取
         pinchDistance = span >= MIN_PINCH_SPAN ? span : 0;
@@ -206,7 +223,7 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       startLeft = grid.scrollLeft;
       startTop = rowsOffset;
       axis = null;
-      startRotated = options.isRotated?.() ?? false;
+      startRotated = gestureRotated();
       log("touchstart", {
         x: startX,
         y: startY,
@@ -222,7 +239,7 @@ export function useScheduleGestures(options: ScheduleGesturesOptions) {
       if (options.onPinch && event.touches.length >= 2) {
         // 第二根手指可能是在单指拖动途中落下的（onStart 没走到捏合分支）：这里补一次旋转状态，
         // 保证间距取的轴与 pinchFocus 用的轴始终一致
-        if (!pinchDistance) pinchRotated = options.isRotated?.() ?? false;
+        if (!pinchDistance) pinchRotated = gestureRotated();
         const distance = pinchSpan(event.touches, pinchRotated);
         if (distance < MIN_PINCH_SPAN) {
           // 两指在时间轴方向上没张开（旋转横屏里左右开合就是这种）：这次不算缩放。

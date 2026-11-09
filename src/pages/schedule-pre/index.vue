@@ -849,13 +849,15 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   background: #fbfbfb;
 }
 
+/* 左列头部「资源与车辆人员」：高度 45 必须与右侧刻度条（.schedule__ruler）一致，
+   否则左列行与右侧 track 错位；文字垂直居中、不留上下留白 */
 .schedule__side-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   flex-shrink: 0;
   box-sizing: border-box;
   height: 45px;
-  padding: 0 0 8px 10px;
+  padding: 0 0 0 10px;
 }
 
 .schedule__side-head-text {
@@ -968,9 +970,11 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   background: #fbfbfb;
 }
 
+/* 刻度标签：在 45 高的刻度条内上下居中（与左侧头部文字同一水平线） */
 .schedule__ruler-label {
   position: absolute;
-  bottom: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   font-size: 12px;
   // font-style: italic;
   color: #1a1a1e;

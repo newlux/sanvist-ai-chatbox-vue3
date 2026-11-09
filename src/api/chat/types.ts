@@ -243,6 +243,8 @@ export interface GuideStepPayload extends Record<string, unknown> {
   /** 步骤卡左上角灰色小标签，如「开始拆装步骤」 */
   note?: string;
   overview?: string;
+  /** 整段指导的小结：全部步骤确认完后展示 */
+  step_summary?: string;
   steps: GuideStepItem[];
 }
 
@@ -254,6 +256,8 @@ export interface GuideStepSelectEvent {
 
 /** 「核对任务与资料」卡片：与某个步骤绑定，步骤卡片翻页时对话滚动到它 */
 export interface GuideCheckPayload extends Record<string, unknown> {
+  /** 卡片顶部标题行（如「随车教练 — 司机上岗」），由步骤卡的 note 带下来 */
+  note?: string;
   title?: string;
   /** 关联的步骤 id（对应 GuideStepItem.id），用于步骤卡片翻页时定位 */
   step_id?: string;
@@ -261,6 +265,12 @@ export interface GuideCheckPayload extends Record<string, unknown> {
   step_total?: number;
   /** 核对清单正文，换行保留 */
   content?: string;
+  /** 这一步的确认问题，渲染在选项上方（如「请确认当前步骤是否学会？」） */
+  confirmation_question?: string;
+  /** 这一步的选项文案：第一个是「下一步」，其余点了当作用户提问发出去 */
+  options?: string[];
+  /** 是否最后一步：确认完就进完成态，展示 step_summary 与推荐问题 */
+  is_last?: boolean;
   /** 配图：步骤详情卡会带这一步的操作图 */
   images?: GuideStepImage[];
   /**
@@ -403,7 +413,7 @@ export interface GanttViewPayload extends Record<string, unknown> {
 
 export interface RichContentEvent {
   event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source" | "ask_slot"
-    | "assistant_navigation" | "assistant_scene" | "guide_step" | "guide_check" | "guide_suggestion" | "gantt";
+    | "assistant_navigation" | "guide_step" | "guide_check" | "guide_suggestion" | "guide_lead" | "gantt";
   conversationId: Identifier;
   messageId: Identifier;
   taskId?: Identifier;

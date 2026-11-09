@@ -268,7 +268,7 @@ function onSubmitTap() {
   display: flex;
   align-items: center;
   padding: 16rpx 32rpx; /* 8px 16px */
-  border: 2rpx solid transparent; /* 1px，颜色交给下面的渐变边框 */
+  border: 2rpx solid #efefef; /* 1px，颜色交给下面的渐变边框 */
   border-radius: 40rpx; /* 20px 胶囊 */
   /**
    * 边框线线性渐变（按设计稿逐像素取样还原，取样点见下）：
