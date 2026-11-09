@@ -3,6 +3,8 @@ import { useI18n } from "vue-i18n";
 import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete.svg";
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
+import autoTtsOffIcon from "@/assets/img/icon-tts-auto-off.svg";
+import autoTtsOnIcon from "@/assets/img/icon-tts-auto-on.svg";
 import listenLogoGif from "@/assets/img/listen.gif";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import saniLogoSmGif from "@/assets/img/sani-logo-sm.gif";
@@ -11,7 +13,7 @@ import thinkLogoGif from "@/assets/img/think.gif";
 import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useChatStore, useSystemStore } from "@/stores";
+import { useChatStore, useSettingsStore, useSystemStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { getSessionSceneLabel, isPodcastSession } from "@/utils/session-scene";
 
@@ -84,6 +86,18 @@ const emit = defineEmits([
  */
 const chatStore = useChatStore();
 const systemStore = useSystemStore();
+/**
+ * 语音播报总开关（头部回主页按钮左边那颗喇叭）：
+ * 只管「回答边出边自动播报」，气泡里手动点的播报按钮不受它影响。
+ * 开关本身落在 settings store（本机 storage 持久化），这里只负责渲染与切换。
+ */
+const settingsStore = useSettingsStore();
+const autoTtsEnabled = computed(() => settingsStore.autoTtsEnabled);
+const autoTtsIcon = computed(() => (autoTtsEnabled.value ? autoTtsOnIcon : autoTtsOffIcon));
+
+function onToggleAutoTts() {
+  settingsStore.setAutoTtsEnabled(!autoTtsEnabled.value);
+}
 /**
  * 深色只有一个作用域：首页对话页的悬浮头部（plainBg）。
  * 作业指导 / 任务协同也复用这个头部，但那些页面还是浅色稿，
@@ -676,23 +690,38 @@ onBeforeUnmount(() => {
             </view>
           </view>
 
-          <view v-if="canMinimize" class="chat-header__icon-btn" @tap="onMinimize">
-            <image
-              :src="minimizeIcon"
-              mode="aspectFit"
-              class="chat-header__icon-minimize-img"
-            />
-          </view>
-          <view v-else-if="!props.backOnly" class="chat-header__icon-btn" @tap="onBackTap">
-            <view class="chat-header__icon-atlas">
+          <!-- 右侧按钮组：语音播报总开关 + 回主页。必须成组，否则 bar 的 space-between
+               会把这个新增按钮甩到正中间（灵动岛下面）去 -->
+          <view class="chat-header__right">
+            <!-- 语音播报总开关：紧挨在「回主页」左边。开 = 自动播报回答，关 = 不自动播报；
+                 只掐自动这条链路，气泡里手动点的播报按钮照常可用 -->
+            <view
+              v-if="!props.backOnly"
+              class="chat-header__icon-btn chat-header__tts-switch"
+              :class="{ 'chat-header__tts-switch--off': !autoTtsEnabled }"
+              @tap="onToggleAutoTts"
+            >
+              <image :src="autoTtsIcon" mode="aspectFit" class="chat-header__icon-tts-img" />
+            </view>
+
+            <view v-if="canMinimize" class="chat-header__icon-btn" @tap="onMinimize">
               <image
-                src="@/assets/img/icon-home.svg"
+                :src="minimizeIcon"
                 mode="aspectFit"
-                class="chat-header__icon-atlas-img"
+                class="chat-header__icon-minimize-img"
               />
             </view>
+            <view v-else-if="!props.backOnly" class="chat-header__icon-btn" @tap="onBackTap">
+              <view class="chat-header__icon-atlas">
+                <image
+                  src="@/assets/img/icon-home.svg"
+                  mode="aspectFit"
+                  class="chat-header__icon-atlas-img"
+                />
+              </view>
+            </view>
+            <view v-else class="chat-header__icon-spacer" />
           </view>
-          <view v-else class="chat-header__icon-spacer" />
         </template>
 
         <template v-else>
@@ -1023,7 +1052,8 @@ onBeforeUnmount(() => {
 
   .chat-header__icon-history-img,
   .chat-header__icon-atlas-img,
-  .chat-header__icon-back-img {
+  .chat-header__icon-back-img,
+  .chat-header__icon-tts-img {
     filter: brightness(0) invert(1);
   }
 
@@ -1078,6 +1108,14 @@ onBeforeUnmount(() => {
   &:active {
     opacity: 0.75;
   }
+}
+
+/* 右侧按钮组（语音播报总开关 + 回主页）：成组后才不会把新增按钮挤到 bar 中间 */
+.chat-header__right {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12rpx; // 6px，与 bar 的 gap 一致
 }
 
 .chat-header__icon-spacer {
@@ -1319,6 +1357,17 @@ onBeforeUnmount(() => {
 .chat-header__icon-minimize-img {
   width: 40rpx;
   height: 40rpx;
+}
+
+/* 语音播报总开关（回主页左边）：24×24（48rpx），与其他头部图标同尺寸同色值；
+   关闭态只靠「喇叭 + ×」图标区分，再压一点透明度让状态更好辨 */
+.chat-header__icon-tts-img {
+  width: 48rpx;
+  height: 48rpx;
+}
+
+.chat-header__tts-switch--off .chat-header__icon-tts-img {
+  opacity: 0.6;
 }
 
 .chat-header__check-all {
@@ -1666,10 +1715,11 @@ onBeforeUnmount(() => {
 .history-drawer__new-conversation {
   padding: 0;
 }
-/* 设计稿 722:2798：32×32（64rpx）齿轮，右边缘距内容区 7px（14rpx）由 footer 的右侧 padding 让出 */
+/* 设计稿 722:2798 是 32×32（64rpx），实际按 26×26（52rpx）收小一点；
+   右边缘仍由 footer 的右侧 padding 让出 7px（14rpx），不额外加 margin */
 .history-drawer__settings {
-  width: 64rpx;
-  height: 64rpx;
+  width: 52rpx;
+  height: 52rpx;
   flex-shrink: 0;
 }
 .history-drawer--batch-delete .history-drawer__toolbar,

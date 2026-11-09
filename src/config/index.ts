@@ -4,6 +4,12 @@ export const LISTEN_REPORT_CURRENT_DATE_KEY = "ai-ask-listen-report-current-date
 /** <WORK_REPORT language="…"> 下发的播报语言，随日期一起带进播报页 */
 export const LISTEN_REPORT_LANGUAGE_KEY = "ai-ask-listen-report-language";
 
+/**
+ * 语音播报总开关（顶部头部的喇叭按钮）：只管「回答边出边自动播报」，
+ * 不影响气泡里手动点的播报按钮。本机偏好，存 "1" 开 / "0" 关，缺省按开。
+ */
+export const AUTO_TTS_ENABLED_KEY = "ai-ask-auto-tts-enabled";
+
 // 访客角色选项预取缓存（进入角色选择页前提前拉取，避免页面加载闪动）
 export const VISITOR_ROLE_OPTIONS_CACHE_KEY = "visitor_role_options_cache";
 export const VISITOR_ROLE_CACHE_KEY = "visitor_role";

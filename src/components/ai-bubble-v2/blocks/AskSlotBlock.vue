@@ -280,7 +280,7 @@ function onSubmitTap() {
    */
   background-color: transparent;
   background-image:
-    linear-gradient(#ffffff, #ffffff),
+    linear-gradient(#fafafa, #fafafa),
     linear-gradient(145deg, #cdcad2 0%, #f7f7f7 28%, #cdcad2 100%);
   background-origin: border-box;
   background-clip: padding-box, border-box;
@@ -306,9 +306,14 @@ function onSubmitTap() {
   color: #ffffff;
 }
 
-/* 生成中 / 已提交：置灰且不吃点击，避免连点 */
+/**
+ * 生成中 / 已提交：只锁点击，不再整体压暗。
+ *
+ * 内联卡片是在流式回答里冒出来的，出现的那一刻 `loading` 还是 true，
+ * 压暗后要先灰一截、等本轮回答结束才变回白底，看着像「先灰后白」的过渡动画。
+ * 按钮就该一出现就是最终配色，所以这里只保留 pointer-events: none。
+ */
 .ask-slot__option--disabled {
-  opacity: 0.4;
   pointer-events: none;
 }
 

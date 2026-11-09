@@ -2,6 +2,7 @@ import type { AppSettings, SettingsDialogueMode, SettingsLanguage, UpdateSetting
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { getSettings, updateSettings } from "@/api/settings";
+import { AUTO_TTS_ENABLED_KEY } from "@/config";
 import { createLogger } from "@/utils/logger";
 import { useSystemStore } from "@/stores/modules/system";
 
@@ -47,6 +48,31 @@ export const useSettingsStore = defineStore("settings", () => {
   const speechRate = ref(1.2);
   /** 最近一次服务端确认过的全量值，写失败时用它回滚 */
   const confirmed = ref<AppSettings | null>(null);
+  /**
+   * 语音播报总开关（顶部头部回主页按钮旁边的喇叭）：
+   * 只管「回答边出边自动播报」，气泡里手动点的播报按钮不受它控制。
+   * 本机偏好，不走 /settings 接口，存 uni storage，重启后保留，缺省为开。
+   */
+  const autoTtsEnabled = ref(readAutoTtsEnabled());
+
+  function readAutoTtsEnabled(): boolean {
+    try {
+      return uni.getStorageSync(AUTO_TTS_ENABLED_KEY) !== "0";
+    }
+    catch {
+      return true;
+    }
+  }
+
+  function setAutoTtsEnabled(value: boolean) {
+    autoTtsEnabled.value = value;
+    try {
+      uni.setStorageSync(AUTO_TTS_ENABLED_KEY, value ? "1" : "0");
+    }
+    catch {
+      // 存储不可用只影响下次启动的默认值，本次开关照常生效
+    }
+  }
 
   /** 把服务端全量值分发到各自的归属地 */
   function apply(data: AppSettings | null | undefined) {
@@ -152,6 +178,7 @@ export const useSettingsStore = defineStore("settings", () => {
     voiceCode,
     speechRate,
     confirmed,
+    autoTtsEnabled,
     load,
     save,
     setMemory,
@@ -159,5 +186,6 @@ export const useSettingsStore = defineStore("settings", () => {
     setDialogueMode,
     setAppearance,
     setLanguage,
+    setAutoTtsEnabled,
   };
 });

@@ -325,7 +325,7 @@ const isGenerating = computed(() => {
  */
 const elapsedSeconds = ref(0);
 const showElapsed = computed(() => isGenerating.value && !props.ttsEnabled);
-const elapsedText = computed(() => (showElapsed.value ? `${elapsedSeconds.value}S` : ""));
+const elapsedText = computed(() => (showElapsed.value ? `${elapsedSeconds.value}s` : ""));
 
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 let elapsedBase = 0;
@@ -1502,13 +1502,16 @@ function onTtsTap() {
 
   // 边框同样是渐变线（设计稿只给了浅色值，深色按同一明暗关系压深：
   // #3D3D3D → #262626 → #3D3D3D，角度与峰值位置跟浅色一致：145° / 28%）。
-  // 不能用 background 简写，会把渐变边框整层重置掉
+  // 不能用 background 简写，会把渐变边框整层重置掉。
+  // border-image-source 必须显式关掉：浅色稿那道 108° 亮色渐变写在子组件基础样式里，
+  // 只要不清掉，深色下它会盖住这里的 border-color / 渐变底，描边仍然是浅色的一条亮边。
   :deep(.ask-slot__option) {
+    border-image-source: none;
     border-color: transparent;
     background-color: transparent;
     background-image:
-      linear-gradient(#1a1a1a, #1a1a1a),
-      linear-gradient(145deg, #3d3d3d 0%, #262626 28%, #3d3d3d 100%);
+      linear-gradient(#0d0d0d, #0d0d0d),
+      linear-gradient(145deg, #5A5A5A 3.66%, #F7F7F7 38.1%, #5A5A5A 89.76%);
     background-origin: border-box;
     background-clip: padding-box, border-box;
   }

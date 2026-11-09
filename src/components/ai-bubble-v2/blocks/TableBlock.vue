@@ -63,12 +63,12 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
 </template>
 
 <style lang="scss" scoped>
-/* 表格：底色跟随外层 AI 气泡（#F3F3F3，见 ai-bubble-v2 的回答卡），
-   表格本身不铺白底、表头也不再压深，只用描边和字重区分行列 */
+/* 表格：正文底色跟随外层 AI 气泡（#F3F3F3，见 ai-bubble-v2 的回答卡），
+   表头第一行铺淡蓝底 #E1F0FF，所有描边（外框 + 行分隔线 + 列分隔线）统一 #E8E8E8 */
 .table-block {
   width: 100%;
   overflow: hidden;
-  border: 1px solid #efefef;
+  border: 1px solid #e8e8e8;
   border-radius: 20rpx;
   background: transparent;
 }
@@ -77,25 +77,31 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
 }
 .table-block__row {
   display: flex;
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid #e8e8e8;
   color: #1a1a1e;
 }
 .table-block__row:first-child {
   border-top: 0;
 }
-/* 表头：不再铺 #F9F9F9，与正文同底色，靠加粗和深一档的文字色区分 */
+/* 表头（第一行）：铺 #E1F0FF，再靠加粗与正文区分 */
 .table-block__row--head {
   color: #1a1a1e;
   font-weight: 600;
+  background: #e1f0ff;
 }
 .table-block__cell {
   flex: 1 1 0;
   min-width: 0;
   padding: 24rpx;
   box-sizing: border-box;
+  /* 列分隔线：与行分隔线同色；首列左边由表格外框负责，不重复画 */
+  border-left: 1px solid #e8e8e8;
   font-size: 24rpx;
   line-height: 36rpx;
   word-break: break-word;
+}
+.table-block__cell:first-child {
+  border-left: 0;
 }
 
 /* ===== 深色主题：结构化表格块（Ardot 1193:5104 → 回复卡 1193:5116）=====
@@ -109,9 +115,16 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
     color: rgba(255, 255, 255, 0.8);
   }
 
-  // 表头只靠字重区分，颜色与正文完全一致
+  // 列分隔线跟随深色稿分隔线 #303030
+  .table-block__cell {
+    border-left-color: #303030;
+  }
+
+  // 表头只靠字重区分，颜色与正文完全一致；
+  // 浅色稿的 #E1F0FF 表头底在深底下要顶掉，否则白字压淡蓝看不清
   .table-block__row--head {
     color: rgba(255, 255, 255, 0.8);
+    background: transparent;
   }
 }
 </style>

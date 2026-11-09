@@ -10,7 +10,6 @@ import arrowDownIcon from "@/assets/img/arrow-down.png";
 import arrowDownDarkIcon from "@/assets/img/arrow-down-dark.png";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
-import AiChatEdgeGlow from "@/components/ai-chat-edge-glow/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
@@ -130,14 +129,6 @@ const chatEnterStyle = computed(() => ({
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用实时 TTS 做流式听播（与作业指导页一致）。
 const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
 const realtimeTts = useRealtimeTts(chatScope);
-/**
- * 是否正在语音播报（页面左右下边缘流光的显示时机）：
- * 实时流式听播（realtimeTts.playing）或整段播报（消息上的 ttsPlaying）任一在播都算。
- */
-const isTtsPlaying = computed(() =>
-  Boolean(realtimeTts.playing.value)
-  || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
-);
 const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   // 任务协同下发的场景标识：TASK（早期下发过 TEST，两者在历史会话里都按任务协同归类，见 utils/session-scene）
   scene: "TASK",
@@ -986,8 +977,6 @@ onUnload(() => {
     >
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
-      <!-- 问答回复中的页面边缘流光：左右竖边 + 底部光雾（设计稿 77:10750 的 203:5920 / 203:5926 / 203:5916） -->
-      <AiChatEdgeGlow :visible="isTtsPlaying" />
       <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车） -->
       <AiChatBackdrop class="ai-page__backdrop" />
       <!-- 顶部毛玻璃渐隐：与首页对话页同一层，状态栏 / 头部区域半透明，内容滚上来只会被虚化 -->
@@ -1741,10 +1730,7 @@ $color-white: #ffffff;
     display: none;
   }
 
-  // 边缘流光同样只在浅色稿里出现（深色稿没有这三层渐变装饰）
-  .ai-chat-edge-glow {
-    display: none;
-  }
+  /* 边缘流光在深色下同样保留：色值、厚度、流动都与浅色一致 */
 
   .ai-page__backdrop {
     display: none;

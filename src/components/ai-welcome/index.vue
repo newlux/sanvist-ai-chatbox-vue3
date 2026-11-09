@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import type { PropType } from "vue";
-import { onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
+import sendUpIcon from "@/assets/img/icon-send-up.svg";
+import voiceWaveIcon from "@/assets/img/icon-voice-wave-dark.svg";
 import listenLogo from "@/assets/img/listen.gif";
 import saniLogo from "@/assets/img/sani-logo.gif";
 import { useSafeArea } from "@/hooks/useSafeArea";
@@ -12,11 +15,16 @@ import { useSafeArea } from "@/hooks/useSafeArea";
  * 原来的游客 / 会员两套欢迎页（渐变标语、三行说明、底部光效、身份选择气泡等）
  * 全部停用；组件文件 visitor.vue、member.vue 仍保留在同一目录，需要恢复时换回引用即可。
  *
- * 点「点击说话」只抛 start-chat，点键盘抛 start-text，飞出动画由父页面驱动：
- * 父页面把 logo 的目标位移算好塞进 logoStyle，本组件只负责把 transition 跑完。
+ * 点「点击说话」只抛 start-chat，飞出动画由父页面驱动：父页面把 logo 的目标位移
+ * 算好塞进 logoStyle，本组件只负责把 transition 跑完。
  *
- * 两条路径的区别只在 logo 的状态图：语音会先挂上 listen.gif（从第 0 帧起播，父页面据此对齐扩散峰值），
- * 文字不换图，直接让常态图飞上去。
+ * 点键盘有两条路径：
+ * - 默认：抛 start-text，由父页面（guide / task）把常态 logo 送上去再聚焦输入框；
+ * - `inline-input`（首页初始页）：原地把「点击说话」换成文本输入框、不跳页面，
+ *   用户填完点发送才抛 send-text，父页面据此发起提问并进入对话页。
+ *
+ * 语音 / 文字两条起飞路径的区别只在 logo 的状态图：语音会先挂上 listen.gif
+ * （从第 0 帧起播，父页面据此对齐扩散峰值），文字不换图，直接让常态图飞上去。
  */
 defineOptions({ name: "AiWelcome" });
 
@@ -33,9 +41,21 @@ const props = defineProps({
    * 与对话页的 #1A1A1A 之间有一刀切的白块。
    */
   dark: { type: Boolean, default: false },
+  /**
+   * 键盘入口原地展开文本输入框（首页初始页）：
+   * 点键盘不跳页，输入完点右侧发送才抛 send-text，由父页面决定何时进对话页。
+   * 不传时保持旧行为 —— 抛 start-text 交给父页面的起飞动画。
+   */
+  inlineInput: { type: Boolean, default: false },
+  /** 键盘高度（CSS px）：文本态把输入条顶到键盘上方，与对话页同一套口径 */
+  keyboardHeight: { type: Number, default: 0 },
 });
 
-const emit = defineEmits<{ (e: "start-chat"): void; (e: "start-text"): void }>();
+const emit = defineEmits<{
+  (e: "start-chat"): void;
+  (e: "start-text"): void;
+  (e: "send-text", text: string): void;
+}>();
 
 const { t } = useI18n();
 const { safeAreaStyle } = useSafeArea();
@@ -84,15 +104,79 @@ function onSpeakTap() {
 }
 
 /**
- * 点键盘：不换 listen.gif，直接抛 start-text ——
- * 父页面照同一套抛物线把常态 logo 送上去，落位后再聚焦输入框。
+ * 点键盘：
+ * - `inlineInput`（首页初始页）：在原地把「点击说话」换成文本输入框并聚焦，
+ *   不离开初始页；填完点右侧发送才抛 send-text，由父页面决定进对话页的时机；
+ * - 否则抛 start-text，父页面照同一套抛物线把常态 logo 送上去再聚焦输入框。
  *
- * 这里不置 startFired：父页面没接这个事件时（如首页）键盘仍然是纯展示，
+ * 这里不置 startFired：父页面没接这个事件时（如旧版首页）键盘仍然是纯展示，
  * 「点击说话」必须还能用；接了的话父页面会立刻进入 leaving，重复点击自然会被挡住。
  */
 function onKeyboardTap() {
   if (props.leaving || startFired) return;
+  if (props.inlineInput) {
+    void enterTextMode();
+    return;
+  }
   emit("start-text");
+}
+
+/* ===== 文本态（inlineInput）：与对话页底部输入栏同一套「语音 ⇄ 键盘」切换 ===== */
+
+const textMode = ref(false);
+const draft = ref("");
+const textareaRef = ref<{ focus?: () => void } | null>(null);
+
+/** 右侧按钮图标：语音态是键盘；文本态没内容时是声波（切回语音），有内容时是发送 */
+const rightIcon = computed(() => {
+  if (!textMode.value) return keyboardIcon;
+  return draft.value.trim() ? sendUpIcon : voiceWaveIcon;
+});
+const rightIsSend = computed(() => textMode.value && Boolean(draft.value.trim()));
+
+/** 键盘弹起的高度：文本态把整条工具栏顶到键盘上方（页面高度不随键盘压缩） */
+const keyboardSpacerHeight = computed(() => (
+  textMode.value ? Math.max(0, Number(props.keyboardHeight) || 0) : 0
+));
+
+async function enterTextMode() {
+  if (textMode.value) return;
+  textMode.value = true;
+  await nextTick();
+  textareaRef.value?.focus?.();
+}
+
+function exitTextMode() {
+  if (!textMode.value) return;
+  textMode.value = false;
+  uni.hideKeyboard();
+}
+
+function onDraftInput(e: { detail: { value: string } }) {
+  draft.value = e.detail.value;
+}
+
+/** 发送：只把内容抛给父页面，进不进对话页由父页面决定（首页是「发送后才起飞」） */
+function sendDraft() {
+  if (props.leaving) return;
+  const content = draft.value.trim();
+  if (!content) return;
+  draft.value = "";
+  // 先收键盘：父页面紧接着要播落位动画，键盘继续弹着会让对话页底部跟着上下抽动
+  uni.hideKeyboard();
+  emit("send-text", content);
+}
+
+function onRightTap() {
+  if (!textMode.value) {
+    onKeyboardTap();
+    return;
+  }
+  if (draft.value.trim()) {
+    sendDraft();
+    return;
+  }
+  exitTextMode();
 }
 
 onBeforeUnmount(() => {
@@ -137,22 +221,45 @@ onBeforeUnmount(() => {
       </view>
     </view>
 
-    <!-- 底部输入条（Ardot 1204:337 Toolbar）：加号 44×44 + 点击说话 219×44 + 键盘 44×44，gap 10 -->
+    <!-- 底部输入条（Ardot 1204:337 Toolbar）：加号 44×44 + 中间 219×44 + 右侧 44×44，gap 10
+         语音态中间是「点击说话」；点键盘后在原地换成文本输入框（不离开初始页），
+         填完点右侧发送才抛 send-text 交给父页面 -->
     <view class="welcome__composer">
       <image
         class="welcome__composer-plus"
         src="@/assets/img/icon-plus.svg"
         mode="aspectFit"
       />
-      <view class="welcome__composer-voice" @tap="onSpeakTap">
+      <view v-if="textMode" class="welcome__composer-field">
+        <textarea
+          ref="textareaRef"
+          class="welcome__composer-textarea"
+          :value="draft"
+          :placeholder="t('input-placeholder')"
+          :auto-height="false"
+          :adjust-position="false"
+          :cursor-spacing="0"
+          :hold-keyboard="true"
+          :maxlength="-1"
+          confirm-type="send"
+          placeholder-class="welcome__composer-placeholder"
+          @input="onDraftInput"
+          @confirm="sendDraft()"
+        />
+      </view>
+      <view v-else class="welcome__composer-voice" @tap="onSpeakTap">
         <text class="welcome__composer-voice-label">
           {{ t("welcome-tap-to-speak") }}
         </text>
       </view>
-      <view class="welcome__composer-kb" @tap="onKeyboardTap">
+      <view
+        class="welcome__composer-kb"
+        :class="{ 'welcome__composer-kb--send': rightIsSend }"
+        @tap="onRightTap"
+      >
         <image
           class="welcome__composer-kb-icon"
-          src="@/assets/img/icon-keyboard-dark.svg"
+          :src="rightIcon"
           mode="aspectFit"
         />
       </view>
@@ -164,6 +271,9 @@ onBeforeUnmount(() => {
         {{ t("welcome-ai-disclaimer") }}
       </text>
     </view>
+
+    <!-- 文本态键盘弹起：页面高度不随键盘压缩，用这段占位把工具栏顶到键盘上方 -->
+    <view v-if="keyboardSpacerHeight" :style="{ height: `${keyboardSpacerHeight}px` }" />
   </view>
 </template>
 
@@ -372,6 +482,55 @@ onBeforeUnmount(() => {
   height: 40rpx;
 }
 
+/* 文本态：中间换成可输入的胶囊，材质 / 高度 / 圆角与「点击说话」完全一致 */
+.welcome__composer-field {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 88rpx;
+  align-items: center;
+  padding: 0 28rpx; // 14px，与问答页文本胶囊的左内边距接近
+  box-sizing: border-box;
+  border-radius: 90rpx;
+  background: rgba(13, 13, 13, 0.0361);
+}
+
+.welcome__composer-textarea {
+  width: 100%;
+  height: 40rpx;
+  min-height: 40rpx;
+  color: #0d0d0d;
+  font-size: 28rpx; // 14px
+  line-height: 40rpx;
+  background: transparent;
+}
+
+/* uni H5 的 <textarea> 实际是 uni-textarea 外壳 + 内层原生 textarea，
+   内层也要吃同一套高度 / 字号，否则会撑到默认 150px */
+.welcome__composer-textarea :deep(textarea) {
+  height: 40rpx;
+  min-height: 40rpx;
+  color: inherit;
+  font-size: inherit;
+  line-height: 40rpx;
+  background: transparent;
+}
+
+.welcome__composer-placeholder {
+  color: #8e8e8e;
+  font-size: 28rpx;
+}
+
+/* 文本态有内容：右侧换成对话页那颗实心发送（不再套灰圆底） */
+.welcome__composer-kb--send {
+  background: transparent;
+}
+
+.welcome__composer-kb--send .welcome__composer-kb-icon {
+  width: 70rpx; // 35px，与问答页文本态发送钮同尺寸
+  height: 70rpx;
+}
+
 /* ===== 底部免责提示：输入条下方 12px，12px / 17px 浅灰居中 =====
    不再吃 flex:1，固定在最后一行；起飞时跟着标题 / 输入条一起淡出 */
 .welcome__disclaimer {
@@ -424,12 +583,26 @@ onBeforeUnmount(() => {
 
 /* 输入条控件的材质换成「白色 8%」：浅色稿的 #0D0D0D 3.61% 在深底上等于没有 */
 .welcome--dark .welcome__composer-voice,
+.welcome--dark .welcome__composer-field,
 .welcome--dark .welcome__composer-kb {
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* 文本态有内容的发送钮是实心图标，不跟着铺底板 */
+.welcome--dark .welcome__composer-kb--send {
+  background: transparent;
+}
+
 .welcome--dark .welcome__composer-voice-label {
   color: #f2f3f5;
+}
+
+.welcome--dark .welcome__composer-textarea {
+  color: #f2f3f5;
+}
+
+.welcome--dark .welcome__composer-placeholder {
+  color: #6b6b6b; // 与问答页深色 placeholder 同色
 }
 
 /* 加号 / 键盘图标本身是深色图形：深底上反色，圆底与十字一起变浅 */

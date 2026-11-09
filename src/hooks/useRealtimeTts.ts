@@ -2,11 +2,11 @@ import type { TtsStreamHandle } from "@/api/chat/tts-stream";
 import type { Identifier, RealtimeTtsChunk, RealtimeTtsParams } from "@/api/chat/types";
 
 import type { UiChatMessage } from "@/stores/chat-types";
-import { onBeforeUnmount, ref } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { resolveReportVoiceId } from "@/hooks/useReportVoice";
-import { useChatStore } from "@/stores";
+import { useChatStore, useSettingsStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { markdownToPlainText } from "@/utils/markdown-to-text";
 
@@ -96,6 +96,7 @@ function lastSentenceBoundary(text: string) {
 export function useRealtimeTts(scope?: string) {
   const { locale } = useI18n();
   const chatStore = useChatStore(scope);
+  const settingsStore = useSettingsStore();
   const playing = ref(false);
   const playingMessageId = ref<Identifier | null>(null);
   const playingMessageKey = ref<string | null>(null);
@@ -304,6 +305,9 @@ export function useRealtimeTts(scope?: string) {
    * ended = true 时把没等到句末标点的尾巴也送出去并收尾。
    */
   function feedAnswerDelta(message: UiChatMessage, deltaText: string, ended: boolean) {
+    // 语音播报总开关关掉：这一轮不自动播报。
+    // 手动播报按钮走 togglePlay，和这个开关无关，照常可用。
+    if (!settingsStore.autoTtsEnabled) return;
     const messageId = message?.messageId;
     if (messageId == null || message?.sessionId == null) return;
     const key = String(message.id ?? messageId);
@@ -434,6 +438,18 @@ export function useRealtimeTts(scope?: string) {
     playingStepId.value = "";
     playing.value = false;
   }
+
+  /**
+   * 播报中把总开关关掉：正在自动播的这条立刻停，不等它念完。
+   * 只停自动会话（activeSession 非空）；手动点的播报（togglePlay）不归这个开关管。
+   */
+  watch(
+    () => settingsStore.autoTtsEnabled,
+    (enabled) => {
+      if (enabled) return;
+      if (activeSession) stop();
+    },
+  );
 
   onBeforeUnmount(stop);
 

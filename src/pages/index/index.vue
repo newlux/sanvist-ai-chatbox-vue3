@@ -28,7 +28,6 @@ import arrowDownDarkIcon from "@/assets/img/arrow-down-dark.png";
 import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
-import AiChatEdgeGlow from "@/components/ai-chat-edge-glow/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
@@ -153,14 +152,6 @@ const navActiveKey = ref("");
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用它做流式听播。
 const realtimeTts = useRealtimeTts();
-/**
- * 是否正在语音播报（页面左右下边缘流光的显示时机）：
- * 实时流式听播（realtimeTts.playing）或整段播报（消息上的 ttsPlaying）任一在播都算。
- */
-const isTtsPlaying = computed(() =>
-  Boolean(realtimeTts.playing.value)
-  || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
-);
 const {
   sendMessage: sendChatMessage,
   sendQuickPrompt,
@@ -1427,10 +1418,24 @@ function onWelcomeStart() {
   void goToChat();
 }
 
+/**
+ * 初始页「键盘」：不在点键盘时跳走 —— AiWelcome 在原地展开文本输入框，
+ * 用户填完点发送才走这里：先起一轮问答，再用同一条抛物线进对话页（不换 listen.gif、不等扩散峰值）。
+ * 顺序与「点击说话」一致（先发起再起飞），用户不用等动画走完才看到回答开始。
+ */
+function onWelcomeTextSend(text: string) {
+  const content = text.trim();
+  if (!content) return;
+  void sendMessage({ text: content });
+  void goToChat({ holdMs: 0 });
+}
+
+/** 对话页淡入延迟：语音起飞要等 listen.gif 扩散到最大，文字起飞（holdMs = 0）立即淡入 */
+const chatEnterDelayMs = ref(CHAT_ENTER_DELAY_MS);
 /** 对话页把淡入推迟到起飞那一刻（保留原有 chatViewportStyle，只加一个动画延迟变量） */
 const chatEnterStyle = computed(() => ({
   ...chatViewportStyle.value,
-  "--chat-enter-delay": `${CHAT_ENTER_DELAY_MS}ms`,
+  "--chat-enter-delay": `${chatEnterDelayMs.value}ms`,
 }));
 
 /** 当前这趟飞行的 rAF 取消器（重启 / 卸载时要掐掉，避免继续往已卸载的层写样式） */
@@ -1491,8 +1496,14 @@ function runWelcomeFly(from: DOMRect, to: DOMRect, onDone: () => void) {
  * 落点直接量 `.chat-header__island-logo` 的真实包围盒，所以不受状态栏高度、
  * 屏幕尺寸影响；落位尺寸按两侧宽度比收敛，交接瞬间不会跳大小。
  */
-async function goToChat() {
+async function goToChat(options?: { holdMs?: number }) {
   if (welcomeLeaving.value) return;
+  if (pageStage.value === "chat") return;
+
+  // holdMs：起飞前先等多久（语音等 listen.gif 扩散到最大，文字发送传 0 立即起飞）
+  const holdMs = Math.max(0, options?.holdMs ?? WELCOME_LISTEN_HOLD_MS);
+  chatEnterDelayMs.value = holdMs > 0 ? CHAT_ENTER_DELAY_MS : 0;
+
   try {
     uni.setStorageSync(AI_ASK_WELCOME_DONE_KEY, true);
   } catch (error) {
@@ -1512,7 +1523,7 @@ async function goToChat() {
   const to = readClientRect(".chat-header__island-logo");
 
   // 等 listen.gif 扩散到最大再起飞：动图还在涨的时候就走，会显得后半段被吃掉
-  const holdRemain = WELCOME_LISTEN_HOLD_MS - (performance.now() - startedAt);
+  const holdRemain = holdMs - (performance.now() - startedAt);
   if (holdRemain > 0) {
     await new Promise<void>(resolve => setTimeout(resolve, holdRemain));
   }
@@ -1619,6 +1630,7 @@ function onRestartToStart() {
   welcomeLeaving.value = false;
   welcomeLanded.value = false;
   welcomeLogoStyle.value = {};
+  chatEnterDelayMs.value = CHAT_ENTER_DELAY_MS;
   pageStage.value = "welcome";
 }
 
@@ -1872,7 +1884,10 @@ onBeforeUnmount(() => {
       :landed="welcomeLanded"
       :logo-style="welcomeLogoStyle"
       :dark="isDark"
+      inline-input
+      :keyboard-height="keyboardHeight"
       @start-chat="onWelcomeStart"
+      @send-text="onWelcomeTextSend"
     />
 
     <!-- 问答页：与欢迎层同时存在，整体淡入 -->
@@ -1883,8 +1898,6 @@ onBeforeUnmount(() => {
     >
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
-      <!-- 问答回复中的页面边缘流光：左右竖边 + 底部光雾（设计稿 77:10750 的 203:5920 / 203:5926 / 203:5916） -->
-      <AiChatEdgeGlow :visible="isTtsPlaying" />
       <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车）；深色下隐藏（见 .ai-page--dark） -->
       <AiChatBackdrop class="ai-page__backdrop" />
       <!-- 顶部白色渐变：页面上沿由白向下渐隐，压住线稿背景与滚上来的内容 -->
@@ -2810,10 +2823,8 @@ $color-white: #ffffff;
     display: none;
   }
 
-  // 边缘流光同样只在浅色稿里出现（深色稿 1193:2097 没有这三层渐变装饰）
-  .ai-chat-edge-glow {
-    display: none;
-  }
+  /* 边缘流光在深色下同样保留：色值、厚度、流动都与浅色一致，
+     不做深色专用替换（深底下同样的紫/蓝更显，无需再调） */
 
   .ai-page__backdrop {
     display: none;

@@ -79,10 +79,10 @@ const rawTagStyle = {
   code: "padding: 2rpx 6rpx; border-radius: 4rpx; background: #f3f5f7; color: #d63200; font-size: 24rpx;",
   pre: "margin: 8rpx 0; padding: 16rpx; border-radius: 12rpx; background: #fff; overflow-x: auto; font-size: 24rpx; line-height: 36rpx; white-space: pre;",
   img: "max-width: 100%; height: auto; display: block; margin: 12rpx 0; border-radius: 8rpx;",
-  // 表格不铺白底：底色跟随外层容器（AI 气泡是 #F3F3F3），只留浅描边分隔行列
+  // 表格：表头格子铺淡蓝底 #E1F0FF，单元格之间与表格外框统一 #E8E8E8 细线
   table: "width: max-content; min-width: 100%; margin: 12rpx 0; border-collapse: collapse; background: transparent; font-size: 24rpx; white-space: nowrap;",
-  th: "min-width: 160rpx; padding: 10rpx 12rpx; border: 1px solid #efefef; font-weight: 600; text-align: left; vertical-align: top; white-space: nowrap; word-break: keep-all;",
-  td: "min-width: 160rpx; padding: 10rpx 12rpx; border: 1px solid #efefef; text-align: left; vertical-align: top; white-space: nowrap; word-break: keep-all;",
+  th: "min-width: 160rpx; padding: 10rpx 12rpx; border: 1px solid #e8e8e8; background: #e1f0ff; font-weight: 600; text-align: left; vertical-align: top; white-space: nowrap; word-break: keep-all;",
+  td: "min-width: 160rpx; padding: 10rpx 12rpx; border: 1px solid #e8e8e8; text-align: left; vertical-align: top; white-space: nowrap; word-break: keep-all;",
 };
 
 /**
@@ -108,8 +108,9 @@ const darkTagOverrides: Record<string, string> = {
   pre: "background: #1a1a1a;",
   code: "background: #303030;",
   // 表格：文字色与外部正文完全一致（同 p 的 80% 白），只换描边，不铺底
+  // （浅色稿表头的 #E1F0FF 在这里要被顶掉，深底上铺淡蓝会看不清白字）
   table: "color: rgba(255, 255, 255, 0.8);",
-  th: "border-color: #303030; color: rgba(255, 255, 255, 0.8);",
+  th: "border-color: #303030; background: transparent; color: rgba(255, 255, 255, 0.8);",
   td: "border-color: #303030; color: rgba(255, 255, 255, 0.8);",
 };
 
