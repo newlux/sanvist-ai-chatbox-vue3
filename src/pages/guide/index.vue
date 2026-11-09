@@ -701,7 +701,10 @@ watch(
     const key = String(last.messageId ?? last.id);
     if (autoSpokenCheckMessageIds.has(key)) return;
     autoSpokenCheckMessageIds.add(key);
-    void realtimeTts.togglePlay(last);
+    // 只播当前这一步（默认第一步）：不传 stepId 会把多步骤卡的每一张核对卡
+    // 标题+正文全部拼在一起念（见 useRealtimeTts 的 extractAnswerText），
+    // 与手动点播报只念当前步骤的口径不一致，表现为「第一次播报内容比手动点击长一大截」。
+    void realtimeTts.togglePlay(last, resolveActiveStepId(last));
   },
 );
 
