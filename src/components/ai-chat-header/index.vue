@@ -1054,7 +1054,7 @@ onBeforeUnmount(() => {
   min-height: env(safe-area-inset-top);
 }
 
-/* ===== 头部行：设计稿 722:69 头部 50px 高、左右 20px、图标 24×24 垂直居中 =====
+/* ===== 头git 部行：设计稿 722:69 头部 50px 高、左右 20px、图标 24×24 垂直居中 =====
    行高 50px（100rpx）已含竖向余量，所以只留左右 20px（40rpx）内边距，
    竖向由 align-items: center 居中，不再用 padding 上下凑位置 */
 .chat-header__bar {
