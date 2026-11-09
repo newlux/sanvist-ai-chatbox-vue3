@@ -705,6 +705,15 @@ export function createDifyEventNormalizer() {
     messageId: Identifier;
     taskId?: Identifier;
   } | null = null;
+  /**
+   * 协议开标签正则（与 PROTOCOL_MARKERS 同步）：workflow_finished 里只有 outputs.answer
+   * 带这些标记时才值得交给 extractSanvistEvents 解析；纯正文保持原样只进 metadata，
+   * 避免被按 message 事件渲染成 answer 气泡、改动首页 / 听汇报等其他页面的既有行为。
+   */
+  const protocolOpenPattern = new RegExp(
+    `<(?:${PROTOCOL_MARKERS.map(marker => marker.slice(1, -1)).join("|")})>`,
+    "i",
+  );
 
   function extractSanvistEvents(
     value: string,
@@ -939,19 +948,32 @@ export function createDifyEventNormalizer() {
         };
       }
       if (event === "workflow_finished") {
-        return {
-          event: "message_end",
-          ...references,
-          metadata: {
-            is_end: true,
-            status: status === "failed" ? "failed" : "succeeded",
-            reason: status === "failed" ? "exception" : "normal",
-            duration_ms: durationMs,
-            message,
-            outputs_answer: outputsAnswer || undefined,
-            assistant_target: assistantTarget || undefined,
+        // 部分工作流只在 workflow_finished 里给最终答案（正文流里没有）。
+        // outputs.answer 可能带 <COMPONENT> 协议（如 guide-lead 机型选择卡），
+        // 需要用 extractSanvistEvents 解析成对应事件，否则协议块不会渲染到气泡。
+        //
+        // 只在带协议标记时才解析：纯正文（如二维码占位 / 无备注正文）保持原样
+        // 仅进 metadata.outputs_answer，避免被按 message 事件渲染成 answer 气泡，
+        // 改动首页 / 听汇报等其他页面的既有行为。
+        const answerEvents = outputsAnswer && protocolOpenPattern.test(outputsAnswer)
+          ? extractSanvistEvents(outputsAnswer, references, false)
+          : [];
+        return [
+          ...answerEvents,
+          {
+            event: "message_end",
+            ...references,
+            metadata: {
+              is_end: true,
+              status: status === "failed" ? "failed" : "succeeded",
+              reason: status === "failed" ? "exception" : "normal",
+              duration_ms: durationMs,
+              message,
+              outputs_answer: outputsAnswer || undefined,
+              assistant_target: assistantTarget || undefined,
+            },
           },
-        };
+        ];
       }
       return null;
     }
