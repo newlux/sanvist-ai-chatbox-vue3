@@ -245,6 +245,8 @@ export interface GuideStepPayload extends Record<string, unknown> {
   overview?: string;
   /** 整段指导的小结：全部步骤确认完后展示 */
   step_summary?: string;
+  /** 小结标题（如「步骤小结」）：与小结正文分开存放，完成态渲染在小结上方 */
+  step_summary_title?: string;
   steps: GuideStepItem[];
 }
 
@@ -283,6 +285,8 @@ export interface GuideCheckPayload extends Record<string, unknown> {
    * 同一条 guide-step 块的 step_summary 注入，非空时确认区替换成小结渲染。
    */
   summary?: string;
+  /** 小结标题（如「步骤小结」）：配合 summary 显示在小结正文上方 */
+  summary_title?: string;
   /** 底部状态行，如「✓ 询问用户」 */
   status?: string;
 }
@@ -425,7 +429,7 @@ export interface GanttViewPayload extends Record<string, unknown> {
 
 export interface RichContentEvent {
   event: "suggestion" | "table" | "chart" | "metric" | "image" | "video" | "source" | "ask_slot"
-    | "assistant_navigation" | "guide_step" | "guide_check" | "guide_suggestion" | "guide_lead" | "gantt";
+    | "assistant_navigation" | "guide_step" | "guide_check" | "guide_suggestion" | "guide_lead" | "gantt" | "voice";
   conversationId: Identifier;
   messageId: Identifier;
   taskId?: Identifier;

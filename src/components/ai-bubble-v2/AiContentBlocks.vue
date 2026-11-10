@@ -46,12 +46,42 @@ const emit = defineEmits([
 // 回答正文里的 Markdown 表格与 ECharts 围栏都在此转换为独立 block，统一走专用组件。
 const normalizedBlocks = computed(() => expandChartFences(expandMarkdownTables((props.blocks || []) as AiBlock[])));
 
+/**
+ * 从 answer 正文里剔除 voice 导语：同一句导语后端会既下发给 voice 块，
+ * 又可能重复写进正文 answer 开头。导语由 voice 块（VoiceBlock）渲染，
+ * answer 里再保留一段就会显示两次——这里在渲染前剔掉那段导语。
+ * 逐块用 indexOf 精确匹配，导语后面的换行一并去掉。
+ */
+function stripVoiceFromAnswers(blocks: AiBlock[], voiceTexts: string[]) {
+  const texts = voiceTexts.map(value => String(value || "").trim()).filter(Boolean);
+  if (!texts.length) return blocks;
+  return blocks.map((block) => {
+    if (block.type !== "answer") return block;
+    let content = String(block.payload?.content || "");
+    texts.forEach((voiceText) => {
+      const index = content.indexOf(voiceText);
+      if (index < 0) return;
+      const after = content.slice(index + voiceText.length).replace(/^\n+/, "");
+      content = `${content.slice(0, index)}${after}`.trim();
+    });
+    return { ...block, payload: { ...block.payload, content } };
+  });
+}
+
 const renderItems = computed(() => {
+  // voice 导语固定排在内容最顶部（AnswerGroup 无涉及），并先从 answer 剔除重复导语
+  const voiceBlocks = normalizedBlocks.value.filter(block => block.type === "voice");
+  const voiceTexts = voiceBlocks.map(block => String((block.payload?.text as string) || ""));
+  const rest = stripVoiceFromAnswers(
+    normalizedBlocks.value.filter(block => block.type !== "voice"),
+    voiceTexts,
+  );
+
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
   // 避免展示「输出结果」标题和分隔线；chart 内容本身仍由 AiBlockRenderer 渲染
-  if (props.noAnswerGroup) return normalizedBlocks.value;
+  if (props.noAnswerGroup) return [...voiceBlocks, ...rest];
 
-  const items = [];
+  const items: any[] = [...voiceBlocks];
   let group = [];
 
   function appendGroup() {
@@ -64,7 +94,7 @@ const renderItems = computed(() => {
     group = [];
   }
 
-  normalizedBlocks.value.forEach((block) => {
+  rest.forEach((block) => {
     if (block.type === "answer" || block.type === "chart") {
       group.push(block);
       return;

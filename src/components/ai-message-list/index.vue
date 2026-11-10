@@ -1040,6 +1040,12 @@ function finishSummaryOf(message: UiChatMessage) {
   return String(stepBlock?.payload?.step_summary || "").trim();
 }
 
+/** 完成态里的小结标题：与小结正文分开读（如「步骤小结」），渲染在小结正文上方 */
+function finishSummaryTitleOf(message: UiChatMessage) {
+  const stepBlock = (message?.blocks || []).find(block => block?.type === "guide-step");
+  return String(stepBlock?.payload?.step_summary_title || "").trim();
+}
+
 /**
  * 播报：`text` 是「要念的内容不在消息正文里」时的覆盖文本（步骤小结 step_summary），
  * 由卡片带上来，页面直接念它，不再从 blocks 里拼。
@@ -1250,17 +1256,19 @@ function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
 
   // 精简版卡片不挂参考来源：正文被隐藏的这轮回答，参考来源跟着一起不展示
   const evidence = hidesBody(message) && !props.compactGuideCard ? collectSourceEvidence(blocks) : [];
-  // 全部确认完：不放步骤卡让位，把步骤小结注入这张卡，由卡片自身在确认区渲染小结。
+  // 全部确认完：不放步骤卡让位，把步骤小结（正文 + 标题）注入这张卡，由卡片自身在确认区渲染小结。
   // 小结属于整段指导的收束，固定落在最后一步卡上；即使 shownStepId 记录异常也按 is_last 兜底
-  const summary = isStepCardFinished(message, messageIndex) ? finishSummaryOf(message) : "";
-  const finalCard = isStepCardFinished(message, messageIndex)
+  const finished = isStepCardFinished(message, messageIndex);
+  const summary = finished ? finishSummaryOf(message) : "";
+  const summaryTitle = finished ? finishSummaryTitleOf(message) : "";
+  const finalCard = finished
     ? (cards.find(item => item.payload?.is_last) || card)
     : card;
   const cardWithSources = evidence.length
     ? { ...finalCard, payload: { ...finalCard.payload, sources: evidence } }
     : finalCard;
   if (!summary) return [cardWithSources];
-  return [{ ...cardWithSources, payload: { ...cardWithSources.payload, summary } }];
+  return [{ ...cardWithSources, payload: { ...cardWithSources.payload, summary, summary_title: summaryTitle } }];
 }
 
 /**

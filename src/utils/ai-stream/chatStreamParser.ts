@@ -8,7 +8,7 @@ export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guid
   | "guide-check" | "guide-lead" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error"
   // assistant-navigation 解析层一直在产出（历史/流式都走它），之前漏在联合类型里导致两处 TS 报错；
   // gantt 是调度视图入口卡（scene=task / type=gantt）。
-  | "assistant-navigation" | "gantt";
+  | "assistant-navigation" | "gantt" | "voice";
 
 /** 深度思考步骤：由 status 事件按 node 聚合而来 */
 export interface ThinkStep {
@@ -208,6 +208,21 @@ export function applyEventToBlocks(
       return {
         ...base,
         blocks: upsertBlock(blocks, stablePayloadId("guide-lead", [text], leadIndex), "guide-lead", event.data, true),
+        receivedContent: true,
+      };
+    }
+    case "voice": {
+      // 老师傅导语文本（COMPONENT scene=guide / type=voice）：一句普通正文，渲染在回答顶部并参与播报。
+      // 新手（分步骤）由消费侧按 operator_role 过滤，这里统一落 voice 块。
+      const text = String(event.data?.text || "").trim();
+      if (!text) return base;
+      // 同一条回答只有一个导语，固定 voice-0：无论 agent_message / message / message_replace /
+      // workflow_finished 重复解析多少次、messageId 是否变化、text 是否暂不完整，
+      // 都 upsertBlock 覆盖同一块，不会累积出多个 voice 块（显示两次/三次的根因）。
+      const voiceId = "voice-0";
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, voiceId, "voice", event.data, true),
         receivedContent: true,
       };
     }
