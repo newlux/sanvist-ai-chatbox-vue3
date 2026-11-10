@@ -19,6 +19,8 @@ import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { chatMessageAnchorDomId } from "@/stores/modules/chat";
+import { animateVoiceMessageArrival, readVoiceMessageOrigin } from "@/utils/voice-message-motion";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
 import { getConversationSummary } from "@/api/conversation-summary";
 import { getTodayListenBroadcast } from "@/api/listen-broadcast";
@@ -38,6 +40,7 @@ import AiPartsJumpSheet from "@/components/ai-parts-jump-sheet/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
+import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import {
   AI_ASK_WELCOME_DONE_KEY,
@@ -925,7 +928,7 @@ const voiceQueryActive = ref(false);
 const voiceTranscript = ref("");
 /** 实时文字的实测高度（px）：两行封顶后是定值（含底部渐隐带），列表按它让位 */
 const voiceLiveHeight = ref(0);
-let voiceLiveObserver: ResizeObserver | null = null;
+let cancelVoiceArrival: (() => void) | null = null;
 /** 实时音量 0~1（已平滑）：驱动底部录音条的声纹长短 */
 const voiceLevel = ref(0);
 /** 已录秒数：底部录音条右侧那枚 4s */
@@ -987,51 +990,25 @@ interface VoiceRecorderInstance {
 }
 
 /**
- * 实时文字的高度观测：列表按这个高度在顶部让位（见 AiMessageList 的 voiceTopPad）。
- * 用 ResizeObserver 而不是每次 partial 都量一次 —— 逐字刷新时每拍量 DOM 太费。
- */
-function stopVoiceLiveObserver() {
-  if (voiceLiveObserver) {
-    voiceLiveObserver.disconnect();
-    voiceLiveObserver = null;
-  }
-  voiceLiveHeight.value = 0;
-}
-
-function startVoiceLiveObserver() {
-  stopVoiceLiveObserver();
-  // #ifdef H5
-  if (typeof ResizeObserver === "undefined") return;
-  const node = document.querySelector(".voice-live") as HTMLElement | null;
-  if (!node) return;
-  voiceLiveObserver = new ResizeObserver(() => {
-    voiceLiveHeight.value = Math.ceil(node.getBoundingClientRect().height);
-  });
-  voiceLiveObserver.observe(node);
-  voiceLiveHeight.value = Math.ceil(node.getBoundingClientRect().height);
-  // #endif
-}
-
-/**
- * 实时文字随「录音中 + 起飞已落位」出现 / 消失：
- * 出现时开始量高，收起时把列表让出的那段高度一起收回。
+ * 字幕组件上报高度；收起时同步收回列表留白。
  */
 watch(
   () => voiceQueryActive.value && asrTipReady.value,
   (visible) => {
-    if (visible) startVoiceLiveObserver();
-    else stopVoiceLiveObserver();
+    if (!visible) voiceLiveHeight.value = 0;
   },
   { flush: "post" },
 );
 
 /** 收掉这一轮录音：实时文字与底部录音条一起退场，列表让出的高度同时归零 */
 function resetVoiceQuery() {
+  cancelVoiceArrival?.();
+  cancelVoiceArrival = null;
   // 序号自增：正在 await 权限 / 采集的启动流程据此自行作废
   voiceSeq += 1;
   voiceQueryActive.value = false;
   voiceTranscript.value = "";
-  stopVoiceLiveObserver();
+  voiceLiveHeight.value = 0;
   voiceFinishing.value = false;
   voiceLevel.value = 0;
   voiceSeconds.value = 0;
@@ -1075,6 +1052,26 @@ function resetVoiceQuery() {
 function failVoiceQuery(title: string) {
   resetVoiceQuery();
   uni.showToast({ title, icon: "none" });
+}
+
+/** 保留实时字幕的文字起点，发送后把同一段文字平滑移入右侧胶囊。 */
+async function submitRecognizedVoice(query: string) {
+  const origin = readVoiceMessageOrigin(typeof document === "undefined"
+    ? null : document.querySelector(".voice-live__text"));
+  resetVoiceQuery();
+  if (!query) {
+    uni.showToast({ title: t("no-speech-recognized"), icon: "none" });
+    return;
+  }
+  const seq = voiceSeq;
+  sendQuickPrompt(query);
+  const messageId = chatStore.pinMessageId;
+  await nextTick();
+  await nextTick();
+  if (seq !== voiceSeq || !messageId || typeof document === "undefined") return;
+  const body = document.getElementById(chatMessageAnchorDomId(messageId))
+    ?.querySelector<HTMLElement>(".ai-bubble-v2__body") || null;
+  cancelVoiceArrival = animateVoiceMessageArrival(body, origin);
 }
 
 /**
@@ -1171,14 +1168,7 @@ async function startVoiceQuery() {
       onFinal(text) {
         if (seq !== voiceSeq) return;
         const query = String(text).trim();
-        // 实时文字先收（列表让出的高度同时归零），紧接着 push 正式提问气泡：两者在同一拍完成，位置不跳
-        resetVoiceQuery();
-        // 静音 / 误触时服务端回空串：提示重说，别拿空问题去提问
-        if (!query) {
-          uni.showToast({ title: t("no-speech-recognized"), icon: "none" });
-          return;
-        }
-        sendQuickPrompt(query);
+        void submitRecognizedVoice(query);
       },
       onError() {
         // 通道层失败（握手被网关拦、服务未部署）和「没听清」要分开提示，
@@ -1407,13 +1397,7 @@ async function finishNativeVoiceQuery() {
       costMs: Date.now() - recognizeStart,
     });
     const query = String(result?.text || "").trim();
-    // 和流式那条线保持一致：先收顶部实时文字，再照原有规则把提问气泡顶到头部下沿
-    resetVoiceQuery();
-    if (!query) {
-      uni.showToast({ title: t("no-speech-recognized"), icon: "none" });
-      return;
-    }
-    sendQuickPrompt(query);
+    await submitRecognizedVoice(query);
   }
   catch (error) {
     logger.warn("native recognition failed", error);
@@ -2082,17 +2066,12 @@ onBeforeUnmount(() => {
            所以实时文字背后不会有任何正文，下面的回复也只按文字长短往下让位。
            只露最后两行：超出的旧文字被裁在框顶外，最新的始终贴在下面；
            外框那层页面底色渐隐负责盖住头部留白条里透出来的上一条回答 -->
-      <view v-if="voiceQueryActive && asrTipReady" class="voice-live">
-        <view class="voice-live__box">
-          <text class="voice-live__text">
-            {{ voiceTranscript || $t("identifying") }}<text class="voice-live__dots" aria-hidden="true"><text
-              v-for="dot in 3"
-              :key="dot"
-              class="voice-live__dot"
-            >.</text></text>
-          </text>
-        </view>
-      </view>
+      <AiVoiceTranscript
+        v-if="voiceQueryActive && asrTipReady"
+        :text="voiceTranscript"
+        :dark="isDark"
+        @height-change="voiceLiveHeight = $event"
+      />
       <!-- 一键回到底部：离底时出现，贴底自动隐藏；
            垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙；
            水平居中，只放 arrow-down.png（无白底 / 阴影，见 .chat-scroll-bottom） -->
@@ -2398,90 +2377,7 @@ $color-white: #ffffff;
   }
 }
 
-/* ===== 录音中的实时转写 =====
-   落点与「提问气泡顶到头部下沿」同一口径（max(头部留白, 150px)，见 ai-message-list 的
-   PIN_MESSAGE_TOP_MIN_Y_PX），不再向上抬进头部的实色背景，避免字幕和提问胶囊被遮挡。
-   左右 40rpx 与 .chat-box 的内边距一致，文字左对齐、从左往右长。
-   只露最后两行：文字块定高 96rpx（2 × 48rpx），文字底部对齐，多出来的旧文字被裁在框顶外，
-   最新的始终贴在框底；框下 40rpx 是页面底色的渐隐，压住紧随其后的回复，不做硬切。
-   高度由消息列表按 voiceTopPad 让出同样的空档（定高后不再随文字变长） */
-.voice-live {
-  position: absolute;
-  top: max(var(--chat-top-inset, 300rpx), 150px);
-  right: 40rpx;
-  left: 40rpx;
-  z-index: 3; // 压在消息列表之上、顶部毛玻璃（1）与悬浮头部（1010）之下
-  box-sizing: content-box;
-  padding-bottom: 40rpx; // 面板底部的渐隐带
-  // 页面底色铺满文字区，往下渐透：上面盖住上一条回答，下面托住这一次的回复
-  background: linear-gradient(180deg, #fafafa 0%, #fafafa 80%, rgba(250, 250, 250, 0) 100%);
-  pointer-events: none;
-  animation: voice-live-in 160ms ease-out both;
-}
 
-/* 两行视窗：高度 = 2 个行高，超出的内容裁掉（裁在上沿），文字再用绝对定位压到底 */
-.voice-live__box {
-  position: relative;
-  height: 96rpx;
-  overflow: hidden;
-}
-
-/* 字号 / 行高沿用原来「识别中」提词的口径：32rpx / 48rpx，读起来像自己刚说的话 */
-.voice-live__text {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  color: #0d0d0d;
-  font-size: 32rpx;
-  font-weight: 500;
-  line-height: 48rpx;
-  white-space: pre-wrap;
-  word-break: break-word;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.ai-page--dark .voice-live {
-  background: linear-gradient(180deg, #1a1a1a 0%, #1a1a1a 80%, rgba(26, 26, 26, 0) 100%);
-}
-
-/* 三点固定占宽，只改变透明度，避免动画带动实时字幕换行。 */
-.voice-live__dots {
-  display: inline-block;
-  margin-left: 8rpx;
-  color: #8f8f8f;
-  white-space: nowrap;
-}
-
-.voice-live__dot {
-  display: inline-block;
-  width: 12rpx;
-  opacity: 0.2;
-  animation: voice-live-dot-blink 1.2s ease-in-out infinite;
-}
-
-.voice-live__dot:nth-child(2) { animation-delay: 0.2s; }
-.voice-live__dot:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes voice-live-dot-blink {
-  0%, 20%, 100% { opacity: 0.2; }
-  40% { opacity: 1; }
-}
-
-.ai-page--dark .voice-live__text {
-  color: #f2f3f5;
-}
-
-@keyframes voice-live-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
 
 // 一键回到底部：只剩 arrow-down.png 图本身（白底圆钮 / 阴影 / 描边全部去掉），水平居中。
 // bottom 由行内样式给：composerBottomInset（输入栏高 + 键盘抬起）+ 24rpx 间隙

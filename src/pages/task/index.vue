@@ -3,6 +3,9 @@ import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import type { VoiceMessageOrigin } from "@/utils/voice-message-motion";
+import { chatMessageAnchorDomId } from "@/stores/modules/chat";
+import { animateVoiceMessageArrival, readVoiceMessageOrigin } from "@/utils/voice-message-motion";
 import type { AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
@@ -19,6 +22,7 @@ import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
+import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
@@ -158,10 +162,23 @@ function stopSceneTts() {
   stopHistoryTts();
 }
 
-/**
- * 「点击说话」语音链路（录音条 + 实时字幕）：与首页同一套实现。
- * 占位气泡走本页的 beginAsrPlaceholder，发送走 sendTaskMessage（会先续上初始化会话）。
- */
+const voiceTranscript = ref("");
+const voiceLiveHeight = ref(0);
+const asrTipReady = ref(true);
+let voiceArrivalOrigin: VoiceMessageOrigin | null = null;
+let cancelVoiceArrival: (() => void) | null = null;
+
+function resolveVoiceAnchorId() {
+  const pinned = String(chatStore.pinMessageId || "");
+  if (pinned && chatStore.messages.some(item => String(item.id || "") === pinned)) return pinned;
+  for (let index = chatStore.messages.length - 1; index >= 0; index -= 1) {
+    const message = chatStore.messages[index];
+    if (message.role === "user" && !message.asrPending) return String(message.id || "");
+  }
+  return "";
+}
+
+/** 与运营助手/作业指导共用两行浮动字幕，识别结束后移入右侧胶囊。 */
 const {
   voiceQueryActive,
   voiceLevel,
@@ -173,23 +190,54 @@ const {
   resetVoiceQuery,
 } = useVoiceQuery({
   beginPlaceholder: () => {
-    beginAsrPlaceholder();
-    const id = chatStore.messages.find(item => item.role === "user" && item.asrPending)?.id || "";
-    if (id) {
+    chatStore.showQuickPrompts = false;
+    chatStore.showQuickList = false;
+    // 与首页一致：不插「识别中」占位气泡，实时文字由 .voice-live 浮动条承载。
+    // 返回一个虚拟 id 让 hook 的 onPartial 守卫通过（partial 不回填气泡，而是写 voiceTranscript）；
+    // 同时把「上一轮提问」登记为 pin 目标，消息列表据此隐藏它、把位置让给浮动条。
+    const anchorId = resolveVoiceAnchorId();
+    if (anchorId) {
       chatStore.setPinnedToBottom(true);
-      chatStore.setPinMessage(id);
+      chatStore.setPinMessage(anchorId);
       chatStore.setCapRoundAtTop(true);
-      chatStore.pinMessageToTop(id);
     }
-    return id;
+    return "__voice-floating__";
   },
-  patchPlaceholder: (id, text) => chatStore.patchMessageById(id, { content: text }),
-  pinPlaceholder: id => chatStore.pinMessageToTop(id),
-  discardPlaceholder: () => discardAsrPlaceholder(),
-  submit: text => sendTaskMessage({ text }),
+  patchPlaceholder: (_id, text) => { voiceTranscript.value = text; },
+  pinPlaceholder: () => {
+    const anchorId = resolveVoiceAnchorId();
+    if (anchorId) chatStore.pinMessageToTop(anchorId);
+  },
+  discardPlaceholder: () => { voiceTranscript.value = ""; },
+  onBeforeSubmit: () => {
+    voiceArrivalOrigin = readVoiceMessageOrigin(typeof document === "undefined"
+      ? null : document.querySelector(".voice-live__text"));
+  },
+  submit: async text => {
+    const origin = voiceArrivalOrigin;
+    voiceArrivalOrigin = null;
+    // 说完：先清浮动条文字，再走正常发送链路（提问由 sendQuickPrompt 落成正式气泡）
+    voiceTranscript.value = "";
+    sendTaskMessage({ text });
+    const messageId = chatStore.pinMessageId;
+    const requestSeq = chatStore.activeRequestSeq;
+    await nextTick();
+    await nextTick();
+    if (!messageId || requestSeq !== chatStore.activeRequestSeq || typeof document === "undefined") return;
+    const body = document.getElementById(chatMessageAnchorDomId(messageId))
+      ?.querySelector<HTMLElement>(".ai-bubble-v2__body") || null;
+    cancelVoiceArrival?.();
+    cancelVoiceArrival = animateVoiceMessageArrival(body, origin);
+  },
   // 开口前先掐掉正在播的回答，避免外放被麦克风收进 ASR
   onStart: () => stopSceneTts(),
 });
+
+watch(() => voiceQueryActive.value && asrTipReady.value, (visible) => {
+  if (visible) return;
+  voiceTranscript.value = "";
+  voiceLiveHeight.value = 0;
+}, { flush: "post" });
 
 /**
  * 页面统一发送入口：直接走真实接口（首次提问前先续上初始化那一轮的会话）。
@@ -706,10 +754,12 @@ watch(shareSheetVisible, async (visible) => {
  * 欢迎层「点击说话」：起飞的同时把语音会话跑起来，
  * 用户在飞行动画里开口也不会丢（ready 前的音频由会话自己缓存）。
  */
-function onWelcomeStart() {
+async function onWelcomeStart() {
   markWelcomeDone();
+  asrTipReady.value = false;
   void startVoiceQuery();
-  void goToChat({ holdMs: WELCOME_LISTEN_HOLD_MS });
+  await goToChat({ holdMs: WELCOME_LISTEN_HOLD_MS });
+  asrTipReady.value = true;
 }
 
 /** 欢迎层「键盘」：同一套抛物线把 logo 送上去，落位后再聚焦输入框（键盘由此弹出） */
@@ -950,6 +1000,9 @@ onShow(() => {
 });
 
 onHide(() => {
+  cancelVoiceArrival?.();
+  cancelVoiceArrival = null;
+  voiceArrivalOrigin = null;
   stopSceneTts();
   clearAutoOpenTimer();
   // 页面被盖住时正在录音：直接断流，别让麦克风在后台继续采
@@ -957,6 +1010,7 @@ onHide(() => {
 });
 
 onUnload(() => {
+  cancelVoiceArrival?.();
   cancelActiveStream();
   stopSceneTts();
   clearAutoOpenTimer();
@@ -1016,6 +1070,8 @@ onUnload(() => {
       />
       <AiMessageList
         :key="chatListKey"
+        :asr-tip-ready="asrTipReady"
+        :voice-top-pad="voiceLiveHeight"
         top-inset="var(--chat-top-inset, 300rpx)"
         :dark="isDark"
         :messages="messages"
@@ -1059,6 +1115,12 @@ onUnload(() => {
         @select-toggle="onShareSelectToggle"
         @scroll-top="onScrollTop"
         @pinned-change="onPinnedChange"
+      />
+      <AiVoiceTranscript
+        v-if="voiceQueryActive && asrTipReady"
+        :text="voiceTranscript"
+        :dark="isDark"
+        @height-change="voiceLiveHeight = $event"
       />
       <!-- 一键回到底部（与首页一致）：离底时出现，贴底自动隐藏；
            垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙；水平居中，只放 arrow-down.png -->
