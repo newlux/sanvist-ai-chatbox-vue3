@@ -161,9 +161,9 @@ function onGuideCheckReady() {
   emit("card-ready");
 }
 
-/** 核对卡动作区：播报 / 复制 / 分享都由页面复用现成能力，这里只透传 */
-function onGuideCheckTts() {
-  emit("tts-click");
+/** 核对卡动作区：播报 / 复制 / 分享都由页面复用现成能力，这里只透传。完成态带小结文本上来 */
+function onGuideCheckTts(text?: string) {
+  emit("tts-click", text);
 }
 
 function onGuideCheckCopy(payload: { text: string }) {
@@ -225,6 +225,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
   <GuideSuggestionBlock
     v-else-if="block.type === 'guide-suggestion'"
     :payload="block.payload"
+    :dark="dark"
     @pick="onSuggestionTap"
   />
   <!-- id 落在根节点上：步骤卡片翻页时按它做 scroll-into-view 定位 -->

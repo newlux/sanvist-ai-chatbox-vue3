@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/**
+ * @deprecated 步骤小结已并入 GuideCheckBlock：整段步骤确认完后，小结直接渲染在最后一张
+ * 核对卡的确认区位置（payload.summary），不再用它独立成卡。文件保留待确认全仓无引用后软删。
+ */
 import type { GuideSuggestionPayload } from "@/api/chat/types";
 import { computed, onMounted, provide } from "vue";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";

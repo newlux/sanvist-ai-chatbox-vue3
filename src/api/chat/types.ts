@@ -278,6 +278,11 @@ export interface GuideCheckPayload extends Record<string, unknown> {
    * 参考来源改在步骤卡内展示），结构与 source 组件的 evidence 一致。
    */
   sources?: Array<Record<string, unknown>>;
+  /**
+   * 全部步骤确认完后的步骤小结（payload.summary）：由消息列表在完成态从
+   * 同一条 guide-step 块的 step_summary 注入，非空时确认区替换成小结渲染。
+   */
+  summary?: string;
   /** 底部状态行，如「✓ 询问用户」 */
   status?: string;
 }

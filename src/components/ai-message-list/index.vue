@@ -1,20 +1,19 @@
 <script setup lang="ts">
+import type { GuideStepSelectEvent } from "@/api/chat/types";
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { UiChatMessage } from "@/stores/chat-types";
 import moment from "moment";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import iconWaveForm from "@/assets/img/icon-waveform.svg";
 // 深色版声波：底层改回设计稿 1193:2106 的 #1A1A1A（浅色稿为在白底上可见用了 #FFF）
 import iconWaveFormDark from "@/assets/img/icon-waveform-dark.svg";
+import iconWaveForm from "@/assets/img/icon-waveform.svg";
 import { useSystemStore } from "@/stores";
+import { chatMessageAnchorDomId } from "@/stores/modules/chat";
 import { guideStepCardDomId } from "@/utils/guide-content";
 import { requestSummaryTts } from "@/utils/guide-step-tts";
-import { chatMessageAnchorDomId } from "@/stores/modules/chat";
 import { isListenReportListened } from "@/utils/listen-report";
-import type { GuideStepSelectEvent } from "@/api/chat/types";
 import AiBlockRenderer from "../ai-bubble-v2/AiBlockRenderer.vue";
-import GuideStepFinishBlock from "../ai-bubble-v2/blocks/GuideStepFinishBlock.vue";
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
 
 defineOptions({
@@ -232,8 +231,8 @@ const overview = computed(() => {
  * 这里做标题 → 词条映射：命中已知标题按当前语言展示，未命中的标题保持后端原文。
  */
 const REPORT_TITLE_KEY_MAP: Record<string, string> = {
-  "经营概览": "overview-report-title",
-  "经营概览早报": "overview-report-title-morning",
+  经营概览: "overview-report-title",
+  经营概览早报: "overview-report-title-morning",
 };
 
 const listenBroadcastTitle = computed(() => {
@@ -1033,12 +1032,6 @@ function finishSummaryOf(message: UiChatMessage) {
   return String(stepBlock?.payload?.step_summary || "").trim();
 }
 
-/** 完成态的参考来源：步骤卡让位后来源不能丢，沿用同一份 source 块 */
-function finishSourcesOf(message: UiChatMessage) {
-  if (props.compactGuideCard) return [];
-  return hidesBody(message) ? collectSourceEvidence(message?.blocks || []) : [];
-}
-
 /**
  * 播报：`text` 是「要念的内容不在消息正文里」时的覆盖文本（步骤小结 step_summary），
  * 由卡片带上来，页面直接念它，不再从 blocks 里拼。
@@ -1241,8 +1234,6 @@ function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
   const blocks = (message?.blocks || []).filter(Boolean);
   const cards = blocks.filter(block => block.type === "guide-check");
   if (!cards.length) return [];
-  // 这一轮已经全部确认完：步骤卡让位给下方的「小结 + 推荐问题」完成块
-  if (isStepCardFinished(message, messageIndex)) return [];
 
   const shownStepId = String(stepCardShownStepId.value[stepCardMessageKey(message, messageIndex)] || "");
   const card = (shownStepId
@@ -1251,8 +1242,17 @@ function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
 
   // 精简版卡片不挂参考来源：正文被隐藏的这轮回答，参考来源跟着一起不展示
   const evidence = hidesBody(message) && !props.compactGuideCard ? collectSourceEvidence(blocks) : [];
-  if (!evidence.length) return [card];
-  return [{ ...card, payload: { ...card.payload, sources: evidence } }];
+  // 全部确认完：不放步骤卡让位，把步骤小结注入这张卡，由卡片自身在确认区渲染小结。
+  // 小结属于整段指导的收束，固定落在最后一步卡上；即使 shownStepId 记录异常也按 is_last 兜底
+  const summary = isStepCardFinished(message, messageIndex) ? finishSummaryOf(message) : "";
+  const finalCard = isStepCardFinished(message, messageIndex)
+    ? (cards.find(item => item.payload?.is_last) || card)
+    : card;
+  const cardWithSources = evidence.length
+    ? { ...finalCard, payload: { ...finalCard.payload, sources: evidence } }
+    : finalCard;
+  if (!summary) return [cardWithSources];
+  return [{ ...cardWithSources, payload: { ...cardWithSources.payload, summary } }];
 }
 
 /**
@@ -1266,12 +1266,11 @@ function ganttBlocks(message: UiChatMessage) {
 
 /**
  * 同一条回答里的推荐问题（guide-suggestion 块）：
- * 步骤卡「全部步骤确认完」后要把推荐问题接在 step_summary 下面，
- * 而核对卡只看得到自己的 payload，所以在这里从兄弟块里取出来透传下去。
+ * 步骤卡「全部步骤确认完」后要把推荐问题接在小结下面，
+ * 而核对卡只看得到自己的 payload，所以在这里把整块取出来，由消息列表独立渲染。
  */
-function guideSuggestionsOf(message: UiChatMessage) {
-  const block = (message?.blocks || []).find(item => item?.type === "guide-suggestion");
-  return block?.payload || null;
+function guideSuggestionBlockOf(message: UiChatMessage) {
+  return (message?.blocks || []).find(item => item?.type === "guide-suggestion") || null;
 }
 
 /**
@@ -1544,8 +1543,8 @@ watch(
           <!-- id 作为「顶到对话区上方」的定位锚点，见 alignMessageToTop -->
           <view
             v-for="(msg, index) in messages"
-            :id="chatMessageAnchorDomId(msg?.id ?? `idx-${index}`)"
             v-show="!msg.hidden"
+            :id="chatMessageAnchorDomId(msg?.id ?? `idx-${index}`)"
             :key="index"
             :style="voicePadStyle(index)"
           >
@@ -1614,23 +1613,17 @@ watch(
                 @guide-check-finish="onGuideCheckFinish(index)"
                 @card-ready="onStepCardReady"
                 @suggestion-tap="onSuggestionTap($event, index)"
-                @tts-click="onTtsClick(index)"
+                @tts-click="onTtsClick(index, $event)"
                 @copy-click="onGuideCheckCopy(index, msg, $event)"
                 @share-click="onGuideCheckShare(index, msg, $event)"
               />
             </view>
-            <!-- 完成态：整段指导全部确认完，展示 step_summary + 推荐问题（独立于步骤卡） -->
-            <view v-if="isStepCardFinished(msg, index)" class="chat-box__card">
-              <GuideStepFinishBlock
-                :summary="finishSummaryOf(msg)"
-                :suggestions="guideSuggestionsOf(msg)"
-                :sources="finishSourcesOf(msg)"
+            <!-- 完成态：整段指导全部确认完，steps 小结已注入最后一张核对卡；底部补上同一条回答的推荐问题 -->
+            <view v-if="isStepCardFinished(msg, index) && guideSuggestionBlockOf(msg)" class="chat-box__card">
+              <AiBlockRenderer
+                :block="guideSuggestionBlockOf(msg)"
                 :dark="props.dark"
-                :tts-enabled="!!msg.ttsEnabled"
-                :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
-                :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
-                @pick="onSuggestionTap($event, index)"
-                @tts-click="onTtsClick(index, finishSummaryOf(msg))"
+                @suggestion-tap="onSuggestionTap($event, index)"
               />
             </view>
             <!-- 调度视图入口卡：同样独立于回答气泡，紧跟在气泡下方 -->

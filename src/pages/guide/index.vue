@@ -1060,7 +1060,6 @@ let pendingQuestion = "";
 onLoad((options) => {
   syncWindowHeight();
   const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("GUIDE");
-  console.log("🚀 ~ sessionId:", sessionId);
   if (sessionId) {
     void openLocalHistory(consumePendingHistorySession("GUIDE") || sessionId, true);
     return;

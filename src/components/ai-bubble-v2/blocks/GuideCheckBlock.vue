@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import type { GuideCheckPayload, GuideStepSelectEvent } from "@/api/chat/types";
-import { computed, onMounted, provide, ref } from "vue";
+import { computed, onMounted, provide, ref, watch } from "vue";
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconShare from "@/assets/img/icon-action-share.svg";
 import saniIcon from "@/assets/img/icon-sani.png";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
-import GuideSourceBlock from "./GuideSourceBlock.vue";
 import { normalizeGuideUrl, previewGuideImages } from "@/utils/guide-content";
-import { consumeStepTtsSwitch, requestStepTtsSwitch } from "@/utils/guide-step-tts";
+import { consumeStepTtsSwitch, consumeSummaryTts, requestStepTtsSwitch } from "@/utils/guide-step-tts";
+import GuideSourceBlock from "./GuideSourceBlock.vue";
 
 /**
  * 核对任务与资料卡片（设计稿 2667:4520）。
@@ -57,7 +57,8 @@ const emit = defineEmits<{
   (e: "finish"): void;
   /** 这张卡真正挂到 DOM 上了：外层据此把它滚到对话区顶部（切步骤时卡会整块重挂载） */
   (e: "card-ready"): void;
-  (e: "tts-click"): void;
+  /** 播报：summary 模式带小结文本，普通模式不带（由消息列表按 step action 兜底） */
+  (e: "tts-click", text?: string): void;
   (e: "copy-click", payload: { text: string }): void;
   (e: "share-click", payload: { element: HTMLElement | null }): void;
 }>();
@@ -99,6 +100,12 @@ function previewImage(current: string) {
   previewGuideImages(current, images.value.map(item => item.url));
 }
 const status = computed(() => String(props.payload?.status || "").trim());
+/**
+ * 全部步骤确认完后的步骤小结（payload.summary，由消息列表从 guide-step 的 step_summary 注入）。
+ * 非空 = 完成态：确认区被替换成小结，卡片正文 / 图片 / 进度条保留在位。
+ */
+const summary = computed(() => String(props.payload?.summary || "").trim());
+const isSummaryMode = computed(() => Boolean(summary.value));
 const stepIndex = computed(() => Math.max(0, Number(props.payload?.step_index) || 0));
 const stepTotal = computed(() => Math.max(0, Number(props.payload?.step_total) || 0));
 const showStep = computed(() => stepTotal.value > 0 && stepIndex.value > 0);
@@ -126,6 +133,8 @@ function optionLetter(index: number) {
 
 /** 点进度条某一段 → 切到该步（越界不响应）；切步同样要停旧语音、播新的一步 */
 function onSelectStep(index: number) {
+  // 完成态：小结是整段指导的收束，留在最后一步上，不再切回中间步
+  if (isSummaryMode.value) return;
   if (index < 1 || index > stepTotal.value) return;
   if (index === stepIndex.value) return;
   requestStepTtsSwitch(index);
@@ -176,16 +185,28 @@ onMounted(() => {
   emit("tts-click");
 });
 
-/** 复制卡片自身文案：这条消息的气泡正文是隐藏的，用户看到的就是卡内的标题 + 正文 */
-const copyText = computed(() => [title.value, content.value].filter(Boolean).join("\n"));
+/**
+ * 最后一步确认完、小结注入到这张卡后要自动念小结。
+ * 不能放 onMounted：finish 只是同一张卡 payload 里多了 summary，block.id 不变，
+ * v-for 会复用组件实例、不重挂载，onMounted 不会第二次触发——用 watcher 认领信号。
+ */
+watch(() => String(props.payload?.summary || ""), (value) => {
+  if (!value || !props.ttsEnabled) return;
+  if (!consumeSummaryTts()) return;
+  emit("tts-click", value);
+}, { flush: "post" });
+
+/** 复制卡片自身文案：这条消息的气泡正文是隐藏的，用户看到的就是卡内的标题 + 正文（完成态再带上小结） */
+const copyText = computed(() => [title.value, content.value, summary.value].filter(Boolean).join("\n"));
 
 function onCopyTap() {
   emit("copy-click", { text: copyText.value });
 }
 
+/** 播报：完成态念小结文本（随事件带到页面），普通步骤不带文本、由页面按 step action 兜底 */
 function onTtsTap() {
   if (!props.ttsEnabled) return;
-  emit("tts-click");
+  emit("tts-click", isSummaryMode.value ? summary.value : undefined);
 }
 
 /** 分享：把卡片根节点交给页面的 useChatShare 截图（动作区带 data-share-poster-ignore，不会进海报） */
@@ -284,26 +305,35 @@ function resolveRootElement(): HTMLElement | null {
     </view>
 
     <!-- 确认问题 + 选项：作业指导一步做完之后的三个出口（下一步 / 换个方式 / 其他问题）。
-         最后一步确认完会 emit finish，由消息列表把这块整体换成「小结 + 推荐问题」，
-         小结与推荐问题不渲染在步骤卡片内部。 -->
-    <text v-if="question" class="guide-check-block__question">
-      {{ question }}
-    </text>
-    <view v-if="options.length" class="guide-check-block__options">
-      <view
-        v-for="(label, index) in options"
-        :key="label"
-        class="guide-check-block__option"
-        @tap.stop="onOptionTap(index)"
-      >
-        <text class="guide-check-block__option-letter">
-          {{ optionLetter(index) }}
-        </text>
-        <view class="guide-check-block__option-divider" />
-        <text class="guide-check-block__option-label">
-          {{ label }}
-        </text>
+         最后一步确认完会 emit finish，消息列表把步骤小结注入 payload.summary，
+         完成态下确认区被小结替换（见下方 summary 区块）。 -->
+    <template v-if="!isSummaryMode">
+      <text v-if="question" class="guide-check-block__question">
+        {{ question }}
+      </text>
+      <view v-if="options.length" class="guide-check-block__options">
+        <view
+          v-for="(label, index) in options"
+          :key="label"
+          class="guide-check-block__option"
+          @tap.stop="onOptionTap(index)"
+        >
+          <text class="guide-check-block__option-letter">
+            {{ optionLetter(index) }}
+          </text>
+          <view class="guide-check-block__option-divider" />
+          <text class="guide-check-block__option-label">
+            {{ label }}
+          </text>
+        </view>
       </view>
+    </template>
+
+    <!-- 全部步骤确认完后的步骤小结：替换确认区渲染在卡片底部，正文 / 图片保留在上方。
+         文本来自 payload.summary（模型可能带 ** 加粗等 markdown），与步骤正文同一套
+         MarkdownRenderer 解析，深色由上面 provide 的 ai-bubble-dark 接管。 -->
+    <view v-if="isSummaryMode" class="guide-check-block__summary">
+      <MarkdownRenderer :content="summary" />
     </view>
 
     <!-- 参考来源：与回答气泡里的参考资料同款（标题 + 条目）；精简版不展示 -->
@@ -365,7 +395,6 @@ function resolveRootElement(): HTMLElement | null {
 .guide-check-block__sources {
   margin-top: 24rpx;
 }
-
 
 /* 设计稿：这张卡不画白框，直接铺在对话背景上（与回答正文同一套字号 / 行距） */
 .guide-check-block {
@@ -504,6 +533,34 @@ function resolveRootElement(): HTMLElement | null {
   word-break: break-word;
 }
 .guide-check-block__content :deep(strong) {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+/* 步骤小结容器：只留边距与字色，文字排版交给 MarkdownRenderer。排版与步骤正文
+   同款（30rpx / 52rpx），180rpx 顶部间距对齐原确认区位置。 */
+.guide-check-block__summary {
+  display: block;
+  margin-top: 40rpx;
+  word-break: break-word;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  color: #1a1a1a;
+}
+
+/*
+ * markdown-renderer 通过 mp-html 把 tagStyle 写进行内样式，scoped 样式压不住；
+ * 这里用 :deep + !important 对齐小结排版，与步骤正文 / GuideStepFinishBlock 的小结同款处理。
+ */
+.guide-check-block__summary :deep(p),
+.guide-check-block__summary :deep(li) {
+  margin-bottom: 0 !important;
+  color: #1a1a1a !important;
+  font-size: 30rpx !important;
+  font-weight: 400;
+  line-height: 52rpx !important;
+  word-break: break-word;
+}
+.guide-check-block__summary :deep(strong) {
   color: #1a1a1a;
   font-weight: 600;
 }
@@ -697,6 +754,17 @@ function resolveRootElement(): HTMLElement | null {
   .guide-check-block__content :deep(p),
   .guide-check-block__content :deep(li),
   .guide-check-block__content :deep(strong) {
+    color: #e5e5e5 !important;
+  }
+
+  /* 深色小结：与步骤正文同一套材质处理 */
+  .guide-check-block__summary {
+    color: #e5e5e5;
+  }
+
+  .guide-check-block__summary :deep(p),
+  .guide-check-block__summary :deep(li),
+  .guide-check-block__summary :deep(strong) {
     color: #e5e5e5 !important;
   }
 

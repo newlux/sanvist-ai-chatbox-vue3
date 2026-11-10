@@ -14,6 +14,12 @@ defineOptions({ name: "GuideSuggestionBlock" });
 
 const props = defineProps({
   payload: { type: Object as () => GuideSuggestionPayload, required: true },
+  /**
+   * 深色：这块由消息列表在气泡外独立渲染（步骤完成态底部的推荐问题）时拿不到
+   * 气泡 provide 的 ai-bubble-dark，需要外层显式传下来。嵌入气泡内它仍是浅色，
+   * 不加 provide——这里不用 MarkdownRenderer，且避免覆盖气泡自身的深色入口。
+   */
+  dark: { type: Boolean, default: false },
 });
 
 const emit = defineEmits<{
@@ -44,7 +50,7 @@ function onPick(label: string) {
 </script>
 
 <template>
-  <view v-if="note || question || options.length" class="guide-suggestion">
+  <view v-if="note || question || options.length" class="guide-suggestion" :class="{ 'guide-suggestion--dark': dark }">
     <text v-if="note" class="guide-suggestion__note">
       {{ note }}
     </text>
@@ -161,5 +167,30 @@ function onPick(label: string) {
   font-weight: 400;
   line-height: 40rpx;
   color: #1a1a1a;
+}
+
+/* ===== 深色：与步骤卡 / 气泡内其它块同一套材质（正文 #E5E5E5、次要 45% 白、块底 6% 白） ===== */
+.guide-suggestion--dark {
+  .guide-suggestion__note {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .guide-suggestion__question {
+    color: #e5e5e5;
+  }
+
+  .guide-suggestion__option {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .guide-suggestion__option-letter,
+  .guide-suggestion__option-label {
+    color: #e5e5e5;
+  }
+
+  .guide-suggestion__option-divider {
+    background: rgba(255, 255, 255, 0.2);
+  }
 }
 </style>
