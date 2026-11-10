@@ -134,14 +134,16 @@ const recording = computed(() => props.voiceListening);
  * 优先级：语音输入 > 回答/播报 > 思考 > 从初始页飞入那一段，同一时刻只亮一层。
  * 动图不分深浅色：listen.gif / tell.gif 只此一套，透明底，深浅两种头部都直接叠。
  */
-const answeringGifOn = computed(() => !recording.value && telling.value);
-const thinkingGifOn = computed(() => !recording.value && !answeringGifOn.value && thinking.value);
+// 替代图加载成功后才隐藏常态图；资源缺失或尚未解码时仍保留可见的三角图。
+const stateGifLoaded = ref({ listen: false, tell: false, think: false });
+const answeringGifOn = computed(() => !recording.value && telling.value && stateGifLoaded.value.tell);
+const thinkingGifOn = computed(() => !recording.value && !telling.value && thinking.value && stateGifLoaded.value.think);
 /** 从初始页飞入那一段（落位时是同一张图在延续）；有状态时让位给状态图 */
 const listeningGifOn = computed(
-  () => !answeringGifOn.value && !recording.value && !thinkingGifOn.value && props.listenIdle,
+  () => !telling.value && !recording.value && !thinking.value && props.listenIdle,
 );
 /** 语音输入层：录音中与飞入段共用同一张 listen.gif */
-const listenSayGifOn = computed(() => recording.value || listeningGifOn.value);
+const listenSayGifOn = computed(() => (recording.value || listeningGifOn.value) && stateGifLoaded.value.listen);
 /** 有任意状态图亮着：底层常驻图淡出 */
 const islandAnyGifOn = computed(
   () => listenSayGifOn.value || answeringGifOn.value || thinkingGifOn.value,
@@ -673,6 +675,8 @@ onBeforeUnmount(() => {
                 :class="{ 'chat-header__island-logo--listen-say-on': listenSayGifOn }"
                 :src="listenLogoGif"
                 mode="aspectFit"
+                @load="stateGifLoaded.listen = true"
+                @error="stateGifLoaded.listen = false"
               />
               <!-- 回答中 / 语音播报：tell.gif（同规格透明画布，图形居中，深浅色共用） -->
               <image
@@ -680,6 +684,8 @@ onBeforeUnmount(() => {
                 :class="{ 'chat-header__island-logo--tell-play-on': answeringGifOn }"
                 :src="tellLogoGif"
                 mode="aspectFit"
+                @load="stateGifLoaded.tell = true"
+                @error="stateGifLoaded.tell = false"
               />
               <!-- think.gif：正在思考（768×384 画布，留白用 aspectFill 裁掉，换算见 --think 注释） -->
               <image
@@ -687,6 +693,8 @@ onBeforeUnmount(() => {
                 :class="{ 'chat-header__island-logo--think-on': thinkingGifOn }"
                 :src="thinkLogoGif"
                 mode="aspectFill"
+                @load="stateGifLoaded.think = true"
+                @error="stateGifLoaded.think = false"
               />
             </view>
           </view>

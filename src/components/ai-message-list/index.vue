@@ -293,20 +293,9 @@ const UNPIN_SCROLL_UP_PX = 12;
  *
  * 头部留白 = 安全区 + 300rpx，刘海 / 灵动岛机型本身更大，所以实际取 max(留白, 150)；
  * 再减掉 .chat-box 自己的上内边距（见样式里的 --chat-box-top-padding），气泡顶边才真落在目标位置上，
- * 否则会白白低 20px。最后再上提 PIN_MESSAGE_TOP_LIFT_PX，把上一条消息的尾巴顶进头部渐隐里。
+ * 否则会白白低 20px。不要再向上抬：头部已有实色背景，上抬会遮住提问胶囊。
  */
 const PIN_MESSAGE_TOP_MIN_Y_PX = 150;
-/**
- * 提问落点再往上提的量（px）。
- *
- * 头部是透明的（只做毛玻璃渐隐、不铺底色），提问正好贴在留白条下沿时，
- * 上一条消息的尾巴（上一轮的提问胶囊、推荐追问 chip）会露在气泡上方。
- * 整条提问再往上抬这段高度，尾巴跟着往上走、进到头部渐隐更浓的一段里淡掉，
- * 视觉上气泡上方就干净了 —— 只挪位置，不额外盖遮罩。
- *
- * 值是「视觉手感」参数：抬得越多，上一轮露出来的越少，但气泡也越贴近灵动岛。
- */
-const PIN_MESSAGE_TOP_LIFT_PX = 48;
 /**
  * 把提问顶到头部下沿时，允许在内容末尾垫的空白上限（px）。
  *
@@ -1040,6 +1029,12 @@ function finishSummaryOf(message: UiChatMessage) {
   return String(stepBlock?.payload?.step_summary || "").trim();
 }
 
+/** 完成态里的小结标题：与小结正文分开读（如「步骤小结」），渲染在小结正文上方 */
+function finishSummaryTitleOf(message: UiChatMessage) {
+  const stepBlock = (message?.blocks || []).find(block => block?.type === "guide-step");
+  return String(stepBlock?.payload?.step_summary_title || "").trim();
+}
+
 /**
  * 播报：`text` 是「要念的内容不在消息正文里」时的覆盖文本（步骤小结 step_summary），
  * 由卡片带上来，页面直接念它，不再从 blocks 里拼。
@@ -1250,17 +1245,17 @@ function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
 
   // 精简版卡片不挂参考来源：正文被隐藏的这轮回答，参考来源跟着一起不展示
   const evidence = hidesBody(message) && !props.compactGuideCard ? collectSourceEvidence(blocks) : [];
-  // 全部确认完：不放步骤卡让位，把步骤小结注入这张卡，由卡片自身在确认区渲染小结。
-  // 小结属于整段指导的收束，固定落在最后一步卡上；即使 shownStepId 记录异常也按 is_last 兜底
-  const summary = isStepCardFinished(message, messageIndex) ? finishSummaryOf(message) : "";
-  const finalCard = isStepCardFinished(message, messageIndex)
-    ? (cards.find(item => item.payload?.is_last) || card)
-    : card;
+  // 全部确认完：不放步骤卡让位，把步骤小结（正文 + 标题）注入「当前展示的那一张卡」，
+  // 由卡片自身在底部渲染小结（确认区不再展示）。完成态只是收束确认交互，步骤仍可切回查看，
+  // 所以不再钉死 is_last，跟随 shownStepId 切到哪一步、summary 就注入到哪一步的卡上。
+  const finished = isStepCardFinished(message, messageIndex);
+  const summary = finished ? finishSummaryOf(message) : "";
+  const summaryTitle = finished ? finishSummaryTitleOf(message) : "";
   const cardWithSources = evidence.length
-    ? { ...finalCard, payload: { ...finalCard.payload, sources: evidence } }
-    : finalCard;
+    ? { ...card, payload: { ...card.payload, sources: evidence } }
+    : card;
   if (!summary) return [cardWithSources];
-  return [{ ...cardWithSources, payload: { ...cardWithSources.payload, summary } }];
+  return [{ ...cardWithSources, payload: { ...cardWithSources.payload, summary, summary_title: summaryTitle } }];
 }
 
 /**
@@ -1338,7 +1333,7 @@ const listPadStyle = computed(() => {
   // 顶部留白给悬浮头部让位：留白在滚动内容里，所以内容往上滚时能穿到头部毛玻璃下面
   if (props.topInset) {
     style.paddingTop = pinnedTopGap.value
-      ? `calc(max(${props.topInset}, ${PIN_MESSAGE_TOP_MIN_Y_PX}px) - ${CHAT_BOX_TOP_PADDING_VAR} - ${PIN_MESSAGE_TOP_LIFT_PX}px)`
+      ? `calc(max(${props.topInset}, ${PIN_MESSAGE_TOP_MIN_Y_PX}px) - ${CHAT_BOX_TOP_PADDING_VAR})`
       : props.topInset;
   }
   if (props.bottomInset) {
@@ -1553,7 +1548,7 @@ watch(
             v-for="(msg, index) in messages"
             v-show="!msg.hidden"
             :id="chatMessageAnchorDomId(msg?.id ?? `idx-${index}`)"
-            :key="index"
+            :key="msg.id"
             :style="voicePadStyle(index)"
           >
             <AiBubbleV2

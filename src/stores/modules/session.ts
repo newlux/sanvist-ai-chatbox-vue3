@@ -112,6 +112,8 @@ export function mapHistoryMessages(
           }
         : block)
       .filter(block => block.type !== "answer" || String(block.payload.content || "").trim())
+      // 新手（分步骤）回看旧会话：老师傅导语（voice）块不展示
+      .filter(block => !(useUserStore().operatorRole?.roleKey === "novice_operator" && block.type === "voice"))
       .map((block, index) => ({
         id: `history-${messageId ?? "message"}-${block.type}-${index}`,
         type: block.type,

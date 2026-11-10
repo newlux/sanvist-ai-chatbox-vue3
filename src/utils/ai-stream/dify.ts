@@ -156,12 +156,12 @@ export function splitMarkdownTables(source: string): DifyHistoryBlockData[] {
 
 export interface DifyHistoryBlockData {
   type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion" | "ask-slot"
-    | "assistant-navigation" | "guide-step" | "guide-check" | "guide-suggestion" | "guide-lead" | "gantt";
+    | "assistant-navigation" | "guide-step" | "guide-check" | "guide-suggestion" | "guide-lead" | "gantt" | "voice";
   payload: Record<string, unknown>;
 }
 
 type GuideBlockType = "image" | "video" | "source" | "suggestion" | "guide-step" | "guide-check"
-  | "guide-suggestion" | "guide-lead";
+  | "guide-suggestion" | "guide-lead" | "voice";
 
 /** 步骤配图：兼容 [{url,caption}] 与 ["url"] 两种写法 */
 function parseGuideImages(value: unknown) {
@@ -192,6 +192,12 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
   if (type === "source") {
     const evidence = Array.isArray(data.evidence) ? data.evidence.filter(item => asRecord(item)?.url) : [];
     return evidence.length ? { type: "source", payload: { evidence } } : null;
+  }
+  // 老师傅（非分步骤）返回的导语文本：一句普通正文，显示在回答内容顶部并参与播报。
+  // 新手（分步骤）由消费侧按 operator_role 过滤，这里统一解析成 voice 块。
+  if (type === "voice") {
+    const text = String(data.text || "").trim();
+    return text ? { type: "voice", payload: { text } } : null;
   }
   /**
    * 开场引导（scene=guide / type=lead）：一段开场白 + 一轮单选（如「选择哪个设备」）。
@@ -250,11 +256,14 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
       : [];
     // 顶层 step_summary 只做老协议兼容，优先用 steps 里拆出来的小结
     let stepSummary = String(data.step_summary || "").trim();
+    // 小结标题：老协议顶层可能没有，从拆出的小结条目自带 title（如「步骤小结」）取
+    let stepSummaryTitle = String(data.step_summary_title || "").trim();
     const realSteps: Record<string, unknown>[] = [];
     for (const item of rawSteps) {
       const extracted = extractStepSummary(item);
       if (extracted) {
         stepSummary = stepSummary || extracted;
+        stepSummaryTitle = stepSummaryTitle || String(item.title || "").trim();
         continue;
       }
       realSteps.push(item);
@@ -284,6 +293,8 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
         overview: String(data.overview || "").trim(),
         /** 整段指导的小结：从 steps 里拆出来的小结（全部确认完后展示） */
         step_summary: stepSummary,
+        /** 小结标题（如「步骤小结」）：与摘要分开存放，完成态渲染在小结正文上方 */
+        step_summary_title: stepSummaryTitle,
         steps,
       },
     };

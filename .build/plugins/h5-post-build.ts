@@ -58,6 +58,27 @@ interface H5PostBuildOptions {
   outDirName?: string;
 }
 
+/** 防止把尚未下载的 Git LFS 指针当成图片打进离线包。 */
+async function assertMaterializedAssets(directory: string): Promise<void> {
+  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+    const filePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      await assertMaterializedAssets(filePath);
+    } else if (entry.isFile()) {
+      const file = await fs.open(filePath, "r");
+      try {
+        const prefix = Buffer.alloc(64);
+        await file.read(prefix, 0, prefix.length, 0);
+        if (prefix.toString("utf8").startsWith("version https://git-lfs.github.com/spec/v1")) {
+          throw new Error(`资源尚未从 Git LFS 下载：${filePath}。请先执行 git lfs pull，再重新构建。`);
+        }
+      } finally {
+        await file.close();
+      }
+    }
+  }
+}
+
 export function h5PostBuild(options: H5PostBuildOptions = {}): Plugin {
   let config: ResolvedConfig;
   let buildFailed = false;
@@ -97,6 +118,8 @@ export function h5PostBuild(options: H5PostBuildOptions = {}): Plugin {
     },
     async buildStart() {
       if (process.env.UNI_PLATFORM === "h5") {
+        await assertMaterializedAssets(path.resolve(config.root, "src/assets"));
+        await assertMaterializedAssets(path.resolve(config.root, "public"));
         const distDir = path.resolve(config.root, "dist");
         await fs.mkdir(distDir, { recursive: true });
         await Promise.all(

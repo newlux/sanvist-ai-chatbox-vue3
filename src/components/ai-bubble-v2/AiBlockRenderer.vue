@@ -28,6 +28,7 @@ import SuggestionBlock from "./blocks/SuggestionBlock.vue";
 import TableBlock from "./blocks/TableBlock.vue";
 import ThinkBlock from "./blocks/ThinkBlock.vue";
 import ToolCallBlock from "./blocks/ToolCallBlock.vue";
+import VoiceBlock from "./blocks/VoiceBlock.vue";
 
 defineOptions({
   name: "AiBlockRenderer",
@@ -254,6 +255,9 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
   <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />
   <GuideVideoBlock v-else-if="block.type === 'video'" :payload="block.payload" />
   <GuideSourceBlock v-else-if="block.type === 'source'" :payload="block.payload" />
+  <!-- 老师傅导语（voice）：一句普通正文，显示在回答内容顶部，参与播报。
+     answer 正文里若后端重复下发了同一句导语，由 AiContentBlocks 剔除，避免显示两次 -->
+  <VoiceBlock v-else-if="block.type === 'voice'" :payload="block.payload" />
   <ErrorBlock v-else-if="block.type === 'error'" :payload="block.payload" />
   <SuggestionBlock v-else-if="block.type === 'suggestion'" :payload="block.payload" @suggestion-tap="onSuggestionTap" />
 </template>

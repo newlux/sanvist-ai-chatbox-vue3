@@ -109,6 +109,8 @@ const status = computed(() => String(props.payload?.status || "").trim());
  * 非空 = 完成态：确认区被替换成小结，卡片正文 / 图片 / 进度条保留在位。
  */
 const summary = computed(() => String(props.payload?.summary || "").trim());
+/** 小结标题（payload.summary_title，如「步骤小结」）：渲染在小结正文上方 */
+const summaryTitle = computed(() => String(props.payload?.summary_title || "").trim());
 const isSummaryMode = computed(() => Boolean(summary.value));
 const stepIndex = computed(() => Math.max(0, Number(props.payload?.step_index) || 0));
 const stepTotal = computed(() => Math.max(0, Number(props.payload?.step_total) || 0));
@@ -137,8 +139,7 @@ function optionLetter(index: number) {
 
 /** 点进度条某一段 → 切到该步（越界不响应）；切步同样要停旧语音、播新的一步 */
 function onSelectStep(index: number) {
-  // 完成态：小结是整段指导的收束，留在最后一步上，不再切回中间步
-  if (isSummaryMode.value) return;
+  // 完成态也能切回中间步查看：确认区整体不渲染，小结固定在卡底部
   if (index < 1 || index > stepTotal.value) return;
   if (index === stepIndex.value) return;
   requestStepTtsSwitch(index);
@@ -334,9 +335,13 @@ function resolveRootElement(): HTMLElement | null {
     </template>
 
     <!-- 全部步骤确认完后的步骤小结：替换确认区渲染在卡片底部，正文 / 图片保留在上方。
-         文本来自 payload.summary（模型可能带 ** 加粗等 markdown），与步骤正文同一套
-         MarkdownRenderer 解析，深色由上面 provide 的 ai-bubble-dark 接管。 -->
+         标题行取 payload.summary_title（如「步骤小结」），正文来自 payload.summary（模型可能带
+         ** 加粗等 markdown），与步骤正文同一套 MarkdownRenderer 解析，深色由上面 provide 的
+         ai-bubble-dark 接管。 -->
     <view v-if="isSummaryMode" class="guide-check-block__summary">
+      <text v-if="summaryTitle" class="guide-check-block__summary-title">
+        {{ summaryTitle }}
+      </text>
       <MarkdownRenderer :content="summary" />
     </view>
 
@@ -548,6 +553,17 @@ function resolveRootElement(): HTMLElement | null {
   margin-top: 40rpx;
   word-break: break-word;
   font-family: "PingFang SC", "Inter", sans-serif;
+  color: #1a1a1a;
+}
+
+/* 小结标题：加粗一行，压在小结正文上方 */
+.guide-check-block__summary-title {
+  display: block;
+  margin-bottom: 16rpx;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  font-size: 32rpx;
+  font-weight: 600;
+  line-height: 48rpx;
   color: #1a1a1a;
 }
 
@@ -763,6 +779,10 @@ function resolveRootElement(): HTMLElement | null {
 
   /* 深色小结：与步骤正文同一套材质处理 */
   .guide-check-block__summary {
+    color: #e5e5e5;
+  }
+
+  .guide-check-block__summary-title {
     color: #e5e5e5;
   }
 
