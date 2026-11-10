@@ -33,6 +33,7 @@ import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useS
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
+import { isWelcomeDone, markWelcomeDone } from "@/utils/welcome-done";
 
 /**
  * 作业指导页（基于首页 home 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
@@ -790,12 +791,14 @@ watch(shareSheetVisible, async (visible) => {
  * 用户在飞行动画里开口也不会丢（ready 前的音频由会话自己缓存）。
  */
 function onWelcomeStart() {
+  markWelcomeDone();
   void startVoiceQuery();
   void goToChat({ holdMs: WELCOME_LISTEN_HOLD_MS });
 }
 
 /** 欢迎层「键盘」：同一套抛物线把 logo 送上去，落位后再聚焦输入框（键盘由此弹出） */
 async function onWelcomeText() {
+  markWelcomeDone();
   await goToChat();
   chatInputRef.value?.focusTextInput?.();
 }
@@ -1057,6 +1060,7 @@ let pendingQuestion = "";
 onLoad((options) => {
   syncWindowHeight();
   const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("GUIDE");
+  console.log("🚀 ~ sessionId:", sessionId);
   if (sessionId) {
     void openLocalHistory(consumePendingHistorySession("GUIDE") || sessionId, true);
     return;
@@ -1065,6 +1069,10 @@ onLoad((options) => {
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
+  // 已完成过 SANI 唤醒（首页对话态 / 本页欢迎层起飞都会置位）→ 直达对话态，
+  // 不再铺整屏欢迎层：老用户从首页快捷入口切过来体验更顺。
+  // 注：不判断 isVisitor —— App 启动即 setVisitor(true)（游客恒定态），加它会导致永远跳过不了。
+  if (isWelcomeDone()) enterChatNow();
   pendingQuestion = readQueryValue(options, "question");
   guideRecommendContext.value = readGuideRecommendContext(options);
   void loadGuideRecommend();
