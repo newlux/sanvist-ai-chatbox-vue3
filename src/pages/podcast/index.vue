@@ -1751,6 +1751,17 @@ onBeforeUnmount(() => {
   :deep(.chat-input) {
     background: #0d0d0d;
   }
+
+  /* 进页拉取偏好的 loading 占位是一整屏实底色：深色下不跟着压深，
+     进页那一下就是"白屏过渡"（等偏好回包可能好几百毫秒）。 */
+  .podcast-page__preference-loading {
+    background: #0d0d0d;
+  }
+
+  // 浅色稿的字色与转圈渐变同色（#3D21CD），深底上会糊掉，提亮到深色稿的次级文字色
+  .preference-loading__text {
+    color: #8f8f8f;
+  }
 }
 
 /* —— 进页拉取偏好的 loading 占位 —— */

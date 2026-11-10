@@ -5,7 +5,7 @@ import type { UiChatMessage } from "@/stores/chat-types";
 import { onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
-import { resolveReportVoiceId } from "@/hooks/useReportVoice";
+import { resolveReportVoiceId, waitReportVoiceSynced } from "@/hooks/useReportVoice";
 import { useChatStore, useSettingsStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { markdownToPlainText } from "@/utils/markdown-to-text";
@@ -284,18 +284,27 @@ export function useRealtimeTts(scope?: string) {
         resolve();
         settleStreamIdle(seq, messageId, session);
       };
-      // 会话已被替换/停止：直接放行，不再发起请求。
-      if (seq !== sessionSeq || activeSession !== session) return settle();
-      try {
-        activeStream = consumeTextToSpeechStream(
-          buildTtsParams(text, language),
-          payload => handleChunk(payload, messageId, seq),
-          () => settle(),
-          () => settle(),
-        );
-      } catch {
-        settle();
-      }
+      const request = () => {
+        // 会话已被替换/停止：直接放行，不再发起请求。
+        if (seq !== sessionSeq || activeSession !== session) return settle();
+        try {
+          activeStream = consumeTextToSpeechStream(
+            buildTtsParams(text, language),
+            payload => handleChunk(payload, messageId, seq),
+            () => settle(),
+            () => settle(),
+          );
+        } catch {
+          settle();
+        }
+      };
+      /**
+       * 音色刚被语音切过时先等保存落地再合成：
+       * 合成用的是服务端的 voiceCode，抢在保存前面发请求就会用旧音色念出「已切换成功」，
+       * 一直到下一次提问才换成新音色（见 useReportVoice 的 waitReportVoiceSynced）。
+       * 没有在途的音色保存时这里立即 resolve，不增加任何延迟。
+       */
+      void waitReportVoiceSynced().then(request);
     }));
   }
 

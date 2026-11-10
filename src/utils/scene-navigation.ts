@@ -64,6 +64,48 @@ export function isSceneWindowRoot() {
   return startupQuery.nativeSceneWindow === "1" && getCurrentPages().length <= 1;
 }
 
+/** 从初始页跳出去的一次性标记：首页回来时要停在初始页，而不是被 syncPageStage 拽回对话页 */
+const RETURN_TO_WELCOME_KEY = "ai-ask-return-to-welcome";
+
+/**
+ * 记录「这次是从初始页（Hey,SANI）跳出去的」。
+ *
+ * 场景页回来有两条路：navigateBack / 关场景窗口 —— 首页实例还在，本来就停在初始页；
+ * 以及 `redirectTo("/pages/index/index")`（听汇报关播报、关窗失败兜底）——
+ * 这会新建一个首页实例，`onLoad` 的 syncPageStage 会把会员直接落回对话页。
+ * 留一个一次性标记，首页无论怎么回来都停在初始页。
+ */
+export function markReturnToWelcome() {
+  try {
+    uni.setStorageSync(RETURN_TO_WELCOME_KEY, true);
+  }
+  catch {
+    // 存储不可用时退化成「回到对话页」，不影响跳转本身
+  }
+}
+
+/** 已经进对话页 / 标记失效时清掉，避免影响之后的正常返回 */
+export function clearReturnToWelcome() {
+  try {
+    uni.removeStorageSync(RETURN_TO_WELCOME_KEY);
+  }
+  catch {
+    // 忽略
+  }
+}
+
+/** 取一次即清：true 表示首页要停在初始页 */
+export function consumeReturnToWelcome() {
+  try {
+    if (!uni.getStorageSync(RETURN_TO_WELCOME_KEY)) return false;
+    uni.removeStorageSync(RETURN_TO_WELCOME_KEY);
+    return true;
+  }
+  catch {
+    return false;
+  }
+}
+
 /**
  * 返回来源场景。
  *

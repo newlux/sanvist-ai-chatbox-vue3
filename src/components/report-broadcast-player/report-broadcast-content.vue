@@ -389,7 +389,7 @@ onBeforeUnmount(() => {
   left: 86rpx;
   width: 282rpx;
   height: 350rpx;
-  background: rgb(229 242 255 / 30%);
+  // background: rgb(229 242 255 / 30%);
 }
 .report-broadcast-content__glow--red {
   top: 40rpx;
@@ -692,7 +692,7 @@ onBeforeUnmount(() => {
      不再需要 screen 混合或径向遮罩去消方形色差 */
 
   .report-broadcast-content__glow--blue {
-    background: rgb(17 102 214 / 35%);
+    // background: rgb(17 102 214 / 35%);
   }
 
   .report-broadcast-content__segment {

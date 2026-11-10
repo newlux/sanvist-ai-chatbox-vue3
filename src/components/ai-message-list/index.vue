@@ -345,6 +345,19 @@ const shortReplySpacerPx = ref(0);
 const PIN_LIFT_MAX_TRIES = 3;
 
 /**
+ * 把垫的空白收回。
+ *
+ * 垫白只为「把提问顶到头部下沿」服务：它让一个本来滚不动的短内容变得可滚。
+ * 一旦这一轮不再需要顶到上方（用户点了回到底部 / 回答收尾后整轮内容装得下一屏），
+ * 这段空白就成了纯粹的「可滚空白」——用户往下拖，屏幕会被拖成一片白底，
+ * 什么内容都没有（见 alignToReplyEnd 里的 fitsOneScreen）。
+ */
+function releaseShortReplySpacer() {
+  if (!shortReplySpacerPx.value) return;
+  shortReplySpacerPx.value = 0;
+}
+
+/**
  * H5：取节点最近的「真正在滚」的祖先。
  * uni 的 scroll-view 在 H5 会渲染好几层 div，`scroll-top` 的变化不会落到内层滚动容器上，
  * 所以真要定位得自己找那个 overflow 生效、且确实溢出（scrollHeight 大于 clientHeight）的祖先。
@@ -567,6 +580,11 @@ function pinnedTopGapPx() {
 function alignToReplyEnd(forceUp = false) {
   // 用户已经上翻看历史了就别再拽下去（贴底状态下才会由 store 请求这里）
   if (!props.pinnedToBottom) return;
+  // 没有可见内容：量出来全是留白，对齐没有落点，旧空白一并收回
+  if (!hasVisibleMessage.value) {
+    releaseShortReplySpacer();
+    return;
+  }
   /**
    * 录音中的实时转写还在逐字刷新：顶部那条文字每来一段 partial 就变一次高，
    * 让位那条提问的高度（voiceTopPad）也跟着变。
@@ -646,8 +664,13 @@ function alignToReplyEnd(forceUp = false) {
        * 第二问会停在屏幕中间，和第一问的位置对不上。
        * 整段内容还不到一屏时（提问下面只有等待占位 + 输入栏留白）先垫白，
        * 垫完再重算一次，落点才真的可达。
+       *
+       * 但「回答已收尾 + 整轮内容本身装得下一屏」时不再封顶：
+       * 这种内容滚不动，能滚起来靠的全是垫出来的空白，往下拖就是满屏白底。
+       * 内容确实长过一屏时照旧封顶 —— 那时的滚动范围都是真实内容，不存在空白。
        */
-      if (props.capRoundAtTop && props.pinMessageId) {
+      const fitsOneScreen = isLastAnswerSettled() && baseContentHeight <= listHeight;
+      if (props.capRoundAtTop && props.pinMessageId && !fitsOneScreen) {
         const userTop = Number(userRect?.top);
         const topTarget = userTop - innerTop - pinnedTopGapPx();
         if (Number.isFinite(topTarget)) {
@@ -666,6 +689,10 @@ function alignToReplyEnd(forceUp = false) {
            */
           if (isLastAnswerSettled() && capTarget < bottomTarget - 1) setPinned(false);
         }
+      }
+      else {
+        // 不封顶（用户点了回到底部 / 这一轮装得下一屏）：垫的空白没有用武之地，收回
+        releaseShortReplySpacer();
       }
       if (!Number.isFinite(target)) return;
 
@@ -704,6 +731,34 @@ watch(
 );
 
 /**
+ * 回答收尾那一拍补一次对齐。
+ *
+ * 流式期间的落点都算「未收尾」，垫的空白按当时的短内容留着；
+ * loading 落下来之后才判定「这一轮装得下一屏」，把垫的空白收回去（见 alignToReplyEnd）。
+ * 收尾这一刻 store 不一定再刷 replyEndToken，所以在这里补一次，保证空白一定收得回。
+ */
+watch(
+  () => isLastAnswerSettled(),
+  (settled) => {
+    if (!settled) return;
+    nextTick(() => alignToReplyEnd());
+  },
+  { flush: "post" },
+);
+
+/**
+ * 封顶被撤掉（用户点「回到底部」）时，把为封顶垫的空白一起收回。
+ * 留着的话「到底」落点其实在那段空白的最下面，用户看到的是一片白，还以为是页面挂了。
+ */
+watch(
+  () => props.capRoundAtTop,
+  (on) => {
+    if (on) return;
+    releaseShortReplySpacer();
+  },
+);
+
+/**
  * 内容末尾垫白：让 next 这个 scrollTop 真的可达。
  *
  * 整段内容不到一屏时滚不动（没有滚动容器 / scrollHeight 等于 clientHeight），
@@ -713,26 +768,31 @@ watch(
  */
 function ensureScrollableTo(next: number) {
   // #ifdef H5
-  if (next <= 0) return false;
-  const remain = PIN_SPACER_MAX_PX - shortReplySpacerPx.value;
-  if (remain <= 0) return false;
   const inner = document.querySelector(".msg-list__inner") as HTMLElement | null;
   if (!inner) return false;
   /**
    * 内容高必须用元素实测，不能用 scrollHeight：内容不足一屏时 scrollHeight 会被钳到 clientHeight，
    * 「可滚量 = scrollHeight − clientHeight」算出来是 0，补白就永远少补 (视口高 − 内容高) 那一截，
    * 补完还是差一点、滚不到落点 —— 表现就是「实时文字贴着列表末尾，怎么都不上去」。
+   * 实测出来的高度里含着自己上次垫的空白，减掉它才是真实内容高：
+   * 补白必须按这个口径「算准」（而不是在旧值上累加），否则回答越长垫的空白越多，
+   * 用户往下拖就拖出一片空白。
    */
-  const contentHeight = inner.getBoundingClientRect().height;
+  const baseContentHeight = Math.max(
+    0,
+    inner.getBoundingClientRect().height - shortReplySpacerPx.value,
+  );
   const viewport = findScrollableAncestor(inner) || findScrollViewport(inner);
   const viewportHeight = viewport ? viewport.clientHeight : 0;
-  if (!contentHeight || !viewportHeight) return false;
-  // 让「内容高 + 补白 − 视口高」正好等于 next
-  const need = next + viewportHeight - contentHeight;
-  if (need <= 1) return false;
-  shortReplySpacerPx.value = Math.round(
-    shortReplySpacerPx.value + Math.min(remain, need + PIN_SPACER_SLACK_PX),
-  );
+  if (!baseContentHeight || !viewportHeight) return false;
+  // 让「内容高 + 补白 − 视口高」正好等于 next；next <= 0 说明不需要落点，垫白收回 0
+  const need = next > 0 ? next + viewportHeight - baseContentHeight : 0;
+  const wanted = need > 1
+    ? Math.min(PIN_SPACER_MAX_PX, Math.round(need + PIN_SPACER_SLACK_PX))
+    : 0;
+  // 收敛：和目标一致就别再改，避免和调用方的 nextTick 重试来回打架
+  if (Math.abs(wanted - shortReplySpacerPx.value) < 2) return false;
+  shortReplySpacerPx.value = wanted;
   return true;
   // #endif
   // #ifndef H5
@@ -1223,8 +1283,21 @@ function guideSuggestionsOf(message: UiChatMessage) {
  * 列表回到普通滚动，不会出现「顶部内容被裁掉且滚不上去」。
  */
 const listViewportHeight = ref(0);
+/** 有非隐藏消息：隐藏消息（二维码占位那类）不占可视内容，不能拿来撑高度或贴底 */
+const hasVisibleMessage = computed(() =>
+  (props.messages || []).some(message => Boolean(message) && !message.hidden),
+);
+/**
+ * 列表里有没有可看的内容：任一条可见消息，或首页式业务概览正在展示。
+ *
+ * 全空时不开放滚动（scroll-y=false）：这时内容只剩上下两段 padding，
+ * 还能滚的话一拖就能把整屏拖成白底，屏幕上什么都不剩。
+ */
+const hasListContent = computed(() =>
+  hasVisibleMessage.value || (props.showQuickPrompts && props.showBusinessOverview),
+);
 /** 只有进入对话才贴底：空会话的业务概览仍要按原来的从上往下排；topAligned 时改为从顶部排 */
-const dockedToBottom = computed(() => (props.messages?.length ?? 0) > 0 && !props.topAligned);
+const dockedToBottom = computed(() => hasVisibleMessage.value && !props.topAligned);
 
 let viewportObserver: ResizeObserver | null = null;
 
@@ -1366,7 +1439,7 @@ watch(
   <view class="ai-message-list" :class="{ 'ai-message-list--dark': isDark }">
     <scroll-view
       class="msg-list"
-      scroll-y
+      :scroll-y="hasListContent"
       :scroll-into-view="scrollIntoView"
       :scroll-top="scrollTopPx"
       :scroll-with-animation="false"
@@ -1591,16 +1664,25 @@ watch(
   flex-direction: column;
   overflow: hidden;
 }
+/* H5 的 scroll-view 会多包两层 div，class 只会落在最外层：
+   <uni-scroll-view class="msg-list">   ← 组件根节点，只负责在 flex 列里占位
+     └ div.uni-scroll-view              ← 真正滚动的层（overflow-y 由 scroll-y 以行内样式写在这层）
+         └ div.uni-scroll-view-content
+   所以「根节点怎么占位」写在这里，滚动容器自身的行为（overscroll / 锚定）必须下钻一层，
+   写在 .msg-list 上对内层滚动没有任何作用。 */
 .msg-list {
   flex: 1;
   min-height: 0;
   box-sizing: border-box;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  /* 滚动位置只由 alignMessageToTop / alignToReplyEnd 按 px 决定，
-     浏览器自己的「滚动锚定」不许插手（否则录音实时文字一变高，它就把视口来回compensate） */
-  overflow-anchor: none;
+
+  :deep(.uni-scroll-view) {
+    /* 滚到顶 / 底继续拖时不许把手势递给页面，否则整屏被拖出白底 */
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    /* 滚动位置只由 alignMessageToTop / alignToReplyEnd 按 px 决定，
+       浏览器自己的「滚动锚定」不许插手（否则录音实时文字一变高，它就把视口来回 compensate） */
+    overflow-anchor: none;
+  }
 }
 .msg-list__inner {
   box-sizing: border-box;

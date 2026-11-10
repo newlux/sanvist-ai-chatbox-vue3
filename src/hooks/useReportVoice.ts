@@ -100,11 +100,44 @@ export function saveReportVoiceByStyle(styleValue: string): string {
   return raw;
 }
 
+/**
+ * 音色落服务端的在途请求。
+ *
+ * TTS 合成只认服务端 `/settings.voiceCode`（请求里的 voice 只是兜底），而语音切音色是
+ * 「标签一到就落库 + 立刻把标签里那句确认文案送去合成」：保存没落地就发请求，
+ * 服务端仍按旧音色合成 —— 听感上就是「提示切换成功，但这条播报还是原音色」，
+ * 下一次提问（那时保存早已完成）才换成新音色。这里留一个把手，让 TTS 请求等它落地。
+ */
+let pendingVoiceSync: Promise<unknown> | null = null;
+/** 等待上限：保存异常慢时不能把播报卡死，超时就按当前状态发出去 */
+const VOICE_SYNC_TIMEOUT_MS = 1500;
+
+/** 记下这次音色落库的请求（由 applyVoiceStyle 在切换音色时调用） */
+export function markReportVoiceSyncing(promise: Promise<unknown>) {
+  const tracked: Promise<unknown> = promise.then(() => undefined, () => undefined);
+  pendingVoiceSync = tracked;
+  void tracked.then(() => {
+    if (pendingVoiceSync === tracked) pendingVoiceSync = null;
+  });
+}
+
+/** TTS 发请求前等一次：有在途的音色保存就先等它落地（没有就立即返回） */
+export async function waitReportVoiceSynced() {
+  const pending = pendingVoiceSync;
+  if (!pending) return;
+  await Promise.race([
+    pending,
+    new Promise<void>(resolve => setTimeout(resolve, VOICE_SYNC_TIMEOUT_MS)),
+  ]);
+}
+
 export function useReportVoice() {
   return {
     saveReportVoice,
     loadReportVoice,
     resolveReportVoiceId,
     saveReportVoiceByStyle,
+    markReportVoiceSyncing,
+    waitReportVoiceSynced,
   };
 }

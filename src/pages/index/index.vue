@@ -62,7 +62,7 @@ import { createLogger } from "@/utils/logger";
 import { closeWebview, ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
-import { navigateToScene } from "@/utils/scene-navigation";
+import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
@@ -703,10 +703,19 @@ function startNewConversation() {
     uni.showToast({ title: t("already-new-conversation"), icon: "none" });
     return;
   }
-  // 正在生成时切走：先掐掉在途请求，否则回包会继续往新会话里写
-  cancelActiveStream();
-  chatStore.resetConversation();
-  nextTick(() => chatStore.scrollToBottom(true));
+  // demo 页是纯展示场景：只清空当前会话，不退回首屏
+  if (isDemoPage) {
+    cancelActiveStream();
+    chatStore.resetConversation();
+    nextTick(() => chatStore.scrollToBottom(true));
+    return;
+  }
+  /**
+   * 与「首次打开」严格对齐：不留在对话页的空会话，而是退回 Hey,SANI 首屏。
+   * 复用回到初始页的那套复位（掐在途请求 / 听播 / 浮层、清「已进过对话」标记、
+   * 复位起飞动画与 stage），否则 onShow 的 syncPageStage 会立刻把页面拽回对话。
+   */
+  onRestartToStart();
 }
 
 /**
@@ -756,6 +765,8 @@ function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; 
 
   const targetUrl = String(item?.url || "");
   if (!targetUrl) return;
+  // 从初始页跳出去的：场景页的返回键要回到 Hey,SANI，而不是对话页（见 markReturnToWelcome）
+  if (pageStage.value === "welcome") markReturnToWelcome();
   if (targetUrl === "/pages/podcast/index") {
     enterListenReport();
     return;
@@ -1500,6 +1511,9 @@ async function goToChat(options?: { holdMs?: number }) {
   if (welcomeLeaving.value) return;
   if (pageStage.value === "chat") return;
 
+  // 已经进对话页，「从初始页跳出去」的标记就用不上了，清掉免得之后误伤
+  clearReturnToWelcome();
+
   // holdMs：起飞前先等多久（语音等 listen.gif 扩散到最大，文字发送传 0 立即起飞）
   const holdMs = Math.max(0, options?.holdMs ?? WELCOME_LISTEN_HOLD_MS);
   chatEnterDelayMs.value = holdMs > 0 ? CHAT_ENTER_DELAY_MS : 0;
@@ -1588,7 +1602,8 @@ function backToWelcome() {
 }
 
 /**
- * 长按顶部三角图标 5 秒：回到初始页。
+ * 回到初始页（三个入口共用：长按顶部三角图标 5 秒、历史抽屉里的「新建对话」、
+ * 从初始页跳出去的场景页返回）。
  * 不换路由 —— 首页本身就是「初始页 / 对话页」两个态（pageStage），
  * 把 stage 打回 welcome 就等于重进初始页（AiWelcome 重新挂载，内部状态全清），
  * 同时把 demo 标记与「已进过对话」的存储标记清掉，
@@ -1838,10 +1853,24 @@ onShow(() => {
   syncWindowHeight();
   const sessionId = consumePendingHistorySession("ASK", "PODCAST");
   if (sessionId) {
+    // 显式打开某个历史会话：优先级最高，顺手把「回初始页」标记作废
+    clearReturnToWelcome();
     pageStage.value = "chat";
     void openLocalHistory(sessionId, true);
   }
-  syncPageStage();
+  else if (consumeReturnToWelcome()) {
+    /**
+     * 从初始页（Hey,SANI）跳出去的场景页回来了：navigateBack / 关场景窗口会回到这个实例，
+     * 听汇报关播报、关窗失败兜底则是 redirectTo 新建一个实例 —— 两种情况都要与「首次打开」一致。
+     * 直接复用回到初始页的那套复位（同时退出 demo 态、清「已进过对话」标记），
+     * 否则紧接着的 syncPageStage 又会按标记把页面落回对话。
+     * 已经在 onLoad 里按 sessionId 打开某个历史会话时不动它（显式意图优先）。
+     */
+    if (!chatStore.aiSessionId) onRestartToStart();
+  }
+  else {
+    syncPageStage();
+  }
   chatStore.refreshQuickPrompts();
   refreshListenReportState();
   startRepairSummaryCallback();
@@ -1888,7 +1917,17 @@ onBeforeUnmount(() => {
       :keyboard-height="keyboardHeight"
       @start-chat="onWelcomeStart"
       @send-text="onWelcomeTextSend"
-    />
+    >
+      <!-- 初始页也带底部胶囊入口：与对话页同一口径，纯净模式关闭时才出现 -->
+      <template #nav>
+        <AiChatNav
+          v-if="!pureMode"
+          flow
+          :dark="isDark"
+          @item-click="onNavItemClick"
+        />
+      </template>
+    </AiWelcome>
 
     <!-- 问答页：与欢迎层同时存在，整体淡入 -->
     <view

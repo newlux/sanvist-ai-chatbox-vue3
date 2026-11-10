@@ -48,6 +48,23 @@ watch(
   { immediate: true, flush: "sync" },
 );
 
+/**
+ * 画布底色跟外观走：`#app` / `uni-page-body` 都是透明底，
+ * 页面自己铺满之前露出来的是 document 的底色，深色下不压深就会白一下。
+ *
+ * 首帧那一下 JS 还没跑起来，由 index.html 里的内联脚本先按 storage 兜住；
+ * 这里负责运行期切换（设置弹层改外观）时别把画布留在旧颜色上。
+ */
+watch(
+  () => systemStore.isDark,
+  (dark) => {
+    if (typeof document === "undefined") return;
+    // 浅色时把内联值撤掉，交还给浏览器默认白底，不额外改变现网观感
+    document.documentElement.style.backgroundColor = dark ? "#0d0d0d" : "";
+  },
+  { immediate: true, flush: "sync" },
+);
+
 function getLaunchQuery(options?: LaunchOptions): StartupQuery {
   return resolveLaunchQuery(options);
 }

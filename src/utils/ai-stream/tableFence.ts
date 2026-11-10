@@ -41,11 +41,21 @@ function isFence(line: string) {
   return /^\s*(?:`{3,}|~{3,})/.test(line);
 }
 
-function expandAnswerBlock(block: AiBlock): AiBlock[] {
+/**
+ * 已经作为结构化 table block 存在的内容快照（`<COMPONENT type="table">` 下发 / 历史解析出来的）。
+ * 正文里同一张表再按 markdown 渲染一次就成了两张表，渲染时按这个集合吞掉。
+ */
+function tableKey(columns: unknown, rows: unknown) {
+  return JSON.stringify([Array.isArray(columns) ? columns : [], Array.isArray(rows) ? rows : []]);
+}
+
+function expandAnswerBlock(block: AiBlock, seen: Set<string>): AiBlock[] {
   const lines = String(block.payload.content || "").split(/\r?\n/);
   const pieces: AiBlock[] = [];
   const textLines: string[] = [];
   let codeFence = false;
+  /** 是否吞掉过「已经以结构化块下发过的表」——正文只有这张表时才需要连 answer 块一起丢掉 */
+  let droppedTable = false;
 
   function appendText() {
     const content = textLines.join("\n");
@@ -74,12 +84,18 @@ function expandAnswerBlock(block: AiBlock): AiBlock[] {
       const table = parseMarkdownTable(lines.slice(index, end));
       if (table) {
         appendText();
-        pieces.push({
-          id: `${block.id}-table-${pieces.length}`,
-          type: "table",
-          payload: table as unknown as Record<string, unknown>,
-          complete: true,
-        });
+        // 这张表已经以结构化 table block 下发过了：不再重复渲染一份
+        if (seen.has(tableKey(table.columns, table.rows))) {
+          droppedTable = true;
+        }
+        else {
+          pieces.push({
+            id: `${block.id}-table-${pieces.length}`,
+            type: "table",
+            payload: table as unknown as Record<string, unknown>,
+            complete: true,
+          });
+        }
         index = end;
         continue;
       }
@@ -90,7 +106,9 @@ function expandAnswerBlock(block: AiBlock): AiBlock[] {
   }
 
   appendText();
-  return pieces.length ? pieces : [block];
+  if (pieces.length) return pieces;
+  // 正文只有那张「已由结构化块渲染」的表：整块丢掉，否则 markdown 会把表格源码再画一遍
+  return droppedTable ? [] : [block];
 }
 
 /** 将 answer 内所有有效 Markdown 表格转换为供 TableBlock 渲染的 table block。 */
@@ -100,6 +118,12 @@ export function expandMarkdownTables(blocks: AiBlock[]): AiBlock[] {
     return list;
   }
 
+  // 已有的结构化表格先登记（协议块可能在正文前面也可能在后面），正文里重复的同一张表直接吞掉
+  const seen = new Set<string>();
+  list.forEach((block) => {
+    if (block?.type === "table") seen.add(tableKey(block.payload?.columns, block.payload?.rows));
+  });
+
   const expanded: AiBlock[] = [];
   let changed = false;
   list.forEach((block) => {
@@ -107,7 +131,7 @@ export function expandMarkdownTables(blocks: AiBlock[]): AiBlock[] {
       expanded.push(block);
       return;
     }
-    const parts = expandAnswerBlock(block);
+    const parts = expandAnswerBlock(block, seen);
     if (parts.length !== 1 || parts[0] !== block) changed = true;
     expanded.push(...parts);
   });

@@ -26,7 +26,8 @@ import { createLogger } from "@/utils/logger";
  *   选中卡 1px `#1166D6` 描边 + 「默认」徽标，右侧 18×18 波形图标。
  *
  * 卡片文案（对齐设计稿 180:211 / 180:212）：
- * - 主标题 = 音色「类型」，如「温柔知性」（取接口 description，缺失回退本地 tagKey）；
+ * - 主标题 = 音色「类型」，如「温柔知性」（按 code 前缀取本地词条 `report-voice-name-*`，
+ *   中英文都走词条；接口新增音色没有词条时才退回接口 description）；
  * - 灰色说明 = 该类型的描述句，如「温柔亲和，陪伴式对话自然舒适」（本地 i18n slogan）。
  *
  * 数据：接口文档 4.5 `/settings`，`voiceCode` 是全局音色、`speechRate` 是语速倍率；
@@ -45,7 +46,7 @@ import { createLogger } from "@/utils/logger";
  */
 const logger = createLogger("sound-settings");
 
-const { t, te } = useI18n();
+const { t, te, locale } = useI18n();
 const { safeAreaStyle } = useSafeArea();
 const settingsStore = useSettingsStore();
 /**
@@ -75,7 +76,22 @@ interface SoundVoice {
   preview: string;
 }
 
-const voices = ref<SoundVoice[]>([]);
+/**
+ * 接口返回的原始音色列表（`/listen-broadcast/config` 的 voices）。
+ * 只存原始数据、不存翻译结果：null 表示接口没给 / 失败，展示时退回本地配置。
+ */
+const rawVoices = ref<ListenBroadcastVoice[] | null>(null);
+/**
+ * 展示用的音色列表。
+ *
+ * 必须用 computed 现算，不能把 `t()` 的结果塞进 ref：主标题（温柔知性…）和说明句都走词条，
+ * 语言一换要重新翻译；存成字符串快照就会永远停在加载时那门语言 —— 切中英文时标题不跟着变。
+ */
+const voices = computed<SoundVoice[]>(() => {
+  // 显式读一次 locale：语言切换后这份列表必须重算（t/te 的依赖不总是能追到）
+  void locale.value;
+  return toVoices(rawVoices.value || undefined);
+});
 /** 滑杆拖动期间的本地值，松手才落库；首屏优先承接 store 里已有的服务端值，避免闪一下默认值 */
 const rate = ref(normalizeRate(settingsStore.speechRate));
 const dragging = ref(false);
@@ -154,11 +170,25 @@ function sloganOf(code: string, option?: ReportVoiceOption) {
   return option ? t(option.descriptionKey) : "";
 }
 
-/** 本地音色配置转成同一结构：类型走 tagKey、说明走 slogan（与听播音色同一份文案） */
+/**
+ * 主标题 = 音色「类型」，例如「沉稳磁性」「温柔知性」。
+ *
+ * 接口 description 只给中文，直接铺上去在英文界面下就是中文（声音设置里那两条一直是中文的原因），
+ * 所以优先按 code 前缀取本地词条 `report-voice-name-<前缀>`（与听播选择器同一份文案，中英文都有），
+ * 接口新增、本地还没配词条的音色才退回 description，最后退回 code。前缀取法容得下 `_v3.1/_v3.2` 这类版本变化。
+ */
+function typeOf(code: string, description?: string) {
+  const prefix = code.split("_")[0];
+  const key = `report-voice-name-${prefix}`;
+  if (prefix && te(key)) return t(key);
+  return String(description || "").trim() || code;
+}
+
+/** 本地音色配置转成同一结构：类型与说明都与听播音色同一份文案 */
 function fallbackVoices(): SoundVoice[] {
   return REPORT_VOICE_OPTIONS.map(option => ({
     code: option.id,
-    type: t(option.tagKey),
+    type: typeOf(option.id),
     slogan: sloganOf(option.id, option),
     preview: option.preview,
   }));
@@ -170,8 +200,8 @@ function toVoices(list?: ListenBroadcastVoice[]): SoundVoice[] {
       const code = String(item?.code || "");
       if (!code) return null;
       const option = localOption(code);
-      // 主标题只放「类型」：接口 description 就是类型；没有再退回本地 tagKey，绝不用人名
-      const type = String(item?.description || "").trim() || (option ? t(option.tagKey) : code);
+      // 主标题只放「类型」：优先本地词条（中英文都全），缺失才用接口 description，绝不用人名
+      const type = typeOf(code, item?.description);
       return {
         code,
         type,
@@ -186,11 +216,12 @@ function toVoices(list?: ListenBroadcastVoice[]): SoundVoice[] {
 async function loadVoices() {
   try {
     const config = await getListenBroadcastConfig();
-    voices.value = toVoices(config?.voices);
+    // 只存原始列表，展示文案由 voices 这个 computed 按当前语言现算
+    rawVoices.value = Array.isArray(config?.voices) ? config.voices : null;
   }
   catch (error) {
     logger.warn("load voice list failed, fallback to local config", error);
-    voices.value = fallbackVoices();
+    rawVoices.value = null;
   }
 }
 

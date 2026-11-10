@@ -10,6 +10,20 @@
         (coverSupport ? ', viewport-fit=cover' : '') + '" />')
     </script>
     <title></title>
+    <!-- 首帧画布底色：uni 的 #app / uni-page-body 都是透明底，页面自己铺满之前露出来的是
+         document 的默认白底。深色模式下推新窗口（听汇报 / 作业指导等场景窗）会先白一下再变深，
+         这里在样式与 JS 之前就把 html 底色压深（uni.setStorageSync 的字符串值是原样存的）。
+         运行期切换外观由 App.vue 的 watch 继续同步。 -->
+    <script>
+      ;(function () {
+        try {
+          if (localStorage.getItem('appAppearance') === 'dark') {
+            document.documentElement.style.backgroundColor = '#0d0d0d'
+          }
+        }
+        catch (e) {}
+      })()
+    </script>
     <link rel="stylesheet" href="/scriptStyle.css" />
     <script src="/scriptError.js"></script>
     <!--preload-links-->

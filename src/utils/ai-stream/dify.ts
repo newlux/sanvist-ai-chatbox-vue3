@@ -701,6 +701,8 @@ export function createDifyEventNormalizer() {
   let isWorkflowStream = false;
   let protocolBuffer = "";
   let receivedSanvistEvent = false;
+  /** 正文是否已经从流里拿到过（workflow_finished 的 outputs.answer 通常与流式正文重复） */
+  let receivedAnswer = false;
   /** Chatflow 通常先发 message_end，后发 workflow_finished；先暂存，等待后者提供总耗时。 */
   let pendingMessageEnd: {
     conversationId: Identifier;
@@ -721,6 +723,8 @@ export function createDifyEventNormalizer() {
     value: string,
     references: { conversationId: Identifier; messageId: Identifier; taskId?: Identifier },
     replaceFirstAnswer: boolean,
+    /** 只解析卡片、丢掉正文：workflow_finished 重放 outputs.answer 时用，正文早已流式给过 */
+    skipAnswers = false,
   ): ChatStreamEvent[] {
     const events: ChatStreamEvent[] = [];
     let shouldReplace = replaceFirstAnswer;
@@ -729,6 +733,7 @@ export function createDifyEventNormalizer() {
       if (!answer) return;
       // 自定义事件包尾通常会带一个协议换行符；它不是回答内容，不能创建空 answer block。
       if (receivedSanvistEvent && !answer.trim()) return;
+      if (skipAnswers) return;
       events.push({
         event: "message",
         ...references,
@@ -736,6 +741,7 @@ export function createDifyEventNormalizer() {
         replace: shouldReplace || replace,
       });
       shouldReplace = false;
+      receivedAnswer = true;
     };
 
     /** GUIDE 卡片入队；步骤卡 / 追问卡都要自动弹起等用户选，其余卡片交给对应 block 渲染。 */
@@ -957,8 +963,17 @@ export function createDifyEventNormalizer() {
         // 只在带协议标记时才解析：纯正文（如二维码占位 / 无备注正文）保持原样
         // 仅进 metadata.outputs_answer，避免被按 message 事件渲染成 answer 气泡，
         // 改动首页 / 听汇报等其他页面的既有行为。
-        const answerEvents = outputsAnswer && protocolOpenPattern.test(outputsAnswer)
-          ? extractSanvistEvents(outputsAnswer, references, false)
+        //
+        // 正文已经在 message 流里给过时，这里只补卡片（ask / guide 等），不再吐 answer：
+        // chatflow 的 outputs.answer 就是整段回答的原文，重放一遍会让气泡里同一段话出现两份。
+        const parseOutputsAnswer = Boolean(outputsAnswer) && protocolOpenPattern.test(outputsAnswer);
+        if (parseOutputsAnswer && receivedAnswer) {
+          logger.info("[chat] outputs.answer 与流式正文重复，只补协议卡片", {
+            length: outputsAnswer.length,
+          });
+        }
+        const answerEvents = parseOutputsAnswer
+          ? extractSanvistEvents(outputsAnswer, references, false, receivedAnswer)
           : [];
         return [
           ...answerEvents,

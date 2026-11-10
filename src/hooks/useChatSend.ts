@@ -9,7 +9,7 @@ import { useI18n } from "vue-i18n";
 import { interruptChat } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { saveReportStyleCode } from "@/hooks/useReportStyle";
-import { saveReportVoiceByStyle } from "@/hooks/useReportVoice";
+import { markReportVoiceSyncing, saveReportVoiceByStyle } from "@/hooks/useReportVoice";
 import { useChatStore, useSessionStore, useSettingsStore, useUserStore } from "@/stores";
 import { buildInitialBlocks, consumeChatStream, parseReportInteraction, parseReportStyleTag, parseRoleTaggedAnswer, parseVoiceStyleTag, parseWorkReportTag } from "@/utils/ai-stream";
 
@@ -529,7 +529,12 @@ export function useChatSend(scope?: string, handlers?: {
       if (settingsStore.voiceCode === voiceCode) return;
       // 先改本地（下一句 TTS 立刻用新音色），再落服务端；失败由 store 自己回滚
       settingsStore.voiceCode = voiceCode;
-      void settingsStore.save({ voiceCode });
+      /**
+       * 这次保存要登记一下：合成只认服务端的 voiceCode，
+       * 标签里那句「已切换为…」的确认播报会紧接着发请求，必须等保存落地才用新音色
+       * （见 useReportVoice 的 waitReportVoiceSynced）。
+       */
+      markReportVoiceSyncing(settingsStore.save({ voiceCode }));
     }
 
     /** 把答案增量通知给页面（首块即触发，不等 message_end / workflow_finished）。 */

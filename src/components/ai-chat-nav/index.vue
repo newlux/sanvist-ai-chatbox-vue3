@@ -50,6 +50,15 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /**
+   * 随文档流排列（首页初始页「Hey,SANI」欢迎层里用）：
+   * 不 fixed、不吃 bottom 偏移，由父级 flex 列把它排在输入条上方；
+   * 对话页仍用默认的 fixed 定位（按输入栏实测高度贴上去）。
+   */
+  flow: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(["item-click"]);
@@ -124,7 +133,11 @@ function onItemTap(item: NavItem) {
 </script>
 
 <template>
-  <view v-if="visible" class="ai-chat-nav" :class="{ 'ai-chat-nav--dark': dark }">
+  <view
+    v-if="visible"
+    class="ai-chat-nav"
+    :class="{ 'ai-chat-nav--dark': dark, 'ai-chat-nav--flow': flow }"
+  >
     <!-- 横向滚动而不是等分 swiper：胶囊宽度跟文案走，英文（Guidance 等）不会被截断 -->
     <scroll-view class="ai-chat-nav__scroll" scroll-x :show-scrollbar="false">
       <view class="ai-chat-nav__list">
@@ -155,6 +168,11 @@ function onItemTap(item: NavItem) {
   box-sizing: border-box;
   background: #fafafa;
   padding-top: 16rpx;
+}
+
+/* 随文档流：初始页欢迎层里由父级 flex 列排布，不再贴视口底部 */
+.ai-chat-nav--flow {
+  position: static;
 }
 
 // 滑动轨道：横向滚动，内容宽度由胶囊自己决定（不再等分屏宽）

@@ -25,6 +25,9 @@ import { useSafeArea } from "@/hooks/useSafeArea";
  *
  * 语音 / 文字两条起飞路径的区别只在 logo 的状态图：语音会先挂上 listen.gif
  * （从第 0 帧起播，父页面据此对齐扩散峰值），文字不换图，直接让常态图飞上去。
+ *
+ * `nav` 具名插槽：底部输入条上方的一行（首页在纯净模式关闭时塞快捷入口胶囊），
+ * 不传就不占位；起飞时与标题 / 输入条一起淡出。
  */
 defineOptions({ name: "AiWelcome" });
 
@@ -221,6 +224,12 @@ onBeforeUnmount(() => {
       </view>
     </view>
 
+    <!-- 底部快捷入口槽位：首页在纯净模式关闭时把对话页那一排胶囊塞进来，
+         排在输入条正上方；不传时整块不渲染（作业指导 / 任务协同页保持原样） -->
+    <view v-if="$slots.nav" class="welcome__nav">
+      <slot name="nav" />
+    </view>
+
     <!-- 底部输入条（Ardot 1204:337 Toolbar）：加号 44×44 + 中间 219×44 + 右侧 44×44，gap 10
          语音态中间是「点击说话」；点键盘后在原地换成文本输入框（不离开初始页），
          填完点右侧发送才抛 send-text 交给父页面 -->
@@ -309,6 +318,7 @@ onBeforeUnmount(() => {
 }
 
 .welcome--leaving .welcome__title,
+.welcome--leaving .welcome__nav,
 .welcome--leaving .welcome__composer,
 .welcome--leaving .welcome__disclaimer {
   opacity: 0;
@@ -420,6 +430,13 @@ onBeforeUnmount(() => {
    落位处即使有 1-2px 误差也看不出来，不会出现「冲过头再往下掉」 */
 .welcome--landed .welcome__logo-fly {
   opacity: 0;
+}
+
+/* 快捷入口槽位：胶囊导航自带底色 / 内边距 / 高度，这里只负责在 flex 列里占一行 */
+.welcome__nav {
+  flex: none;
+  width: 100%;
+  transition: opacity 240ms ease;
 }
 
 /* ===== 底部输入条：加号 / 点击说话 / 键盘 =====

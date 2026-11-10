@@ -67,6 +67,22 @@ function upsertBlock(
   return nextBlocks;
 }
 
+/**
+ * 合并一段 answer 正文。
+ *
+ * 增量事件（delta）直接拼接；但同一条回答偶尔会被「整段重放」一次
+ * （换了事件类型 / 换了通道，replace 标记却没带），拼上去正文就会变成两份。
+ * 重放的识别方式：新内容以已有正文开头 —— 正常的 delta 不可能以整段已收内容开头。
+ * 门槛放在 8 个字符，避免「你好」「好的」这类短前缀被误判成重放。
+ */
+function mergeAnswerContent(previous: string, chunk: string, replace: boolean) {
+  if (replace) return chunk;
+  const base = previous.trim();
+  // 重放常常带一个前导换行（协议换行 / 段落分隔），先削掉再比
+  if (base.length >= 8 && chunk.trimStart().startsWith(base)) return chunk;
+  return `${previous}${chunk}`;
+}
+
 function readThinkSteps(blocks: AiBlock[]): ThinkStep[] {
   const steps = blocks.find(block => block.id === "think-0")?.payload.steps;
   return Array.isArray(steps) ? steps as ThinkStep[] : [];
@@ -75,6 +91,16 @@ function readThinkSteps(blocks: AiBlock[]): ThinkStep[] {
 function stablePayloadId(prefix: string, values: unknown[], fallbackIndex: number) {
   const parts = values.map(value => String(value || "").trim()).filter(Boolean);
   return parts.length ? `${prefix}-${parts.join("-")}` : `${prefix}-${fallbackIndex}`;
+}
+
+/** 卡片载荷快照：用来判断「这张卡片是不是已经被收过了」 */
+function payloadKey(payload: unknown) {
+  try {
+    return JSON.stringify(payload ?? null) || "";
+  }
+  catch {
+    return String(payload);
+  }
 }
 
 export function buildInitialBlocks(): AiBlock[] {
@@ -112,9 +138,16 @@ export function applyEventToBlocks(
       const answerBlocks = blocks.filter(block => block.type === "answer");
       // 低端安卓 WebView 不支持 ES2022 的 Array.prototype.at
       const lastBlock = blocks[blocks.length - 1];
-      const answerId = !event.replace && lastBlock?.type === "answer"
-        ? lastBlock.id
-        : `answer-${answerBlocks.length}`;
+      const lastAnswerBlock = answerBlocks[answerBlocks.length - 1];
+      /**
+       * replace 只表示「这一段是完整正文，覆盖旧的」（Dify 的 message_replace /
+       * Agent 收尾整段回包），不是「另起一段」。之前按 `!event.replace` 判断会新开
+       * `answer-1`，于是流式正文和收尾整段同时存在 —— 气泡里同一条回复出现两份。
+       * 有 answer 块就写回它本身；一个都没有才是首块。
+       */
+      const answerId = event.replace
+        ? (lastAnswerBlock?.id || "answer-0")
+        : (lastBlock?.type === "answer" ? lastBlock.id : `answer-${answerBlocks.length}`);
       const answerIndex = blocks.findIndex(block => block.id === answerId);
       const previousContent = answerIndex < 0
         ? ""
@@ -122,7 +155,7 @@ export function applyEventToBlocks(
       return {
         ...base,
         blocks: upsertBlock(blocks, answerId, "answer", {
-          content: event.replace ? event.answer : `${previousContent}${event.answer}`,
+          content: mergeAnswerContent(previousContent, event.answer, Boolean(event.replace)),
         }),
         receivedContent: true,
       };
@@ -195,8 +228,10 @@ export function applyEventToBlocks(
       const option = chartData.option;
       if (!option || typeof option !== "object") return base;
       const layout = chartData.layout && typeof chartData.layout === "object" ? chartData.layout : undefined;
-      const chartIndex = blocks.filter(block => block.type === "chart").length;
-      const chartId = `chart-${chartIndex}`;
+      // 与表格同理：同一张图被重放时写回原来的块，别多画一张
+      const key = payloadKey({ option, layout });
+      const duplicated = blocks.find(block => block.type === "chart" && payloadKey(block.payload) === key);
+      const chartId = duplicated?.id || `chart-${blocks.filter(block => block.type === "chart").length}`;
       return {
         ...base,
         blocks: upsertBlock(blocks, chartId, "chart", { option, layout }),
@@ -246,10 +281,20 @@ export function applyEventToBlocks(
         processSubtitle: event.message,
       };
     case "table": {
-      const tableIndex = blocks.filter(block => block.type === "table").length;
+      /**
+       * 表格不能按「已有 table 块数量」生成 id：同一张表会被重放一次
+       * （`<COMPONENT type="table">` 在正文里出现两遍，或者 workflow_finished 的
+       * outputs.answer 把协议块再回灌一遍），每来一次就新开一块 —— 气泡里同一条回答
+       * 出现两张一模一样的表，和之前正文重复是同一个成因。
+       * 内容完全相同的表写回原来那一块，内容不同才新开。
+       */
+      const key = payloadKey(event.data);
+      const duplicated = blocks.find(block => block.type === "table" && payloadKey(block.payload) === key);
+      const tableId = duplicated?.id
+        || `table-${blocks.filter(block => block.type === "table").length}`;
       return {
         ...base,
-        blocks: upsertBlock(blocks, `table-${tableIndex}`, "table", event.data, true),
+        blocks: upsertBlock(blocks, tableId, "table", event.data, true),
         receivedContent: true,
       };
     }
