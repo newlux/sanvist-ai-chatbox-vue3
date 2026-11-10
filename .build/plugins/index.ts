@@ -4,7 +4,6 @@ import * as uniModule from "@dcloudio/vite-plugin-uni";
 import { codeInspectorPlugin } from "code-inspector-plugin";
 import AutoImport from "unplugin-auto-import/vite";
 import { loadEnv } from "vite";
-import envTyped from "vite-plugin-env-typed";
 
 import { h5PostBuild } from "./h5-post-build";
 
@@ -15,12 +14,6 @@ function plugins({ mode }: ConfigEnv): PluginOption[] {
   const env = loadEnv(mode, root);
 
   return [
-    envTyped({
-      mode,
-      envDir: root,
-      envPrefix: "VITE_",
-      filePath: path.join(root, "types", "import_meta.d.ts"),
-    }),
     uni(),
     AutoImport({
       imports: ["vue"],
