@@ -13,6 +13,7 @@ import saniIcon from "@/assets/img/icon-sani.png";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { toInlineImageUrl } from "@/utils/image-preview";
+import { animateVoiceMessageArrival, readVoiceMessageOrigin, resolveMotionElement } from "@/utils/voice-message-motion";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
@@ -374,7 +375,8 @@ const showProcessStatus = computed(
 const SUBTITLE_STATUS_SUFFIX = /[\s·,，—-]*(正在执行|执行完成|执行中|已完成|进行中|is running|is executing|executing|running|completed|in progress)\s*$/i;
 
 const processSubtitleText = computed(() => {
-  const raw = String(props.processSubtitle || "").trim();
+  // 各助手均优先展示 subtitle；只下发标准节点状态的工作流使用节点标题兜底。
+  const raw = String(props.processSubtitle || (isGenerating.value ? props.processStatus?.title : "") || "").trim();
   if (!raw) return "";
   // 「|」是后端约定的「中文 | 英文」分隔符，全角竖线一并认
   const parts = raw
@@ -462,10 +464,24 @@ function onTtsTap() {
   if (!props.ttsEnabled) return;
   emit("tts-click");
 }
+
+const bubbleRoot = ref<unknown>(null);
+let cancelVoiceArrival: (() => void) | null = null;
+watch(() => props.asrPending, async (pending, previous) => {
+  if (!isUser.value || pending || !previous) return;
+  const origin = readVoiceMessageOrigin(resolveMotionElement(bubbleRoot.value)?.querySelector(".ai-bubble-v2__asr-label") || null);
+  await nextTick();
+  await nextTick();
+  const body = resolveMotionElement(bubbleRoot.value)?.querySelector<HTMLElement>(".ai-bubble-v2__body") || null;
+  cancelVoiceArrival?.();
+  cancelVoiceArrival = animateVoiceMessageArrival(body, origin);
+}, { flush: "pre" });
+onBeforeUnmount(() => cancelVoiceArrival?.());
 </script>
 
 <template>
   <view
+    ref="bubbleRoot"
     class="ai-bubble-v2"
     :class="{
       'ai-bubble-v2--selected': props.selectMode,
@@ -1242,11 +1258,11 @@ function onTtsTap() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 生成中实时秒数：紧跟 SANI（不推到右侧），11px / #8F8F8F，可以播报后整段消失 */
+/* 生成中实时秒数：字号继承品牌行，与 SANI 保持一致。 */
 .ai-bubble-v2__process-elapsed {
   flex-shrink: 0;
   color: #8f8f8f;
-  font-size: 22rpx;
+  font-size: inherit;
   line-height: 36rpx;
   white-space: nowrap;
 }

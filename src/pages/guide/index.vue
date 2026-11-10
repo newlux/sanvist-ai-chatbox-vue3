@@ -3,6 +3,9 @@ import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import type { VoiceMessageOrigin } from "@/utils/voice-message-motion";
+import { chatMessageAnchorDomId } from "@/stores/modules/chat";
+import { animateVoiceMessageArrival, readVoiceMessageOrigin } from "@/utils/voice-message-motion";
 import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload, GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload } from "@/api/chat/types";
 import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
 import { getRecommendedGuideQuestions } from "@/api/guide";
@@ -19,6 +22,7 @@ import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
+import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
@@ -33,7 +37,7 @@ import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useS
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
-import { isWelcomeDone, markWelcomeDone } from "@/utils/welcome-done";
+import { markWelcomeDone } from "@/utils/welcome-done";
 
 /**
  * 作业指导页（基于首页 home 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
@@ -176,7 +180,7 @@ const isTtsPlaying = computed(() =>
   Boolean(realtimeTts.playing.value)
   || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
 );
-const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, sendSilentMessage, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
   // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
   // 回复里的核对卡仍由 focusStepBlock 在卡片出现 / 翻页时顶到对话区最上方（见 onGuideStepOpen）。
@@ -258,7 +262,8 @@ function stopSceneTtsOnVoiceStart() {
 const voiceTranscript = ref("");
 /** 实时文字的实测高度（px）：两行封顶后是定值（含底部渐隐带），列表按它让位 */
 const voiceLiveHeight = ref(0);
-let voiceLiveObserver: ResizeObserver | null = null;
+let voiceArrivalOrigin: VoiceMessageOrigin | null = null;
+let cancelVoiceArrival: (() => void) | null = null;
 /**
  * 「识别中」实时转写文字的出场闸门（文字铺在对话页顶部那一条上，不再是消息气泡）。
  * 从欢迎层起飞时先关上：这行文字要等中间图标飞进灵动岛、落位动效彻底收尾之后才出现，
@@ -266,29 +271,6 @@ let voiceLiveObserver: ResizeObserver | null = null;
  * 对话页里直接说话不经过起飞，保持 true 立即显示。
  */
 const asrTipReady = ref(true);
-
-/** 实时文字的高度观测：列表按这个高度在顶部让位（见 AiMessageList 的 voiceTopPad）。 */
-function stopVoiceLiveObserver() {
-  if (voiceLiveObserver) {
-    voiceLiveObserver.disconnect();
-    voiceLiveObserver = null;
-  }
-  voiceLiveHeight.value = 0;
-}
-
-function startVoiceLiveObserver() {
-  stopVoiceLiveObserver();
-  // #ifdef H5
-  if (typeof ResizeObserver === "undefined") return;
-  const node = document.querySelector(".voice-live") as HTMLElement | null;
-  if (!node) return;
-  voiceLiveObserver = new ResizeObserver(() => {
-    voiceLiveHeight.value = Math.ceil(node.getBoundingClientRect().height);
-  });
-  voiceLiveObserver.observe(node);
-  voiceLiveHeight.value = Math.ceil(node.getBoundingClientRect().height);
-  // #endif
-}
 
 /**
  * 实时文字的落点锚：上一轮登记过的那条提问（pinMessageId），
@@ -339,10 +321,25 @@ const {
     if (anchorId) chatStore.pinMessageToTop(anchorId);
   },
   discardPlaceholder: () => { voiceTranscript.value = ""; },
-  submit: text => {
+  onBeforeSubmit: () => {
+    voiceArrivalOrigin = readVoiceMessageOrigin(typeof document === "undefined"
+      ? null : document.querySelector(".voice-live__text"));
+  },
+  submit: async text => {
+    const origin = voiceArrivalOrigin;
+    voiceArrivalOrigin = null;
     // 说完：先清浮动条文字，再走正常发送链路（提问由 sendQuickPrompt 落成正式气泡）
     voiceTranscript.value = "";
     sendQuickPrompt(text);
+    const messageId = chatStore.pinMessageId;
+    const requestSeq = chatStore.activeRequestSeq;
+    await nextTick();
+    await nextTick();
+    if (!messageId || requestSeq !== chatStore.activeRequestSeq || typeof document === "undefined") return;
+    const body = document.getElementById(chatMessageAnchorDomId(messageId))
+      ?.querySelector<HTMLElement>(".ai-bubble-v2__body") || null;
+    cancelVoiceArrival?.();
+    cancelVoiceArrival = animateVoiceMessageArrival(body, origin);
   },
   // 开口前先掐掉正在播的回答，避免外放被麦克风收进 ASR
   onStart: () => stopSceneTts(),
@@ -356,12 +353,12 @@ watch(
   () => voiceQueryActive.value && asrTipReady.value,
   (visible) => {
     if (visible) {
-      startVoiceLiveObserver();
+      // 高度由共用字幕组件上报。
       return;
     }
     // 收起（取消 / 说完 / 离开页面）：清掉文字并收回列表让出的高度
     voiceTranscript.value = "";
-    stopVoiceLiveObserver();
+    voiceLiveHeight.value = 0;
   },
   { flush: "post" },
 );
@@ -431,43 +428,6 @@ function onAskSlotOpen(slot: AskSlotPayload) {
 
 function closeAskSlotDrawer() {
   askSlotDrawerVisible.value = false;
-}
-
-/**
- * 进入页面自动触发一次「选择机型」的静默请求：不往消息列表落用户气泡，
- * 只把返回的开场引导卡（guide-lead）塞进消息列表，让用户一进页面就能看到机型选择。
- * 已选过机型就不再触发；重复进入（onShow）也只触发一次。
- */
-let initAskSlotHandled = false;
-function triggerInitAskSlot() {
-  if (initAskSlotHandled) return;
-  initAskSlotHandled = true;
-  // 已选机型就不再触发（用户已经选过，直接进对话）
-  if (userStore.selectedDeviceModelKey) return;
-  void sendSilentMessage({
-    // 触发后端返回机型选择引导卡的固定提问文案（与后端约定）
-    text: "选择机型",
-    onBlocks(blocks, ended) {
-      if (!ended) return;
-      const leadBlock = (blocks || []).find(block => block?.type === "guide-lead");
-      if (!leadBlock?.payload) return;
-      // 手动把引导卡塞进消息列表（作为一条 AI 消息的 blocks），
-      // 卡片通过 AiBlockRenderer 内联渲染，点选项走 sendQuickPrompt 发对话。
-      chatStore.messages.push({
-        id: `guide-lead-${Date.now()}`,
-        role: "ai",
-        content: "",
-        blocks: [leadBlock],
-        loading: false,
-        sessionId: chatStore.aiSessionId,
-        messageId: null,
-        hideActions: true,
-        ttsEnabled: false,
-        processStatus: { phase: "succeeded" },
-      });
-      nextTick(() => chatStore.scrollToBottom(true));
-    },
-  });
 }
 
 /** 抽屉高度量出来了：底部间距随之变化，贴一次底把内容抬到卡片上方 */
@@ -1147,7 +1107,8 @@ async function loadGuideRecommend() {
   }
 }
 
-/** 推荐页带过来的问题：onLoad 记下来，等 onMounted 把视口同步完再发 */
+/** 新进入默认发起能力介绍；推荐页指定的问题优先，历史会话不自动提问。 */
+const GUIDE_OPENING_QUESTION = "你能为我做什么";
 let pendingQuestion = "";
 
 onLoad((options) => {
@@ -1161,15 +1122,11 @@ onLoad((options) => {
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
-  // 已完成过 SANI 唤醒（首页对话态 / 本页欢迎层起飞都会置位）→ 直达对话态，
-  // 不再铺整屏欢迎层：老用户从首页快捷入口切过来体验更顺。
-  // 注：不判断 isVisitor —— App 启动即 setVisitor(true)（游客恒定态），加它会导致永远跳过不了。
-  if (isWelcomeDone()) enterChatNow();
-  pendingQuestion = readQueryValue(options, "question");
+  // 带入的问题或默认能力介绍都直接进入对话态，每次新进入只发送一次。
+  pendingQuestion = readQueryValue(options, "question") || GUIDE_OPENING_QUESTION;
+  enterChatNow();
   guideRecommendContext.value = readGuideRecommendContext(options);
   void loadGuideRecommend();
-  // 进入即自动触发「选择机型」：把机型选择追问卡弹出来（不落消息气泡）
-  triggerInitAskSlot();
 });
 
 onMounted(() => {
@@ -1189,12 +1146,16 @@ onShow(() => {
 // 离开页面时停止听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
 // 两个 TTS hook 自带的 onBeforeUnmount 清理不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
+  cancelVoiceArrival?.();
+  cancelVoiceArrival = null;
+  voiceArrivalOrigin = null;
   stopSceneTts();
   clearAutoOpenTimer();
   // 页面被盖住时正在录音：直接断流，别让麦克风在后台继续采
   resetVoiceQuery();
 });
 onUnload(() => {
+  cancelVoiceArrival?.();
   cancelActiveStream();
   stopSceneTts();
   clearAutoOpenTimer();
@@ -1333,13 +1294,12 @@ onUnload(() => {
            所以实时文字背后不会有任何正文，下面的回复也只按文字长短往下让位。
            只露最后两行：超出的旧文字被裁在框顶外，最新的始终贴在下面；
            外框那层页面底色渐隐负责盖住头部留白条里透出来的上一条回答 -->
-      <view v-if="voiceQueryActive && asrTipReady" class="voice-live">
-        <view class="voice-live__box">
-          <text class="voice-live__text">
-            {{ voiceTranscript || $t("identifying") }}
-          </text>
-        </view>
-      </view>
+      <AiVoiceTranscript
+        v-if="voiceQueryActive && asrTipReady"
+        :text="voiceTranscript"
+        :dark="isDark"
+        @height-change="voiceLiveHeight = $event"
+      />
       <!-- 一键回到底部（与首页一致）：离底时出现，贴底自动隐藏；
            垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙；水平居中，只放 arrow-down.png -->
       <view
@@ -1641,72 +1601,12 @@ $color-white: #ffffff;
     display: none;
   }
 
-  /* 实时转写浮动条在深色下换成深色页面底，与浅色同一套渐变结构 */
-  .voice-live {
-    background: linear-gradient(180deg, #1a1a1a 0%, #1a1a1a 80%, rgba(26, 26, 26, 0) 100%);
-  }
 
-  .voice-live__text {
-    color: #f2f3f5;
-  }
 
   /* 边缘流光在深色下同样保留：色值、厚度、流动都与浅色一致 */
 }
 
-/* ===== 录音中的实时转写（与首页同款）=====
-   落点与「提问气泡顶到头部下沿」同一口径（max(头部留白, 150px)，见 ai-message-list 的
-   PIN_MESSAGE_TOP_MIN_Y_PX），再上提 48rpx：头部是透明的，上一条回答的尾巴会从头部的留白条里
-   透出来，这一条要连它一起盖住 —— 上提一行（48rpx = 1 个行高）正好压掉那一行。
-   左右 40rpx 与 .chat-box 的内边距一致，文字左对齐、从左往右长。
-   只露最后两行：文字块定高 96rpx（2 × 48rpx），文字底部对齐，多出来的旧文字被裁在框顶外，
-   最新的始终贴在框底；框下 40rpx 是页面底色的渐隐，压住紧随其后的回复，不做硬切。
-   高度由消息列表按 voiceTopPad 让出同样的空档（定高后不再随文字变长） */
-.voice-live {
-  position: absolute;
-  top: calc(max(var(--chat-top-inset, 300rpx), 150px) - 48rpx);
-  right: 40rpx;
-  left: 40rpx;
-  z-index: 3; // 压在消息列表之上、顶部毛玻璃（1）与悬浮头部（1010）之下
-  box-sizing: content-box;
-  padding-bottom: 40rpx; // 面板底部的渐隐带
-  // 页面底色铺满文字区，往下渐透：上面盖住上一条回答，下面托住这一次的回复
-  background: linear-gradient(180deg, #fafafa 0%, #fafafa 80%, rgba(250, 250, 250, 0) 100%);
-  pointer-events: none;
-  animation: voice-live-in 160ms ease-out both;
-}
 
-/* 两行视窗：高度 = 2 个行高，超出的内容裁掉（裁在上沿），文字再用绝对定位压到底 */
-.voice-live__box {
-  position: relative;
-  height: 96rpx;
-  overflow: hidden;
-}
-
-/* 字号 / 行高沿用原来「识别中」提词的口径：32rpx / 48rpx，读起来像自己刚说的话 */
-.voice-live__text {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  color: #0d0d0d;
-  font-size: 32rpx;
-  font-weight: 500;
-  line-height: 48rpx;
-  white-space: pre-wrap;
-  word-break: break-word;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-@keyframes voice-live-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
 
 .ai-chat-glow {
   position: absolute;

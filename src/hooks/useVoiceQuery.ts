@@ -55,6 +55,8 @@ export interface UseVoiceQueryOptions {
   discardPlaceholder: () => void;
   /** 发送：页面用自己的发送入口（sendQuickPrompt / sendMessage） */
   submit: (text: string, placeholderId: string) => void;
+  /** 识别成功、收起字幕前，供页面记录文字原位置以播放发送动画。 */
+  onBeforeSubmit?: () => void;
   /** 开口前：停掉正在播的语音，避免外放被麦克风收进去 */
   onStart?: () => void;
 }
@@ -233,6 +235,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
       if (seq !== voiceSeq) return;
       const query = String(result?.text || "").trim();
       // 和流式那条线保持一致：占位气泡先留着，发送入口按 asrPending 原地替换成正式提问
+      if (query) options.onBeforeSubmit?.();
       resetVoiceQuery({ keepPlaceholder: true });
       if (!query) {
         options.discardPlaceholder();
@@ -444,6 +447,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
           const query = String(text).trim();
           // 占位气泡的 id 要在 reset 清空之前留住：final 之后它要接着停在顶部
           const placeholderIdAfterFinal = voicePlaceholderId.value;
+          if (query) options.onBeforeSubmit?.();
           // 占位气泡先留着：发送入口按 asrPending 找到它，原地改成正式提问，顶部位置不动
           resetVoiceQuery({ keepPlaceholder: true });
           // 静音 / 误触时服务端回空串：撤掉占位，提示重说，别拿空问题去提问
