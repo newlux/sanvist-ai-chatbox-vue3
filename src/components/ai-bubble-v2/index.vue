@@ -1500,49 +1500,40 @@ function onTtsTap() {
     color: #ffffff;
   }
 
-  // 边框同样是渐变线（设计稿只给了浅色值，深色按同一明暗关系压深：
-  // #3D3D3D → #262626 → #3D3D3D，角度与峰值位置跟浅色一致：145° / 28%）。
-  // 不能用 background 简写，会把渐变边框整层重置掉。
-  // border-image-source 必须显式关掉：浅色稿那道 108° 亮色渐变写在子组件基础样式里，
-  // 只要不清掉，深色下它会盖住这里的 border-color / 渐变底，描边仍然是浅色的一条亮边。
+  // 胶囊材质与「身份选择」那组（GuideSuggestionBlock）深色态保持一致：
+  // 6% 白底 + 16% 白描边，正文色 #E5E5E5。
   :deep(.ask-slot__option) {
-    border-image-source: none;
-    border-color: transparent;
-    background-color: transparent;
-    background-image:
-      linear-gradient(#0d0d0d, #0d0d0d),
-      linear-gradient(145deg, #5A5A5A 3.66%, #F7F7F7 38.1%, #5A5A5A 89.76%);
-    background-origin: border-box;
-    background-clip: padding-box, border-box;
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.06);
   }
 
+  :deep(.ask-slot__option-letter),
   :deep(.ask-slot__option-text) {
-    color: #ffffff;
+    color: #e5e5e5;
+  }
+
+  :deep(.ask-slot__option-divider) {
+    background: rgba(255, 255, 255, 0.2);
   }
 
   :deep(.ask-slot__option--selected) {
-    background-image:
-      linear-gradient(#ffffff, #ffffff),
-      linear-gradient(#ffffff, #ffffff);
+    border-color: #ffffff;
+    background: #ffffff;
   }
 
   :deep(.ask-slot__option--selected .ask-slot__option-text) {
     color: #0d0d0d;
   }
 
-  // ---- 内联追问卡的多选行：与胶囊同一道 145° 渐变边线，内层底色换成暗色行底 ----
+  // ---- 内联追问卡的多选行：深色行底，选中态提亮一档 ----
   :deep(.ask-slot--multiple .ask-slot__option) {
-    background-color: transparent;
-    background-image:
-      linear-gradient(#212121, #212121),
-      linear-gradient(145deg, #3d3d3d 0%, #262626 28%, #3d3d3d 100%);
+    background-color: #212121;
     box-shadow: none;
   }
 
   :deep(.ask-slot--multiple .ask-slot__option--selected) {
-    background-image:
-      linear-gradient(#303030, #303030),
-      linear-gradient(145deg, #3d3d3d 0%, #262626 28%, #3d3d3d 100%);
+    border-color: #303030;
+    background-color: #303030;
   }
 
   :deep(.ask-slot__remark-placeholder-text) {

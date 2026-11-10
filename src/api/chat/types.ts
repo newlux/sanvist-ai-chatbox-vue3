@@ -467,6 +467,20 @@ export interface MessageEndEvent {
   };
 }
 
+/**
+ * SANVIST 协议自定义事件：由 `<COMPONENT>` 指令解出来的「动作」而非「内容」，
+ * 不渲染卡片、只带一个目标值给上层执行。
+ * - `assistant_scene`：直接切页目标（作业指导 / 任务协同），见 useChatSend 的 openAssistantScene；
+ * - `language_switch`：语言切换指令（data.language = zh / en），见 useChatSend 的 applyLanguageSwitch。
+ */
+export interface ProtocolEvent {
+  event: "assistant_scene" | "language_switch";
+  conversationId?: Identifier;
+  messageId?: Identifier;
+  taskId?: Identifier;
+  data: Record<string, unknown>;
+}
+
 export type ChatStreamEvent =
   | MessageStartEvent
   | StatusEvent
@@ -475,6 +489,7 @@ export type ChatStreamEvent =
   | MessageEvent
   | SubtitleEvent
   | RichContentEvent
+  | ProtocolEvent
   | MessageEndEvent;
 
 export interface ListConversationsParams {

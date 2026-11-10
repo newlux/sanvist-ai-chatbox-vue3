@@ -512,6 +512,8 @@ export function useChatSend(scope?: string, handlers?: {
     let assistantSceneHandled = false;
     /** 本轮已经落过的音色标签值：标签会随每一拍快照重复出现，只处理第一次 */
     let appliedVoiceStyle = "";
+    /** 本轮已经执行过的语言切换指令：同样随快照重复出现，只处理第一次 */
+    let appliedLanguageSwitch = "";
 
     /**
      * 音色切换标签落库：本机存储 + `/settings.voiceCode` 两处都写。
@@ -535,6 +537,26 @@ export function useChatSend(scope?: string, handlers?: {
        * （见 useReportVoice 的 waitReportVoiceSynced）。
        */
       markReportVoiceSyncing(settingsStore.save({ voiceCode }));
+    }
+
+    /**
+     * 语言切换指令：`<COMPONENT>{"scene":"ask","type":"language_switch","data":{"language":"en"}}</COMPONENT>`。
+     *
+     * 与设置弹层「语言」分段同一套写入口径，所以走 `settingsStore.setLanguage`：
+     * - `systemStore.setLanguage` 切 i18n 全局 locale（界面文案立即变英文 / 中文），
+     *   同时改 header 的 `Lang` / `X-Site-Language` —— 设置弹层语言分段读的就是这份，跟着一起变；
+     * - `save({ language })` 打 `PUT /settings` 落库（服务端按语言生成后续回答）。
+     *
+     * 同一轮里指令会随每一拍快照重复出现，只处理第一次；未知语言值直接忽略。
+     */
+    function applyLanguageSwitch(language: string) {
+      const code = String(language || "").trim().toLowerCase();
+      if (!code || code === appliedLanguageSwitch) return;
+      const target = code === "en" ? "en_US" : code === "zh" ? "zh_CN" : "";
+      if (!target) return;
+      appliedLanguageSwitch = code;
+      logger.info("[chat] language switched by component", { language: code });
+      void settingsStore.setLanguage(target);
     }
 
     /** 把答案增量通知给页面（首块即触发，不等 message_end / workflow_finished）。 */
@@ -675,6 +697,12 @@ export function useChatSend(scope?: string, handlers?: {
           if (voiceStyleTurn.matched && voiceStyleTurn.style) {
             applyVoiceStyle(voiceStyleTurn.style);
           }
+
+          /**
+           * 语言切换指令 `<COMPONENT type="language_switch" data.language=en|zh>`：
+           * 切界面语言 + 落 `/settings`（与设置弹层同一个入口），整段 JSON 不进气泡。
+           */
+          if (snapshot.languageSwitch) applyLanguageSwitch(snapshot.languageSwitch);
 
           /**
            * 播报风格标签 `<REPORT_STYLE style="…">正文</REPORT_STYLE>`：

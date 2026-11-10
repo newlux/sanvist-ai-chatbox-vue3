@@ -22,6 +22,8 @@ export interface ChatStreamSnapshot {
   metadata?: MessageEndEvent["metadata"];
   /** 本轮出现的「直接切页」目标（assistant_scene 事件），为空表示不跳转 */
   assistantScene?: string;
+  /** 本轮出现的「语言切换」指令（language_switch 事件）：zh / en，为空表示不切换 */
+  languageSwitch?: string;
   processSubtitle?: string | null;
   processStatus?: {
     phase: "thinking" | "succeeded" | "failed" | "stopped";
@@ -62,6 +64,7 @@ export async function consumeChatStream(
     if (update.taskId) snapshot.taskId = update.taskId;
     if (update.metadata) snapshot.metadata = update.metadata;
     if (update.assistantScene) snapshot.assistantScene = update.assistantScene;
+    if (update.languageSwitch) snapshot.languageSwitch = update.languageSwitch;
     if (update.processSubtitle !== undefined) snapshot.processSubtitle = update.processSubtitle;
     if (update.processStatus) snapshot.processStatus = update.processStatus;
     if (event.event === "message_end") snapshot.ended = true;

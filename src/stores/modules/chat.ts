@@ -175,9 +175,16 @@ function defineChatStore(scope: string) {
       pinnedToBottom.value = true;
       // 用户要的是真末尾：本轮的「提问题顶到上方就停」上限一起撤掉，
       // 否则后面图片 / 图表撑高触发的对齐又会把视图拽回提问那边
+      const wasCapped = capRoundAtTop.value;
       capRoundAtTop.value = false;
       if (settleTimer) clearTimeout(settleTimer);
-      jumpToAnchor();
+      /**
+       * 封顶期间列表末尾垫过白，底部锚点就在那段白之后：
+       * 同一拍滚过去会落在白区（用户看到的就是「点回到底部后整屏白底」）。
+       * 先让消息列表把垫白收回并重排，下一拍再落锚点。
+       */
+      if (wasCapped) nextTick(() => jumpToAnchor());
+      else jumpToAnchor();
       // 图表 / 表格 / 图片是渲染后才撑开高度的，补一次
       settleTimer = setTimeout(() => {
         settleTimer = null;

@@ -35,28 +35,18 @@ const rows = computed(() => rawRows.value.map(row => Array.from(
 const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
 
 /**
- * 竖向手势放行（H5）。
+ * 竖向滚动放行（H5）。
  *
  * 表格是横向滚动容器：uni 的 scroll-view 在 H5 下把内层 div 写成
- * `overflow-x: auto; overflow-y: hidden`。只要表格比气泡宽（列多 / 单元格长），
- * 浏览器在 touchstart 就把握住这次手势锁给这个横向容器，竖向拖动不再冒到外层消息列表 ——
- * 表现就是「手指按在表格里往上滑，列表纹丝不动」。
+ * `overflow-x: auto; overflow-y: hidden`。浏览器里 `hidden` 同样是「滚动容器」，
+ * 该容器的纵向滚动链到它就断了 —— 手指竖滑 / 鼠标滚轮都被它吃掉，
+ * 既不滚表格（纵向没有可滚空间）也不滚外层，表现就是「按在表格中间滚不动」。
  *
- * 处理：只对「横向确实能滚」的表格（就是会出问题的那一类）接管竖向手势 ——
- * 判定为竖向后 preventDefault 掉横向容器的默认接管，位移直接写给外层滚动容器，
- * 1:1 跟手；横向手势完全不动，窄表格（不需要横滚）依旧走原生。
+ * 两条路分开处理：
+ * - **手指**交给 CSS（见样式表的 `touch-action: pan-x`）：浏览器只把横向手势给表格，
+ *   纵向手势直接由外层消息列表处理，不经过 JS，跟手且不会被 preventDefault 拖慢；
+ * - **鼠标滚轮** CSS 管不到，这里把纵向 deltaY 转给外层滚动容器。
  */
-const GESTURE_AXIS_THRESHOLD = 8;
-/** 本次手势判定出的主方向；空串 = 还没判定 */
-let gestureAxis: "" | "x" | "y" = "";
-let gestureStartX = 0;
-let gestureStartY = 0;
-let gestureLastY = 0;
-/** 接管竖向手势时要驱动的外层滚动容器（消息列表），拿不到就交还原生 */
-let gestureScroller: HTMLElement | null = null;
-/** 按下时外层的滚动位置：用来判断浏览器是不是已经把原生滚动带起来了 */
-let gestureStartScrollTop = 0;
-
 /** 外层能竖向滚的祖先：消息列表的内层滚动 div */
 function findScrollableAncestor(from: HTMLElement | null) {
   let node = from?.parentElement || null;
@@ -70,70 +60,15 @@ function findScrollableAncestor(from: HTMLElement | null) {
   return null;
 }
 
-/**
- * 找到真正横向滚动的内层 div。
- * H5 下 `<scroll-view>` 里有两层同名 class 的 div（wrap + main），
- * 只有 main 带 `overflow-x: auto` 且内容溢出；不能按顺序盲取第一层。
- */
-function findHorizontalScroller(root: HTMLElement | null) {
-  if (!root) return null;
-  const nodes: HTMLElement[] = [root, ...Array.from(root.querySelectorAll<HTMLElement>("div"))];
-  for (const node of nodes) {
-    const { overflowX } = getComputedStyle(node);
-    if (overflowX !== "auto" && overflowX !== "scroll") continue;
-    if (node.scrollWidth > node.clientWidth + 1) return node;
-  }
-  return null;
-}
-
-function onTableTouchStart(event: TouchEvent) {
-  gestureAxis = "";
-  gestureScroller = null;
-  // 只服务 H5；小程序端没有 DOM 度量能力，整段交还原生
+/** 横向 wheel（deltaX 为主）留给表格自己滚；纵向一律转给外层列表 */
+function onTableWheel(event: WheelEvent) {
+  // 只服务 H5；小程序端没有 wheel，也没有 DOM 度量
   if (typeof document === "undefined") return;
-  const touch = event.touches?.[0];
-  if (!touch) return;
-  const root = event.currentTarget as HTMLElement | null;
-  const scroller = findHorizontalScroller(root);
-  // 横向滚不动的表格不会锁手势，交给浏览器原生处理，别自作聪明
+  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+  const scroller = findScrollableAncestor(event.currentTarget as HTMLElement | null);
   if (!scroller) return;
-  gestureStartX = touch.clientX;
-  gestureStartY = touch.clientY;
-  gestureLastY = touch.clientY;
-  gestureScroller = findScrollableAncestor(scroller);
-  gestureStartScrollTop = gestureScroller ? gestureScroller.scrollTop : 0;
-}
-
-function onTableTouchMove(event: TouchEvent) {
-  if (!gestureScroller) return;
-  const touch = event.touches?.[0];
-  if (!touch) return;
-  if (!gestureAxis) {
-    const dx = Math.abs(touch.clientX - gestureStartX);
-    const dy = Math.abs(touch.clientY - gestureStartY);
-    if (dx < GESTURE_AXIS_THRESHOLD && dy < GESTURE_AXIS_THRESHOLD) return;
-    gestureAxis = dy > dx ? "y" : "x";
-    /**
-     * 判定的同一拍里外层已经在动了，说明这次浏览器没被表格锁住（原生滚动正常工作），
-     * 再自己写 scrollTop 就成了双倍速度 —— 直接交还原生。
-     */
-    if (gestureAxis === "y" && Math.abs(gestureScroller.scrollTop - gestureStartScrollTop) > 1) {
-      gestureScroller = null;
-      return;
-    }
-  }
-  // 横向手势留给表格自己滚
-  if (gestureAxis !== "y") return;
-  // 拦住横向容器对本次手势的接管，位移自己写给外层列表（不 prevent 会两边同时滚）
   if (event.cancelable) event.preventDefault();
-  const delta = gestureLastY - touch.clientY;
-  gestureLastY = touch.clientY;
-  if (delta) gestureScroller.scrollTop += delta;
-}
-
-function onTableTouchEnd() {
-  gestureAxis = "";
-  gestureScroller = null;
+  scroller.scrollTop += event.deltaY;
 }
 </script>
 
@@ -144,10 +79,7 @@ function onTableTouchEnd() {
     scroll-x
     :show-scrollbar="false"
     enhanced
-    @touchstart="onTableTouchStart"
-    @touchmove="onTableTouchMove"
-    @touchend="onTableTouchEnd"
-    @touchcancel="onTableTouchEnd"
+    @wheel="onTableWheel"
   >
     <view class="table-block__table" :style="{ minWidth: tableWidth }">
       <view class="table-block__row table-block__row--head">
@@ -177,6 +109,15 @@ function onTableTouchEnd() {
   border: 1px solid #e8e8e8;
   border-radius: 20rpx;
   background: transparent;
+
+  /**
+   * 只把横向手势交给这个滚动容器：`pan-x` 下浏览器不为该元素处理纵向平移，
+   * 竖滑直接由外层消息列表接管，不会被 `overflow-y: hidden` 的内层 div 截断。
+   * 内层 div 是 uni 运行时生成的，得穿透 scoped 才命中。
+   */
+  :deep(.uni-scroll-view) {
+    touch-action: pan-x;
+  }
 }
 .table-block__table {
   width: 100%;

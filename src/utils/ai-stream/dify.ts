@@ -509,6 +509,16 @@ function parseAskStreamEvent(value: Record<string, unknown> | null) {
    * 先于 parseAskBlock 判定，避免被 navigation 白名单当未知卡片丢掉。
    */
   const directData = asRecord(value?.data) || {};
+  /**
+   * 语言切换指令（`<COMPONENT>{"scene":"ask","type":"language_switch","data":{"language":"en"}}`）：
+   * 不落卡片、不进正文，只把目标语言带进快照，由 useChatSend 去切界面语言并落 `/settings`。
+   * 先于 parseAskBlock 判定，避免被当未知类型丢掉后整段 JSON 留在气泡里。
+   */
+  if (String(value?.type || "").toLowerCase() === "language_switch") {
+    const language = String(directData.language || "").trim().toLowerCase();
+    if (!language) return null;
+    return { event: "language_switch" as const, data: { language } };
+  }
   const directTarget = String(directData.target || "").trim();
   if (String(value?.type || "").toLowerCase() === "navigation" && ASSISTANT_SCENE_TARGETS.has(directTarget)) {
     return { event: "assistant_scene" as const, data: { target: directTarget } };

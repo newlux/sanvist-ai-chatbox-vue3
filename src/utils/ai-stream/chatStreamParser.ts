@@ -35,6 +35,11 @@ export interface StreamBlockUpdate {
    * work_guidance_assistant / task_coordination_assistant，由 useChatSend 映射成路由。
    */
   assistantScene?: string;
+  /**
+   * 本轮流中出现的「语言切换」指令（language_switch 事件）：`zh` / `en`，
+   * 不落 block、不占位，由 useChatSend 切界面语言并落 `/settings`。
+   */
+  languageSwitch?: string;
   processSubtitle?: string | null;
   processStatus?: {
     phase: "thinking" | "succeeded" | "failed" | "stopped";
@@ -341,6 +346,19 @@ export function applyEventToBlocks(
       return {
         ...base,
         assistantScene: target,
+      };
+    }
+    case "language_switch": {
+      /**
+       * 语言切换指令：不落 block、不占位（同 assistant_scene），只把目标语言带进快照。
+       * 落到气泡里就会多出一张空卡片 / 一段 JSON，正文那句「Sure, I've switched the interface…」
+       * 才是给人看的。
+       */
+      const language = String(event.data?.language || "").trim().toLowerCase();
+      if (!language) return base;
+      return {
+        ...base,
+        languageSwitch: language,
       };
     }
     case "image": {

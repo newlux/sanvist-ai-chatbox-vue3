@@ -976,6 +976,8 @@ function onScrollToBottomTap() {
  */
 function onPinnedChange(pinned: boolean) {
   chatStore.setPinnedToBottom(pinned);
+  // 封顶模式下「滚到底」就是回到本轮提问的落点，撤封顶会把视图再拽回顶部（见首页同函数）
+  if (pinned && chatStore.capRoundAtTop) return;
   if (pinned) chatStore.setCapRoundAtTop(false);
 }
 

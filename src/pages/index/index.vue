@@ -1830,6 +1830,12 @@ function onScrollToBottomTap() {
  */
 function onPinnedChange(pinned: boolean) {
   chatStore.setPinnedToBottom(pinned);
+  /**
+   * 封顶模式下「滚到底」就是回到本轮提问的落点，不代表用户要看最新内容：
+   * 这一拍撤封顶会连带收回垫白、把视图又拽回顶部（表现为「滑到底跳一下」）。
+   * 真正的「回到底部」走 jumpToBottom，它自己会撤封顶。
+   */
+  if (pinned && chatStore.capRoundAtTop) return;
   if (pinned) chatStore.setCapRoundAtTop(false);
 }
 
