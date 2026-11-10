@@ -24,10 +24,10 @@ export function animateVoiceMessageArrival(element: HTMLElement | null, origin: 
   const rect = element.getBoundingClientRect();
   const style = getComputedStyle(element);
   const dx = origin.left - rect.left - (Number.parseFloat(style.paddingLeft) || 0);
-  const dy = origin.top - rect.top - (Number.parseFloat(style.paddingTop) || 0);
+  // 只沿水平方向滑入，字幕与胶囊高度不同也不产生上下移动。
   try {
     const animation = element.animate([
-      { transform: `translate3d(${dx}px, ${dy}px, 0)`, backgroundColor: 'transparent', borderColor: 'transparent' },
+      { transform: `translate3d(${dx}px, 0, 0)`, backgroundColor: 'transparent', borderColor: 'transparent' },
       { transform: 'translate3d(0, 0, 0)', backgroundColor: style.backgroundColor, borderColor: style.borderColor },
     ], { duration: 420, easing: 'cubic-bezier(0.25, 0.1, 0.25, 1)' });
     return () => animation.cancel();

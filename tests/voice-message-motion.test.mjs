@@ -21,7 +21,7 @@ function stub(t, name, value) {
   });
 }
 
-test('从实时文字起点移入胶囊，扣除新胶囊内边距，不修改布局位置', (t) => {
+test('字幕与胶囊高度不同时仍只横向移入，扣除水平内边距', (t) => {
   stub(t, 'getComputedStyle', () => ({ paddingLeft: '18px', paddingTop: '12px', backgroundColor: 'white', borderColor: '#efefef' }));
   stub(t, 'matchMedia', () => ({ matches: false }));
   let captured;
@@ -30,8 +30,8 @@ test('从实时文字起点移入胶囊，扣除新胶囊内边距，不修改�
     getBoundingClientRect: () => ({ left: 70, top: 150 }),
     animate(frames, options) { captured = { frames, options }; return { cancel() { cancelled = true; } }; },
   };
-  const cancel = animateVoiceMessageArrival(element, { left: 20, top: 162 });
-  assert.equal(captured.frames[0].transform, 'translate3d(-68px, 0px, 0)');
+  const cancel = animateVoiceMessageArrival(element, { left: 20, top: 80 });
+  assert.equal(captured.frames[0].transform, 'translate3d(-68px, 0, 0)');
   assert.equal(captured.frames[0].backgroundColor, 'transparent');
   assert.equal(captured.frames[1].transform, 'translate3d(0, 0, 0)');
   assert.equal(captured.frames[1].backgroundColor, 'white');
