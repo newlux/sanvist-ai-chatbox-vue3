@@ -3,9 +3,12 @@ import { onLoad } from "@dcloudio/uni-app";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import backIcon from "@/assets/img/nav-arrow-left.svg";
+import backIconDark from "@/assets/img/nav-arrow-left-dark.svg";
 import stepIcon from "@/assets/img/qrcode-step-form.svg";
 import introVideo from "@/assets/video/qrcode-intro.mp4";
+import introVideoDark from "@/assets/video/qrcode-intro-dark.mp4";
 import { useSafeArea } from "@/hooks/useSafeArea";
+import { useSystemStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { encodeQrCode } from "@/utils/qrcode";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -33,16 +36,31 @@ const { t } = useI18n();
 const { safeAreaStyle } = useSafeArea();
 const logger = createLogger("qrcode-page");
 
+/**
+ * 深色模式（Ardot 430:1「二维码页面-方案1」暗色稿）：
+ * 整页换成暗色渐变 + 深色卡片，开场视频也换成配套的暗色版（浅色版末帧是浅底，压在暗底上会闪）。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
+const introVideoSrc = computed(() => (isDark.value ? introVideoDark : introVideo));
+
 /** 二维码四周的静默区（模块数），少于 4 个很多扫码器识别不到 */
 const QUIET_ZONE = 4;
 /** 默认扫码内容：三一 App 下载页（与 useChatShare 的「复制链接」同一地址） */
 const DEFAULT_QR_CONTENT = "https://portal.sanygroup.com/appDownload/";
-/** 码点渐变（设计稿 865:1772）：从左上到右下，0% → 48.72% → 76% → 100% */
+/** 码点渐变（浅色稿 865:1772）：从左上到右下，0% → 48.72% → 76% → 100% */
 const QR_GRADIENT_STOPS = [
   { offset: "0", color: "#3D21CD" },
   { offset: "0.4872", color: "#1999FE" },
   { offset: "0.76", color: "#C067FA" },
   { offset: "1", color: "#FD90C4" },
+];
+/** 码点渐变（暗色稿 430:4 的渐变矩形，码点由它裁切上色）：同样左上 → 右下 */
+const QR_GRADIENT_STOPS_DARK = [
+  { offset: "0", color: "#5133E8" },
+  { offset: "0.4872", color: "#4BAFFF" },
+  { offset: "0.76", color: "#D491FF" },
+  { offset: "1", color: "#FFB3D7" },
 ];
 
 const content = ref(DEFAULT_QR_CONTENT);
@@ -155,7 +173,8 @@ const qrCode = computed(() => {
         if (modules[row][col]) path += `M${col + QUIET_ZONE} ${row + QUIET_ZONE}h1v1h-1z`;
       }
     }
-    const stops = QR_GRADIENT_STOPS
+    // 深色稿用的是另一套色标（430:4），按当前外观切换
+    const stops = (isDark.value ? QR_GRADIENT_STOPS_DARK : QR_GRADIENT_STOPS)
       .map(stop => `<stop offset="${stop.offset}" stop-color="${stop.color}"/>`)
       .join("");
     // 渐变用 userSpaceOnUse 铺满整个码区（含静默区），方向与设计稿一致：左上 → 右下
@@ -177,13 +196,14 @@ function onBack() {
 </script>
 
 <template>
-  <!-- 页面背景 865:1327：竖向渐变 #E6F1FF → #F5F9FF，铺满 375×812 -->
-  <view class="qrcode-page" :style="safeAreaStyle">
+  <!-- 页面背景：浅色稿 865:1327（#E6F1FF → #F5F9FF）/ 暗色稿 430:997（#02080A → #041729） -->
+  <view class="qrcode-page" :class="{ 'qrcode-page--dark': isDark }" :style="safeAreaStyle">
     <!-- 二维码内容层：视频播完后由下方淡入上浮，与视频层的淡出同时进行，形成交叉淡入 -->
     <view class="qrcode-page__stage" :class="{ 'qrcode-page__stage--in': pageVisible }">
-      <!-- 设计稿没有返回位，宿主 WebView 里必须留一个可达的返回热区，浮在标题上方空白区 -->
+      <!-- 设计稿没有返回位，宿主 WebView 里必须留一个可达的返回热区，浮在标题上方空白区。
+           暗色底上换白色箭头（nav-arrow-left-dark.svg），否则 #1A1A1A 的箭头看不见 -->
       <view class="qrcode-page__back" @tap="onBack">
-        <image class="qrcode-page__back-icon" :src="backIcon" />
+        <image class="qrcode-page__back-icon" :src="isDark ? backIconDark : backIcon" />
       </view>
 
       <view class="qrcode-page__main">
@@ -191,8 +211,8 @@ function onBack() {
         <view class="qrcode-page__head">
           <!-- 标题：y=139，24px / 行高 35px / Bold / #0D0D0D，居中 -->
           <text class="qrcode-page__title">扫码下载 SanVIST App</text>
-          <!-- 副标题：y=181，16px / 行高 23px / Regular / #5E5E5E，居中 -->
-          <text class="qrcode-page__subtitle">很高兴认识你！要不要把我也装进手机里？</text>
+          <!-- 副标题：y=181（暗色稿 y=244），16px / Regular，浅色 #5E5E5E / 深色 #9A9A9A，居中 -->
+          <text class="qrcode-page__subtitle">很高兴认识你，快把我带走吧！</text>
         </view>
 
         <view class="qrcode-page__body">
@@ -235,7 +255,7 @@ function onBack() {
         :id="INTRO_VIDEO_ID"
         class="qrcode-page__intro-video"
         :class="{ 'qrcode-page__intro-video--ready': introVideoReady }"
-        :src="introVideo"
+        :src="introVideoSrc"
         :autoplay="true"
         :muted="true"
         :controls="false"
@@ -521,5 +541,82 @@ function onBack() {
   font-weight: 400;
   line-height: 42rpx; // 21px
   white-space: nowrap;
+}
+
+/* ==================== 深色模式：Ardot 430:1「二维码页面-方案1」暗色稿 375×812 ====================
+   设计稿关键坐标（px）：标题 y=193、副标题 y=244、卡片 (65,331) 246×252、二维码 (111,372) 159×159。
+   换算 1px = 2rpx；仅覆盖暗色稿与浅色稿的差异项，布局骨架与入场动画沿用上面那套。 */
+
+/* 430:997 背景矩形：375×812，180° 线性渐变（像素采样顶部 #02080A、底部 #041729） */
+.qrcode-page--dark {
+  background-image: linear-gradient(180deg, #02080a 0%, #041729 100%);
+}
+
+/* 开场视频层的兜底底色：与暗色页面同渐变，视频首帧解码前不会透出浅底 */
+.qrcode-page--dark .qrcode-page__intro {
+  background-image: linear-gradient(180deg, #02080a 0%, #041729 100%);
+}
+
+/* 430:989 标题顶 y=193；副标题底(268) → 卡片顶(331) 63px */
+.qrcode-page--dark .qrcode-page__main {
+  padding-top: 386rpx; /* 193px */
+  gap: 126rpx; /* 63px */
+}
+
+/* 标题底(228) → 副标题顶(244) 16px */
+.qrcode-page--dark .qrcode-page__head {
+  gap: 32rpx; /* 16px */
+}
+
+/* 430:989：24px / 行高 35px / Bold / #FFFFFF（行高沿用 70rpx，暗色稿同值） */
+.qrcode-page--dark .qrcode-page__title {
+  color: #ffffff;
+}
+
+/* 430:991：16px / 行高 24px / Regular / #9A9A9A */
+.qrcode-page--dark .qrcode-page__subtitle {
+  color: #9a9a9a;
+  line-height: 48rpx; /* 24px */
+}
+
+/* 卡片在暗色稿里是定宽居中的一块（左 65 / 右 64，居中误差 1px） */
+.qrcode-page--dark .qrcode-page__body {
+  align-items: center;
+}
+
+/* 430:990 卡片：246×252，圆角 12，180° 渐变 #323232 → #02090B，无描边、无投影。
+   上内距 41（二维码顶 372 − 卡片顶 331）、下内距 52（卡片底 583 − 二维码底 531），
+   41 + 159 + 52 = 252，高度由内容撑出，不写死 */
+.qrcode-page--dark .qrcode-card {
+  box-sizing: border-box;
+  width: 492rpx; /* 246px */
+  padding: 82rpx 0 104rpx; /* 41px / 52px */
+  border: none;
+  border-radius: 24rpx; /* 12px */
+  background-image: linear-gradient(180deg, #323232 0%, #02090b 100%);
+}
+
+/* 430:3 二维码区：159×159（33×33 模块，单模块 4.818×4.818，码点由 430:4 的品牌渐变裁切上色） */
+.qrcode-page--dark .qrcode-card__code {
+  width: 318rpx; /* 159px */
+  height: 318rpx;
+}
+
+/* 编码失败占位同尺寸，避免卡片高度跳动 */
+.qrcode-page--dark .qrcode-card__failed {
+  width: 318rpx; /* 159px */
+  height: 318rpx;
+}
+
+.qrcode-page--dark .qrcode-card__failed-text {
+  color: #9a9a9a;
+}
+
+/* 视频落位：暗色二维码区 159，去掉四周 4 个模块静默区后码区 128×128；
+   末帧码区 238（与浅色版同一支动画的实测值）→ 128 / 238 ≈ 0.538。
+   页面码区中心 y = 331 + 41 + 159/2 ≈ 451.5，末帧码区中心 49.3% × 812 ≈ 400.3 → 下移 ≈ 51px。
+   （暗色视频若与浅色版末帧构图不同，需要按真机重新标定这两个值） */
+.qrcode-page--dark .qrcode-page__intro--out .qrcode-page__intro-video {
+  transform: translateY(102rpx) scale(0.538);
 }
 </style>
