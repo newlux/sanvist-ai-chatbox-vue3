@@ -192,7 +192,9 @@ function onSubmitTap() {
 
 <template>
   <view v-if="inline" class="ask-slot" :class="{ 'ask-slot--multiple': isMultiple }">
-    <text v-if="title" class="ask-slot__title">{{ title }}</text>
+    <text v-if="title" class="ask-slot__title">
+      {{ title }}
+    </text>
     <view class="ask-slot__options">
       <view
         v-for="(option, index) in options"
@@ -206,10 +208,14 @@ function onSubmitTap() {
       >
         <!-- 单选与身份选择那组胶囊保持一致：A｜选项文案 -->
         <template v-if="!isMultiple">
-          <text class="ask-slot__option-letter">{{ optionLetter(index) }}</text>
+          <text class="ask-slot__option-letter">
+            {{ optionLetter(index) }}
+          </text>
           <view class="ask-slot__option-divider" />
         </template>
-        <text class="ask-slot__option-text">{{ option.label }}</text>
+        <text class="ask-slot__option-text">
+          {{ option.label }}
+        </text>
       </view>
 
       <!-- 其他输入：多选时与选项一起提交；点开变输入框，填了就算作答 -->
