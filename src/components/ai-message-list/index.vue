@@ -576,7 +576,7 @@ function pinnedTopGapPx() {
  * @param forceUp 刚发过消息（强制回底）：允许把视图往上拉到落点；
  *                自动跟随时只往下，不打断用户看历史
  */
-function alignToReplyEnd(forceUp = false) {
+function alignToReplyEnd(forceUp = false, attempt = 0) {
   // 用户已经上翻看历史了就别再拽下去（贴底状态下才会由 store 请求这里）
   if (!props.pinnedToBottom) return;
   // 没有可见内容：量出来全是留白，对齐没有落点，旧空白一并收回
@@ -675,8 +675,10 @@ function alignToReplyEnd(forceUp = false) {
         if (Number.isFinite(topTarget)) {
           const bottomTarget = Math.max(0, Math.round(baseContentHeight - listHeight));
           const capTarget = Math.max(0, Math.round(topTarget));
-          if (ensureScrollableTo(capTarget)) {
-            nextTick(() => alignToReplyEnd(forceUp));
+          // 补白会反过来改变实测高度；布局未收敛时不能无限 nextTick，
+          // 否则点击机型后的首轮定位会饿死渲染和网络回调。与提问定位共用重试上限。
+          if (attempt < PIN_LIFT_MAX_TRIES && ensureScrollableTo(capTarget)) {
+            nextTick(() => alignToReplyEnd(forceUp, attempt + 1));
             return;
           }
           target = capTarget;
