@@ -149,7 +149,7 @@ const islandAnyGifOn = computed(
 
 const logger = createLogger("chat-header");
 const { t, locale } = useI18n();
-const { safeTopPx } = useSafeArea();
+const { safeTopPx, safeAreaStyle } = useSafeArea();
 /**
  * 抽屉顶部的「中 / EN」开关已下线（设计稿 309:3088 的位置让给了品牌头像），
  * 现在挂到齿轮弹层的「语言」分段上：只切换本应用可见的文案语言，
@@ -588,6 +588,7 @@ onBeforeUnmount(() => {
   <!-- 分享选择态是「文字 + 勾选」条，保留原来的实底渐隐，避免文字压在滚动内容上看不清 -->
   <view
     class="ai-chat-header"
+    :style="safeAreaStyle"
     :class="{
       'ai-chat-header--plain': plainBg && !shareMode,
       'ai-chat-header--dark': darkPlain,
@@ -1033,10 +1034,13 @@ onBeforeUnmount(() => {
   // 设计稿头部无投影：不加 box-shadow，底部靠渐变自然淡出
 }
 
-/* 悬浮头部（首页对话页）：底色交给页面顶部的毛玻璃渐隐层，
-   这里完全透明，滚上来的消息才能透到图标下面，而不是被一层实底挡住 */
+/* 悬浮头部：实色背景覆盖状态栏和完整岛图标，外围由页面的毛玻璃层渐隐。 */
 .ai-chat-header--plain {
-  background: #fafafa  //linear-gradient(180deg, #fafafa 10%, rgba(250, 250, 250, 0.92) 90%, rgba(250, 250, 250, 0) 100%);
+  // 页面给头部固定了 200rpx，但岛图标位于「状态栏 + 160rpx」内。
+  // iOS 安全区较高时图标会伸出实色背景；最小高度必须包含同一份安全区。
+  min-height: calc(var(--safe-top-px, 0px) + 160rpx);
+  min-height: calc(max(var(--safe-top-px, 0px), env(safe-area-inset-top, 0px)) + 160rpx);
+  background: #fafafa;
 }
 
 /* ===== 深色主题：首页问答态头部（Ardot 1193:2097 → 1193:2129 Component 2） =====

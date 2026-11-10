@@ -1,6 +1,7 @@
 import type { ChatStreamEvent, SendChatMessageParams } from "@/api/chat/types";
 import { createDifyEventNormalizer, toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
 import { createSseSession } from "@/utils/ai-stream/sseSession";
+import { readSseResponse, useXhrForSse } from "@/utils/ai-stream/sseTransport";
 import { createLogger } from "@/utils/logger";
 import { getRequestBaseURL, getRequestHeaders } from "@/utils/request";
 
@@ -97,7 +98,7 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
       if (!waitMs) return;
       clearIdleTimer();
       idleTimer = setTimeout(() => {
-        abortActiveRequest?.();
+        abortRequest();
         fail(new Error("流式响应超时，请重试"));
       }, waitMs);
     }
@@ -118,40 +119,29 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
       (Array.isArray(event) ? event : [event]).forEach(item => queue.push({ result: item }));
     }
 
-    // 浏览器环境：fetch 原生支持分块读取，直接消费 SSE，不需要 WebSocket 通道
+    // iOS 容器用 XHR 增量读取，避免包装后的 fetch 把过程事件缓冲到回答结束。
     const controller = new AbortController();
-    abortActiveRequest = () => controller.abort();
+    const abortRequest = () => controller.abort();
+    abortActiveRequest = abortRequest;
     const session = createSseSession({
       onEvent: pushEvent,
       isAborted: () => finished,
     });
+    const transport = useXhrForSse() ? "xhr" : "fetch";
+    logger.info("[chat] SSE 传输通道", { transport });
     armIdleTimer();
     void (async () => {
       try {
-        const response = await fetch(url, {
-          method: "POST",
+        await readSseResponse({
+          url,
           headers: getRequestHeaders({
             Accept: "text/event-stream",
             "Content-Type": "application/json",
           }),
           body: JSON.stringify(body),
           signal: controller.signal,
-        });
-        if (!response.ok) throw new Error(`流式请求失败（${response.status}）`);
-        if (!response.body) {
-          // 个别 WebView 不暴露 ReadableStream，退化成一次性读取整包再解析
-          session.finalize(await response.text());
-          succeed();
-          return;
-        }
-
-        const reader = response.body.getReader();
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value) session.consumeChunk(value);
-        }
-        session.finalize();
+          session,
+        }, transport);
         succeed();
       }
       catch (error) {
@@ -177,7 +167,8 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
     finally {
       clearIdleTimer();
       finished = true;
-      abortActiveRequest = undefined;
+      abortRequest();
+      if (abortActiveRequest === abortRequest) abortActiveRequest = undefined;
     }
   }
 
