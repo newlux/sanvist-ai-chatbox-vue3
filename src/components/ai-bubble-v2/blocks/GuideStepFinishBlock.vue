@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import type { GuideSuggestionPayload } from "@/api/chat/types";
-import { computed, onMounted } from "vue";
+import { computed, onMounted, provide } from "vue";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import saniIcon from "@/assets/img/icon-sani.png";
+import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { consumeSummaryTts } from "@/utils/guide-step-tts";
 import GuideSourceBlock from "./GuideSourceBlock.vue";
+
+/**
+ * 深色：小结卡同样由消息列表在气泡外独立渲染，provide 给 MarkdownRenderer
+ * 让它排出深色正文（与 GuideCheckBlock 同一套处理）。
+ */
+provide("ai-bubble-dark", computed(() => props.dark));
 
 /**
  * 指导步骤的完成态（独立于步骤卡）：
@@ -102,9 +109,11 @@ onMounted(() => {
       </view>
     </view>
 
-    <text v-if="summary" class="guide-finish__summary">
-      {{ summary }}
-    </text>
+    <!-- 步骤小结（step_summary，可能带 ** 加粗等 markdown）：与步骤正文同一套
+         MarkdownRenderer 解析渲染，深色由上面 provide 的 ai-bubble-dark 接管 -->
+    <view v-if="summary" class="guide-finish__summary">
+      <MarkdownRenderer :content="summary" />
+    </view>
 
     <template v-if="suggestionOptions.length">
       <text class="guide-finish__question">
@@ -234,15 +243,31 @@ onMounted(() => {
   }
 }
 
+/* 步骤小结容器：只留白边距与字色，文字排版交给 MarkdownRenderer */
 .guide-finish__summary {
   display: block;
-  white-space: pre-wrap;
   word-break: break-word;
   font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 30rpx;
-  font-weight: 400;
-  line-height: 52rpx;
   color: #1a1a1a;
+}
+
+/*
+ * markdown-renderer 通过 mp-html 把 tagStyle 写进行内样式，scoped 样式压不住；
+ * 这里用 :deep + !important 对齐小结原有排版（30rpx / 52rpx），
+ * 与 GuideCheckBlock 的步骤正文同一套处理。
+ */
+.guide-finish__summary :deep(p),
+.guide-finish__summary :deep(li) {
+  margin-bottom: 0 !important;
+  color: #1a1a1a !important;
+  font-size: 30rpx !important;
+  font-weight: 400;
+  line-height: 52rpx !important;
+  word-break: break-word;
+}
+.guide-finish__summary :deep(strong) {
+  color: #1a1a1a;
+  font-weight: 600;
 }
 
 .guide-finish__question {
@@ -324,6 +349,14 @@ onMounted(() => {
   .guide-finish__summary,
   .guide-finish__question {
     color: #e5e5e5;
+  }
+
+  /* 深色小结：step_summary 走 MarkdownRenderer，浅色覆盖会压过 tagStyle 的深色，
+     这里再按白色材质对齐（正文 / 加粗都用 #e5e5e5），与步骤正文同一套 */
+  .guide-finish__summary :deep(p),
+  .guide-finish__summary :deep(li),
+  .guide-finish__summary :deep(strong) {
+    color: #e5e5e5 !important;
   }
 
   .guide-finish__option {
