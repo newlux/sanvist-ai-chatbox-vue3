@@ -95,6 +95,13 @@ const secondsText = computed(() => `${props.seconds}s`);
        单层纯渐变就够：靠 alpha 收边，不会像「模糊层 + overflow 裁」那样切出硬线 -->
   <view class="voice-query__glow" :class="{ 'voice-query__glow--dark': dark }" aria-hidden="true" />
 
+  <!-- ===== 胶囊后面的垫底渐隐 =====
+       输入栏有一条不透明的底，正文滚到它后面就被挡住了；录音条只有一枚半透明胶囊，
+       上一条回答滚到这里会整段透出来，看着就是「字被压住、突破了底部安全区」。
+       这里铺一层页面底色，高度刚好盖到胶囊顶边（安全区 + 160rpx），
+       层级压在消息列表之上、光晕（1000）与胶囊（1001）之下：底色只挡正文，不挡这些控件 -->
+  <view class="voice-query__mask" :class="{ 'voice-query__mask--dark': dark }" aria-hidden="true" />
+
   <!-- 设计稿 70:1651 Voice Pill：327×44 / r45 / rgba(13,13,13,0.38) / 左右 24 距底 36 -->
   <view class="voice-query" :class="{ 'voice-query--dark': dark }">
     <!-- 设计稿 70:1653 Group 109：36×36 浅色圆 + 深灰 ×（左内边距 6、上 4） -->
@@ -188,6 +195,27 @@ const secondsText = computed(() => `${props.seconds}s`);
   to {
     opacity: 1;
   }
+}
+
+/* ===== 胶囊后面的垫底渐隐 =====
+   高度 = 胶囊顶边（bottom 72rpx + 高 88rpx = 160rpx）再带上底部安全区，
+   所以它盖住的正好是「胶囊那一条带」，不会往上多挡正文。
+   上沿留一段透明过渡（40% 处才完全实色）：硬切一条白边会比透字更难看。
+   层级 999：压在消息列表之上，光晕（1000）与胶囊 / 提示语（1001）之下，
+   光晕仍然照常透出来，胶囊和提示语也照常可见。 */
+.voice-query__mask {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 999;
+  height: calc(env(safe-area-inset-bottom) + 160rpx);
+  background: linear-gradient(180deg, rgb(250 250 250 / 0%) 0%, #fafafa 40%);
+  pointer-events: none;
+}
+
+.voice-query__mask--dark {
+  background: linear-gradient(180deg, rgb(26 26 26 / 0%) 0%, #1a1a1a 40%);
 }
 
 /* 设计稿 70:1651 Voice Pill

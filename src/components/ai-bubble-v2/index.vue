@@ -1516,26 +1516,6 @@ function onTtsTap() {
     background: rgba(255, 255, 255, 0.2);
   }
 
-  :deep(.ask-slot__option--selected) {
-    border-color: #ffffff;
-    background: #ffffff;
-  }
-
-  :deep(.ask-slot__option--selected .ask-slot__option-text) {
-    color: #0d0d0d;
-  }
-
-  // ---- 内联追问卡的多选行：深色行底，选中态提亮一档 ----
-  :deep(.ask-slot--multiple .ask-slot__option) {
-    background-color: #212121;
-    box-shadow: none;
-  }
-
-  :deep(.ask-slot--multiple .ask-slot__option--selected) {
-    border-color: #303030;
-    background-color: #303030;
-  }
-
   :deep(.ask-slot__remark-placeholder-text) {
     color: #8f8f8f;
   }
@@ -1543,17 +1523,6 @@ function onTtsTap() {
   :deep(.ask-slot__remark-filled),
   :deep(.ask-slot__remark-input) {
     color: #ffffff;
-  }
-
-  // 主按钮与浅色稿黑白反转：#FFFFFF 底 + #1A1A1A 字；禁用 #212121 + #5D5D5D
-  :deep(.ask-slot__submit) {
-    background: #ffffff;
-    color: #1a1a1a;
-  }
-
-  :deep(.ask-slot__submit--disabled) {
-    background: #212121;
-    color: #5d5d5d;
   }
 }
 </style>

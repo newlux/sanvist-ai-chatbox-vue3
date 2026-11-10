@@ -261,6 +261,15 @@ const messageBottomInset = computed(() => {
   if (askSlotDrawerVisible.value && askSlotDrawerHeight.value > 0) {
     return `${askSlotDrawerHeight.value}px`;
   }
+  /**
+   * 录音中：输入栏已经被 fixed 的录音条顶掉，底部快捷入口也一起收起，
+   * 这时的 composerBottomInset 还是输入栏那一帧量到的旧值。
+   * 录音条胶囊的顶边固定在「安全区 + 160rpx」（bottom 72rpx + 高 88rpx），
+   * 旧值一旦比它小，滚到底时最后一行就压在胶囊后面；取两者较大值，两种情况都不吃亏。
+   */
+  if (voiceQueryActive.value) {
+    return `max(${composerBottomInset.value}, calc(env(safe-area-inset-bottom) + 184rpx))`;
+  }
   // 纯净模式关闭时底部多了一条快捷入口：给列表多留 88rpx（导航 72rpx + 顶部间距 16rpx）
   if (navVisible.value) return `calc(${composerBottomInset.value} + 88rpx)`;
   // 底部只剩输入栏

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { GuideSuggestionPayload } from "@/api/chat/types";
 import { computed } from "vue";
+import { stripOptionPrefix } from "@/utils/option-label";
 
 /**
  * 多轮追问卡（COMPONENT scene=guide / type=suggestion）。
@@ -31,10 +32,11 @@ const emit = defineEmits<{
 const note = computed(() => String(props.payload?.note || "").trim());
 /** 问题行，如「你需要了解哪个机型？」 */
 const question = computed(() => String(props.payload?.question || "").trim());
+/** 选项：文案剥掉后端可能自带的「A |」序号，避免和前面渲染的字母重复 */
 const options = computed(() => (Array.isArray(props.payload?.options) ? props.payload.options : [])
   .map(item => ({
     id: String(item?.id || "").trim(),
-    label: String(item?.label || "").trim(),
+    label: stripOptionPrefix(item?.label),
   }))
   .filter(item => item.label));
 

@@ -1058,15 +1058,18 @@ export function useChatSend(scope?: string, handlers?: {
         .join("；");
     }
 
-    const originalQuery = payload.slot.original_query.trim();
     // 选项一律取 label 回发：value 是业务编码（如 time / space），对话里要给用户看得懂的文案
     const selectedLabels = payload.selectedOptions
       .map(option => String(option.label || option.value).trim())
       .filter(Boolean);
     // 「其他输入」填的自定义内容也算作答，跟选项一起按「、」拼进提问
     const remark = String(payload.remark || "").trim();
-    const answer = [selectedLabels.join("、"), remark].filter(Boolean).join("、");
-    return [originalQuery, answer].filter(Boolean).join("：");
+    /**
+     * 只发本次点击的内容，**不再拼上一轮的提问**（原 `original_query` 前缀）：
+     * 追问卡的选项本身就是一句完整意图（如「近 7 天：11 月 3 日至 11 月 9 日」），
+     * 再把上一问带进去会让后端把两轮问题合成一条重新理解，一串重复语义反而查不准。
+     */
+    return [selectedLabels.join("、"), remark].filter(Boolean).join("、");
   }
 
   function sendAskSlotSelection(payload: AskSlotSubmitPayload) {

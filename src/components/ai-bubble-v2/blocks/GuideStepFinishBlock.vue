@@ -9,6 +9,7 @@ import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import saniIcon from "@/assets/img/icon-sani.png";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { consumeSummaryTts } from "@/utils/guide-step-tts";
+import { stripOptionPrefix } from "@/utils/option-label";
 import GuideSourceBlock from "./GuideSourceBlock.vue";
 
 /**
@@ -54,7 +55,8 @@ const suggestionQuestion = computed(() => String(props.suggestions?.question || 
 const suggestionOptions = computed(() => (Array.isArray(props.suggestions?.options)
   ? props.suggestions?.options || []
   : [])
-  .map(item => ({ id: String(item?.id || "").trim(), label: String(item?.label || "").trim() }))
+  // 文案剥掉后端可能自带的「A |」序号，避免和前面渲染的字母重复
+  .map(item => ({ id: String(item?.id || "").trim(), label: stripOptionPrefix(item?.label) }))
   .filter(item => item.label));
 
 function optionLetter(index: number) {

@@ -8,6 +8,7 @@ import saniIcon from "@/assets/img/icon-sani.png";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { normalizeGuideUrl, previewGuideImages } from "@/utils/guide-content";
 import { consumeStepTtsSwitch, consumeSummaryTts, requestStepTtsSwitch } from "@/utils/guide-step-tts";
+import { stripOptionPrefix } from "@/utils/option-label";
 import GuideSourceBlock from "./GuideSourceBlock.vue";
 
 /**
@@ -82,9 +83,12 @@ const showStepTitle = computed(() => Boolean(stepTitle.value) && stepTitle.value
 const content = computed(() => String(props.payload?.content || ""));
 /** 确认问题（「请确认当前步骤是否学会？」） */
 const question = computed(() => String(props.payload?.confirmation_question || "").trim());
-/** 这一步的选项文案，序号按顺序补 A/B/C */
+/**
+ * 这一步的选项文案，序号按顺序补 A/B/C。
+ * 文案自带的「A |」前缀要剥掉（后端有时会带），否则会显示成「A ｜ A | 已学会，下一步」。
+ */
 const options = computed(() => (Array.isArray(props.payload?.options) ? props.payload.options : [])
-  .map(item => String(item ?? "").trim())
+  .map(item => stripOptionPrefix(item))
   .filter(Boolean));
 /** 这一步的参考图（steps[].images）：渲染在「参考来源」上方，宽高自适应 */
 const images = computed(() => (Array.isArray(props.payload?.images) ? props.payload.images : [])

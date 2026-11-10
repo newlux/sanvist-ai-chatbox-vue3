@@ -159,6 +159,103 @@ function clearRenderTimer() {
  * 仅用于本地 demo 等可控场景，正常模型输出仍走 markdown 安全渲染。 */
 const TRUSTED_HTML_PREFIX = "<!--html-->";
 
+/**
+ * 文字落定动效（对齐 demo 录屏 62→66 帧那段）：一段字写完停更之后，整段轻轻「压淡一下再落定」
+ * —— opacity 0.7 起手，SETTLE_MS 内淡回正文色。生成中的文字保持正常不透明度：
+ * 逐字流过的那部分如果也做淡入，反而会整段发虚，和录屏里「写完了才落一下」对不上。
+ *
+ * 关键点：mp-html 每帧都按 `:key="renderVersion"` 整体重建，元素上的 CSS 动画会从 0 重跑，
+ * 所以落定动画只在「停更之后」开一次，并用负的 animation-delay 记录已经走了多少，
+ * 中途被重建也能接着走，不会跳回起点。
+ *
+ * 「停更」的判定阈值要跟着当前那档 flush 间隔走（见 settleDelay）：阈值比 flush 间隔还小的话，
+ * 正在出字的时候就会被当成停更，一段字要闪好几下落定。
+ */
+const SETTLE_DELAY_MIN_MS = 150;
+const SETTLE_DELAY_MARGIN_MS = 40;
+const SETTLE_MS = 240;
+const SETTLE_KEYFRAMES = "md-text-settle";
+/** 参与落定的块：正文段落、标题、列表项（紧凑列表的文字直接挂在 li 上，没有 p） */
+const SETTLE_TOKEN_TYPES = new Set(["paragraph_open", "heading_open", "list_item_open"]);
+
+/** markdown-it 没带类型声明，这里只取落定动效要用到的那几个字段 */
+interface MarkdownToken {
+  type: string;
+  level: number;
+  nesting: number;
+  map?: [number, number];
+  attrJoin: (name: string, value: string) => void;
+}
+
+/** 块签名（类型@起始行）→ 上一次渲染时的源码片段 / 最后一次变化时间，仅本实例使用 */
+const settleSource = new Map<string, string>();
+const settleChangedAt = new Map<string, number>();
+/** 首帧不铺动效：历史消息、分享海报一进来就该是落定态，不能整片淡一下 */
+let settleStarted = false;
+/** 本次渲染后是否还有块停在「等停更」的窗口里——有的话要补一次渲染，否则落定那一帧永远画不出来 */
+let settlePending = false;
+let settleTimer = null;
+
+/** 当前这档 flush 间隔（流式时由内容长度决定），落定阈值跟着它走 */
+let streamIntervalMs = STREAM_RENDER_INTERVAL_MS;
+
+/** 停更判定阈值：比当前这档 flush 间隔再宽松一点，保证「还在出字」不会被误判成停更 */
+function settleDelay() {
+  return Math.max(SETTLE_DELAY_MIN_MS, streamIntervalMs + SETTLE_DELAY_MARGIN_MS);
+}
+
+/** 给刚停更的块打上落定动画（写在 token 的 style 上，跟随 HTML 一起交给 mp-html） */
+function decorateSettle(tokens: MarkdownToken[], content: string) {
+  const now = Date.now();
+  const lines = content.split(/\r?\n/);
+  const alive = new Set<string>();
+  const delay = settleDelay();
+  /** 已经铺过动效的层级：外层块铺过，里层（li > p）就不再叠一层，否则透明度会翻倍 */
+  let settledLevel: number | undefined;
+  settlePending = false;
+
+  tokens.forEach((token, index) => {
+    if (token.nesting === -1) {
+      if (settledLevel !== undefined && token.level === settledLevel) settledLevel = undefined;
+      return;
+    }
+    if (!SETTLE_TOKEN_TYPES.has(token.type)) return;
+    if (settledLevel !== undefined && token.level > settledLevel) return;
+
+    const [start = index, end = index + 1] = token.map || [];
+    const key = `${token.type}@${start}`;
+    const source = lines.slice(start, end).join("\n");
+    alive.add(key);
+
+    if (!settleStarted) settleChangedAt.set(key, now - delay - SETTLE_MS);
+    else if (settleSource.get(key) !== source) settleChangedAt.set(key, now);
+    settleSource.set(key, source);
+
+    const idle = now - (settleChangedAt.get(key) ?? now);
+    // 还在往外流：不动它，等停更
+    if (idle < delay) {
+      settlePending = true;
+      return;
+    }
+    const elapsed = idle - delay;
+    if (elapsed >= SETTLE_MS) return;
+
+    settledLevel = token.level;
+    token.attrJoin(
+      "style",
+      `animation: ${SETTLE_KEYFRAMES} ${SETTLE_MS}ms ease-out both; animation-delay: -${elapsed}ms;`,
+    );
+  });
+
+  settleStarted = true;
+  // 重新解析后行号整体挪动过：清掉签名表里已经不存在的块，避免越攒越大
+  for (const key of [...settleSource.keys()]) {
+    if (alive.has(key)) continue;
+    settleSource.delete(key);
+    settleChangedAt.delete(key);
+  }
+}
+
 function parseMarkdown(content) {
   const trimmed = content.trim();
   if (!trimmed) return "";
@@ -166,7 +263,11 @@ function parseMarkdown(content) {
     return trimmed.slice(TRUSTED_HTML_PREFIX.length).trimStart();
   }
   try {
-    return markdown.render(content);
+    // 先出 token 再自己 render：落定动效要挂在块级 token 的 style 上，纯 render 拿不到这一层
+    const env = {};
+    const tokens = markdown.parse(content, env);
+    decorateSettle(tokens, content);
+    return markdown.renderer.render(tokens, markdown.options, env);
   }
   catch (error) {
     logger.error("解析失败，回退为纯文本", error);
@@ -196,6 +297,27 @@ function paintTableText(html: string) {
   });
 }
 
+/**
+ * 落定那一帧要自己补一次渲染：内容停更后不会再有 watch 触发，
+ * 单独等 setTimeout 到点重排，才能把「压淡 → 落定」这一次动画挂上去。
+ */
+function scheduleSettleCheck() {
+  if (settleTimer) {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }
+  if (!settlePending) return;
+  const scheduledFor = pendingContent;
+  settleTimer = setTimeout(() => {
+    settleTimer = null;
+    // 期间又来了新内容：交给正常 flush 重排，别在这里多重建一次
+    if (pendingContent !== scheduledFor) return;
+    // 内容没变，但这一帧必须重排：清掉「已渲染」标记绕过相等判断
+    lastRenderedContent = "";
+    renderLatest();
+  }, settleDelay() + 20);
+}
+
 function renderLatest() {
   clearRenderTimer();
   if (pendingContent === lastRenderedContent) return;
@@ -208,6 +330,7 @@ function renderLatest() {
   renderVersion.value += 1;
   lastRenderedContent = pendingContent;
   lastRenderAt = Date.now();
+  scheduleSettleCheck();
 
   if (import.meta.env.DEV) {
     logger.debug(
@@ -228,6 +351,8 @@ watch(
 
     const elapsed = Date.now() - lastRenderAt;
     const interval = getStreamRenderInterval(pendingContent.length);
+    // 落定动效判「停更」用的阈值跟这档间隔走，别用写死的毫秒数
+    streamIntervalMs = interval;
     // 段落刚闭合时排版最稳定，此时提前 flush 观感最好
     const reachedBlockBoundary = /\n[\t ]*\n$/.test(pendingContent);
 
@@ -248,7 +373,13 @@ watch(darkContainer, () => {
   renderLatest();
 });
 
-onBeforeUnmount(clearRenderTimer);
+onBeforeUnmount(() => {
+  clearRenderTimer();
+  if (settleTimer) {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }
+});
 
 function onLinkTap(e) {
   const href = String(e?.detail?.href || e?.href || "");
@@ -327,6 +458,25 @@ function onParseError(e) {
   :deep(table),
   :deep(table *) {
     color: rgba(255, 255, 255, 0.8);
+  }
+}
+</style>
+
+<!--
+  文字落定动效的 keyframes。
+  单独用非 scoped 的块：动画是写在 mp-html 生成的行内 style 上的，
+  而 mp-html 内部的节点不带你组件的 data-v 属性，scoped 选择器根本选不到；
+  keyframes 本身是全局的，放这里只为了跟上面那段样式区分开。
+  起始透明度与脚本里的 SETTLE_MS 配套，改一处要想着另一处。
+-->
+<style>
+@keyframes md-text-settle {
+  from {
+    opacity: 0.7;
+  }
+
+  to {
+    opacity: 1;
   }
 }
 </style>
