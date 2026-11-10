@@ -34,8 +34,8 @@ import { useSafeArea } from "@/hooks/useSafeArea";
 import { useVoiceQuery } from "@/hooks/useVoiceQuery";
 import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
 import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
+import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { createLogger } from "@/utils/logger";
-import { closeWebview, isMpaasReady } from "@/utils/platform/mpaas";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 import { markWelcomeDone } from "@/utils/welcome-done";
@@ -885,23 +885,11 @@ function onBack() {
 }
 
 /**
- * 右上角「关闭当前小程序」：把当前 webview 交回宿主（mPaaS popWindow）。
- * 没有 bridge（浏览器 / 直接用 url 打开）时按退栈兜底，栈里只有本页就回首页，
- * 保证这颗按钮在任何环境下都有反应。
+ * 右上角「关闭当前小程序」：与首页右上角那颗房子按钮同一套行为
+ * （游客态清听播临时态 + popWindow，没有桥时退栈兜底），见 utils/exit-mini-program。
  */
 function onCloseWindow() {
-  const fallback = () => {
-    if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
-    else uni.redirectTo({ url: "/pages/index/index" });
-  };
-  if (isMpaasReady()) {
-    void closeWebview().catch((error) => {
-      logger.warn("popWindow failed", error);
-      fallback();
-    });
-    return;
-  }
-  fallback();
+  exitMiniProgram();
 }
 
 /**

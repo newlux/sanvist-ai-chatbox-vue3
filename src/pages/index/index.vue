@@ -44,8 +44,6 @@ import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import {
   AI_ASK_WELCOME_DONE_KEY,
-  LISTEN_REPORT_CURRENT_DATE_KEY,
-  LISTEN_REPORT_DATE_KEY,
   REPAIR_NAV_INTENT_ENTER,
   REPAIR_NAV_INTENT_FAULT_CODE,
 } from "@/config";
@@ -59,9 +57,10 @@ import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, us
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
 import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
+import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
-import { closeWebview, ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
+import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { openPartsAssistant } from "@/utils/parts-h5";
 import { openRepairAssistant } from "@/utils/repair-h5";
@@ -1613,24 +1612,14 @@ async function goToChat(options?: { holdMs?: number }) {
   welcomeFlyTimer = setTimeout(land, WELCOME_FLY_MS);
 }
 
+/**
+ * 头部右上角那颗房子按钮：关闭当前小程序（交回宿主）。
+ * 游客态的听播临时态由本页自己收掉，其余（清身份 / 清听播存储 / popWindow / 退栈兜底）
+ * 与作业指导、任务协同页共用一份实现，见 utils/exit-mini-program。
+ */
 function backToWelcome() {
-  if (userStore.isVisitor) {
-    try {
-      uni.removeStorageSync(LISTEN_REPORT_DATE_KEY);
-      uni.removeStorageSync(LISTEN_REPORT_CURRENT_DATE_KEY);
-    } catch (error) {
-      logger.warn("failed to reset visitor listen report state", error);
-    }
-    listenBroadcast.value = null;
-    userStore.setVisitorRole(null);
-    userStore.setUserId("");
-  }
-  // 嵌在宿主 APP 里时，返回交回 mPaaS 容器
-  if (isMpaasReady()) {
-    void closeWebview().catch(error => logger.warn("popWindow failed", error));
-    return;
-  }
-  if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
+  if (userStore.isVisitor) listenBroadcast.value = null;
+  exitMiniProgram();
 }
 
 /**
