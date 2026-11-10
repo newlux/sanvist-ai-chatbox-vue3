@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { GuideCheckPayload, GuideStepSelectEvent } from "@/api/chat/types";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, provide, ref } from "vue";
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconShare from "@/assets/img/icon-action-share.svg";
 import saniIcon from "@/assets/img/icon-sani.png";
+import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import GuideSourceBlock from "./GuideSourceBlock.vue";
 import { normalizeGuideUrl, previewGuideImages } from "@/utils/guide-content";
 import { consumeStepTtsSwitch, requestStepTtsSwitch } from "@/utils/guide-step-tts";
@@ -60,6 +61,13 @@ const emit = defineEmits<{
   (e: "copy-click", payload: { text: string }): void;
   (e: "share-click", payload: { element: HTMLElement | null }): void;
 }>();
+
+/**
+ * 深色：这张卡独立于回答气泡渲染（见 ai-bubble-v2 的 STANDALONE_BLOCK_TYPES），
+ * 拿不到气泡 provide 的 ai-bubble-dark，需要自己按 props.dark 提供，
+ * MarkdownRenderer 才能排出深色正文（加粗 strong / 正文 p 的颜色跟随主题）。
+ */
+provide("ai-bubble-dark", computed(() => props.dark));
 
 /** 卡片根节点：分享时整卡截图用（uni 的 view 在部分端会包一层组件实例） */
 const rootRef = ref<HTMLElement | { $el?: HTMLElement } | null>(null);
@@ -253,9 +261,12 @@ function resolveRootElement(): HTMLElement | null {
       {{ stepTitle }}
     </text>
 
-    <text v-if="content" class="guide-check-block__content">
-      {{ content }}
-    </text>
+    <!-- 步骤正文（steps[].action，来自模型输出，可能带 ** 加粗等 markdown）：
+         用 MarkdownRenderer 解析渲染，与回答气泡同一套 markdown 能力，
+         深色由上面 provide 的 ai-bubble-dark 接管 -->
+    <view v-if="content" class="guide-check-block__content">
+      <MarkdownRenderer :content="content" />
+    </view>
 
     <!-- 这一步的参考图：渲染在「参考来源」上方 -->
     <view v-if="images.length" class="guide-check-block__images">
@@ -469,16 +480,32 @@ function resolveRootElement(): HTMLElement | null {
   color: #1a1a1a;
 }
 
+/* 步骤正文容器：只留外边距，文字排版交给 MarkdownRenderer */
 .guide-check-block__content {
   display: block;
   margin-top: 16rpx;
-  white-space: pre-wrap;
   word-break: break-word;
   font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 30rpx;
-  font-weight: 400;
-  line-height: 52rpx;
   color: #1a1a1a;
+}
+
+/*
+ * markdown-renderer 通过 mp-html 把 tagStyle 写进行内样式，scoped 样式压不住；
+ * 这里用 :deep + !important 对齐卡片原有正文排版（30rpx / 52rpx），
+ * 覆盖 p / li / strong 的字号、行高、颜色，不破坏加粗等 markdown 语义。
+ */
+.guide-check-block__content :deep(p),
+.guide-check-block__content :deep(li) {
+  margin-bottom: 0 !important;
+  color: #1a1a1a !important;
+  font-size: 30rpx !important;
+  font-weight: 400;
+  line-height: 52rpx !important;
+  word-break: break-word;
+}
+.guide-check-block__content :deep(strong) {
+  color: #1a1a1a;
+  font-weight: 600;
 }
 
 /* 确认问题：「请确认当前步骤是否学会？」 */
@@ -663,6 +690,14 @@ function resolveRootElement(): HTMLElement | null {
   .guide-check-block__content,
   .guide-check-block__question {
     color: #e5e5e5;
+  }
+
+  /* 深色正文：步骤 action 走 MarkdownRenderer，浅色覆盖会压过 tagStyle 的深色，
+     这里再按 6% 白块材质对齐（正文 / 加粗都用 #e5e5e5） */
+  .guide-check-block__content :deep(p),
+  .guide-check-block__content :deep(li),
+  .guide-check-block__content :deep(strong) {
+    color: #e5e5e5 !important;
   }
 
   .guide-check-block__option {
