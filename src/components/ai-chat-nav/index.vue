@@ -108,7 +108,8 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     titleKey: "nav-parts",
     icon: iconParts,
     subagent: "parts",
-    // 与维修助手一致：另开独立场景页 /pages/parts/index，由该页全屏内嵌三方 H5
+    // 与维修助手一致：pushWindow 直达三方 H5；url 里带的是目标地址，
+    // 首页点击时解析出来交给 utils/parts-h5，本地壳页 /pages/parts/index 只做兜底
     mode: "page",
     url: `/pages/parts/index?url=${encodeURIComponent(PARTS_ASSISTANT_EMBED_URL)}`,
   },

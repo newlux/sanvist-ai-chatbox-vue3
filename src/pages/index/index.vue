@@ -43,7 +43,6 @@ import {
   AI_ASK_WELCOME_DONE_KEY,
   LISTEN_REPORT_CURRENT_DATE_KEY,
   LISTEN_REPORT_DATE_KEY,
-  PARTS_ASSISTANT_EMBED_URL,
   REPAIR_NAV_INTENT_ENTER,
   REPAIR_NAV_INTENT_FAULT_CODE,
 } from "@/config";
@@ -61,6 +60,7 @@ import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
+import { openPartsAssistant } from "@/utils/parts-h5";
 import { openRepairAssistant } from "@/utils/repair-h5";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
@@ -372,11 +372,12 @@ async function onAssistantNavigationConfirm(
 }
 
 /**
- * 进入配件助手：与维修助手一致，另开独立场景页 `/pages/parts/index`，
- * 由该页全屏内嵌三方 H5（地址见 config 的 PARTS_ASSISTANT_EMBED_URL）。
+ * 进入配件助手：与维修助手同一套口径 —— pushWindow 直达三方 H5，
+ * 参数一致、只有地址不同（见 config 的 PARTS_ASSISTANT_EMBED_URL），
+ * 原生容器不可用时才降级到本地壳页 `/pages/parts/index?url=...`。
  */
 function enterPartsAssistant() {
-  void navigateToScene(`/pages/parts/index?url=${encodeURIComponent(PARTS_ASSISTANT_EMBED_URL)}`);
+  void openPartsAssistant();
 }
 
 function clearRepairSummaryPolling() {
@@ -744,13 +745,21 @@ function enterListenReport() {
   void navigateToScene("/pages/podcast/index?direct=1");
 }
 
+/** 从入口项的 `/pages/parts/index?url=...` 里取三方地址（URLSearchParams 会自动解码） */
+function readPartsEmbedUrl(route: string) {
+  const query = route.split("?")[1] || "";
+  if (!query) return "";
+  return new URLSearchParams(query).get("url") || "";
+}
+
 /**
- * 配件助手跳转：弹层里填的是完整地址，原样带给内嵌页（不拼参数、不做校验）。
+ * 配件助手跳转：弹层里填的是完整地址，作为 pushWindow 的目标地址（不校验域名），
+ * 参数与维修助手一致，由 utils/parts-h5 统一补上。
  */
 function onPartsJump(url: string) {
   const target = String(url || "").trim();
   if (!target) return;
-  void navigateToScene(`/pages/parts/index?url=${encodeURIComponent(target)}`);
+  void openPartsAssistant({ url: target });
 }
 
 /**
@@ -787,6 +796,11 @@ function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; 
   // 维修助手：pushWindow 直达三方 H5，本地壳页只做兜底（与对话内跳转同一套口径）
   if (targetUrl === "/pages/repair/index") {
     void openRepairAssistant();
+    return;
+  }
+  // 配件助手：同一套口径，地址由入口项带过来（缺省用 config 里的地址）
+  if (targetUrl.startsWith("/pages/parts/index")) {
+    void openPartsAssistant({ url: readPartsEmbedUrl(targetUrl) });
     return;
   }
   void navigateToScene(targetUrl);

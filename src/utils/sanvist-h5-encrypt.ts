@@ -22,6 +22,9 @@ const DEFAULT_EXTERNAL_USER_ID = "shengmz2";
 const DEFAULT_NAME = "smz2";
 /** 外部主题兜底值：拿不到具体外观时按浅色（appAppearance 只会有 light / dark） */
 const DEFAULT_THEME = "light";
+/** 公司 / 组织兜底：宿主没下发、用户信息里也没有时沿用 sanvist 默认租户（与维修助手同一口径） */
+const DEFAULT_COMPANY_ID = "69";
+const DEFAULT_ORGANIZATION_ID = "2";
 
 /**
  * sanvist H5 公钥（PEM）。
@@ -67,6 +70,15 @@ export interface SanvistH5EncryptOptions {
    * 未传时保留固定下发的默认值 `language=zh-CN`；传了则覆盖为宿主口径的值。
    */
   language?: string;
+  /** 公司 id，缺省用 sanvist 侧默认租户（69） */
+  companyId?: string;
+  /** 组织 id，缺省用 sanvist 侧默认组织（2） */
+  organizationId?: string;
+  /**
+   * 追加参数：三方页各自额外要的键值（如配件助手的 `gatewayHost` / `access_token`），
+   * 统一在最后写入；空值自动跳过，不会覆盖上面已算好的业务参数。
+   */
+  extraParams?: Record<string, string | undefined>;
 }
 
 export interface SanvistH5EncryptResult {
@@ -121,6 +133,44 @@ function encryptPayload(payload: SanvistH5Payload) {
 }
 
 /**
+ * 把参数接到 frontend 上。
+ *
+ * frontend 允许自带 query 与 hash（配件助手入口就是 `.../dist/?source=pjzs-sanvist#/agent`）：
+ * - 参数一律拼在 hash 之前，落到 `#/agent` 后面三方就取不到了；
+ * - frontend 里已经写死的同名参数保持原值（例如 `source=pjzs-sanvist`），
+ *   不覆盖它对接入口径的约定。
+ */
+function composeUrl(frontend: string, detailPath: string, params: URLSearchParams) {
+  try {
+    const target = new URL(frontend);
+    if (detailPath) {
+      target.pathname = `${target.pathname.replace(/\/$/, "")}${detailPath}`;
+    }
+    const merged = new URLSearchParams(target.search);
+    params.forEach((value, key) => {
+      if (!merged.has(key)) merged.set(key, value);
+    });
+    target.search = merged.toString();
+    return target.href;
+  }
+  catch {
+    // 不是绝对地址（理论上不会出现）：退回最朴素的拼接
+    return `${frontend.replace(/\/$/, "")}${detailPath}?${params.toString()}`;
+  }
+}
+
+/**
+ * `gatewayHost` 里是 `https://` 这种地址，URLSearchParams 会把它转义成
+ * `https%3A%2F%2F...`；三方页有按原始字符串取值的情况，这里还原成未转义形态
+ * （`:` 与 `/` 在 query 里本身是合法字符，标准解析结果不变）。
+ */
+function decodeGatewayHost(url: string) {
+  return url.replace(/([?&]gatewayHost=)([^&#]*)/, (_match, prefix: string, value: string) => (
+    prefix + value.replace(/%3A/gi, ":").replace(/%2F/gi, "/")
+  ));
+}
+
+/**
  * 使用 node-forge 加密用户信息，并按当前环境拼出可直接访问的 URL。
  */
 export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): SanvistH5EncryptResult {
@@ -138,8 +188,9 @@ export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): Sanvis
     sysCode,
     ciphertext,
     language: "zh-CN",
-    companyId: "69",
-    organizationId: "2",
+    // 公司 / 组织：三方页自己取不到，由调用方按宿主身份注入，缺省沿用 sanvist 默认租户
+    companyId: String(options.companyId || "").trim() || DEFAULT_COMPANY_ID,
+    organizationId: String(options.organizationId || "").trim() || DEFAULT_ORGANIZATION_ID,
     isChinaMode: "true",
     isConsumer: "true",
     // 外观：透传当前生效的外观值（light / dark），未显式传入时按浅色处理
@@ -158,9 +209,24 @@ export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): Sanvis
   if (voice) params.set("voice", voice);
   // 界面语言（zh_CN / en_US）：参数名统一为 `language`，未传时保留上面的默认值 zh-CN
   if (language) params.set("language", language);
-  const chatPath = chatConversationId ? `/chat/${encodeURIComponent(chatConversationId)}` : "/chat";
-  const url = `${frontend}${chatPath}?${params.toString()}`;
-  console.log("🚀 ~ buildSanvistH5Url ~ url:", url);
+  // 三方页各自追加的参数（如配件助手的 gatewayHost / access_token）：空值跳过
+  Object.entries(options.extraParams || {}).forEach(([key, value]) => {
+    const text = String(value ?? "").trim();
+    if (text) params.set(key, text);
+  });
+  /**
+   * 路径：入口直接落在 frontend（`https://maix-bm.irootech.com/repair`），不再补 `/chat` ——
+   * 三方最新版把对话页放在根路径上，旧的 `/repair/chat` 是历史地址。
+   * 只有「维修助手详情」才带子路径 `/chat/{chatConversationId}`，它由三方单独路由。
+   */
+  const detailPath = chatConversationId ? `/chat/${encodeURIComponent(chatConversationId)}` : "";
+  const url = decodeGatewayHost(composeUrl(frontend, detailPath, params));
+  // 只打目标路径与参数名：ciphertext / access_token 都是鉴权值，不落日志
+  console.log(
+    "🚀 ~ buildSanvistH5Url ~ target:",
+    `${frontend}${detailPath}`,
+    params.toString().split("&").map(pair => pair.split("=")[0]),
+  );
 
   return {
     payload,

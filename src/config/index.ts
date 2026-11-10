@@ -25,9 +25,21 @@ export const REPAIR_NAV_INTENT_FAULT_CODE = "MAINT_FAULT_CODE";
 export const REPAIR_NAV_INTENT_ENTER = "ENTER_ASSISTANT";
 
 /**
- * 配件助手内嵌的三方 H5 地址。
- * 与维修助手保持一致：入口另开独立场景页 `/pages/parts/index`（不在首页内联），
- * 由该页全屏 iframe 加载这个地址，并把 AlipayJSBridge 代理给内嵌页。
- * 地址含 query 与 hash，作为 `?url=` 传参时必须整体 encodeURIComponent。
+ * 配件助手三方 H5 地址（与维修助手同一套打开方式，只有地址不同）。
+ *
+ * - 首选：`utils/parts-h5` 用 pushWindow 直达这个地址，参数口径与维修助手一致；
+ * - 兜底：原生容器不可用时落到本地壳页 `/pages/parts/index?url=...`，
+ *   由该页 iframe 加载同一地址，并把 AlipayJSBridge 代理给内嵌页。
+ *
+ * 地址自带 query 与 hash：参数会被拼到 hash 之前，已写死的 `source` 不会被覆盖；
+ * 走 `?url=` 传参时必须整体 encodeURIComponent。
  */
 export const PARTS_ASSISTANT_EMBED_URL = "https://seed.alexsun.top/dev/dist/?source=pjzs-sanvist#/agent";
+
+/**
+ * 配件助手三方页回连的网关地址（`gatewayHost` 参数，固定值）。
+ *
+ * 三方页用它自己去调 sanvist 的接口，不跟本工程的 `VITE_AI_QUESTION_BASE_URL` 联动 ——
+ * 换环境（测试 / 正式）时需要同时改这里。
+ */
+export const PARTS_ASSISTANT_GATEWAY_HOST = "https://sanvist-api-test.sany.com.cn";

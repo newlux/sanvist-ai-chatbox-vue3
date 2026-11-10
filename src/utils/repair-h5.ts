@@ -11,10 +11,8 @@
  *
  * 三方页的返回由它自己处理（原生返回键 / 自己跳回）；壳页上的 postMessage 桥只服务兜底路径。
  */
-import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
-import { loadReportVoice } from "@/hooks/useReportVoice";
-import { i18n } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
+import { resolveSelectedLanguage, resolveSelectedVoiceId } from "@/utils/assistant-h5-params";
 import { createLogger } from "@/utils/logger";
 import { isMpaasReady, openWebview } from "@/utils/platform/mpaas";
 import { buildSanvistH5Url } from "@/utils/sanvist-h5-encrypt";
@@ -43,24 +41,6 @@ export interface OpenRepairAssistantOptions extends RepairH5UrlOptions {
   onFallback?: () => void;
   /** 降级时打开的站内路由，默认维修壳页；带参数的场景（如详情会话）可覆盖 */
   fallbackUrl?: string;
-}
-
-/**
- * 当前选中的音色 id：读本机记忆的音色（听播页 saveReportVoice 写入的同一份数据），
- * 没选过时与听播页保持一致的兜底口径 —— 取音色列表第一项。
- */
-function resolveSelectedVoiceId() {
-  return loadReportVoice()?.id || REPORT_VOICE_OPTIONS[0]?.id || "";
-}
-
-/**
- * 当前界面语言：优先取 systemStore.header.Lang（启动参数注入 + 设置弹层切换都会写这里），
- * 它是宿主与请求头共用的口径（zh_CN / en_US）；拿到前用 i18n 当前 locale 兜底。
- */
-function resolveSelectedLanguage() {
-  const fromHeader = String(useSystemStore().header?.Lang || "").trim();
-  if (fromHeader) return fromHeader;
-  return String(i18n.global.locale.value || "zh_CN");
 }
 
 /**

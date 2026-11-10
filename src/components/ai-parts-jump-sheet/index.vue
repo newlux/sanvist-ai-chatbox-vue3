@@ -5,8 +5,9 @@ import { useI18n } from "vue-i18n";
 /**
  * 配件助手跳转弹层。
  *
- * 首页底部「配件助手」入口点击后弹出：输入框里填的是**完整地址**（不做拼接、不做校验），
- * 点「跳转」后交给页面新开 `/pages/parts/index` 全屏内嵌这个地址。
+ * 首页底部「配件助手」入口点击后弹出：输入框里填的是**完整地址**（不做校验），
+ * 点「跳转」后交给页面用 pushWindow 直达这个地址（参数由 utils/parts-h5 统一补），
+ * 原生容器不可用时才退回本地壳页 `/pages/parts/index?url=...` 全屏内嵌。
  */
 defineOptions({ name: "AiPartsJumpSheet" });
 
