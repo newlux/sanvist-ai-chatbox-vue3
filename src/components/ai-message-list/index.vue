@@ -305,13 +305,14 @@ const PIN_MESSAGE_TOP_MIN_Y_PX = 150;
  */
 const PIN_SPACER_MAX_PX = 1000;
 /**
- * 垫白时在「刚好够到落点」之外再留的余量（px）。
+ * 垫白时在「刚好够到落点」之外多留的取整余量（px）。
  *
- * 不留在落点下方，滚到位那一下就等于滑到了最底：
- * 列表会派发 scrolltolower → 页面上报「用户在底部」，把本轮的「提问封顶」撤掉，
- * 之后实时文字一长就又退回贴底（表现就是「录音时文字掉到下面去」）。
+ * 这个值就是**用户最多还能往下多滚多远**：垫白 = 差额 + 这段余量，
+ * 滚动上限正好停在「本轮提问顶到上方」的落点上，再多一分就是纯白。
+ * 所以只留取整 / 亚像素误差的量级，绝不能放大 —— 放大后用户手指一滑，
+ * 最后一条回复会被推出屏幕顶部，整屏只剩空白。
  */
-const PIN_SPACER_SLACK_PX = 160;
+const PIN_SPACER_SLACK_PX = 8;
 /** 行内样式的 rpx 在 H5 不会被编译，减去的这段走 CSS 变量（值定义在 .msg-list__inner 上） */
 const CHAT_BOX_TOP_PADDING_VAR = `var(--chat-box-top-padding, 20px)`;
 let lastScrollTop = 0;
@@ -653,12 +654,12 @@ function alignToReplyEnd(forceUp = false, attempt = 0) {
        * 整段内容还不到一屏时（提问下面只有等待占位 + 输入栏留白）先垫白，
        * 垫完再重算一次，落点才真的可达。
        *
-       * 但「回答已收尾 + 整轮内容本身装得下一屏」时不再封顶：
-       * 这种内容滚不动，能滚起来靠的全是垫出来的空白，往下拖就是满屏白底。
-       * 内容确实长过一屏时照旧封顶 —— 那时的滚动范围都是真实内容，不存在空白。
+       * 收尾之后**继续封顶**：整轮内容装得下一屏时也不再退回贴底 ——
+       * 那种退让会让新一轮在回答结束时掉回屏幕中间、上一轮的内容重新露在顶部。
+       * 底部为此垫出来的留白只在用户主动下滑时才看得见；点「回到底部」/ 滑到底
+       * 会撤掉封顶并收回垫白（见下面 capRoundAtTop 的 watch），不会再出现整屏白底。
        */
-      const fitsOneScreen = isLastAnswerSettled() && baseContentHeight <= listHeight;
-      if (props.capRoundAtTop && props.pinMessageId && !fitsOneScreen) {
+      if (props.capRoundAtTop && props.pinMessageId) {
         const userTop = Number(userRect?.top);
         const topTarget = userTop - innerTop - pinnedTopGapPx();
         if (Number.isFinite(topTarget)) {
@@ -681,7 +682,7 @@ function alignToReplyEnd(forceUp = false, attempt = 0) {
         }
       }
       else {
-        // 不封顶（用户点了回到底部 / 这一轮装得下一屏）：垫的空白没有用武之地，收回
+        // 不封顶（用户点了回到底部 / 滑到了底）：垫的空白没有用武之地，收回
         releaseShortReplySpacer();
       }
       if (!Number.isFinite(target)) return;
@@ -737,14 +738,19 @@ watch(
 );
 
 /**
- * 封顶被撤掉（用户点「回到底部」）时，把为封顶垫的空白一起收回。
+ * 封顶被撤掉（用户点「回到底部」/ 滑到了底）时，把为封顶垫的空白一起收回。
  * 留着的话「到底」落点其实在那段空白的最下面，用户看到的是一片白，还以为是页面挂了。
+ *
+ * 收白会让内容瞬间变短：贴底状态下按「真末尾」再对齐一次，
+ * 否则视口有可能停在原来那片空白上（同样表现为整屏白底）。
  */
 watch(
   () => props.capRoundAtTop,
   (on) => {
     if (on) return;
+    const hadSpacer = shortReplySpacerPx.value > 0;
     releaseShortReplySpacer();
+    if (hadSpacer && props.pinnedToBottom) nextTick(() => alignToReplyEnd(true));
   },
 );
 
@@ -1023,6 +1029,12 @@ function finishSummaryOf(message: UiChatMessage) {
   return String(stepBlock?.payload?.step_summary || "").trim();
 }
 
+/** 完成态里的小结标题：与小结正文分开读（如「步骤小结」），渲染在小结正文上方 */
+function finishSummaryTitleOf(message: UiChatMessage) {
+  const stepBlock = (message?.blocks || []).find(block => block?.type === "guide-step");
+  return String(stepBlock?.payload?.step_summary_title || "").trim();
+}
+
 /**
  * 播报：`text` 是「要念的内容不在消息正文里」时的覆盖文本（步骤小结 step_summary），
  * 由卡片带上来，页面直接念它，不再从 blocks 里拼。
@@ -1233,17 +1245,17 @@ function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
 
   // 精简版卡片不挂参考来源：正文被隐藏的这轮回答，参考来源跟着一起不展示
   const evidence = hidesBody(message) && !props.compactGuideCard ? collectSourceEvidence(blocks) : [];
-  // 全部确认完：不放步骤卡让位，把步骤小结注入这张卡，由卡片自身在确认区渲染小结。
-  // 小结属于整段指导的收束，固定落在最后一步卡上；即使 shownStepId 记录异常也按 is_last 兜底
-  const summary = isStepCardFinished(message, messageIndex) ? finishSummaryOf(message) : "";
-  const finalCard = isStepCardFinished(message, messageIndex)
-    ? (cards.find(item => item.payload?.is_last) || card)
-    : card;
+  // 全部确认完：不放步骤卡让位，把步骤小结（正文 + 标题）注入「当前展示的那一张卡」，
+  // 由卡片自身在底部渲染小结（确认区不再展示）。完成态只是收束确认交互，步骤仍可切回查看，
+  // 所以不再钉死 is_last，跟随 shownStepId 切到哪一步、summary 就注入到哪一步的卡上。
+  const finished = isStepCardFinished(message, messageIndex);
+  const summary = finished ? finishSummaryOf(message) : "";
+  const summaryTitle = finished ? finishSummaryTitleOf(message) : "";
   const cardWithSources = evidence.length
-    ? { ...finalCard, payload: { ...finalCard.payload, sources: evidence } }
-    : finalCard;
+    ? { ...card, payload: { ...card.payload, sources: evidence } }
+    : card;
   if (!summary) return [cardWithSources];
-  return [{ ...cardWithSources, payload: { ...cardWithSources.payload, summary } }];
+  return [{ ...cardWithSources, payload: { ...cardWithSources.payload, summary, summary_title: summaryTitle } }];
 }
 
 /**
@@ -1350,7 +1362,7 @@ const voiceSlotIndex = computed(() => {
 });
 
 /** 只在录音中改写锚点那条消息的占位；其余时候不写内联样式（Vue 会把之前写过的样式收回去） */
-function voicePadStyle(index: number) {
+function voicePadStyle(index: number): Record<string, string> | undefined {
   if (props.voiceTopPad <= 0) return undefined;
   const pad = Math.round(props.voiceTopPad);
   const slot = voiceSlotIndex.value;

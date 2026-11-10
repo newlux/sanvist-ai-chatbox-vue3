@@ -8,7 +8,7 @@ export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guid
   | "guide-check" | "guide-lead" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error"
   // assistant-navigation 解析层一直在产出（历史/流式都走它），之前漏在联合类型里导致两处 TS 报错；
   // gantt 是调度视图入口卡（scene=task / type=gantt）。
-  | "assistant-navigation" | "gantt";
+  | "assistant-navigation" | "gantt" | "voice";
 
 /** 深度思考步骤：由 status 事件按 node 聚合而来 */
 export interface ThinkStep {
@@ -35,6 +35,11 @@ export interface StreamBlockUpdate {
    * work_guidance_assistant / task_coordination_assistant，由 useChatSend 映射成路由。
    */
   assistantScene?: string;
+  /**
+   * 本轮流中出现的「语言切换」指令（language_switch 事件）：`zh` / `en`，
+   * 不落 block、不占位，由 useChatSend 切界面语言并落 `/settings`。
+   */
+  languageSwitch?: string;
   processSubtitle?: string | null;
   processStatus?: {
     phase: "thinking" | "succeeded" | "failed" | "stopped";
@@ -206,6 +211,21 @@ export function applyEventToBlocks(
         receivedContent: true,
       };
     }
+    case "voice": {
+      // 老师傅导语文本（COMPONENT scene=guide / type=voice）：一句普通正文，渲染在回答顶部并参与播报。
+      // 新手（分步骤）由消费侧按 operator_role 过滤，这里统一落 voice 块。
+      const text = String(event.data?.text || "").trim();
+      if (!text) return base;
+      // 同一条回答只有一个导语，固定 voice-0：无论 agent_message / message / message_replace /
+      // workflow_finished 重复解析多少次、messageId 是否变化、text 是否暂不完整，
+      // 都 upsertBlock 覆盖同一块，不会累积出多个 voice 块（显示两次/三次的根因）。
+      const voiceId = "voice-0";
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, voiceId, "voice", event.data, true),
+        receivedContent: true,
+      };
+    }
     case "guide_suggestion": {
       const options = Array.isArray(event.data?.options) ? event.data.options : [];
       if (!options.length) return base;
@@ -341,6 +361,19 @@ export function applyEventToBlocks(
       return {
         ...base,
         assistantScene: target,
+      };
+    }
+    case "language_switch": {
+      /**
+       * 语言切换指令：不落 block、不占位（同 assistant_scene），只把目标语言带进快照。
+       * 落到气泡里就会多出一张空卡片 / 一段 JSON，正文那句「Sure, I've switched the interface…」
+       * 才是给人看的。
+       */
+      const language = String(event.data?.language || "").trim().toLowerCase();
+      if (!language) return base;
+      return {
+        ...base,
+        languageSwitch: language,
       };
     }
     case "image": {

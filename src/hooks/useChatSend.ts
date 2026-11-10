@@ -126,11 +126,29 @@ function resolveQrcodeTurn(
   };
 }
 
-/** 把快照里的 answer 块拼成整段回答文本 */
+/**
+ * 从 answer 正文里剔除 voice 导语（与 AiContentBlocks 渲染层同一口径）：
+ * 同一句导语后端既下发给 voice 块，又可能重复写进正文 answer 开头。
+ * 播报时 answer 剔除导语、再补 voice 文本，整段 = 导语 + 正文，各念一遍不重复。
+ */
+function stripVoiceFromAnswer(content: string, voiceText: string): string {
+  const voice = String(voiceText || "").trim();
+  if (!voice) return content;
+  const index = content.indexOf(voice);
+  if (index < 0) return content;
+  const after = content.slice(index + voice.length).replace(/^\n+/, "");
+  return `${content.slice(0, index)}${after}`.trim();
+}
+
+/** 把快照里的 answer / voice 块拼成整段播报文本：导语（voice）在前，answer 剔除重复导语后接正文 */
 function collectAnswerText(blocks: ReturnType<typeof buildInitialBlocks>) {
-  return blocks
+  const voiceText = blocks
+    .filter(block => block.type === "voice")
+    .map(block => String(block.payload?.text || ""))
+    .join("");
+  return voiceText + blocks
     .filter(block => block.type === "answer")
-    .map(block => String(block.payload?.content || ""))
+    .map(block => stripVoiceFromAnswer(String(block.payload?.content || ""), voiceText))
     .join("");
 }
 
@@ -512,6 +530,8 @@ export function useChatSend(scope?: string, handlers?: {
     let assistantSceneHandled = false;
     /** 本轮已经落过的音色标签值：标签会随每一拍快照重复出现，只处理第一次 */
     let appliedVoiceStyle = "";
+    /** 本轮已经执行过的语言切换指令：同样随快照重复出现，只处理第一次 */
+    let appliedLanguageSwitch = "";
 
     /**
      * 音色切换标签落库：本机存储 + `/settings.voiceCode` 两处都写。
@@ -535,6 +555,26 @@ export function useChatSend(scope?: string, handlers?: {
        * （见 useReportVoice 的 waitReportVoiceSynced）。
        */
       markReportVoiceSyncing(settingsStore.save({ voiceCode }));
+    }
+
+    /**
+     * 语言切换指令：`<COMPONENT>{"scene":"ask","type":"language_switch","data":{"language":"en"}}</COMPONENT>`。
+     *
+     * 与设置弹层「语言」分段同一套写入口径，所以走 `settingsStore.setLanguage`：
+     * - `systemStore.setLanguage` 切 i18n 全局 locale（界面文案立即变英文 / 中文），
+     *   同时改 header 的 `Lang` / `X-Site-Language` —— 设置弹层语言分段读的就是这份，跟着一起变；
+     * - `save({ language })` 打 `PUT /settings` 落库（服务端按语言生成后续回答）。
+     *
+     * 同一轮里指令会随每一拍快照重复出现，只处理第一次；未知语言值直接忽略。
+     */
+    function applyLanguageSwitch(language: string) {
+      const code = String(language || "").trim().toLowerCase();
+      if (!code || code === appliedLanguageSwitch) return;
+      const target = code === "en" ? "en_US" : code === "zh" ? "zh_CN" : "";
+      if (!target) return;
+      appliedLanguageSwitch = code;
+      logger.info("[chat] language switched by component", { language: code });
+      void settingsStore.setLanguage(target);
     }
 
     /** 把答案增量通知给页面（首块即触发，不等 message_end / workflow_finished）。 */
@@ -677,6 +717,12 @@ export function useChatSend(scope?: string, handlers?: {
           }
 
           /**
+           * 语言切换指令 `<COMPONENT type="language_switch" data.language=en|zh>`：
+           * 切界面语言 + 落 `/settings`（与设置弹层同一个入口），整段 JSON 不进气泡。
+           */
+          if (snapshot.languageSwitch) applyLanguageSwitch(snapshot.languageSwitch);
+
+          /**
            * 播报风格标签 `<REPORT_STYLE style="…">正文</REPORT_STYLE>`：
            * 正文留在气泡里，style 属性里的风格码落进「听播风格」存储，
            * 下次播报按它作为 styleCode 传值（音色仍然取最新音色，不受这个标签影响）。
@@ -696,9 +742,14 @@ export function useChatSend(scope?: string, handlers?: {
            */
           const sceneTarget = snapshot.assistantScene
             || (snapshot.ended ? snapshot.metadata?.assistant_target : "");
+          // 新手（分步骤）模式：后端可能仍返回老师傅的导语（voice）块，这里直接丢弃，不渲染也不播报
+          const isNovice = userStore.operatorRole?.roleKey === "novice_operator";
+          const filteredBlocks = isNovice
+            ? displayBlocks.filter(block => block.type !== "voice")
+            : displayBlocks;
           const displaySnapshot = displayBlocks === snapshot.blocks
             ? snapshot
-            : { ...snapshot, blocks: displayBlocks };
+            : { ...snapshot, blocks: filteredBlocks };
           // 要跳页的这一轮不触发「回答完成」回调（页面会据此起自动听播，跳走就白播了）
           applySnapshot(aiMsgId, userMsgId, displaySnapshot, preserveProcessStatus, qrcodeTurn.matched || Boolean(sceneTarget));
           if (qrcodeTurn.matched) {

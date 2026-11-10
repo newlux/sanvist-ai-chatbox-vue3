@@ -57,14 +57,23 @@ function optionKey(option: AskSlotOption) {
 }
 
 /**
- * 单选选中项来自服务端下发的 default_value，不由前端乐观更新：
- * 点选项只是把文字再发一次给 chat-messages，接口返回后才允许选中态变化。
+ * 选中项来自服务端下发的 default_value。
+ *
+ * 单选**不再回显**这个值：以前它会让第一项一进来就是黑底选中，
+ * 看着像「已经替用户答过了」，而实际上用户还没点（见 onOptionTap：单选点击即发问）。
+ * 多选 / 抽屉表单仍按 default_value 预选，行为不变。
  */
 const selectedValues = computed(() => {
+  if (!isMultiple.value) return [];
   const raw = props.payload.default_value;
   const list = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
   return list.map(value => String(value));
 });
+
+/** 选项序号：A / B / C…（与身份选择那组胶囊同一套写法） */
+function optionLetter(index: number) {
+  return String.fromCharCode(65 + index);
+}
 
 function isRequired(slot: AskSlotPayload) {
   return slot.required !== false;
@@ -183,10 +192,12 @@ function onSubmitTap() {
 
 <template>
   <view v-if="inline" class="ask-slot" :class="{ 'ask-slot--multiple': isMultiple }">
-    <text v-if="title" class="ask-slot__title">{{ title }}</text>
+    <text v-if="title" class="ask-slot__title">
+      {{ title }}
+    </text>
     <view class="ask-slot__options">
       <view
-        v-for="option in options"
+        v-for="(option, index) in options"
         :key="optionKey(option)"
         class="ask-slot__option"
         :class="{
@@ -195,7 +206,16 @@ function onSubmitTap() {
         }"
         @tap.stop="onOptionTap(option)"
       >
-        <text class="ask-slot__option-text">{{ option.label }}</text>
+        <!-- 单选与身份选择那组胶囊保持一致：A｜选项文案 -->
+        <template v-if="!isMultiple">
+          <text class="ask-slot__option-letter">
+            {{ optionLetter(index) }}
+          </text>
+          <view class="ask-slot__option-divider" />
+        </template>
+        <text class="ask-slot__option-text">
+          {{ option.label }}
+        </text>
       </view>
 
       <!-- 其他输入：多选时与选项一起提交；点开变输入框，填了就算作答 -->
@@ -241,8 +261,8 @@ function onSubmitTap() {
 
 <style scoped>
 /* ===== 追问卡（内联形态）=====
-   问题行 14px / Medium，选项为胶囊：白底 + 1px #E0E0E0 描边 + 20px 圆角，
-   上下 8px / 左右 16px 内边距，字 14px，纵向排列、左对齐，间距 8px */
+   问题行 14px / Medium；单选选项与「身份选择」那组胶囊（GuideSuggestionBlock）同一套材质：
+   白底 + 1px #E6E6E6 描边 + 32rpx 圆角，左侧 A｜文案，纵向排列、左对齐 */
 .ask-slot {
   display: flex;
   flex-direction: column;
@@ -264,42 +284,53 @@ function onSubmitTap() {
   gap: 16rpx; /* 8px：选项之间 */
 }
 
+/* 单选与身份选择那组胶囊一致：选项间距 10px */
+.ask-slot:not(.ask-slot--multiple) .ask-slot__options {
+  gap: 20rpx;
+}
+
 .ask-slot__option {
   display: flex;
   align-items: center;
-  padding: 16rpx 32rpx; /* 8px 16px */
-  /* border: 2rpx solid #efefef; /* 1px，颜色交给下面的渐变边框 */
-  border-radius: 40rpx; /* 20px 胶囊 */
-  /**
-   * 边框线线性渐变（按设计稿逐像素取样还原，取样点见下）：
-   * 145° 走向，两端 #CDCAD2，最亮处 #F7F7F7 落在渐变线的 28%（不是 50%）。
-   * 实测：右下 / 右侧 (205,202,210) = #CDCAD2，左侧偏中（x≈310 顶边）(247,247,247) = #F7F7F7，
-   * 左上角 (214,211,218)、右上角 (219,217,222)、左下 (247,247,247)、右中 (207,204,212)，
-   * 三段线性拟合 RMSE ≈ 2.5/255。
-   * 双层背景法：内层白底裁到 padding-box 盖住中间，外层渐变裁到 border-box，只露 2rpx 的边框环
-   */
-  background-color: transparent;
-  background-image:
-    linear-gradient(#fafafa, #fafafa),
-    linear-gradient(145deg, #cdcad2 0%, #f7f7f7 28%, #cdcad2 100%);
-  background-origin: border-box;
-  background-clip: padding-box, border-box;
   box-sizing: border-box;
-  border: 2rpx solid;
-  border-image-source: linear-gradient(108deg, #CDCAD2 0.66%, #F7F7F7 29.15%, #CDCAD2 89.97%);
+  max-width: 100%;
+  padding: 18rpx 28rpx;
+  border: 1px solid #e6e6e6;
+  border-radius: 32rpx;
+  background: #ffffff;
+}
+
+/* 序号：A / B / C… 与 GuideSuggestionBlock 逐项对齐 */
+.ask-slot__option-letter {
+  flex-shrink: 0;
+  font-size: 28rpx;
+  font-weight: 600;
+  line-height: 40rpx;
+  color: #1a1a1a;
+}
+
+/* 字母与文案之间的细分隔线（设计稿里的「A｜」） */
+.ask-slot__option-divider {
+  flex-shrink: 0;
+  width: 1px;
+  height: 26rpx;
+  margin: 0 16rpx;
+  background: #dcdcdc;
 }
 
 .ask-slot__option-text {
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
   font-size: 28rpx; /* 14px */
   line-height: 40rpx; /* 20px */
-  color: #0d0d0d;
+  color: #1a1a1a;
 }
 
-/* 已选中：服务端 default_value 命中的项（实底盖掉渐变边框） */
+/* 已选中（多选勾选态）：实底黑，白字 */
 .ask-slot__option--selected {
-  background-image:
-    linear-gradient(#0d0d0d, #0d0d0d),
-    linear-gradient(#0d0d0d, #0d0d0d);
+  border-color: #0d0d0d;
+  background: #0d0d0d;
 }
 
 .ask-slot__option--selected .ask-slot__option-text {
@@ -331,19 +362,12 @@ function onSubmitTap() {
   padding: 16rpx 24rpx;
   border: 2rpx solid transparent;
   border-radius: 16rpx;
-  /* 与胶囊同一道 145° 渐变边线，内层底色换成 #F6F6F6 的行底 */
-  background-color: transparent;
-  background-image:
-    linear-gradient(#f6f6f6, #f6f6f6),
-    linear-gradient(145deg, #cdcad2 0%, #f7f7f7 28%, #cdcad2 100%);
-  background-origin: border-box;
-  background-clip: padding-box, border-box;
+  background-color: #f6f6f6;
 }
 
 .ask-slot--multiple .ask-slot__option--selected {
-  background-image:
-    linear-gradient(#1a1a1a, #1a1a1a),
-    linear-gradient(#1a1a1a, #1a1a1a);
+  border-color: #1a1a1a;
+  background-color: #1a1a1a;
 }
 
 .ask-slot--multiple .ask-slot__option--selected .ask-slot__option-text {
