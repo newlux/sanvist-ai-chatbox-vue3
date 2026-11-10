@@ -51,6 +51,13 @@ const { t } = useI18n();
 const chatScope = provideChatScope("guide");
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
+// 首包返回会话 ID 时保持组件与读秒，切换已有会话/重置才重新挂载列表。
+const chatListKey = ref(0);
+watch(() => chatStore.aiSessionId, (next, previous) => {
+  if (previous != null && previous !== "" && String(next ?? "") !== String(previous)) {
+    chatListKey.value += 1;
+  }
+});
 // 注入 --safe-top-px：悬浮头部的高度补偿（--chat-header-height）要按真实状态栏算
 const { safeAreaStyle } = useSafeArea();
 /** 外观（设置弹层 → 深色）：与首页问答态同一套暗色底色 + 顶部渐隐，组件靠 :dark 各自切样式 */
@@ -245,8 +252,63 @@ function stopSceneTtsOnVoiceStart() {
 }
 
 /**
+ * 本轮实时转写文本：录音期间逐字刷新，只长在顶部浮动条上，不进消息列表。
+ * 与首页一致：不做占位气泡，实时文字走页面级 .voice-live 浮动条。
+ */
+const voiceTranscript = ref("");
+/** 实时文字的实测高度（px）：两行封顶后是定值（含底部渐隐带），列表按它让位 */
+const voiceLiveHeight = ref(0);
+let voiceLiveObserver: ResizeObserver | null = null;
+/**
+ * 「识别中」实时转写文字的出场闸门（文字铺在对话页顶部那一条上，不再是消息气泡）。
+ * 从欢迎层起飞时先关上：这行文字要等中间图标飞进灵动岛、落位动效彻底收尾之后才出现，
+ * 否则它会和图标动效叠在一起（看起来像被图标压住半截）。
+ * 对话页里直接说话不经过起飞，保持 true 立即显示。
+ */
+const asrTipReady = ref(true);
+
+/** 实时文字的高度观测：列表按这个高度在顶部让位（见 AiMessageList 的 voiceTopPad）。 */
+function stopVoiceLiveObserver() {
+  if (voiceLiveObserver) {
+    voiceLiveObserver.disconnect();
+    voiceLiveObserver = null;
+  }
+  voiceLiveHeight.value = 0;
+}
+
+function startVoiceLiveObserver() {
+  stopVoiceLiveObserver();
+  // #ifdef H5
+  if (typeof ResizeObserver === "undefined") return;
+  const node = document.querySelector(".voice-live") as HTMLElement | null;
+  if (!node) return;
+  voiceLiveObserver = new ResizeObserver(() => {
+    voiceLiveHeight.value = Math.ceil(node.getBoundingClientRect().height);
+  });
+  voiceLiveObserver.observe(node);
+  voiceLiveHeight.value = Math.ceil(node.getBoundingClientRect().height);
+  // #endif
+}
+
+/**
+ * 实时文字的落点锚：上一轮登记过的那条提问（pinMessageId），
+ * 取不到（或已不在当前会话里）就退回最后一条用户消息。
+ * 拿不到锚点时（第一次提问 / 空会话）返回空串：没有可隐藏的旧提问。
+ */
+function resolveVoiceAnchorId() {
+  const pinned = String(chatStore.pinMessageId || "");
+  const messages = chatStore.messages || [];
+  if (pinned && messages.some(item => String(item?.id ?? "") === pinned)) return pinned;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user" && !message.asrPending) return String(message.id || "");
+  }
+  return "";
+}
+
+/**
  * 「点击说话」语音链路（录音条 + 实时字幕）：与首页同一套实现。
- * 占位气泡与发送都走本页已有的 beginAsrPlaceholder / sendQuickPrompt，
+ * 实时文字走页面级 .voice-live 浮动条（不进消息列表占位气泡），
  * 录音、识别、静音收尾、流式降级原生录音全在 hook 里。
  */
 const {
@@ -260,24 +322,49 @@ const {
   resetVoiceQuery,
 } = useVoiceQuery({
   beginPlaceholder: () => {
-    // 与首页一致：占位气泡一开始就钉到对话区顶部，partial 只改内容、不换位置
-    beginAsrPlaceholder();
-    const id = chatStore.messages.find(item => item.role === "user" && item.asrPending)?.id || "";
-    if (id) {
+    // 与首页一致：不插「识别中」占位气泡，实时文字由 .voice-live 浮动条承载。
+    // 返回一个虚拟 id 让 hook 的 onPartial 守卫通过（partial 不回填气泡，而是写 voiceTranscript）；
+    // 同时把「上一轮提问」登记为 pin 目标，消息列表据此隐藏它、把位置让给浮动条。
+    const anchorId = resolveVoiceAnchorId();
+    if (anchorId) {
       chatStore.setPinnedToBottom(true);
-      chatStore.setPinMessage(id);
+      chatStore.setPinMessage(anchorId);
       chatStore.setCapRoundAtTop(true);
-      chatStore.pinMessageToTop(id);
     }
-    return id;
+    return "__voice-floating__";
   },
-  patchPlaceholder: (id, text) => chatStore.patchMessageById(id, { content: text }),
-  pinPlaceholder: id => chatStore.pinMessageToTop(id),
-  discardPlaceholder: () => discardAsrPlaceholder(),
-  submit: text => sendQuickPrompt(text),
+  patchPlaceholder: (_id, text) => { voiceTranscript.value = text; },
+  pinPlaceholder: () => {
+    const anchorId = resolveVoiceAnchorId();
+    if (anchorId) chatStore.pinMessageToTop(anchorId);
+  },
+  discardPlaceholder: () => { voiceTranscript.value = ""; },
+  submit: text => {
+    // 说完：先清浮动条文字，再走正常发送链路（提问由 sendQuickPrompt 落成正式气泡）
+    voiceTranscript.value = "";
+    sendQuickPrompt(text);
+  },
   // 开口前先掐掉正在播的回答，避免外放被麦克风收进 ASR
   onStart: () => stopSceneTts(),
 });
+
+/**
+ * 实时文字随「录音中 + 起飞已落位」出现 / 消失：出现时开始量高，收起时让位归零。
+ * 必须放在 useVoiceQuery 之后（getter 里要用到 voiceQueryActive）。
+ */
+watch(
+  () => voiceQueryActive.value && asrTipReady.value,
+  (visible) => {
+    if (visible) {
+      startVoiceLiveObserver();
+      return;
+    }
+    // 收起（取消 / 说完 / 离开页面）：清掉文字并收回列表让出的高度
+    voiceTranscript.value = "";
+    stopVoiceLiveObserver();
+  },
+  { flush: "post" },
+);
 
 // 「再次发起其他提问 / 切换会话 / 停止生成」时立刻停掉正在进行的听播（同首页）：
 // activeRequestSeq 在新请求开始和取消/重置时都会变化，一个 watcher 兜底覆盖全部入口。
@@ -790,10 +877,14 @@ watch(shareSheetVisible, async (visible) => {
  * 欢迎层「点击说话」：起飞的同时把语音会话跑起来，
  * 用户在飞行动画里开口也不会丢（ready 前的音频由会话自己缓存）。
  */
-function onWelcomeStart() {
+async function onWelcomeStart() {
   markWelcomeDone();
+  // 起飞前先关上「识别中」文字：语音链路是异步的，慢一点就会抢在动效前面冒出文字
+  asrTipReady.value = false;
   void startVoiceQuery();
-  void goToChat({ holdMs: WELCOME_LISTEN_HOLD_MS });
+  // goToChat 在 logo 落位、动效收尾后才 resolve，此时再放行实时文字
+  await goToChat({ holdMs: WELCOME_LISTEN_HOLD_MS });
+  asrTipReady.value = true;
 }
 
 /** 欢迎层「键盘」：同一套抛物线把 logo 送上去，落位后再聚焦输入框（键盘由此弹出） */
@@ -1187,7 +1278,7 @@ onUnload(() => {
         </template>
       </view>
       <AiMessageList
-        :key="aiSessionId || 'new-conversation'"
+        :key="chatListKey"
         top-inset="var(--chat-top-inset, 300rpx)"
         :dark="isDark"
         :messages="messages"
@@ -1212,6 +1303,9 @@ onUnload(() => {
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"
+        :asr-tip-ready="asrTipReady"
+        :top-aligned="true"
+        :voice-top-pad="voiceLiveHeight"
         :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
         :realtime-tts-playing="realtimeTts.playing.value"
         @quick-prompt="sendQuickPrompt"
@@ -1232,6 +1326,20 @@ onUnload(() => {
         @scroll-top="onScrollTop"
         @pinned-change="onPinnedChange"
       />
+      <!-- 录音中的实时转写：铺在提问气泡的同一个落点（头部下沿）上，纯文字、没有气泡外壳，
+           文字从左往右长出来；说完才收成正式提问气泡。
+           与首页同款：点下说话时会先把上一轮提问顶到这个落点（历史回复整体往上拉走），
+           再由列表把那条提问临时隐藏、把位置让给这段文字（voiceTopPad 同步它的高度），
+           所以实时文字背后不会有任何正文，下面的回复也只按文字长短往下让位。
+           只露最后两行：超出的旧文字被裁在框顶外，最新的始终贴在下面；
+           外框那层页面底色渐隐负责盖住头部留白条里透出来的上一条回答 -->
+      <view v-if="voiceQueryActive && asrTipReady" class="voice-live">
+        <view class="voice-live__box">
+          <text class="voice-live__text">
+            {{ voiceTranscript || $t("identifying") }}
+          </text>
+        </view>
+      </view>
       <!-- 一键回到底部（与首页一致）：离底时出现，贴底自动隐藏；
            垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙；水平居中，只放 arrow-down.png -->
       <view
@@ -1533,7 +1641,71 @@ $color-white: #ffffff;
     display: none;
   }
 
+  /* 实时转写浮动条在深色下换成深色页面底，与浅色同一套渐变结构 */
+  .voice-live {
+    background: linear-gradient(180deg, #1a1a1a 0%, #1a1a1a 80%, rgba(26, 26, 26, 0) 100%);
+  }
+
+  .voice-live__text {
+    color: #f2f3f5;
+  }
+
   /* 边缘流光在深色下同样保留：色值、厚度、流动都与浅色一致 */
+}
+
+/* ===== 录音中的实时转写（与首页同款）=====
+   落点与「提问气泡顶到头部下沿」同一口径（max(头部留白, 150px)，见 ai-message-list 的
+   PIN_MESSAGE_TOP_MIN_Y_PX），再上提 48rpx：头部是透明的，上一条回答的尾巴会从头部的留白条里
+   透出来，这一条要连它一起盖住 —— 上提一行（48rpx = 1 个行高）正好压掉那一行。
+   左右 40rpx 与 .chat-box 的内边距一致，文字左对齐、从左往右长。
+   只露最后两行：文字块定高 96rpx（2 × 48rpx），文字底部对齐，多出来的旧文字被裁在框顶外，
+   最新的始终贴在框底；框下 40rpx 是页面底色的渐隐，压住紧随其后的回复，不做硬切。
+   高度由消息列表按 voiceTopPad 让出同样的空档（定高后不再随文字变长） */
+.voice-live {
+  position: absolute;
+  top: calc(max(var(--chat-top-inset, 300rpx), 150px) - 48rpx);
+  right: 40rpx;
+  left: 40rpx;
+  z-index: 3; // 压在消息列表之上、顶部毛玻璃（1）与悬浮头部（1010）之下
+  box-sizing: content-box;
+  padding-bottom: 40rpx; // 面板底部的渐隐带
+  // 页面底色铺满文字区，往下渐透：上面盖住上一条回答，下面托住这一次的回复
+  background: linear-gradient(180deg, #fafafa 0%, #fafafa 80%, rgba(250, 250, 250, 0) 100%);
+  pointer-events: none;
+  animation: voice-live-in 160ms ease-out both;
+}
+
+/* 两行视窗：高度 = 2 个行高，超出的内容裁掉（裁在上沿），文字再用绝对定位压到底 */
+.voice-live__box {
+  position: relative;
+  height: 96rpx;
+  overflow: hidden;
+}
+
+/* 字号 / 行高沿用原来「识别中」提词的口径：32rpx / 48rpx，读起来像自己刚说的话 */
+.voice-live__text {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  color: #0d0d0d;
+  font-size: 32rpx;
+  font-weight: 500;
+  line-height: 48rpx;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+@keyframes voice-live-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .ai-chat-glow {

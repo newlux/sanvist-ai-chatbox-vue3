@@ -128,12 +128,13 @@ export function applyEventToBlocks(
     case "message_start":
       return base;
     case "status": {
-      const { node, message, phase } = event.data;
+      const { node, message } = event.data;
       if (!message) return base;
       return {
         ...base,
         processStatus: {
-          phase: phase === "completed" ? "succeeded" : "thinking",
+          // status.completed 只代表当前节点完成；整轮结束由 message_end 确认。
+          phase: "thinking",
           title: node ? String(node) : undefined,
         },
       };
