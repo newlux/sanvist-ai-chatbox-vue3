@@ -35,12 +35,12 @@ import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useVoiceQuery } from "@/hooks/useVoiceQuery";
 import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
-import { provideChatScope, useChatStore, useSessionStore, useSystemStore, useUserStore } from "@/stores";
+import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
 import { probeDemoModeData } from "@/utils/demo-data-probe";
 import { openGanttView } from "@/utils/gantt-navigation";
 import { consumeOfflineGanttAsk, shouldUseOfflineGantt } from "@/utils/gantt-offline";
 import { createLogger } from "@/utils/logger";
-import { onNativeEvent } from "@/utils/platform/mpaas";
+import { closeWebview, isMpaasReady, onNativeEvent } from "@/utils/platform/mpaas";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -75,6 +75,14 @@ const sessionStore = useSessionStore();
 /** 外观（设置弹层 → 深色）：与首页同一套暗色底色 + 顶部渐隐，组件靠 :dark 各自切样式 */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
+/**
+ * 纯净模式（设置弹层 → 纯净模式）：决定头部左上角那颗按钮是谁。
+ * - 开启：左侧 = 历史对话抽屉（纯净模式下没有别的入口进历史）；
+ * - 关闭：左侧 = 返回上级页面（原有的多入口导航还在，历史走别处）。
+ * 右上角两种模式都是「关闭当前小程序」，见 onCloseWindow。
+ */
+const settingsStore = useSettingsStore();
+const { pureMode } = storeToRefs(settingsStore);
 /** 一键回到底部的箭头：深色模式换 arrow-down-dark.png（浅色箭头压在暗底上看不清） */
 const scrollBottomIcon = computed(() => (isDark.value ? arrowDownDarkIcon : arrowDownIcon));
 const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
@@ -790,6 +798,26 @@ function onBack() {
 }
 
 /**
+ * 右上角「关闭当前小程序」：把当前 webview 交回宿主（mPaaS popWindow）。
+ * 没装 bridge（浏览器 / 直接用 url 打开）时按退栈兜底，栈里只有本页就回首页，
+ * 保证这颗按钮在任何环境下都有反应。
+ */
+function onCloseWindow() {
+  const fallback = () => {
+    if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
+    else uni.redirectTo({ url: "/pages/index/index" });
+  };
+  if (isMpaasReady()) {
+    void closeWebview().catch((error) => {
+      logger.warn("popWindow failed", error);
+      fallback();
+    });
+    return;
+  }
+  fallback();
+}
+
+/**
  * 长按顶部三角图标 5 秒：回到首页初始「你好三一」页。
  * 首页本身是「初始页 / 对话页」两个态（pageStage）：清掉「欢迎页已完成」标记后重载首页，
  * 首页 onLoad 的 syncPageStage 才会落到 welcome 态（否则会因标记残留 / 旧实例仍停在对话态）。
@@ -1059,7 +1087,11 @@ onUnload(() => {
         :share-selected-round-count="shareSelectedRoundCount"
         :voice-listening="voiceQueryActive"
         restartable
+        :back-on-left="!pureMode"
+        close-on-right
+        round-buttons
         @back="onBack"
+        @close="onCloseWindow"
         @restart="onRestartToStart"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"
