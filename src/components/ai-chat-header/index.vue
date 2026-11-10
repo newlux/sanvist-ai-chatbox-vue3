@@ -681,7 +681,7 @@ onBeforeUnmount(() => {
                 :src="tellLogoGif"
                 mode="aspectFit"
               />
-              <!-- think.gif：正在思考（3840×1920 画布，留白用 aspectFill 裁掉，换算见 --think 注释） -->
+              <!-- think.gif：正在思考（768×384 画布，留白用 aspectFill 裁掉，换算见 --think 注释） -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--think"
                 :class="{ 'chat-header__island-logo--think-on': thinkingGifOn }"
@@ -1303,7 +1303,7 @@ onBeforeUnmount(() => {
     transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* think.gif（正在思考）：画布 3840×1920，图案只占中间（宽约 40%、高约 68%），两侧是透明留白。
+/* think.gif（正在思考）：画布由 3840×1920 等比优化为 768×384，图案只占中间（宽约 40%、高约 68%），两侧是透明留白。
    1) 留白用 aspectFill 裁掉，图案正好撑满 62×62 的位；
    2) 换算下来图案仍比原图小约 15%（340/400 的缩放差），要放大到 1.18 才与原图视觉等大；
    3) 图案中心在画布上偏下约 2.5%（y 210 / 400），上移 3rpx 让中心仍落在原位置。 */
