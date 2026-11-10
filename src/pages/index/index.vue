@@ -73,6 +73,13 @@ const { t } = useI18n();
 const userStore = useUserStore();
 provideChatScope(DEFAULT_CHAT_SCOPE);
 const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
+// 新会话首包只补齐服务端 ID，不重建消息列表；切换已有会话或清空时才重建。
+const chatListKey = ref(0);
+watch(() => chatStore.aiSessionId, (next, previous) => {
+  if (previous != null && previous !== "" && String(next ?? "") !== String(previous)) {
+    chatListKey.value += 1;
+  }
+});
 /**
  * 自动滚动的落点：回复内容末尾（不含参考来源）——参考来源不被贴底滚进视野，
  * 以内容块容器高度减去参考来源高度为准（见 ai-message-list 的 alignToReplyEnd）。
@@ -2005,7 +2012,7 @@ onBeforeUnmount(() => {
         @share-select-all="onShareSelectAll"
       />
       <AiMessageList
-        :key="aiSessionId || 'new-conversation'"
+        :key="chatListKey"
         top-inset="var(--chat-top-inset, 300rpx)"
         :dark="isDark"
         :asr-tip-ready="asrTipReady"

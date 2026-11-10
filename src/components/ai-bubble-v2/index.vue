@@ -339,9 +339,10 @@ function stopElapsedTimer() {
 
 function startElapsedTimer() {
   if (elapsedTimer) return;
-  elapsedBase = Date.now();
+  // 同一条消息暂时隐藏后恢复，沿用起点，不能从 1s 重新计时。
+  if (!elapsedBase) elapsedBase = Date.now();
   // 直接从 1S 起表，避免出现「0S」
-  elapsedSeconds.value = Math.max(1, elapsedSeconds.value);
+  elapsedSeconds.value = Math.max(1, Math.round((Date.now() - elapsedBase) / 1000));
   elapsedTimer = setInterval(() => {
     elapsedSeconds.value = Math.max(1, Math.round((Date.now() - elapsedBase) / 1000));
   }, 500);
@@ -667,13 +668,15 @@ function onTtsTap() {
             <image v-else :src="iconRadioOn" mode="aspectFit" class="ai-bubble-v2__action-icon" />
           </view>
           <!-- 进度文案只使用品牌/语音图标右侧的余量，不再占正文上方的一行。 -->
-          <text
+          <view
             v-if="showProcessSubtitle"
-            :key="processSubtitleText"
             class="ai-bubble-v2__process-subtitle"
           >
-            {{ processSubtitleText }}
-          </text>
+            <text class="ai-bubble-v2__process-subtitle-label">{{ processSubtitleText }}</text>
+            <view v-if="isGenerating" class="ai-bubble-v2__process-subtitle-dots" aria-hidden="true">
+              <text v-for="dot in 3" :key="dot" class="ai-bubble-v2__process-subtitle-dot">.</text>
+            </view>
+          </view>
         </view>
         <view
           v-if="showWaiting && !showProcessStatus && !props.assistantCallbackTitle"
@@ -1180,7 +1183,8 @@ function onTtsTap() {
 }
 /* 行高固定，进度显隐不改正文位置；长文案只裁切剩余宽度，图标与 SANI 不收缩。 */
 .ai-bubble-v2__process-subtitle {
-  display: block;
+  display: flex;
+  align-items: center;
   flex: 1 1 0%;
   height: 36rpx;
   min-width: 0;
@@ -1192,6 +1196,27 @@ function onTtsTap() {
   white-space: nowrap;
   animation: ai-bubble-subtitle-enter 180ms ease-out both;
 }
+.ai-bubble-v2__process-subtitle-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+/* 固定三点宽度，长标题先裁切；动画只改变透明度，不挤压正文或重排状态行。 */
+.ai-bubble-v2__process-subtitle-dots {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: 8rpx;
+  width: 36rpx;
+}
+.ai-bubble-v2__process-subtitle-dot {
+  flex: 0 0 12rpx;
+  opacity: 0.2;
+  animation: asr-dot-blink 1.2s ease-in-out infinite;
+}
+.ai-bubble-v2__process-subtitle-dot:nth-child(2) { animation-delay: 0.2s; }
+.ai-bubble-v2__process-subtitle-dot:nth-child(3) { animation-delay: 0.4s; }
 @keyframes ai-bubble-subtitle-enter {
   from { opacity: 0; }
   to { opacity: 1; }

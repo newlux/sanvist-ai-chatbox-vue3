@@ -51,6 +51,13 @@ const { t } = useI18n();
 const chatScope = provideChatScope("guide");
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
+// 首包返回会话 ID 时保持组件与读秒，切换已有会话/重置才重新挂载列表。
+const chatListKey = ref(0);
+watch(() => chatStore.aiSessionId, (next, previous) => {
+  if (previous != null && previous !== "" && String(next ?? "") !== String(previous)) {
+    chatListKey.value += 1;
+  }
+});
 // 注入 --safe-top-px：悬浮头部的高度补偿（--chat-header-height）要按真实状态栏算
 const { safeAreaStyle } = useSafeArea();
 /** 外观（设置弹层 → 深色）：与首页问答态同一套暗色底色 + 顶部渐隐，组件靠 :dark 各自切样式 */
@@ -1187,7 +1194,7 @@ onUnload(() => {
         </template>
       </view>
       <AiMessageList
-        :key="aiSessionId || 'new-conversation'"
+        :key="chatListKey"
         top-inset="var(--chat-top-inset, 300rpx)"
         :dark="isDark"
         :messages="messages"
