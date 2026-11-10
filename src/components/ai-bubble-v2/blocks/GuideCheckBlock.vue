@@ -135,8 +135,7 @@ function optionLetter(index: number) {
 
 /** 点进度条某一段 → 切到该步（越界不响应）；切步同样要停旧语音、播新的一步 */
 function onSelectStep(index: number) {
-  // 完成态：小结是整段指导的收束，留在最后一步上，不再切回中间步
-  if (isSummaryMode.value) return;
+  // 完成态也能切回中间步查看：确认区整体不渲染，小结固定在卡底部
   if (index < 1 || index > stepTotal.value) return;
   if (index === stepIndex.value) return;
   requestStepTtsSwitch(index);

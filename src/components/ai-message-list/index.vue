@@ -1256,17 +1256,15 @@ function standaloneBlocks(message: UiChatMessage, messageIndex: number) {
 
   // 精简版卡片不挂参考来源：正文被隐藏的这轮回答，参考来源跟着一起不展示
   const evidence = hidesBody(message) && !props.compactGuideCard ? collectSourceEvidence(blocks) : [];
-  // 全部确认完：不放步骤卡让位，把步骤小结（正文 + 标题）注入这张卡，由卡片自身在确认区渲染小结。
-  // 小结属于整段指导的收束，固定落在最后一步卡上；即使 shownStepId 记录异常也按 is_last 兜底
+  // 全部确认完：不放步骤卡让位，把步骤小结（正文 + 标题）注入「当前展示的那一张卡」，
+  // 由卡片自身在底部渲染小结（确认区不再展示）。完成态只是收束确认交互，步骤仍可切回查看，
+  // 所以不再钉死 is_last，跟随 shownStepId 切到哪一步、summary 就注入到哪一步的卡上。
   const finished = isStepCardFinished(message, messageIndex);
   const summary = finished ? finishSummaryOf(message) : "";
   const summaryTitle = finished ? finishSummaryTitleOf(message) : "";
-  const finalCard = finished
-    ? (cards.find(item => item.payload?.is_last) || card)
-    : card;
   const cardWithSources = evidence.length
-    ? { ...finalCard, payload: { ...finalCard.payload, sources: evidence } }
-    : finalCard;
+    ? { ...card, payload: { ...card.payload, sources: evidence } }
+    : card;
   if (!summary) return [cardWithSources];
   return [{ ...cardWithSources, payload: { ...cardWithSources.payload, summary, summary_title: summaryTitle } }];
 }
