@@ -51,8 +51,9 @@ import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture"
 import { getCurrentListenReportDate, getCurrentListenReportLanguage, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, permissionDeniedMessage } from "@/utils/platform/mpaas";
+import { openRepairAssistant } from "@/utils/repair-h5";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
-import { backFromScene, isSceneWindowRoot, navigateToScene } from "@/utils/scene-navigation";
+import { backFromScene, isSceneWindowRoot } from "@/utils/scene-navigation";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
 /**
@@ -883,19 +884,25 @@ function onReportQaQuerySubmit(query: string) {
   void sendMessage({ text });
 }
 
-/** 跳转确认：与首页同一套上下文落盘 + 场景跳转。 */
+/** 跳转确认：与首页同一套口径 —— pushWindow 直达三方维修 H5，本地壳页只做兜底。 */
 function onReportQaNavigationConfirm(payload: AssistantNavigationPayload) {
   if (payload.target !== "maintenance_assistant") return;
-  stashPendingRepairNavigationContext({
-    ...payload.context,
-    userId: userStore.userId,
-    sessionId: payload.sessionId,
-    conversationId: payload.conversationId,
-  });
   // 回调摘要轮询只保留在首页：听播页不写 pending，避免残留数据被首页误消费
   // 跳到维修助手前收尾：别把播报 / 答案朗读带过去
   stopPlaybackOnLeave();
-  void navigateToScene("/pages/repair/index");
+  void openRepairAssistant({
+    sessionId: String(payload.sessionId || ""),
+    conversationId: String(payload.conversationId || ""),
+    // 上下文只在降级回本地壳页时才落盘（直连三方页走 URL 参数）
+    onFallback: () => {
+      stashPendingRepairNavigationContext({
+        ...payload.context,
+        userId: userStore.userId,
+        sessionId: payload.sessionId,
+        conversationId: payload.conversationId,
+      });
+    },
+  });
 }
 
 function dismissReportQa() {

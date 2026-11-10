@@ -61,6 +61,7 @@ import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { closeWebview, ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
+import { openRepairAssistant } from "@/utils/repair-h5";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -293,12 +294,16 @@ function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
   assistantNavigationVisible.value = true;
 }
 
-/** 点维修助手回流卡：跳维修助手详情；已生成的回流结果看过就不再重复拉取。 */
+/** 点维修助手回流卡：pushWindow 直达三方维修 H5 的详情页；已生成的回流结果看过就不再重复拉取。 */
 function onAssistantCallbackOpen(conversationId: string) {
   const id = String(conversationId || "").trim();
   if (!id) return;
   clearPendingRepairCallback();
-  void navigateToScene(`/pages/repair/index?conversationId=${encodeURIComponent(id)}`);
+  void openRepairAssistant({
+    chatConversationId: id,
+    // 降级回本地壳页时要把详情会话带上，壳页据此拼 `/chat/{id}`
+    fallbackUrl: `/pages/repair/index?conversationId=${encodeURIComponent(id)}`,
+  });
 }
 
 /**
@@ -309,20 +314,28 @@ function onAssistantCallbackOpen(conversationId: string) {
  */
 const REPAIR_ENTER_CONFIRM_TEXT = "确认进入维修助手";
 
-/** 真正进维修助手页：上下文落盘 → 另开维修助手页（/pages/repair/index），返回后靠 pending 回调拉 summary */
+/**
+ * 真正进维修助手：pushWindow 直达三方维修 H5（上下文走 URL 参数），
+ * 只有降级回本地壳页时才落盘 pending 上下文；返回后靠 pending 回调拉 summary。
+ */
 function enterRepairAssistant(payload: AssistantNavigationPayload) {
-  stashPendingRepairNavigationContext({
-    ...payload.context,
-    userId: userStore.userId,
-    sessionId: payload.sessionId,
-    conversationId: payload.conversationId,
-  });
   const aiAskConversationId = String(payload.conversationId || "").trim();
   const aiAskSessionId = String(payload.sessionId || "").trim();
   if (aiAskConversationId && aiAskSessionId) {
     stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
   }
-  void navigateToScene("/pages/repair/index");
+  void openRepairAssistant({
+    sessionId: aiAskSessionId,
+    conversationId: aiAskConversationId,
+    onFallback: () => {
+      stashPendingRepairNavigationContext({
+        ...payload.context,
+        userId: userStore.userId,
+        sessionId: payload.sessionId,
+        conversationId: payload.conversationId,
+      });
+    },
+  });
 }
 
 /**
@@ -769,6 +782,11 @@ function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; 
   if (pageStage.value === "welcome") markReturnToWelcome();
   if (targetUrl === "/pages/podcast/index") {
     enterListenReport();
+    return;
+  }
+  // 维修助手：pushWindow 直达三方 H5，本地壳页只做兜底（与对话内跳转同一套口径）
+  if (targetUrl === "/pages/repair/index") {
+    void openRepairAssistant();
     return;
   }
   void navigateToScene(targetUrl);

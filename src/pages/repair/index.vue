@@ -1,25 +1,21 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { useI18n } from "vue-i18n";
-import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
-import { loadReportVoice } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useSystemStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
+import { buildRepairH5Url } from "@/utils/repair-h5";
 import { consumePendingRepairNavigationContext } from "@/utils/repair-navigation";
-import { buildSanvistH5Url } from "@/utils/sanvist-h5-encrypt";
 import { backFromScene } from "@/utils/scene-navigation";
 
 /**
- * 故障维修页：内嵌三方 H5。
- * 入口 URL 由 sanvist H5 加密脚本本地生成，不走业务对话链路。
+ * 故障维修页：内嵌三方 H5（**兜底壳页**）。
+ *
+ * 正常入口走 `utils/repair-h5` 的 pushWindow 直达三方页；只有原生容器不可用
+ * （浏览器 / PC 内嵌）或 pushWindow 失败时才落到本页，由 iframe 内嵌同一个三方 H5，
+ * 并用 postMessage 桥转发「取问题 / 关闭窗口」。
  */
 defineOptions({ name: "AiRepairPage" });
 
 const logger = createLogger("repair-page");
-const userStore = useUserStore();
-const systemStore = useSystemStore();
-const { locale } = useI18n();
 const { safeTopPx } = useSafeArea();
 const embedUrl = ref("");
 const loadError = ref("");
@@ -40,44 +36,16 @@ const embedStyle = computed(() => ({
   paddingTop: `${safeTopPx.value}px`,
 }));
 
-/**
- * 当前选中的音色 id：读本机记忆的音色（听播页 saveReportVoice 写入的同一份数据），
- * 没选过时与听播页保持一致的兜底口径 —— 取音色列表第一项。
- */
-function resolveSelectedVoiceId() {
-  return loadReportVoice()?.id || REPORT_VOICE_OPTIONS[0]?.id || "";
-}
-
-/**
- * 当前界面语言：优先取 systemStore.header.Lang（启动参数注入 + 设置弹层切换都会写这里），
- * 它是宿主与请求头共用的口径（zh_CN / en_US）；拿到前用当前 i18n locale 兜底。
- */
-function resolveSelectedLanguage() {
-  const fromHeader = String(systemStore.header?.Lang || "").trim();
-  if (fromHeader) return fromHeader;
-  return String(locale.value || "zh_CN");
-}
-
+/** 地址口径与 pushWindow 直达共用一处（utils/repair-h5），这里只补上壳页才有的上下文来源。 */
 function buildEmbedUrl() {
   try {
-    const result = buildSanvistH5Url({
-      userId: "66",
-      externalUserId: String(userStore.userId || "").trim() || undefined,
-      name: String(userStore.username || "").trim() || undefined,
-      // userId: String(repairNavigationContext.value.userId || userStore.userId || "").trim() || undefined,
-      sessionId: String(repairNavigationContext.value.sessionId || "").trim() || undefined,
-      conversationId: String(repairNavigationContext.value.conversationId || "").trim() || undefined,
-      chatConversationId: repairDetailConversationId.value || undefined,
-      // 外观：带具体生效值（light / dark），不再把 system 透给内嵌页
-      theme: systemStore.appAppearance,
-      // 音色：把选中的音色 id 原样带给内嵌页
-      voice: resolveSelectedVoiceId(),
-      // 界面语言：把选中的中英文值（zh_CN / en_US）以 language 参数带给内嵌页
-      language: resolveSelectedLanguage(),
+    embedUrl.value = buildRepairH5Url({
+      sessionId: String(repairNavigationContext.value.sessionId || "").trim(),
+      conversationId: String(repairNavigationContext.value.conversationId || "").trim(),
+      chatConversationId: repairDetailConversationId.value,
     });
-    embedUrl.value = result.url;
     loadError.value = "";
-    logger.info("sanvist h5 url ready", result.payload);
+    logger.info("sanvist h5 url ready");
   }
   catch (error) {
     loadError.value = "三方页面加载失败";

@@ -9,7 +9,6 @@ interface ImportMetaEnv {
   readonly VITE_GANTT_OFFLINE_APPID: number;
   readonly VITE_CJS_IGNORE_WARNING: boolean;
   readonly VITE_ROOT_DIR: string;
-  readonly VITE_SANVIST_H5_FRONTEND: string;
   readonly VITE_USER_NODE_ENV: string;
 }
 
