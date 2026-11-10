@@ -88,6 +88,12 @@ const waveScale = computed(() => {
 });
 
 const secondsText = computed(() => `${props.seconds}s`);
+
+/** 声纹区域与箭头共用发送出口；等待识别定稿时不重复提交。 */
+function onSubmit() {
+  if (props.busy) return;
+  emit("submit");
+}
 </script>
 
 <template>
@@ -109,26 +115,32 @@ const secondsText = computed(() => `${props.seconds}s`);
       <view class="voice-query__cross" />
     </view>
 
-    <!-- 声纹：铺满左圆与计时之间的整条空间，单根呼吸 + 整排跟随音量 -->
-    <view class="voice-query__wave" :style="{ '--wave-scale': waveScale }">
-      <view
-        v-for="(height, index) in BAR_HEIGHTS"
-        :key="index"
-        class="voice-query__bar"
-        :style="{ '--bar-h': `${height}rpx`, '--bar-i': index }"
-      />
+    <!-- 整段声纹与计时都可点发送；热区不随声纹的缩放动画缩小。 -->
+    <view
+      class="voice-query__send-area"
+      :class="{ 'voice-query__send-area--busy': busy }"
+      :aria-disabled="busy"
+      @tap.stop="onSubmit"
+    >
+      <view class="voice-query__wave" :style="{ '--wave-scale': waveScale }">
+        <view
+          v-for="(height, index) in BAR_HEIGHTS"
+          :key="index"
+          class="voice-query__bar"
+          :style="{ '--bar-h': `${height}rpx`, '--bar-i': index }"
+        />
+      </view>
+      <text class="voice-query__time">
+        {{ secondsText }}
+      </text>
     </view>
-
-    <!-- 设计稿 70:1652：14px / 行高 20 / 白色 / Source Han Sans CN Regular -->
-    <text class="voice-query__time">
-      {{ secondsText }}
-    </text>
 
     <!-- 设计稿 70:1657 Group 110：36×36 白色圆 + 上箭头（点按结束录音） -->
     <view
       class="voice-query__submit"
       :class="{ 'voice-query__submit--busy': busy }"
-      @tap="emit('submit')"
+      :aria-disabled="busy"
+      @tap.stop="onSubmit"
     >
       <view class="voice-query__arrow">
         <view class="voice-query__arrow-head" />
@@ -320,6 +332,20 @@ const secondsText = computed(() => `${props.seconds}s`);
 
 /* 声纹铺满左圆与计时之间的整条剩余空间（原来是固定 174rpx，右侧留一大段空白）。
    高度给足 44rpx：最高那根 40rpx，缩放后不裁切 */
+.voice-query__send-area {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.voice-query__send-area--busy {
+  opacity: 0.45;
+  cursor: default;
+}
 .voice-query__wave {
   display: flex;
   flex: 1 1 auto;
