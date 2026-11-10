@@ -37,14 +37,11 @@ const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
 /**
  * 竖向滚动放行（H5）。
  *
- * 表格是横向滚动容器：uni 的 scroll-view 在 H5 下把内层 div 写成
- * `overflow-x: auto; overflow-y: hidden`。浏览器里 `hidden` 同样是「滚动容器」，
- * 该容器的纵向滚动链到它就断了 —— 手指竖滑 / 鼠标滚轮都被它吃掉，
- * 既不滚表格（纵向没有可滚空间）也不滚外层，表现就是「按在表格中间滚不动」。
+ * 表格是嵌在纵向消息列表中的横向滚动容器。
  *
  * 两条路分开处理：
- * - **手指**交给 CSS（见样式表的 `touch-action: pan-x`）：浏览器只把横向手势给表格，
- *   纵向手势直接由外层消息列表处理，不经过 JS，跟手且不会被 preventDefault 拖慢；
+ * - **手指**使用 touch-action: auto，允许浏览器按手势方向滚动表格或外层列表。
+ *   pan-x 会禁止从表格开始的原生纵向平移，并不会把它转交给父级；
  * - **鼠标滚轮** CSS 管不到，这里把纵向 deltaY 转给外层滚动容器。
  */
 /** 外层能竖向滚的祖先：消息列表的内层滚动 div */
@@ -110,13 +107,9 @@ function onTableWheel(event: WheelEvent) {
   border-radius: 20rpx;
   background: transparent;
 
-  /**
-   * 只把横向手势交给这个滚动容器：`pan-x` 下浏览器不为该元素处理纵向平移，
-   * 竖滑直接由外层消息列表接管，不会被 `overflow-y: hidden` 的内层 div 截断。
-   * 内层 div 是 uni 运行时生成的，得穿透 scoped 才命中。
-   */
+  // 保留横向滚动，同时放行从表格开始的纵向手势；uni 内层需穿透 scoped。
   :deep(.uni-scroll-view) {
-    touch-action: pan-x;
+    touch-action: auto;
   }
 }
 .table-block__table {
