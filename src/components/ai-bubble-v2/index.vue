@@ -361,7 +361,6 @@ onBeforeUnmount(stopElapsedTimer);
 const showProcessStatus = computed(
   () => !isUser.value && (Boolean(processStatusText.value) || isGenerating.value),
 );
-const hasProcessContent = computed(() => Boolean(contentBlocks.value.length || props.content));
 
 /**
  * 过程副标题（接口 subtitle 事件）的展示文案。
@@ -633,13 +632,7 @@ function onTtsTap() {
         <view
           v-if="showProcessStatus && !props.assistantCallbackTitle"
           class="ai-bubble-v2__process-status"
-          :class="[
-            `ai-bubble-v2__process-status--${props.processStatus?.phase}`,
-            {
-              'ai-bubble-v2__process-status--with-content': hasProcessContent && !showProcessSubtitle,
-              'ai-bubble-v2__process-status--with-subtitle': showProcessSubtitle,
-            },
-          ]"
+          :class="`ai-bubble-v2__process-status--${props.processStatus?.phase}`"
         >
           <!-- 品牌署名：sani 图标 26×26（52rpx）+ 文案 SANI，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
           <image
@@ -673,13 +666,12 @@ function onTtsTap() {
             </view>
             <image v-else :src="iconRadioOn" mode="aspectFit" class="ai-bubble-v2__action-icon" />
           </view>
-        </view>
-        <view
-          v-if="showProcessSubtitle && !props.assistantCallbackTitle"
-          class="ai-bubble-v2__process-subtitle"
-          :class="{ 'ai-bubble-v2__process-subtitle--with-content': hasProcessContent }"
-        >
-          <text :key="processSubtitleText" class="ai-bubble-v2__process-subtitle-text">
+          <!-- 进度文案只使用品牌/语音图标右侧的余量，不再占正文上方的一行。 -->
+          <text
+            v-if="showProcessSubtitle"
+            :key="processSubtitleText"
+            class="ai-bubble-v2__process-subtitle"
+          >
             {{ processSubtitleText }}
           </text>
         </view>
@@ -1176,39 +1168,33 @@ function onTtsTap() {
 .ai-bubble-v2__process-status {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
   gap: 8rpx;
+  height: 52rpx;
   min-width: 0;
+  overflow: hidden;
   color: #5d5d5d;
   font-size: 24rpx;
   line-height: 36rpx;
 }
-.ai-bubble-v2__process-status--with-content {
-  // padding-bottom: 24rpx;
-  // border-bottom: 1px solid #e8e8e8;
-}
-.ai-bubble-v2__process-status--with-subtitle {
-  padding-bottom: 24rpx;
-}
+/* 行高固定，进度显隐不改正文位置；长文案只裁切剩余宽度，图标与 SANI 不收缩。 */
 .ai-bubble-v2__process-subtitle {
   display: block;
+  flex: 1 1 0%;
+  height: 36rpx;
   min-width: 0;
   overflow: hidden;
   color: #8f8f8f;
   font-size: 24rpx;
   line-height: 36rpx;
-}
-.ai-bubble-v2__process-subtitle-text {
-  display: block;
-  width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
-  animation: ai-bubble-subtitle-enter 0.28s ease-out both;
+  animation: ai-bubble-subtitle-enter 180ms ease-out both;
 }
 @keyframes ai-bubble-subtitle-enter {
-  from { opacity: 0; transform: translateY(24rpx); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 /* 状态行里的「✓」：设计稿 1187:17 与文字同色，不单独着色 */
 .ai-bubble-v2__process-icon {
@@ -1225,6 +1211,7 @@ function onTtsTap() {
   flex-shrink: 0;
 }
 .ai-bubble-v2__process-text {
+  flex-shrink: 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1294,6 +1281,7 @@ function onTtsTap() {
    16×16（32rpx）见 .ai-bubble-v2__action-btn；与 SANI 文字之间留 4px，
    加上状态行本身的 gap 4px，视觉间距 8px，不用 margin 撑 */
 .ai-bubble-v2__process-tts {
+  flex-shrink: 0;
   padding-left: 8rpx;
 }
 /* ===== 空回答兜底提示 =====

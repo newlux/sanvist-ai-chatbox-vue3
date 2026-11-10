@@ -2063,7 +2063,11 @@ onBeforeUnmount(() => {
       <view v-if="voiceQueryActive && asrTipReady" class="voice-live">
         <view class="voice-live__box">
           <text class="voice-live__text">
-            {{ voiceTranscript || $t("identifying") }}
+            {{ voiceTranscript || $t("identifying") }}<text class="voice-live__dots" aria-hidden="true"><text
+              v-for="dot in 3"
+              :key="dot"
+              class="voice-live__dot"
+            >.</text></text>
           </text>
         </view>
       </view>
@@ -2374,15 +2378,14 @@ $color-white: #ffffff;
 
 /* ===== 录音中的实时转写 =====
    落点与「提问气泡顶到头部下沿」同一口径（max(头部留白, 150px)，见 ai-message-list 的
-   PIN_MESSAGE_TOP_MIN_Y_PX），再上提 48rpx：头部是透明的，上一条回答的尾巴会从头部的留白条里
-   透出来，这一条要连它一起盖住 —— 上提一行（48rpx = 1 个行高）正好压掉那一行。
+   PIN_MESSAGE_TOP_MIN_Y_PX），不再向上抬进头部的实色背景，避免字幕和提问胶囊被遮挡。
    左右 40rpx 与 .chat-box 的内边距一致，文字左对齐、从左往右长。
    只露最后两行：文字块定高 96rpx（2 × 48rpx），文字底部对齐，多出来的旧文字被裁在框顶外，
    最新的始终贴在框底；框下 40rpx 是页面底色的渐隐，压住紧随其后的回复，不做硬切。
    高度由消息列表按 voiceTopPad 让出同样的空档（定高后不再随文字变长） */
 .voice-live {
   position: absolute;
-  top: calc(max(var(--chat-top-inset, 300rpx), 150px) - 48rpx);
+  top: max(var(--chat-top-inset, 300rpx), 150px);
   right: 40rpx;
   left: 40rpx;
   z-index: 3; // 压在消息列表之上、顶部毛玻璃（1）与悬浮头部（1010）之下
@@ -2419,6 +2422,29 @@ $color-white: #ffffff;
 
 .ai-page--dark .voice-live {
   background: linear-gradient(180deg, #1a1a1a 0%, #1a1a1a 80%, rgba(26, 26, 26, 0) 100%);
+}
+
+/* 三点固定占宽，只改变透明度，避免动画带动实时字幕换行。 */
+.voice-live__dots {
+  display: inline-block;
+  margin-left: 8rpx;
+  color: #8f8f8f;
+  white-space: nowrap;
+}
+
+.voice-live__dot {
+  display: inline-block;
+  width: 12rpx;
+  opacity: 0.2;
+  animation: voice-live-dot-blink 1.2s ease-in-out infinite;
+}
+
+.voice-live__dot:nth-child(2) { animation-delay: 0.2s; }
+.voice-live__dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes voice-live-dot-blink {
+  0%, 20%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
 }
 
 .ai-page--dark .voice-live__text {
