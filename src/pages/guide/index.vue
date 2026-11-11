@@ -38,7 +38,7 @@ import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
-import { markWelcomeDone } from "@/utils/welcome-done";
+import { isWelcomeDone, markWelcomeDone } from "@/utils/welcome-done";
 
 /**
  * 作业指导页（基于首页 home 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
@@ -1124,10 +1124,7 @@ async function loadGuideRecommend() {
   }
 }
 
-/** 新进入默认发起能力介绍；推荐页指定的问题优先，历史会话不自动提问。 */
-const GUIDE_OPENING_QUESTION = "你能为我做什么";
-let pendingQuestion = "";
-
+/** 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 GUIDE。 */
 onLoad((options) => {
   syncWindowHeight();
   const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("GUIDE");
@@ -1139,19 +1136,17 @@ onLoad((options) => {
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
-  // 带入的问题或默认能力介绍都直接进入对话态，每次新进入只发送一次。
-  pendingQuestion = readQueryValue(options, "question") || GUIDE_OPENING_QUESTION;
-  enterChatNow();
+  // 已完成过 SANI 唤醒（首页对话态 / 本页欢迎层起飞都会置位）→ 直达对话态，
+  // 不再铺整屏欢迎层：老用户从首页快捷入口切过来体验更顺，与任务协同页口径一致。
+  // 注：不判断 isVisitor —— App 启动即 setVisitor(true)（游客恒定态），加它会导致永远跳过不了。
   guideRecommendContext.value = readGuideRecommendContext(options);
   void loadGuideRecommend();
+  if (isWelcomeDone()) enterChatNow();
 });
 
 onMounted(() => {
   syncWindowHeight();
   loadAwakeningPrompt();
-  const question = pendingQuestion;
-  pendingQuestion = "";
-  if (question) sendQuickPrompt(question);
 });
 
 onShow(() => {
