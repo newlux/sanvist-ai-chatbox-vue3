@@ -11,6 +11,7 @@ import listenLogo from "@/assets/img/listen.gif";
 import saniLogo from "@/assets/img/sani-logo.gif";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
+import { resolveMotionElement } from "@/utils/voice-message-motion";
 
 /**
  * 初始页（首页 welcome 态）：中间 SANI 图标 +「Hey,SANI」，底部一条静态输入栏。
@@ -58,7 +59,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits<{
-  (e: "start-chat"): void;
+  (e: "start-chat", mode?: "hold", target?: EventTarget): void;
   (e: "start-text"): void;
   (e: "send-text", text: string): void;
 }>();
@@ -80,14 +81,14 @@ const LISTEN_READY_TIMEOUT_MS = 120;
 let startFired = false;
 let readyTimer: ReturnType<typeof setTimeout> | null = null;
 
-function fireStart() {
+function fireStart(mode?: "hold", target?: EventTarget) {
   if (startFired) return;
   startFired = true;
   if (readyTimer) {
     clearTimeout(readyTimer);
     readyTimer = null;
   }
-  emit("start-chat");
+  emit("start-chat", mode, target);
 }
 
 function onListenLoad() {
@@ -107,6 +108,39 @@ function beginDepart() {
 function onSpeakTap() {
   if (props.leaving || startFired) return;
   beginDepart();
+}
+
+const speakButtonRef = ref<unknown>(null);
+let holdTimer: ReturnType<typeof setTimeout> | null = null;
+let holdOrigin: { x: number; y: number } | null = null;
+function clearSpeakHold() {
+  if (holdTimer) clearTimeout(holdTimer);
+  holdTimer = null;
+  holdOrigin = null;
+}
+function readSpeakPoint(event: unknown) {
+  const source = event as TouchEvent & MouseEvent;
+  const point = source.touches?.[0] || source;
+  return { x: point.clientX, y: point.clientY };
+}
+function onSpeakPressStart(event: unknown) {
+  if (props.leaving || startFired) return;
+  clearSpeakHold();
+  holdOrigin = readSpeakPoint(event);
+  const source = event as { currentTarget?: EventTarget; target?: EventTarget };
+  const target = resolveMotionElement(speakButtonRef.value)
+    || (typeof source.currentTarget?.addEventListener === "function" ? source.currentTarget : source.target);
+  holdTimer = setTimeout(() => {
+    clearSpeakHold();
+    listenMounted.value = true;
+    // 长按不等 GIF 加载：先交给页面接管松手，避免等待首帧期间抬手丢失。
+    fireStart("hold", target);
+  }, 350);
+}
+function onSpeakPressMove(event: unknown) {
+  if (!holdOrigin) return;
+  const point = readSpeakPoint(event);
+  if (Math.abs(point.x - holdOrigin.x) > 12 || Math.abs(point.y - holdOrigin.y) > 12) clearSpeakHold();
 }
 
 /**
@@ -186,6 +220,7 @@ function onRightTap() {
 }
 
 onBeforeUnmount(() => {
+  clearSpeakHold();
   if (readyTimer) {
     clearTimeout(readyTimer);
     readyTimer = null;
@@ -267,7 +302,14 @@ onBeforeUnmount(() => {
           @confirm="sendDraft()"
         />
       </view>
-      <view v-else class="welcome__composer-voice" @tap="onSpeakTap">
+      <view
+        v-else class="welcome__composer-voice"
+          ref="speakButtonRef"
+        @touchstart="onSpeakPressStart" @touchmove="onSpeakPressMove"
+        @touchend="clearSpeakHold" @touchcancel="clearSpeakHold"
+        @mousedown="onSpeakPressStart" @mouseup="clearSpeakHold"
+        @tap="onSpeakTap"
+      >
         <text class="welcome__composer-voice-label">
           {{ t("welcome-tap-to-speak") }}
         </text>

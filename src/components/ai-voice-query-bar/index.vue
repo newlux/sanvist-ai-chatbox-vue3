@@ -28,6 +28,8 @@ const props = defineProps({
   seconds: { type: Number, default: 0 },
   /** 已发过 finish、在等定稿：按钮降透明度，避免重复点 */
   busy: { type: Boolean, default: false },
+  holdToSend: { type: Boolean, default: false },
+  cancelPending: { type: Boolean, default: false },
   /** 深色外观：设计稿只有浅色，这里仅给夜间模式兜底 */
   dark: { type: Boolean, default: false },
 });
@@ -166,11 +168,13 @@ onBeforeUnmount(() => {
   }
 });
 
+// 每轮录音条重新挂载；记住本轮使用长按遮罩，松手后不再补出旧的点击录音光晕。
+const useHoldBackdrop = props.holdToSend;
 const secondsText = computed(() => `${props.seconds}s`);
 
 /** 声纹区域与箭头共用发送出口；等待识别定稿时不重复提交。 */
 function onSubmit() {
-  if (props.busy) return;
+  if (props.busy || props.holdToSend) return;
   emit("submit");
 }
 </script>
@@ -178,7 +182,7 @@ function onSubmit() {
 <template>
   <!-- ===== 录音中底部半圆光晕：#0F7EEE 径向渐变，圆心在底部正中，向上收成半圆顶 =====
        单层纯渐变就够：靠 alpha 收边，不会像「模糊层 + overflow 裁」那样切出硬线 -->
-  <view class="voice-query__glow" :class="{ 'voice-query__glow--dark': dark }" aria-hidden="true" />
+  <view v-if="!useHoldBackdrop" class="voice-query__glow" :class="{ 'voice-query__glow--dark': dark }" aria-hidden="true" />
 
   <!-- ===== 胶囊后面的垫底渐隐 =====
        输入栏有一条不透明的底，正文滚到它后面就被挡住了；录音条只有一枚半透明胶囊，
@@ -188,7 +192,7 @@ function onSubmit() {
   <view class="voice-query__mask" :class="{ 'voice-query__mask--dark': dark }" aria-hidden="true" />
 
   <!-- 设计稿 70:1651 Voice Pill：327×44 / r45 / rgba(13,13,13,0.38) / 左右 24 距底 36 -->
-  <view class="voice-query" :class="{ 'voice-query--dark': dark }">
+  <view class="voice-query" :class="{ 'voice-query--dark': dark, 'voice-query--cancel-pending': holdToSend && cancelPending }">
     <!-- 设计稿 70:1653 Group 109：36×36 圆 + ×。
          改用导出的整圆图标 icon-close-recording.svg（36×36，白 33.6% 圆底 + 白色 ×），
          圆底随图一起进来，容器不再铺底色 -->
@@ -518,6 +522,10 @@ function onSubmit() {
 /* 深色外观：设计稿无此态，仅夜间模式兜底（数值按同比例反色） */
 .voice-query--dark {
   background: rgba(242, 242, 245, 0.16);
+}
+
+.voice-query--cancel-pending {
+  background: rgba(13, 13, 13, 0.5);
 }
 
 .voice-query--dark .voice-query__bar {

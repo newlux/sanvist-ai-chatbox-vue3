@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AiVoiceHoldOverlay from "@/components/ai-voice-hold-overlay/index.vue";
+import { useVoiceQueryGesture } from "@/hooks/useVoiceQueryGesture";
 import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
@@ -198,6 +200,7 @@ const {
   cancelVoiceQuery,
   resetVoiceQuery,
 } = useVoiceQuery({
+  isHolding: () => voiceHoldActive.value,
   beginPlaceholder: () => {
     chatStore.showQuickPrompts = false;
     chatStore.showQuickList = false;
@@ -766,9 +769,10 @@ watch(shareSheetVisible, async (visible) => {
 async function onWelcomeStart() {
   markWelcomeDone();
   asrTipReady.value = false;
-  void startVoiceQuery();
+  const recording = startVoiceQuery();
   await goToChat({ holdMs: WELCOME_LISTEN_HOLD_MS });
   asrTipReady.value = true;
+  await recording;
 }
 
 /** 欢迎层「键盘」：同一套抛物线把 logo 送上去，落位后再聚焦输入框（键盘由此弹出） */
@@ -1032,10 +1036,33 @@ onUnload(() => {
   stopNativeResume();
   if (typeof document !== "undefined") document.removeEventListener("visibilitychange", handleHostVisible);
 });
+const voiceHoldActive = ref(false);
+const voiceHoldCancelPending = ref(false);
+const startWelcomeVoiceFromGesture = useVoiceQueryGesture({
+  active: voiceQueryActive,
+  holding: voiceHoldActive,
+  cancelPending: voiceHoldCancelPending,
+  start: onWelcomeStart,
+  send: stopVoiceQuery,
+  cancel: cancelVoiceQuery,
+});
+const startVoiceQueryFromGesture = useVoiceQueryGesture({
+  active: voiceQueryActive,
+  holding: voiceHoldActive,
+  cancelPending: voiceHoldCancelPending,
+  start: startVoiceQuery,
+  send: stopVoiceQuery,
+  cancel: cancelVoiceQuery,
+});
 </script>
 
 <template>
   <view class="ai-page" :class="{ 'ai-page--dark': isDark }" :style="safeAreaStyle">
+    <AiVoiceHoldOverlay
+      :active="voiceHoldActive"
+      :cancel-pending="voiceHoldCancelPending"
+      :dark="isDark"
+    />
     <AiChatHeader
       v-if="!pureMode || pageStage === 'chat'"
       :show-island="pageStage === 'chat'"
@@ -1069,12 +1096,12 @@ onUnload(() => {
     <!-- 欢迎层：与首页初始页同款（Hey,SANI + logo + 点击说话 / 键盘）；
          起飞动画期间继续挂载，logo 滑到顶部灵动岛再收起 -->
     <AiWelcome
-      v-if="showWelcome"
-      :leaving="welcomeLeaving"
-      :landed="welcomeLanded"
+      v-if="showWelcome || voiceHoldActive"
+      :leaving="welcomeLeaving || !showWelcome"
+      :landed="welcomeLanded || !showWelcome"
       :logo-style="welcomeLogoStyle"
       :dark="isDark"
-      @start-chat="onWelcomeStart"
+      @start-chat="startWelcomeVoiceFromGesture"
       @start-text="onWelcomeText"
     />
     <!-- 对话页：与欢迎层同时存在，整体淡入 -->
@@ -1259,7 +1286,8 @@ onUnload(() => {
       </view>
 
       <AiChatInput
-        v-else-if="!voiceQueryActive"
+        v-else
+        :voice-query-active="voiceQueryActive"
         ref="chatInputRef"
         v-model="inputText"
         :dark="isDark"
@@ -1280,16 +1308,18 @@ onUnload(() => {
         @input-blur="setTextInputFocused(false)"
         @voice-input-focus="setVoiceInputFocused(true)"
         @voice-input-blur="setVoiceInputFocused(false)"
-        @voice-query-start="startVoiceQuery"
+        @voice-query-start="startVoiceQueryFromGesture"
         @dock-height-change="setInputDockHeight"
       />
 
       <!-- 点击说话录音中：输入栏换成「取消 / 声纹 / 计时 + 发送」这一条（与首页同稿） -->
       <AiVoiceQueryBar
-        v-else
+        v-if="voiceQueryActive && !shareSheetVisible"
         :level="voiceLevel"
         :seconds="voiceSeconds"
         :busy="voiceFinishing"
+        :hold-to-send="voiceHoldActive"
+        :cancel-pending="voiceHoldCancelPending"
         :dark="isDark"
         @cancel="cancelVoiceQuery"
         @submit="stopVoiceQuery"

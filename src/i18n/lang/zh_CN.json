@@ -302,6 +302,8 @@
   "guide-init-welcome-title": "欢迎了解作业指导AI助手",
   "guide-init-welcome-subtitle": "师傅远在千里，\n经验近在车里",
   "welcome-tap-to-speak": "点击说话",
+  "voice-hold-release-send": "松开发送，上滑取消",
+  "voice-hold-release-cancel": "松开取消发送",
   "welcome-ai-disclaimer": "内容由AI生成，请核实重要信息",
   "welcome-voice-done": "说完了",
   "welcome-voice-listening": "正在聆听…",

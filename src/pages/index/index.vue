@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AiVoiceHoldOverlay from "@/components/ai-voice-hold-overlay/index.vue";
+import { useVoiceQueryGesture } from "@/hooks/useVoiceQueryGesture";
 import type {
   AskSlotOption,
   AskSlotPayload,
@@ -957,6 +959,7 @@ let voiceHeard = false;
  * 优先 stream，采集起不来（getUserMedia 失败 / 1.2s 没有回调 / 采到静音）自动降级到 native。
  */
 let voiceBackend: "stream" | "native" = "stream";
+let nativeVoiceStartup: Promise<void> | null = null;
 /** 原生录音器：只有降级后才创建 */
 let nativeVoiceRecorder: VoiceRecorderInstance | null = null;
 /** 原生通道的音量轮询：没有 partial，声纹和静音收尾全靠它 */
@@ -1146,7 +1149,7 @@ async function startVoiceQuery() {
    */
   const useNativePcm = isNativePcmStreamSupported();
   if (!isAsrStreamSupported() || (!useNativePcm && !isPcmCaptureSupported())) {
-    void startNativeVoiceQuery(seq);
+    await (nativeVoiceStartup = startNativeVoiceQuery(seq));
     return;
   }
 
@@ -1206,7 +1209,7 @@ async function startVoiceQuery() {
     if (!useNativePcm) {
       voiceNoSpeechTimer = setTimeout(() => {
         voiceNoSpeechTimer = null;
-        if (!voiceHeard) stopVoiceQuery();
+        if (!voiceHeard && !voiceHoldActive.value) stopVoiceQuery();
       }, VOICE_NO_SPEECH_MS);
     }
   }
@@ -1252,7 +1255,7 @@ function degradeToNativeVoice(reason: string) {
   voiceTickTimer = setInterval(() => {
     voiceSeconds.value += 1;
   }, 1000);
-  void startNativeVoiceQuery(seq);
+  nativeVoiceStartup = startNativeVoiceQuery(seq);
 }
 
 /**
@@ -1416,7 +1419,11 @@ function stopVoiceQuery() {
   }
   // 原生通道：停录音 → 整段识别 → 回填文本（没有 finish/final 那套）
   if (voiceBackend === "native") {
-    void finishNativeVoiceQuery();
+    const seq = voiceSeq;
+    // 降级或授权还在启动时也记住发送，不能在 recorder 尚未赋值时丢掉本轮。
+    void Promise.resolve(nativeVoiceStartup).then(() => {
+      if (seq === voiceSeq && voiceQueryActive.value) void finishNativeVoiceQuery();
+    });
     return;
   }
   voiceCapture?.stop();
@@ -1432,6 +1439,11 @@ function cancelVoiceQuery() {
 
 /** 静音检测：说过话之后连续 1.5s 没声音就自动收尾，用户不用再点一次 */
 function onVoiceLevel(level: number) {
+  if (voiceHoldActive.value) {
+    voiceSilenceSince = 0;
+    voiceLevel.value += (Math.min(1, Math.max(0, level / 0.15)) - voiceLevel.value) * 0.35;
+    return;
+  }
   // 声纹用的音量：RMS 0.15 已经算大声，再乘一次平滑，跳动才跟得上 100ms 的采样
   const normalized = Math.min(1, Math.max(0, level / 0.15));
   voiceLevel.value += (normalized - voiceLevel.value) * 0.35;
@@ -1457,8 +1469,9 @@ function onVoiceLevel(level: number) {
 function onWelcomeStart() {
   // 先关掉「识别中」文字再起飞：语音链路是异步的，慢一点就会抢在动效前面冒出文字
   asrTipReady.value = false;
-  void startVoiceQuery();
+  const recording = startVoiceQuery();
   void goToChat();
+  return recording;
 }
 
 /**
@@ -1929,10 +1942,33 @@ onBeforeUnmount(() => {
   islandListenFromWelcome.value = false;
   asrTipReady.value = true;
 });
+const voiceHoldActive = ref(false);
+const voiceHoldCancelPending = ref(false);
+const startWelcomeVoiceFromGesture = useVoiceQueryGesture({
+  active: voiceQueryActive,
+  holding: voiceHoldActive,
+  cancelPending: voiceHoldCancelPending,
+  start: onWelcomeStart,
+  send: stopVoiceQuery,
+  cancel: cancelVoiceQuery,
+});
+const startVoiceQueryFromGesture = useVoiceQueryGesture({
+  active: voiceQueryActive,
+  holding: voiceHoldActive,
+  cancelPending: voiceHoldCancelPending,
+  start: startVoiceQuery,
+  send: stopVoiceQuery,
+  cancel: cancelVoiceQuery,
+});
 </script>
 
 <template>
   <view class="ai-page" :class="{ 'ai-page--dark': isDark }">
+    <AiVoiceHoldOverlay
+      :active="voiceHoldActive"
+      :cancel-pending="voiceHoldCancelPending"
+      :dark="isDark"
+    />
     <AiChatHeader
       v-if="!pureMode || pageStage === 'chat'"
       :show-island="pageStage === 'chat'"
@@ -1963,14 +1999,14 @@ onBeforeUnmount(() => {
 
     <!-- 欢迎页：起飞动画期间继续挂载，logo 滑到顶部再收起 -->
     <AiWelcome
-      v-if="showWelcome"
-      :leaving="welcomeLeaving"
-      :landed="welcomeLanded"
+      v-if="showWelcome || voiceHoldActive"
+      :leaving="welcomeLeaving || !showWelcome"
+      :landed="welcomeLanded || !showWelcome"
       :logo-style="welcomeLogoStyle"
       :dark="isDark"
       inline-input
       :keyboard-height="keyboardHeight"
-      @start-chat="onWelcomeStart"
+      @start-chat="startWelcomeVoiceFromGesture"
       @send-text="onWelcomeTextSend"
     >
       <!-- 初始页也带底部胶囊入口：与对话页同一口径，纯净模式关闭时才出现 -->
@@ -2243,7 +2279,8 @@ onBeforeUnmount(() => {
       </view>
 
       <AiChatInput
-        v-else-if="!voiceQueryActive"
+        v-else
+        :voice-query-active="voiceQueryActive"
         ref="chatInputRef"
         v-model="inputText"
         :dark="isDark"
@@ -2253,7 +2290,7 @@ onBeforeUnmount(() => {
         :compact-voice-listening="true"
         :tap-to-talk="true"
         @send="sendMessage"
-        @voice-query-start="startVoiceQuery"
+        @voice-query-start="startVoiceQueryFromGesture"
         @stop="stopGenerating"
         @voice-start="stopRealtimeTtsOnVoiceStart"
         @voice-restart="stopRealtimeTtsOnVoiceStart"
@@ -2271,10 +2308,12 @@ onBeforeUnmount(() => {
 
       <!-- 录音中：输入栏换成「取消 / 声纹 / 计时 + 发送」这一条（稿子 Frame 114） -->
       <AiVoiceQueryBar
-        v-else
+        v-if="voiceQueryActive && !shareSheetVisible"
         :level="voiceLevel"
         :seconds="voiceSeconds"
         :busy="voiceFinishing"
+        :hold-to-send="voiceHoldActive"
+        :cancel-pending="voiceHoldCancelPending"
         :dark="isDark"
         @cancel="cancelVoiceQuery"
         @submit="stopVoiceQuery"

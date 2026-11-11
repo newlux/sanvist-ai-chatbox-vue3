@@ -45,6 +45,8 @@ interface VoiceRecorderInstance {
 }
 
 export interface UseVoiceQueryOptions {
+  /** 长按期间由松手决定发送/取消，暂停静音自动发送。 */
+  isHolding?: () => boolean;
   /** 开一轮：页面创建「识别中」占位气泡并返回它的 id（创建不了就返回空串） */
   beginPlaceholder: () => string;
   /** partial 是「完整文本的当前版本」：整体替换占位气泡内容 */
@@ -91,6 +93,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
   let voiceSilenceSince = 0;
   let voiceHeard = false;
   let voiceBackend: "stream" | "native" = "stream";
+  let nativeVoiceStartup: Promise<void> | null = null;
   let nativeVoiceRecorder: VoiceRecorderInstance | null = null;
   let nativeLevelTimer: ReturnType<typeof setInterval> | null = null;
   /** 原生通道这一轮听到的最大音量：排查「有没有真的收到声音」时打日志用 */
@@ -162,6 +165,10 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
     // 声纹用的音量：RMS 0.15 已经算大声，再乘一次平滑，跳动才跟得上 100ms 的采样
     const normalized = Math.min(1, Math.max(0, level / 0.15));
     voiceLevel.value += (normalized - voiceLevel.value) * 0.35;
+    if (options.isHolding?.()) {
+      voiceSilenceSince = 0;
+      return;
+    }
 
     if (level >= VOICE_LEVEL_THRESHOLD) {
       voiceHeard = true;
@@ -343,7 +350,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
     voiceTickTimer = setInterval(() => {
       voiceSeconds.value += 1;
     }, 1000);
-    void startNativeVoiceQuery(seq);
+    nativeVoiceStartup = startNativeVoiceQuery(seq);
   }
 
   /** 说完了：先停采集再发 finish，等 final 回来才落成气泡 */
@@ -357,7 +364,11 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
     }
     // 原生通道：停录音 → 整段识别 → 回填文本（没有 finish/final 那套）
     if (voiceBackend === "native") {
-      void finishNativeVoiceQuery();
+      const seq = voiceSeq;
+      // 降级或授权还在启动时也记住发送，不能在 recorder 尚未赋值时丢掉本轮。
+      void Promise.resolve(nativeVoiceStartup).then(() => {
+        if (seq === voiceSeq && voiceQueryActive.value) void finishNativeVoiceQuery();
+      });
       return;
     }
     voiceCapture?.stop();
@@ -423,7 +434,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
       token: describeRequestAuth(),
     });
     if (!isAsrStreamSupported() || (!useNativePcm && !isPcmCaptureSupported())) {
-      void startNativeVoiceQuery(seq);
+      await (nativeVoiceStartup = startNativeVoiceQuery(seq));
       return;
     }
 
@@ -495,7 +506,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
       if (!useNativePcm) {
         voiceNoSpeechTimer = setTimeout(() => {
           voiceNoSpeechTimer = null;
-          if (!voiceHeard) stopVoiceQuery();
+          if (!voiceHeard && !options.isHolding?.()) stopVoiceQuery();
         }, VOICE_NO_SPEECH_MS);
       }
     }

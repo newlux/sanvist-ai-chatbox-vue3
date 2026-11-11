@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
+import { resolveMotionElement } from "@/utils/voice-message-motion";
 import { usePressDelay } from "@/hooks/usePressDelay";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { createLogger } from "@/utils/logger";
@@ -30,6 +31,8 @@ const props = defineProps({
    * 与初始页同一套功能，不再走内部的「按住说话」长按手势。
    */
   tapToTalk: { type: Boolean, default: false },
+  /** 页面录音条展示时保留触点 DOM，避免 WebView 丢掉长按的松手事件。 */
+  voiceQueryActive: { type: Boolean, default: false },
   /**
    * 语音播报（TTS）进行中：底部换成「请选择你的身份吧」页同一套三色带波纹。
    * 播报期间常态那条淡蓝波浪让位，避免两种底纹叠在一起。
@@ -618,6 +621,7 @@ const VOICE_QUERY_HOLD_TOLERANCE_PX = 12;
 
 let lastVoiceQueryStartAt = 0;
 /** 按住计时器：按下起表，抬手 / 滑动 / 到点都会清掉 */
+const voiceQueryButtonRef = ref<unknown>(null);
 let holdTimer: ReturnType<typeof setTimeout> | null = null;
 /** 本次按下的起点，用于判断手指有没有滑走 */
 let holdOrigin: { x: number; y: number } | null = null;
@@ -636,12 +640,12 @@ function clearHoldTimer() {
  * 开一轮语音提问：不进入内部的长按状态机（那套是整段录音 + 上传识别），
  * 直接把「开始一轮语音提问」交给页面，由页面的流式 ASR 链路接管。
  */
-function emitVoiceQueryStart() {
+function emitVoiceQueryStart(mode?: "hold", target?: EventTarget) {
   if (props.isLoading) return;
   const now = Date.now();
   if (now - lastVoiceQueryStartAt < VOICE_QUERY_START_DEDUPE_MS) return;
   lastVoiceQueryStartAt = now;
-  emit("voice-query-start");
+  emit("voice-query-start", mode, target);
 }
 
 /**
@@ -664,24 +668,23 @@ function readPressPoint(event: unknown) {
 }
 
 /**
- * 按住说话：按下起计时，到点手指还在原处才开录。
- *
- * 不能「按下即开录」：一开录页面就把输入栏换成录音条（`v-else-if="!voiceQueryActive"`），
- * 手指还按着时元素就被移除，随后的 click 会落到同一坐标的录音条上，
- * 一下就把刚开的这轮结束掉 —— 点击说话会被带坏。
- * 所以短按仍旧走 tap（抬手后开录），只有真的按住（≥350ms）才在按下阶段开录。
+ * 短按在抬手后的 tap 开录；按住 ≥350ms 才提前开录，并交给页面处理松手发送。
+ * 录音期间只隐藏输入栏，保留原触点节点，避免 WebView 中断触摸事件。
  */
 function onVoiceQueryPressStart(event: unknown) {
   if (props.isLoading) return;
   clearHoldTimer();
   holdStarted = false;
   holdOrigin = readPressPoint(event);
+  const source = event as { currentTarget?: EventTarget; target?: EventTarget };
+  const target = resolveMotionElement(voiceQueryButtonRef.value)
+    || (typeof source.currentTarget?.addEventListener === "function" ? source.currentTarget : source.target);
   holdTimer = setTimeout(() => {
     holdTimer = null;
     // 抬手 / 滑动都会 clearHoldTimer 把这个计时器清掉，能跑到这里就说明手指还按着
     if (!holdOrigin) return;
     holdStarted = true;
-    emitVoiceQueryStart();
+    emitVoiceQueryStart("hold", target);
   }, VOICE_QUERY_HOLD_MS);
 }
 
@@ -697,7 +700,7 @@ function onVoiceQueryPressMove(event: unknown) {
   }
 }
 
-/** 抬手 / 手势中断：停掉按住计时；已经开录的那一轮由录音条自己收尾（↑ 发送 / 静音收尾） */
+/** 未开录时取消长按计时；已开录后的松手由页面监听并发送。 */
 function onVoiceQueryPressEnd() {
   clearHoldTimer();
 }
@@ -776,7 +779,7 @@ onBeforeUnmount(() => {
   if (maskLingerTimer) clearTimeout(maskLingerTimer);
   composerResizeObserver?.disconnect();
   composerResizeObserver = null;
-  // 按住计时的兜底：组件在录音态一现身就被卸载，别把定时器留到下一轮
+  // 按住计时的兜底：页面离开时别把定时器留到下一轮
   clearHoldTimer();
 });
 </script>
@@ -788,6 +791,7 @@ onBeforeUnmount(() => {
       'chat-input--keyboard-open': keyboardOpen || voiceKeyboardOpen,
       'chat-input--voice-panel-open': isVoicePanelOpen,
       'chat-input--dark': dark,
+      'chat-input--query-active': voiceQueryActive,
     }"
     :style="inputLiftStyle"
   >
@@ -1042,10 +1046,11 @@ onBeforeUnmount(() => {
           录音手势直接挂在「按住说话」这块框上，不再用原来的小语音段图标
         -->
         <!-- 首页问答态：中间那颗「点击说话」，点一下交回页面开流式语音提问。
-             按住 ≥350ms 也会开录（按住说话），抬手后的 tap 自动跳过；
-             按下阶段只是起计时器，不开录 —— 开录会让输入栏在手势中途被录音条替换 -->
+             按住 ≥350ms 开录、松手发送，页面拦截这次抬手及随后补发的点击；
+             按下阶段只起计时器，录音时保留输入节点，外观交给录音条 -->
         <view
           v-if="inputMode === 'voice' && tapToTalk"
+          ref="voiceQueryButtonRef"
           class="input-bar__hold"
           :class="{ 'input-bar__hold--disabled': isLoading }"
           @touchstart="onVoiceQueryPressStart"
@@ -1170,6 +1175,12 @@ onBeforeUnmount(() => {
 .chat-input--voice-panel-open {
   z-index: 0;
   background: transparent;
+}
+
+/* 不用 v-if / display:none：长按仍在进行，原触点必须保持连接。 */
+.chat-input--query-active {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* 3) 设计稿 1204:467 的录音态底部只有「提示行 + 声纹 + 水面」：
