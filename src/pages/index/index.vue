@@ -2032,32 +2032,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       <AiChatBackdrop class="ai-page__backdrop" />
       <!-- 顶部白色渐变：页面上沿由白向下渐隐，压住线稿背景与滚上来的内容 -->
       <view class="ai-page__top-fade" />
-      <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
-      <AiChatHeader
-        v-model:sessions="sessions"
-        class="ai-page__header"
-        plain-bg
-        :load-sessions="getAISessionList"
-        :selected-session-id="aiSessionId"
-        :generating="isLoading"
-        :realtime-tts-playing="realtimeTts.playing.value"
-        :share-mode="shareSheetVisible"
-        :share-select-all-disabled="shareSelectAllDisabled"
-        :share-all-checked="shareAllChecked"
-        :share-selected-round-count="shareSelectedRoundCount"
-        :voice-listening="voiceListening || voiceQueryActive"
-        :listen-idle="islandListenFromWelcome"
-        :pure-mode="pureMode"
-        restartable
-        @back="backToWelcome"
-        @restart="onRestartToStart"
-        @new-conversation="startNewConversation"
-        @session-click="onSessionClick"
-        @session-delete="onSessionDelete"
-        @session-delete-batch="onSessionDeleteBatch"
-        @session-rename="onSessionRename"
-        @share-select-all="onShareSelectAll"
-      />
+      <!-- 顶部菜单统一由页面根节点的 AiChatHeader 渲染，避免两套按钮叠加。 -->
       <AiMessageList
         :key="chatListKey"
         top-inset="var(--chat-top-inset, 300rpx)"
