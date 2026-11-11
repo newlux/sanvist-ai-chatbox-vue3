@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import AiAttachmentPicker from "@/components/ai-attachment-picker/index.vue";
 import { isNativeAttachmentPickerAvailable, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { usePlainTts } from "@/hooks/usePlainTts";
+import { useSettingsStore } from "@/stores";
 import closeIcon from "@/assets/img/icon-close.svg";
 
 /**
@@ -70,6 +71,8 @@ const emit = defineEmits<{
 
 const { t, locale } = useI18n();
 
+const settingsStore = useSettingsStore();
+
 const currentIndex = ref(0);
 /**
  * 当前步骤下标（0 起）。
@@ -126,9 +129,15 @@ const narrationText = computed(() => {
   return String(step.action || "").trim();
 });
 
-// 展开 / 切步时读当前步，收起即停；speak 重复调用会打断上一次，播最新一步
+// 展开 / 切步时读当前步，收起即停；speak 重复调用会打断上一次，播最新一步。
+// 语音播报总开关关掉：只停不播（与页面其它自动播报同一口径，见 ai-chat-header 的喇叭）
 watch([() => props.visible, currentStep], ([visible]) => {
   if (!visible) {
+    stepTts.stop();
+    return;
+  }
+  // 总开关关掉：本卡自动播报不动作（切步时顺带停掉旧语音），手动播报按钮不受影响
+  if (!settingsStore.autoTtsEnabled) {
     stepTts.stop();
     return;
   }
