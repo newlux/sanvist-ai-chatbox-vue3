@@ -74,7 +74,7 @@ const settingsStore = useSettingsStore();
  * 纯净模式（设置弹层 → 纯净模式）：与任务协同页一套口径，只管头部左上角那颗按钮。
  * - 开启：左侧 = 历史对话抽屉（纯净模式下没有别的入口进历史）；
  * - 关闭：左侧 = 返回上级页面。
- * 右上角两种模式都是「关闭当前小程序」，见 onCloseWindow。
+ * 右上角两种模式都是「返回宿主首页」，见 onGoHome。
  */
 const { pureMode } = storeToRefs(settingsStore);
 /** 一键回到底部的箭头：深色模式换 arrow-down-dark.png（浅色箭头压在暗底上看不清） */
@@ -885,12 +885,12 @@ function onBack() {
 }
 
 /**
- * 右上角「关闭当前小程序」：强制走 closeMiniPro 退出小程序
+ * 右上角房子按钮「返回主页」：调用宿主原生 goHome 回 App 首页
  * （宿主没有这个 JSAPI 时依次退到 popWindow、history.back），
- * 关容器前的游客态清理见 utils/exit-mini-program。
+ * 回首页前的游客态清理见 utils/exit-mini-program。
  */
-function onCloseWindow() {
-  exitMiniProgram("closeMiniPro");
+function onGoHome() {
+  exitMiniProgram("goHome");
 }
 
 /**
@@ -1223,7 +1223,7 @@ onUnload(() => {
         close-on-right
         round-buttons
         @back="onBack"
-        @close="onCloseWindow"
+        @close="onGoHome"
         @restart="onRestartToStart"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"

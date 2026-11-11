@@ -45,9 +45,9 @@ const props = defineProps({
    */
   backOnLeft: { type: Boolean, default: false },
   /**
-   * 右侧最右那颗按钮点击时 emit close（关闭当前小程序）。
-   * 图标沿用回首页那颗房子（icon-home.svg），只是把行为从「回首页」换成「关闭」。
-   * 任务协同页固定传 true。
+   * 右侧最右那颗按钮点击时 emit close，由页面决定行为
+   * （作业指导 / 任务协同 = 调原生 goHome 回宿主首页）。
+   * 图标沿用回首页那颗房子（icon-home.svg）。
    */
   closeOnRight: { type: Boolean, default: false },
   /**
@@ -737,8 +737,8 @@ onBeforeUnmount(() => {
               <image :src="autoTtsIcon" mode="aspectFit" class="chat-header__icon-tts-img" />
             </view>
 
-            <!-- 关闭当前小程序（任务协同 / 作业指导页固定走这一颗）：交回 mPaaS 容器 popWindow。
-                 图标沿用回首页那颗房子（icon-home.svg），只有点击行为是关闭 -->
+            <!-- 返回主页（任务协同 / 作业指导页固定走这一颗）：点击 emit close，
+                 页面里调原生 goHome 回宿主首页。图标沿用 house（icon-home.svg） -->
             <view v-if="props.closeOnRight" class="chat-header__icon-btn" @tap="onCloseTap">
               <view class="chat-header__icon-atlas">
                 <image

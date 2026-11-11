@@ -80,7 +80,7 @@ const isDark = computed(() => systemStore.isDark);
  * 纯净模式（设置弹层 → 纯净模式）：决定头部左上角那颗按钮是谁。
  * - 开启：左侧 = 历史对话抽屉（纯净模式下没有别的入口进历史）；
  * - 关闭：左侧 = 返回上级页面（原有的多入口导航还在，历史走别处）。
- * 右上角两种模式都是「关闭当前小程序」，见 onCloseWindow。
+ * 右上角两种模式都是「返回宿主首页」，见 onGoHome。
  */
 const settingsStore = useSettingsStore();
 const { pureMode } = storeToRefs(settingsStore);
@@ -799,12 +799,12 @@ function onBack() {
 }
 
 /**
- * 右上角「关闭当前小程序」：强制走 closeMiniPro 退出小程序
+ * 右上角房子按钮「返回主页」：调用宿主原生 goHome 回 App 首页
  * （宿主没有这个 JSAPI 时依次退到 popWindow、history.back），
- * 关容器前的游客态清理见 utils/exit-mini-program。
+ * 回首页前的游客态清理见 utils/exit-mini-program。
  */
-function onCloseWindow() {
-  exitMiniProgram("closeMiniPro");
+function onGoHome() {
+  exitMiniProgram("goHome");
 }
 
 /**
@@ -1081,7 +1081,7 @@ onUnload(() => {
         close-on-right
         round-buttons
         @back="onBack"
-        @close="onCloseWindow"
+        @close="onGoHome"
         @restart="onRestartToStart"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"
