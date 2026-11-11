@@ -1,7 +1,7 @@
 /**
  * 配件助手（三方 H5 / seed.alexsun.top）入口：地址拼装 + pushWindow 直达。
  *
- * 与维修助手（utils/repair-h5）同一套打开方式与参数口径：加密身份、主题、音色、界面语言、
+ * 与维修助理（utils/repair-h5）同一套打开方式与参数口径：加密身份、主题、音色、界面语言、
  * AI 问答上下文都一致，**只有内嵌地址不同**（见 config 的 PARTS_ASSISTANT_EMBED_URL，
  * 该地址自带 `?source=pjzs-sanvist#/agent`，参数会拼在 hash 之前、且不覆盖它已有的 source）。
  *
@@ -53,7 +53,7 @@ export interface OpenPartsAssistantOptions extends PartsH5UrlOptions {
 }
 
 /**
- * 拼三方配件 H5 的完整地址（参数口径与维修助手一致，只有 frontend 不同）。
+ * 拼三方配件 H5 的完整地址（参数口径与维修助理一致，只有 frontend 不同）。
  * pushWindow 直达与本地壳页 iframe 共用这一处口径。
  */
 export function buildPartsH5Url(options: PartsH5UrlOptions = {}) {

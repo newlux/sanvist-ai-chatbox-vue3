@@ -7,8 +7,9 @@ import type {
 export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-suggestion"
   | "guide-check" | "guide-lead" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error"
   // assistant-navigation 解析层一直在产出（历史/流式都走它），之前漏在联合类型里导致两处 TS 报错；
-  // gantt 是调度视图入口卡（scene=task / type=gantt）。
-  | "assistant-navigation" | "gantt" | "voice";
+  // gantt 是调度视图入口卡（scene=task / type=gantt）；
+  // report-card 是听汇报入口卡（<WORK_REPORT> 标签命中后由 useChatSend 追加，不再自动跳播报页）。
+  | "assistant-navigation" | "gantt" | "voice" | "report-card";
 
 /** 深度思考步骤：由 status 事件按 node 聚合而来 */
 export interface ThinkStep {
@@ -340,9 +341,9 @@ export function applyEventToBlocks(
       };
     }
     case "assistant_navigation": {
-      // 跳转确认（维修助手）：一条回复只保留一个确认块，重复下发时覆盖同一块。
+      // 跳转确认（维修助理）：一条回复只保留一个确认块，重复下发时覆盖同一块。
       // SSE 顶层引用要映射进 payload（conversation_id → sessionId，message_id → conversationId），
-      // 进入维修助手后靠这两个值轮询 summary；缺了它们回调存储会被整段跳过。
+      // 进入维修助理后靠这两个值轮询 summary；缺了它们回调存储会被整段跳过。
       const navigationPayload: Record<string, unknown> = {
         ...event.data,
         ...(event.conversationId ? { sessionId: event.conversationId } : {}),

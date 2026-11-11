@@ -20,7 +20,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-/** 配件助手与维修助手共用这个弹层，兜底文案与动作按 target 切换（后端下发了就以它为准）。 */
+/** 配件助手与维修助理共用这个弹层，兜底文案与动作按 target 切换（后端下发了就以它为准）。 */
 const isPartsAssistant = computed(() => props.payload?.target === "parts_assistant");
 
 const title = computed(
@@ -33,7 +33,7 @@ const title = computed(
  * 进入方式列表：
  * - 后端下发 actions 就用后端的（顺序即设计稿顺序）；
  * - 配件助手兜底成设计稿 1318:1 的四项：拍照 / 上传 / 进入首页 / 暂不进入；
- * - 维修助手仍是「确定 / 暂不进入」两项。
+ * - 维修助理仍是「确定 / 暂不进入」两项。
  * note: 设计稿里「暂不进入」的圆角标的是 12px（其余 8px），这里按原值还原，见 --last 规则。
  */
 const actions = computed<AssistantNavigationAction[]>(() => {

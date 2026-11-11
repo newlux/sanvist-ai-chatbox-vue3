@@ -128,7 +128,7 @@ function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
 }
 
-/** 内联跳转卡（维修助手）选了进入方式：继续上抛给页面 */
+/** 内联跳转卡（维修助理）选了进入方式：继续上抛给页面 */
 function onAssistantNavigationConfirm(payload, action) {
   emit("assistant-navigation-confirm", payload, action);
 }

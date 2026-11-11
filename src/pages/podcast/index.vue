@@ -138,7 +138,7 @@ const reportQaGuideStep = ref<GuideStepPayload | null>(null);
 const reportQaGuideStepVisible = ref(false);
 /** 听播页没有对话区核对卡，步骤卡固定从第 1 步打开。 */
 const reportQaGuideStepIndex = ref(0);
-/** 跳转确认（维修助手）。 */
+/** 跳转确认（维修助理）。 */
 const reportQaNavigation = ref<AssistantNavigationPayload | null>(null);
 const reportQaNavigationVisible = ref(false);
 /** 本轮问答是否从异常列表发起：确认或取消后必须回到异常列表。 */
@@ -888,7 +888,7 @@ function onReportQaQuerySubmit(query: string) {
 function onReportQaNavigationConfirm(payload: AssistantNavigationPayload) {
   if (payload.target !== "maintenance_assistant") return;
   // 回调摘要轮询只保留在首页：听播页不写 pending，避免残留数据被首页误消费
-  // 跳到维修助手前收尾：别把播报 / 答案朗读带过去
+  // 跳到维修助理前收尾：别把播报 / 答案朗读带过去
   stopPlaybackOnLeave();
   void openRepairAssistant({
     sessionId: String(payload.sessionId || ""),
@@ -1653,7 +1653,7 @@ onBeforeUnmount(() => {
         :keyboard-height="keyboardHeight"
         @submit="onReportQaQuerySubmit"
       />
-      <!-- 跳转确认：进入维修助手 -->
+      <!-- 跳转确认：进入维修助理 -->
       <AiAssistantNavigationSheet
         v-model:visible="reportQaNavigationVisible"
         :payload="reportQaNavigation"

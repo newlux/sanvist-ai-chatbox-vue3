@@ -59,7 +59,7 @@ src/
 
 **智能体入口与引导链路**（`src/components/ai-chat-nav/`）：
 
-- 底部快捷入口在 `ai-chat-nav` 的 `DEFAULT_NAV_ITEMS` 里：`mode: "page"` 的项另开专属页，`url` 直连对话页 —— 作业指导 `/pages/guide/index`、任务协同 `/pages/task/index`、维修助手 `/pages/repair/index`、听汇报 `/pages/podcast/index`
+- 底部快捷入口在 `ai-chat-nav` 的 `DEFAULT_NAV_ITEMS` 里：`mode: "page"` 的项另开专属页，`url` 直连对话页 —— 作业指导 `/pages/guide/index`、任务协同 `/pages/task/index`、维修助理 `/pages/repair/index`、听汇报 `/pages/podcast/index`
 - `pages/guide-init` / `pages/task-init` 是引导流程的薄壳：只渲染 `components/ai-guide-init` / `components/ai-task-init`，收到组件的 `finish` 事件后 `uni.redirectTo` 对话页，不留在页面栈里。两页目前不被 `ai-chat-nav` 引用，保留引导能力
 - 引导链路（走引导页时）：唤醒 → 自我介绍 → 选择设备 / 身份 → 经验 / 身份信息 → 进对话页。终点分别是 `/pages/guide/index?deviceModel=..&experience=..&modelExperience=..` 与 `/pages/task/index?from=init`；选择结果同时写 `user` store（`inputs.device_model`、`inputs.operator_role`、`visitorRole`），任务身份另落 `uni.setStorage`（`utils/task-identity`）
 - 步骤表优先取 `GET /flow/steps?module=GUIDE|TASK`，为空才回退组件内的 `FALLBACK_STEPS`；未知 `stepCode` 保留在表里避免白屏

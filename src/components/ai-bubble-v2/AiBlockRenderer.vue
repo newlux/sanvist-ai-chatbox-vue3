@@ -23,6 +23,7 @@ import GuideStepBlock from "./blocks/GuideStepBlock.vue";
 import GuideSuggestionBlock from "./blocks/GuideSuggestionBlock.vue";
 import GuideVideoBlock from "./blocks/GuideVideoBlock.vue";
 import MetricBlock from "./blocks/MetricBlock.vue";
+import ReportCardBlock from "./blocks/ReportCardBlock.vue";
 import StatusBlock from "./blocks/StatusBlock.vue";
 import SuggestionBlock from "./blocks/SuggestionBlock.vue";
 import TableBlock from "./blocks/TableBlock.vue";
@@ -133,7 +134,7 @@ function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
   emit("assistant-navigation-open", payload);
 }
 
-/** 内联跳转卡（维修助手）选了某个进入方式：整包继续上抛，由页面落盘上下文并跳转 */
+/** 内联跳转卡（维修助理）选了某个进入方式：整包继续上抛，由页面落盘上下文并跳转 */
 function onAssistantNavigationConfirm(payload: AssistantNavigationPayload, action: AssistantNavigationAction) {
   emit("assistant-navigation-confirm", payload, action);
 }
@@ -207,7 +208,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     @pick="onAskSlotPick"
     @submit="onAskSlotSubmit"
   />
-  <!-- 跳转确认块（navigation 积木）：维修助手就地内联成卡；配件助手只做 auto_open 触发，不占视觉位置 -->
+  <!-- 跳转确认块（navigation 积木）：维修助理就地内联成卡；配件助手只做 auto_open 触发，不占视觉位置 -->
   <AssistantNavigationBlock
     v-else-if="block.type === 'assistant-navigation'"
     :payload="block.payload"
@@ -249,6 +250,8 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     @share-click="onGuideCheckShare"
   />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
+  <!-- 听汇报入口卡（<WORK_REPORT> 命中后追加）：不再自动跳播报页，点卡片才跳 -->
+  <ReportCardBlock v-else-if="block.type === 'report-card'" :payload="block.payload" :dark="dark" />
   <!-- 调度视图入口卡（COMPONENT scene=task / type=gantt）：点它跳横屏调度视图并带上整包数据 -->
   <GanttBlock v-else-if="block.type === 'gantt'" :payload="block.payload" :dark="dark" @open="onGanttOpen" />
   <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />

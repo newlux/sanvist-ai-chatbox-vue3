@@ -305,7 +305,7 @@ export interface AskSlotSubmitPayload {
   answers?: AskStepAnswer[];
 }
 
-/** 跳转确认弹层能去的业务助手：维修助手（独立页）/ 配件助手（首页内联智能体）。 */
+/** 跳转确认弹层能去的业务助手：维修助理（独立页）/ 配件助手（首页内联智能体）。 */
 export type AssistantNavigationTarget = "maintenance_assistant" | "parts_assistant";
 
 /**
@@ -323,21 +323,21 @@ export interface AssistantNavigationAction {
 export interface AssistantNavigationPayload extends Record<string, unknown> {
   target: AssistantNavigationTarget;
   /**
-   * 跳转意图（维修助手用）：
-   * - `MAINT_FAULT_CODE`：故障码场景，先弹「是否进入维修助手」确认卡，用户点确定后把确认发回对话；
-   * - `ENTER_ASSISTANT`：后端已确认进入，直接跳维修助手页，不再给确认卡。
+   * 跳转意图（维修助理用）：
+   * - `MAINT_FAULT_CODE`：故障码场景，先弹「是否进入维修助理」确认卡，用户点确定后把确认发回对话；
+   * - `ENTER_ASSISTANT`：后端已确认进入，直接跳维修助理页，不再给确认卡。
    * 两个都不是时不弹卡也不跳转（见 AssistantNavigationBlock / 首页 onAssistantNavigationConfirm）。
    */
   intent?: string;
   title?: string;
   confirm_text?: string;
   cancel_text?: string;
-  /** 多入口进入方式；缺省时按 target 兜底（维修助手=确定/暂不进入，配件助手=拍照/上传/首页/暂不进入） */
+  /** 多入口进入方式；缺省时按 target 兜底（维修助理=确定/暂不进入，配件助手=拍照/上传/首页/暂不进入） */
   actions?: AssistantNavigationAction[];
   context?: Record<string, unknown>;
-  /** 来源 SSE 的 conversation_id，进入维修助手时映射为 sessionId。 */
+  /** 来源 SSE 的 conversation_id，进入维修助理时映射为 sessionId。 */
   sessionId?: Identifier;
-  /** 来源 SSE 的 message_id，进入维修助手时映射为 conversationId。 */
+  /** 来源 SSE 的 message_id，进入维修助理时映射为 conversationId。 */
   conversationId?: Identifier;
   auto_open?: boolean;
 }

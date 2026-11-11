@@ -53,7 +53,7 @@ const props = defineProps({
    * 否则这行文字会跟图标动效叠在一起；其它入口（对话页直接说话）默认 true。
    */
   asrTipReady: { type: Boolean, default: true },
-  /** 维修助手回流的 QA 卡片标题。 */
+  /** 维修助理回流的 QA 卡片标题。 */
   assistantCallbackTitle: { type: String, default: "" },
   /** 回流卡片副标题：故障诊断 / 快问快答。 */
   assistantCallbackStatus: { type: String, default: "" },
@@ -61,7 +61,7 @@ const props = defineProps({
     type: Array as () => Array<{ label: string; value: string }>,
     default: () => [],
   },
-  /** 维修助手侧会话 ID，有值时摘要卡可跳转到详情。 */
+  /** 维修助理侧会话 ID，有值时摘要卡可跳转到详情。 */
   assistantCallbackConversationId: { type: String, default: "" },
   /**
    * 深色主题（首页问答态 Ardot 1193:5104）：
@@ -393,7 +393,7 @@ const processSubtitleText = computed(() => {
 
 const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(processSubtitleText.value));
 
-/** 维修助手回流卡：轮询中显示「故障诊断中…」，回流完成后展示摘要详情。 */
+/** 维修助理回流卡：轮询中显示「故障诊断中…」，回流完成后展示摘要详情。 */
 const showAssistantCallbackResult = computed(
   () => Boolean(props.assistantCallbackTitle) && !props.loading && !props.interrupted,
 );
@@ -436,7 +436,7 @@ function onAssistantNavigationOpen(payload) {
   emit("assistant-navigation-open", payload);
 }
 
-/** 内联跳转卡（维修助手）选了进入方式：继续上抛给页面做跳转 */
+/** 内联跳转卡（维修助理）选了进入方式：继续上抛给页面做跳转 */
 function onAssistantNavigationConfirm(payload, action) {
   emit("assistant-navigation-confirm", payload, action);
 }
@@ -860,7 +860,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   background: transparent;
   box-shadow: none;
 }
-/* 维修助手回流卡片本身承担边框和底色，不使用通用 AI 气泡外壳。 */
+/* 维修助理回流卡片本身承担边框和底色，不使用通用 AI 气泡外壳。 */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--assistant-callback {
   gap: 0;
   padding: 0;
@@ -869,7 +869,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   background: transparent;
   box-shadow: none;
 }
-/* 维修助手回流卡（设计稿 1187:1 之外的独立态）：白卡 / 1px #EFEFEF 描边 / 20px 圆角，
+/* 维修助理回流卡（设计稿 1187:1 之外的独立态）：白卡 / 1px #EFEFEF 描边 / 20px 圆角，
    标题区与详情区之间用 gap 排（16px） */
 .ai-bubble-v2__assistant-callback-card {
   display: flex;

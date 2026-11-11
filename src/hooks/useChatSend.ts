@@ -13,8 +13,6 @@ import { markReportVoiceSyncing, saveReportVoiceByStyle } from "@/hooks/useRepor
 import { useChatStore, useSessionStore, useSettingsStore, useUserStore } from "@/stores";
 import { buildInitialBlocks, consumeChatStream, parseReportInteraction, parseReportStyleTag, parseRoleTaggedAnswer, parseVoiceStyleTag, parseWorkReportTag } from "@/utils/ai-stream";
 
-/** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
-import { saveCurrentListenReportDate, saveCurrentListenReportLanguage } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { navigateToScene } from "@/utils/scene-navigation";
 
@@ -40,8 +38,6 @@ const QRCODE_TAG_CLOSE = "</QRCODE>";
 const QRCODE_PLACEHOLDER_PREFIX = /^q(?:r(?:c(?:o(?:de?)?)?)?)?$/i;
 /** 二维码页路由（pages/qrcode/index） */
 const QRCODE_PAGE_ROUTE = "/pages/qrcode/index";
-/** 播报页路由（pages/podcast/index）：<WORK_REPORT> 标签命中后跳这里 */
-const PODCAST_PAGE_ROUTE = "/pages/podcast/index";
 /**
  * 工作流 `workflow_finished` 下发的跳转目标（target）→ 站内助手页。
  * 只认这两个：作业指导 / 任务协同；其余取值不跳转（避免被无关工作流带去别的页面）。
@@ -183,7 +179,7 @@ function resolveRoleTagTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
 /**
  * 听汇报标签 `<WORK_REPORT date="…" language="…">正文</WORK_REPORT>`：
  * 取出日期与播报语言，并把标签源码摘掉。
- * matched/closed 决定要不要跳播报页，tagged 只表示这一拍正文被改写过。
+ * matched/closed 决定要不要补「听汇报」入口卡（不跳页），tagged 只表示这一拍正文被改写过。
  */
 function resolveWorkReportTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
   const answerText = collectAnswerText(blocks);
@@ -524,8 +520,6 @@ export function useChatSend(scope?: string, handlers?: {
     let podcastAnswer = "";
     /** 二维码占位回答已经开过二维码页：避免同一轮重复跳转，也用来跳过听播出口。 */
     let qrcodeHandled = false;
-    /** 听汇报标签已经开过播报页：避免同一轮重复跳转。 */
-    let workReportHandled = false;
     /** 工作流跳转目标已经切过页：避免同一轮重复跳转。 */
     let assistantSceneHandled = false;
     /** 本轮已经落过的音色标签值：标签会随每一拍快照重复出现，只处理第一次 */
@@ -630,23 +624,26 @@ export function useChatSend(scope?: string, handlers?: {
     }
 
     /**
-     * 听汇报标签的收尾：打开播报页（pages/podcast/index）。
-     * 播报页 onLoad 从 storage 读「当前播报日期」与「播报语言」，所以先把标签里的
-     * date / language 写进去再跳，否则播报页拿到的还是上一次的值。
-     * language 会原样进 `/listen-broadcast/play` 的入参。跳转同样走 navigateToScene。
+     * 听汇报标签的收尾：**不再自动跳播报页**，改成在气泡里补一张「听汇报」入口卡
+     * （设计稿 479:384），点卡片才跳（跳转逻辑在卡片内，见 utils/listen-report）。
+     *
+     * 卡片随标签闭合（或整轮结束）出现，date / language 挂在 payload 上；
+     * 标签会随每一拍快照出现，这里按 type 幂等追加，不会堆出一排卡。
      */
-    function openWorkReportPage(turn: { date: string; language?: string }) {
-      if (workReportHandled) return;
-      workReportHandled = true;
-      logger.debug("work report tag detected", { aiMsgId, date: turn.date, language: turn.language });
-      saveCurrentListenReportDate(turn.date);
-      saveCurrentListenReportLanguage(turn.language);
-      // 已经在播报页里问出来的标签：日期照写，但不要再跳自己一次
-      const pages = getCurrentPages();
-      const current = pages[pages.length - 1];
-      if (current && `/${String(current.route || "")}` === PODCAST_PAGE_ROUTE) return;
-      // direct=1：播报页跳过「选助手 → 选汇报内容」，直接起播
-      void navigateToScene(`${PODCAST_PAGE_ROUTE}?direct=1`).catch(error => logger.error("failed to open podcast page", error));
+    function withReportCard(
+      blocks: ReturnType<typeof buildInitialBlocks>,
+      turn: { date: string; language?: string },
+    ) {
+      if (blocks.some(block => block?.type === "report-card")) return blocks;
+      return [
+        ...blocks,
+        {
+          id: `report-card-${turn.date || "current"}`,
+          type: "report-card" as const,
+          payload: { date: turn.date, language: turn.language || "" },
+          complete: true,
+        },
+      ];
     }
 
     /**
@@ -697,8 +694,8 @@ export function useChatSend(scope?: string, handlers?: {
 
           /**
            * 听汇报标签 `<WORK_REPORT date="…">正文</WORK_REPORT>`：
-           * 正文留在气泡里，标签里的日期写进「当前播报日期」后跳播报页；
-           * 等闭合标签到齐（或整轮结束）再跳，避免正文还在流就把页面切走。
+           * 正文留在气泡里，date / language 交给下面追加的「听汇报」入口卡；
+           * 这一轮不再自动跳播报页，等用户点卡片才跳。
            */
           const reportTurn = resolveWorkReportTurn(displayBlocks);
           if (reportTurn.tagged) displayBlocks = withAnswerText(displayBlocks, reportTurn.text);
@@ -742,6 +739,14 @@ export function useChatSend(scope?: string, handlers?: {
            */
           const sceneTarget = snapshot.assistantScene
             || (snapshot.ended ? snapshot.metadata?.assistant_target : "");
+          /**
+           * 听汇报标签：等闭合标签到齐（或整轮结束）再补入口卡，
+           * 避免正文还在流就先把卡插进去、卡和正文顺序打架。
+           * 这里只加卡，**不跳页** —— 跳不跳交给用户点卡片。
+           */
+          if (reportTurn.matched && (reportTurn.closed || snapshot.ended)) {
+            displayBlocks = withReportCard(displayBlocks, reportTurn);
+          }
           // 新手（分步骤）模式：后端可能仍返回老师傅的导语（voice）块，这里直接丢弃，不渲染也不播报
           const isNovice = userStore.operatorRole?.roleKey === "novice_operator";
           const filteredBlocks = isNovice
@@ -760,9 +765,6 @@ export function useChatSend(scope?: string, handlers?: {
             // 跳页前把本轮流式听播收尾，避免旧页面在后台继续念
             notifyAnswerDelta("", true);
             return;
-          }
-          if (reportTurn.matched && (reportTurn.closed || snapshot.ended)) {
-            openWorkReportPage(reportTurn);
           }
 
           // 过程小标题：接口 subtitle 事件（如「目标 Dify 工作流已开始。」），听播思考态直接展示它。
@@ -1015,7 +1017,7 @@ export function useChatSend(scope?: string, handlers?: {
         interrupted: false,
         sessionId: conversationId,
         messageId: null,
-        waitingText: options.waitingText || "维修助手-快速问答",
+        waitingText: options.waitingText || "维修助理-快速问答",
         processStatus: { phase: "thinking" },
       });
     }

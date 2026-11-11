@@ -60,15 +60,15 @@ export interface RepairCallbackSummary {
   statusText: string;
   /** 卡片明细：设备 / 问题 / 结论 / 处理，空值会被过滤 */
   details: Array<{ label: string; value: string }>;
-  /** 维修助手侧会话 ID，有值时卡片可打开对应详情。 */
+  /** 维修助理侧会话 ID，有值时卡片可打开对应详情。 */
   repairConversationId: string;
 }
 
 /** 故障诊断（回流数据带 status） */
-const DIAGNOSIS_TITLE = "维修助手-机型诊断";
+const DIAGNOSIS_TITLE = "维修助理-机型诊断";
 const DIAGNOSIS_STATUS = "诊断报告生成已完成";
 /** 快速问答（回流数据没有 status） */
-const QUICK_ANSWER_TITLE = "维修助手-快问快答";
+const QUICK_ANSWER_TITLE = "维修助理-快问快答";
 const QUICK_ANSWER_STATUS = "答案回复已生成";
 
 /** 从回流数据里取明细，空值不展示 */

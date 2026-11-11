@@ -5,7 +5,7 @@ export function stashPendingRepairNavigationContext(context: Record<string, unkn
     uni.setStorageSync(PENDING_REPAIR_NAVIGATION_CONTEXT_KEY, context);
   }
   catch {
-    // 本地存储不可用时仍允许进入维修助手，只是不携带 AI 建议上下文。
+    // 本地存储不可用时仍允许进入维修助理，只是不携带 AI 建议上下文。
   }
 }
 

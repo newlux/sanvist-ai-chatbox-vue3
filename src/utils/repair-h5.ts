@@ -1,7 +1,7 @@
 /**
- * 维修助手（三方 H5 / maix-bm）入口：地址拼装 + pushWindow 直达。
+ * 维修助理（三方 H5 / maix-bm）入口：地址拼装 + pushWindow 直达。
  *
- * 维修助手有两条打开方式：
+ * 维修助理有两条打开方式：
  * - **首选（原生）**：本地用 `buildSanvistH5Url` 拼好三方地址，`pushWindow` 直接开一个原生
  *   WebView 加载三方 H5 —— 没有 iframe 套壳，容器给的返回键、顶部安全区都是原生的；
  *   AI 问答上下文（sessionId / conversationId）走 URL 参数，不落盘。
@@ -28,7 +28,7 @@ export interface RepairH5UrlOptions {
   sessionId?: string;
   /** 来源 SSE 的 conversationId（AI 问答上下文） */
   conversationId?: string;
-  /** 维修助手详情会话 id：作为三方页 `/chat/{id}` 路径参数（回流卡「看详情」用） */
+  /** 维修助理详情会话 id：作为三方页 `/chat/{id}` 路径参数（回流卡「看详情」用） */
   chatConversationId?: string;
 }
 
@@ -70,7 +70,7 @@ export function buildRepairH5Url(options: RepairH5UrlOptions = {}) {
 let opening = false;
 
 /**
- * 打开维修助手：pushWindow 直达三方 H5，失败才降级回本地壳页。
+ * 打开维修助理：pushWindow 直达三方 H5，失败才降级回本地壳页。
  */
 export async function openRepairAssistant(options: OpenRepairAssistantOptions = {}) {
   if (opening) return;
@@ -88,7 +88,7 @@ export async function openRepairAssistant(options: OpenRepairAssistantOptions = 
       url = buildRepairH5Url(options);
     }
     catch (error) {
-      logger.error("维修助手地址生成失败，降级本地壳页", error);
+      logger.error("维修助理地址生成失败，降级本地壳页", error);
       fallback();
       return;
     }

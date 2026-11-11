@@ -22,7 +22,7 @@ const DEFAULT_EXTERNAL_USER_ID = "shengmz2";
 const DEFAULT_NAME = "smz2";
 /** 外部主题兜底值：拿不到具体外观时按浅色（appAppearance 只会有 light / dark） */
 const DEFAULT_THEME = "light";
-/** 公司 / 组织兜底：宿主没下发、用户信息里也没有时沿用 sanvist 默认租户（与维修助手同一口径） */
+/** 公司 / 组织兜底：宿主没下发、用户信息里也没有时沿用 sanvist 默认租户（与维修助理同一口径） */
 const DEFAULT_COMPANY_ID = "69";
 const DEFAULT_ORGANIZATION_ID = "2";
 
@@ -56,7 +56,7 @@ export interface SanvistH5EncryptOptions {
   userId?: string;
   sessionId?: string;
   conversationId?: string;
-  /** 维修助手详情页的会话 ID，作为 `/chat/{id}` 路径参数。 */
+  /** 维修助理详情页的会话 ID，作为 `/chat/{id}` 路径参数。 */
   chatConversationId?: string;
   /**
    * 外观主题：直接透传设置弹层里选中的外观值（system / light / dark），
@@ -217,7 +217,7 @@ export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): Sanvis
   /**
    * 路径：入口直接落在 frontend（`https://maix-bm.irootech.com/repair`），不再补 `/chat` ——
    * 三方最新版把对话页放在根路径上，旧的 `/repair/chat` 是历史地址。
-   * 只有「维修助手详情」才带子路径 `/chat/{chatConversationId}`，它由三方单独路由。
+   * 只有「维修助理详情」才带子路径 `/chat/{chatConversationId}`，它由三方单独路由。
    */
   const detailPath = chatConversationId ? `/chat/${encodeURIComponent(chatConversationId)}` : "";
   const url = decodeGatewayHost(composeUrl(frontend, detailPath, params));

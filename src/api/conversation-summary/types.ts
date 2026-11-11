@@ -11,7 +11,7 @@ export interface ConversationSummaryData {
   equipmentCategory?: string | null;
   model?: string | null;
   deviceId?: string | null;
-  /** 维修助手侧会话 ID，用于打开对应的诊断详情。 */
+  /** 维修助理侧会话 ID，用于打开对应的诊断详情。 */
   repairConversationId?: string | null;
 }
 

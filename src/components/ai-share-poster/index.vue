@@ -34,7 +34,7 @@ const selectedMessages = computed(() => {
         : [block],
     ).filter(
       // guide-step / guide-suggestion 是「选一下继续问」的交互入口，guide-check / gantt 是独立于气泡的卡片，
-      // assistant-navigation（是否进入维修助手）同样是交互入口，海报里都不还原
+      // assistant-navigation（是否进入维修助理）同样是交互入口，海报里都不还原
       block => !["think", "tool_call", "status", "suggestion", "guide-step", "guide-suggestion", "guide-check", "gantt", "assistant-navigation"].includes(block.type),
     );
     return { ...message, blocks };

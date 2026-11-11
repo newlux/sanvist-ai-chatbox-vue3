@@ -6,8 +6,8 @@ import { useI18n } from "vue-i18n";
 
 /**
  * 跳转确认卡（COMPONENT type=navigation，`data.target` 决定去哪）：
- * - maintenance_assistant（维修助手）由 `data.intent` 再分两种：
- *   · MAINT_FAULT_CODE：**消息流内联卡** —— 标题 + 「确定，进入维修助手 / 暂不进入」，
+ * - maintenance_assistant（维修助理）由 `data.intent` 再分两种：
+ *   · MAINT_FAULT_CODE：**消息流内联卡** —— 标题 + 「确定，进入维修助理 / 暂不进入」，
  *     就地排在回答正文下方，不再弹底部白板；点「确定」只是把确认发回对话（页面处理），
  *     真正的跳转要等后端下发 ENTER_ASSISTANT；
  *   · ENTER_ASSISTANT：后端已确认进入，卡不渲染，流式到达（auto_open）即自动抛 confirm 直接跳页；
@@ -36,17 +36,17 @@ const isDark = computed(() => Boolean(darkContainer?.value));
 
 const intent = computed(() => String(props.payload.intent || "").trim().toUpperCase());
 
-/** 是否「故障码 → 询问要不要进维修助手」的确认卡 */
+/** 是否「故障码 → 询问要不要进维修助理」的确认卡 */
 const isRepairFaultCode = computed(
   () => props.payload.target === "maintenance_assistant" && intent.value === REPAIR_NAV_INTENT_FAULT_CODE,
 );
 
-/** 是否后端已经确认进入维修助手（此时不出卡，直接跳） */
+/** 是否后端已经确认进入维修助理（此时不出卡，直接跳） */
 const isRepairEnter = computed(
   () => props.payload.target === "maintenance_assistant" && intent.value === REPAIR_NAV_INTENT_ENTER,
 );
 
-/** 只有「故障码」这一种维修助手内联；配件助手 / 已确认进入的维修助手都不占位 */
+/** 只有「故障码」这一种维修助理内联；配件助手 / 已确认进入的维修助理都不占位 */
 const inline = computed(() => isRepairFaultCode.value);
 
 /** 标题：后端下发了就用它的，否则按 target 兜底 */
@@ -56,7 +56,7 @@ const title = computed(
 
 /**
  * 进入方式：后端下发 actions 就用后端的（顺序即设计稿顺序），
- * 维修助手兜底成「确定，进入维修助手 / 暂不进入」两项。
+ * 维修助理兜底成「确定，进入维修助理 / 暂不进入」两项。
  */
 const actions = computed<AssistantNavigationAction[]>(() => {
   const fromPayload = Array.isArray(props.payload.actions)
@@ -82,7 +82,7 @@ const hasOpened = ref(false);
 const autoEnteredPayloads = new WeakSet<object>();
 
 onMounted(() => {
-  // intent=ENTER_ASSISTANT：后端已确认进入，直接抛给页面跳维修助手页。
+  // intent=ENTER_ASSISTANT：后端已确认进入，直接抛给页面跳维修助理页。
   // 只认流式到达的这次（带 auto_open），历史消息里的块不自动跳，避免翻旧会话被带走。
   if (isRepairEnter.value) {
     if (props.payload.auto_open !== true) return;

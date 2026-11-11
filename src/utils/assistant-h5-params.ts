@@ -1,5 +1,5 @@
 /**
- * 维修助手 / 配件助手两个三方 H5 共用的业务参数口径。
+ * 维修助理 / 配件助手两个三方 H5 共用的业务参数口径。
  *
  * 两边「参数一致、地址不同」，音色 / 界面语言 / 身份信息的取值方式抽到这里，
  * 避免两条链路各写一份、改一处漏一处。
@@ -65,7 +65,7 @@ export function resolveUserId() {
 
 /**
  * 公司 id：用户信息 → 宿主启动参数。
- * 都没取到时返回空串，调用方沿用 sanvist 侧的默认租户（69，与维修助手一致）。
+ * 都没取到时返回空串，调用方沿用 sanvist 侧的默认租户（69，与维修助理一致）。
  */
 export function resolveCompanyId() {
   return readUserInfo(["companyId", "company_id", "companyid"])
@@ -74,7 +74,7 @@ export function resolveCompanyId() {
 
 /**
  * 组织 id：用户信息 → 宿主启动参数。
- * 都没取到时返回空串，调用方沿用 sanvist 侧的默认组织（2，与维修助手一致）。
+ * 都没取到时返回空串，调用方沿用 sanvist 侧的默认组织（2，与维修助理一致）。
  */
 export function resolveOrganizationId() {
   return readUserInfo(["organizationId", "organization_id", "organizationid"])

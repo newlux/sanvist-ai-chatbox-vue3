@@ -612,13 +612,97 @@ function onTrySend() {
 
 const textTextareaRef = ref<unknown>(null);
 
+/** 同一处手势的去重窗口：按住已开录后，抬手时若还补发 tap 就不再开第二轮 */
+const VOICE_QUERY_START_DEDUPE_MS = 400;
+/** 按住判定阈值：短于它算「点击说话」，到点手指还按着才算「按住说话」 */
+const VOICE_QUERY_HOLD_MS = 350;
+/** 按住判定期间允许的最大位移（CSS px）：一滑就是滚动/拖动，不再当成长按 */
+const VOICE_QUERY_HOLD_TOLERANCE_PX = 12;
+
+let lastVoiceQueryStartAt = 0;
+/** 按住计时器：按下起表，抬手 / 滑动 / 到点都会清掉 */
+let holdTimer: ReturnType<typeof setTimeout> | null = null;
+/** 本次按下的起点，用于判断手指有没有滑走 */
+let holdOrigin: { x: number; y: number } | null = null;
+/** 本轮手势是否已经由「按住」开录：抬手后的 tap 据此跳过 */
+let holdStarted = false;
+
+function clearHoldTimer() {
+  if (holdTimer) {
+    clearTimeout(holdTimer);
+    holdTimer = null;
+  }
+  holdOrigin = null;
+}
+
 /**
- * 点击说话：不进入内部的长按状态机（那套是整段录音 + 上传识别），
+ * 开一轮语音提问：不进入内部的长按状态机（那套是整段录音 + 上传识别），
  * 直接把「开始一轮语音提问」交给页面，由页面的流式 ASR 链路接管。
  */
-function onVoiceQueryStartTap() {
+function emitVoiceQueryStart() {
   if (props.isLoading) return;
+  const now = Date.now();
+  if (now - lastVoiceQueryStartAt < VOICE_QUERY_START_DEDUPE_MS) return;
+  lastVoiceQueryStartAt = now;
   emit("voice-query-start");
+}
+
+/**
+ * 点击说话：**抬手时**触发，与改造前完全一致
+ * （按下阶段只起按住计时器，不开录，避免输入栏在手势中途被卸载）。
+ */
+function onVoiceQueryStartTap() {
+  // 按住那条路径已经开过一轮：这次 tap 是同一次手势的抬手，跳过
+  if (holdStarted) {
+    holdStarted = false;
+    return;
+  }
+  emitVoiceQueryStart();
+}
+
+function readPressPoint(event: unknown) {
+  const source = event as { touches?: ArrayLike<{ clientX?: number; clientY?: number }>; changedTouches?: ArrayLike<{ clientX?: number; clientY?: number }> };
+  const point = source?.touches?.[0] ?? source?.changedTouches?.[0] ?? (event as { clientX?: number; clientY?: number });
+  return { x: Number(point?.clientX ?? 0), y: Number(point?.clientY ?? 0) };
+}
+
+/**
+ * 按住说话：按下起计时，到点手指还在原处才开录。
+ *
+ * 不能「按下即开录」：一开录页面就把输入栏换成录音条（`v-else-if="!voiceQueryActive"`），
+ * 手指还按着时元素就被移除，随后的 click 会落到同一坐标的录音条上，
+ * 一下就把刚开的这轮结束掉 —— 点击说话会被带坏。
+ * 所以短按仍旧走 tap（抬手后开录），只有真的按住（≥350ms）才在按下阶段开录。
+ */
+function onVoiceQueryPressStart(event: unknown) {
+  if (props.isLoading) return;
+  clearHoldTimer();
+  holdStarted = false;
+  holdOrigin = readPressPoint(event);
+  holdTimer = setTimeout(() => {
+    holdTimer = null;
+    // 抬手 / 滑动都会 clearHoldTimer 把这个计时器清掉，能跑到这里就说明手指还按着
+    if (!holdOrigin) return;
+    holdStarted = true;
+    emitVoiceQueryStart();
+  }, VOICE_QUERY_HOLD_MS);
+}
+
+/** 按住期间手指一滑（滚动 / 拖动）就取消按住判定，避免误开录音 */
+function onVoiceQueryPressMove(event: unknown) {
+  if (!holdOrigin) return;
+  const point = readPressPoint(event);
+  if (
+    Math.abs(point.x - holdOrigin.x) > VOICE_QUERY_HOLD_TOLERANCE_PX
+    || Math.abs(point.y - holdOrigin.y) > VOICE_QUERY_HOLD_TOLERANCE_PX
+  ) {
+    clearHoldTimer();
+  }
+}
+
+/** 抬手 / 手势中断：停掉按住计时；已经开录的那一轮由录音条自己收尾（↑ 发送 / 静音收尾） */
+function onVoiceQueryPressEnd() {
+  clearHoldTimer();
 }
 
 /**
@@ -716,6 +800,8 @@ onBeforeUnmount(() => {
   if (maskLingerTimer) clearTimeout(maskLingerTimer);
   composerResizeObserver?.disconnect();
   composerResizeObserver = null;
+  // 按住计时的兜底：组件在录音态一现身就被卸载，别把定时器留到下一轮
+  clearHoldTimer();
 });
 </script>
 
@@ -979,11 +1065,19 @@ onBeforeUnmount(() => {
           加号（左 44×44） + 按住说话框（中 219×44，r45，#0D0D0D 3.61%） + 键盘（右 44×44）
           录音手势直接挂在「按住说话」这块框上，不再用原来的小语音段图标
         -->
-        <!-- 首页问答态：中间那颗「点击说话」，点一下交回页面开流式语音提问 -->
+        <!-- 首页问答态：中间那颗「点击说话」，点一下交回页面开流式语音提问。
+             按住 ≥350ms 也会开录（按住说话），抬手后的 tap 自动跳过；
+             按下阶段只是起计时器，不开录 —— 开录会让输入栏在手势中途被录音条替换 -->
         <view
           v-if="inputMode === 'voice' && tapToTalk"
           class="input-bar__hold"
           :class="{ 'input-bar__hold--disabled': isLoading }"
+          @touchstart="onVoiceQueryPressStart"
+          @touchmove="onVoiceQueryPressMove"
+          @touchend="onVoiceQueryPressEnd"
+          @touchcancel="onVoiceQueryPressEnd"
+          @mousedown="onVoiceQueryPressStart"
+          @mouseup="onVoiceQueryPressEnd"
           @tap="onVoiceQueryStartTap"
         >
           <text class="input-bar__hold-label">{{ t("welcome-tap-to-speak") }}</text>

@@ -152,7 +152,7 @@ const {
 } = useChatViewport();
 /**
  * 纯净模式（设置弹层 → 纯净模式）：关闭时底部才露出快捷入口胶囊
- * （作业指导 / 任务协同 / 维修助手 / 配件助手 / 听汇报），打开后整条导航不渲染
+ * （作业指导 / 任务协同 / 维修助理 / 配件助手 / 听汇报），打开后整条导航不渲染
  * —— 纯净模式即「界面只留对话」，胶囊入口属于要收起来的那部分。
  */
 const settingsStore = useSettingsStore();
@@ -304,7 +304,7 @@ const REPAIR_SUMMARY_POLL_INTERVAL_MS = 5_000;
 const REPAIR_SUMMARY_MAX_ATTEMPTS = 30;
 
 /**
- * 只有配件助手还会抛 open：维修助手（target=maintenance_assistant）已改成
+ * 只有配件助手还会抛 open：维修助理（target=maintenance_assistant）已改成
  * 消息流里的内联卡，点按钮直接走 onAssistantNavigationConfirm，不再弹底部白板。
  */
 function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
@@ -313,7 +313,7 @@ function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
   assistantNavigationVisible.value = true;
 }
 
-/** 点维修助手回流卡：pushWindow 直达三方维修 H5 的详情页；已生成的回流结果看过就不再重复拉取。 */
+/** 点维修助理回流卡：pushWindow 直达三方维修 H5 的详情页；已生成的回流结果看过就不再重复拉取。 */
 function onAssistantCallbackOpen(conversationId: string) {
   const id = String(conversationId || "").trim();
   if (!id) return;
@@ -328,13 +328,13 @@ function onAssistantCallbackOpen(conversationId: string) {
 /**
  * 故障码确认卡点「确定」时回给后端的那句话。
  * 卡片本身不跳页，只把这句话当成一条提问发出去，由后端下发
- * target=maintenance_assistant && intent=ENTER_ASSISTANT 的 navigation 再跳维修助手页。
+ * target=maintenance_assistant && intent=ENTER_ASSISTANT 的 navigation 再跳维修助理页。
  * 后端若约定别的措辞，只改这一个常量即可。
  */
-const REPAIR_ENTER_CONFIRM_TEXT = "确认进入维修助手";
+const REPAIR_ENTER_CONFIRM_TEXT = "确认进入维修助理";
 
 /**
- * 真正进维修助手：pushWindow 直达三方维修 H5（上下文走 URL 参数），
+ * 真正进维修助理：pushWindow 直达三方维修 H5（上下文走 URL 参数），
  * 只有降级回本地壳页时才落盘 pending 上下文；返回后靠 pending 回调拉 summary。
  */
 function enterRepairAssistant(payload: AssistantNavigationPayload) {
@@ -361,9 +361,9 @@ function enterRepairAssistant(payload: AssistantNavigationPayload) {
  * 「进入助手」的去向按 target + intent 分流：
  * - parts_assistant：底部弹层点「进入配件助手」→ 另开配件助手页
  *   （/pages/parts/index，全屏内嵌三方 H5）；
- * - maintenance_assistant + intent=ENTER_ASSISTANT：确认可进入 → 直接跳维修助手页；
+ * - maintenance_assistant + intent=ENTER_ASSISTANT：确认可进入 → 直接跳维修助理页；
  * - maintenance_assistant + intent=MAINT_FAULT_CODE：故障码确认卡，点「确定」不直接跳，
- *   而是把「确认进入维修助手」发回对话，等后端回 ENTER_ASSISTANT；
+ *   而是把「确认进入维修助理」发回对话，等后端回 ENTER_ASSISTANT；
  * - 其它 intent（或没有）：不跳页。
  */
 async function onAssistantNavigationConfirm(
@@ -391,7 +391,7 @@ async function onAssistantNavigationConfirm(
 }
 
 /**
- * 进入配件助手：与维修助手同一套口径 —— pushWindow 直达三方 H5，
+ * 进入配件助手：与维修助理同一套口径 —— pushWindow 直达三方 H5，
  * 参数一致、只有地址不同（见 config 的 PARTS_ASSISTANT_EMBED_URL），
  * 原生容器不可用时才降级到本地壳页 `/pages/parts/index?url=...`。
  */
@@ -420,15 +420,15 @@ function startRepairSummaryCallback() {
     loading: true,
     sessionId: chatStore.aiSessionId,
     messageId: null,
-    waitingText: "维修助手-快速问答",
-    assistantCallbackTitle: "维修助手-快速问答",
+    waitingText: "维修助理-快速问答",
+    assistantCallbackTitle: "维修助理-快速问答",
     // 状态文案由气泡统一补「...」，这里只写标题本体，避免卡片上出现重复省略号
     processStatus: { phase: "thinking", title: "故障诊断中" },
   });
   chatStore.scrollToBottom(true);
 
   /**
-   * 已经补到卡片上的维修助手会话 ID。
+   * 已经补到卡片上的维修助理会话 ID。
    * 诊断中没有回填明细，但 ID 一到位就要让卡片可点（气泡只按这个字段决定是否显示右箭头），
    * 所以要单独记一份，避免每轮都重复 patch，也避免 Completed 回包没带 ID 时把它覆盖成空。
    */
@@ -462,14 +462,14 @@ function startRepairSummaryCallback() {
       if (!status || status === "Completed") {
         clearRepairSummaryPolling();
         applySummary();
-        await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: "维修助手-快速问答" });
+        await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: "维修助理-快速问答" });
         return;
       }
 
       /**
        * 还没到 Completed（如 Diagnosing 诊断中）：结论仍是占位文案，明细 / 副标题一律不写；
        * 但只要服务端这次带回了 repairConversationId，就立刻把卡片补成可点击的，
-       * 用户不用等诊断结束也能点右箭头跳到维修助手看诊断详情。
+       * 用户不用等诊断结束也能点右箭头跳到维修助理看诊断详情。
        * 只补这一个字段，不碰明细，也不打断下面的轮询。
        */
       const conversationId = summary.repairConversationId;
@@ -485,7 +485,7 @@ function startRepairSummaryCallback() {
     if (repairSummaryPollingAttempts >= REPAIR_SUMMARY_MAX_ATTEMPTS) {
       clearRepairSummaryPolling();
       chatStore.patchMessageById(aiMsgId, {
-        content: "维修助手结果暂未生成，请稍后再试。",
+        content: "维修助理结果暂未生成，请稍后再试。",
         loading: false,
         processStatus: { phase: "failed", title: "故障诊断未完成" },
       });
@@ -773,7 +773,7 @@ function readPartsEmbedUrl(route: string) {
 
 /**
  * 配件助手跳转：弹层里填的是完整地址，作为 pushWindow 的目标地址（不校验域名），
- * 参数与维修助手一致，由 utils/parts-h5 统一补上。
+ * 参数与维修助理一致，由 utils/parts-h5 统一补上。
  */
 function onPartsJump(url: string) {
   const target = String(url || "").trim();
@@ -812,7 +812,7 @@ function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; 
     enterListenReport();
     return;
   }
-  // 维修助手：pushWindow 直达三方 H5，本地壳页只做兜底（与对话内跳转同一套口径）
+  // 维修助理：pushWindow 直达三方 H5，本地壳页只做兜底（与对话内跳转同一套口径）
   if (targetUrl === "/pages/repair/index") {
     void openRepairAssistant();
     return;
@@ -1882,7 +1882,7 @@ function refreshListenReportState() {
 
 const stopNativeResume = onNativeEvent("resume", () => {
   refreshListenReportState();
-  // 维修助手是独立场景窗口：关窗回到本页时原 webview 一直在，不会经历 onHide/onShow，
+  // 维修助理是独立场景窗口：关窗回到本页时原 webview 一直在，不会经历 onHide/onShow，
   // 只靠 onShow 消费回调会漏，这里在原生 resume 上补一次（重复调用有 pending 判空，安全）。
   startRepairSummaryCallback();
 });
@@ -2095,7 +2095,7 @@ onBeforeUnmount(() => {
         @submit="onAskSlotSubmit"
         @height-change="onAskSlotDrawerHeightChange"
       />
-      <!-- 跳转确认层：维修助手已改成消息流内联卡，这里只剩配件助手（拍照 / 上传 / 首页） -->
+      <!-- 跳转确认层：维修助理已改成消息流内联卡，这里只剩配件助手（拍照 / 上传 / 首页） -->
       <AiAssistantNavigationSheet
         v-model:visible="assistantNavigationVisible"
         :payload="assistantNavigationPayload"
@@ -2262,7 +2262,7 @@ onBeforeUnmount(() => {
         @submit="stopVoiceQuery"
       />
 
-      <!-- 纯净模式关闭时的底部快捷入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手；
+      <!-- 纯净模式关闭时的底部快捷入口：听汇报 / 作业指导 / 任务协同 / 维修助理 / 配件助手；
            打开纯净模式（或录音面板展开）时整条导航不渲染 -->
       <AiChatNav
         :visible="navVisible"

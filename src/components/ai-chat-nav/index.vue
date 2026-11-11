@@ -67,7 +67,7 @@ const { t } = useI18n();
 
 const { isPc } = usePcMode();
 
-// 入口：听汇报 / 作业指导 / 任务协同 / 维修助手 / 配件助手，全部另开专属场景页
+// 入口：听汇报 / 作业指导 / 任务协同 / 维修助理 / 配件助手，全部另开专属场景页
 const DEFAULT_NAV_ITEMS: NavItem[] = [
   {
     key: "vox-core",
@@ -108,7 +108,7 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     titleKey: "nav-parts",
     icon: iconParts,
     subagent: "parts",
-    // 与维修助手一致：pushWindow 直达三方 H5；url 里带的是目标地址，
+    // 与维修助理一致：pushWindow 直达三方 H5；url 里带的是目标地址，
     // 首页点击时解析出来交给 utils/parts-h5，本地壳页 /pages/parts/index 只做兜底
     mode: "page",
     url: `/pages/parts/index?url=${encodeURIComponent(PARTS_ASSISTANT_EMBED_URL)}`,

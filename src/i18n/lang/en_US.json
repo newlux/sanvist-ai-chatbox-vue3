@@ -135,6 +135,8 @@
   "overview-morning-report": "({date})",
   "overview-listen": "Listen",
   "overview-listened": "Listened",
+  "report-card-subtitle": "{date} Morning Brief, Operations Overview",
+  "report-card-desc": "Equipment status, project progress and exceptions — all in one listen.",
   "overview-more-questions": "You can also ask",
   "task-welcome-question-owner-orders-tomorrow": "Show me tomorrow's orders",
   "task-welcome-question-owner-progress-today": "How are today's jobs progressing?",
