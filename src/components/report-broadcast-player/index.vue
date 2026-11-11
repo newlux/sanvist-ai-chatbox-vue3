@@ -1,19 +1,12 @@
 <script setup lang="ts">
-import type {
-  ListenBroadcastHistoryItem,
-  PlayListenBroadcastParams,
-} from "@/api/listen-broadcast/types";
-import type { ReportPlaybackRate } from "@/config/report-playback-rate";
+import type { PlayListenBroadcastParams } from "@/api/listen-broadcast/types";
 import type { ThinkStep } from "@/utils/ai-stream";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { getListenBroadcastHistory } from "@/api/listen-broadcast";
 import { useListenBroadcastPlayer } from "@/hooks/useListenBroadcastPlayer";
 import { useSystemStore } from "@/stores";
 import ReportBroadcastContent from "./report-broadcast-content.vue";
 import ReportBroadcastHeader from "./report-broadcast-header.vue";
-import ReportBroadcastHistory from "./report-broadcast-history.vue";
-import ReportBroadcastRate from "./report-broadcast-rate.vue";
 
 const props = defineProps<{
   params: PlayListenBroadcastParams;
@@ -39,7 +32,6 @@ const emit = defineEmits<{
   minimize: [];
   "broadcast-finished": [];
   "playback-change": [payload: { playing: boolean; loading: boolean }];
-  "open-preference": [];
 }>();
 
 const {
@@ -47,8 +39,6 @@ const {
   pause,
   resume,
   stop,
-  setPlaybackRate,
-  playbackRate,
   loading,
   playing,
   paused,
@@ -60,12 +50,6 @@ const {
   transcriptSegments,
   error,
 } = useListenBroadcastPlayer();
-const showHistory = ref(false);
-const showRatePanel = ref(false);
-const historyLoading = ref(false);
-const historyItems = ref<ListenBroadcastHistoryItem[]>([]);
-const activeHistoryBizDate = ref("");
-const currentBizDate = ref("");
 let finishedNotified = false;
 
 const { t } = useI18n();
@@ -103,37 +87,6 @@ watch(finished, (value) => {
   emit("broadcast-finished");
 });
 
-async function openHistory() {
-  showRatePanel.value = false;
-  showHistory.value = true;
-  if (historyItems.value.length || historyLoading.value) return;
-  historyLoading.value = true;
-  try {
-    historyItems.value = await getListenBroadcastHistory("daily");
-  } catch {
-    historyItems.value = [];
-  } finally {
-    historyLoading.value = false;
-  }
-}
-
-function openRatePanel() {
-  showHistory.value = false;
-  showRatePanel.value = true;
-}
-
-function onSelectRate(rate: ReportPlaybackRate) {
-  setPlaybackRate(rate);
-  showRatePanel.value = false;
-}
-
-function playHistory(item: ListenBroadcastHistoryItem) {
-  activeHistoryBizDate.value = item.bizDate;
-  currentBizDate.value = item.bizDate;
-  showHistory.value = false;
-  play({ ...props.params, bizDate: item.bizDate });
-}
-
 /**
  * 播放 / 暂停 / 重播三态合一：播报页头像下方的控件与洞察收起态那颗按钮
  * 共用同一套语义——播完再点即为从头重播。
@@ -148,7 +101,7 @@ function togglePlayback() {
     resume();
     return;
   }
-  play({ ...props.params, bizDate: currentBizDate.value || props.params.bizDate });
+  play(props.params);
 }
 
 function exitReport() {
@@ -157,7 +110,6 @@ function exitReport() {
 }
 
 onMounted(() => {
-  currentBizDate.value = props.params.bizDate || "";
   play(props.params);
 });
 defineExpose({ pause, resume, restart: play, togglePlayback, stop });
@@ -167,7 +119,6 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
   <view
     class="report-broadcast-player"
     :class="{
-      'report-broadcast-player--overlay': showHistory || showRatePanel,
       'report-broadcast-player--dark': isDark,
     }"
     :style="{ height: `calc(100% - ${dockOffset})` }"
@@ -182,9 +133,6 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       @dismiss-qa="emit('dismiss-qa')"
       @exit-report="exitReport"
       @minimize="emit('minimize')"
-      @open-history="openHistory"
-      @open-preference="emit('open-preference')"
-      @open-rate="openRatePanel"
     />
     <ReportBroadcastContent
       :portrait="portrait"
@@ -203,20 +151,6 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       @play-pause="togglePlayback"
       @seek="seekToSegment"
     />
-    <ReportBroadcastHistory
-      v-if="showHistory"
-      :loading="historyLoading"
-      :items="historyItems"
-      :active-biz-date="activeHistoryBizDate"
-      @close="showHistory = false"
-      @select="playHistory"
-    />
-    <ReportBroadcastRate
-      v-if="showRatePanel"
-      :current-rate="playbackRate"
-      @close="showRatePanel = false"
-      @select="onSelectRate"
-    />
   </view>
 </template>
 
@@ -234,19 +168,9 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
   background: #fafafa;
 }
 
-/**
- * 历史列表 / 语速面板等播放器内全屏弹层打开时，把整层抬到页面底部快捷导航
- * （.podcast-page__quick-nav，z-index: 3）之上。
- * 弹窗自身虽是 fixed + 高层级，但会被本层 z-index: 2 的层叠上下文锁住，
- * 对外只按 2 参与比较，不抬升就会露出「消异常 / 回问问」浮在弹窗之上。
- */
-.report-broadcast-player--overlay {
-  z-index: 4;
-}
-
 /* ===== 深色主题：听播播放层（Ardot 1193:2708「日常运营助手-听播-正在播放」）=====
    暗色稿画布 = #0D0D0D，浅色稿的 #FFF 一一对应；其余尺寸 / 间距 / 层级不动。
-   头部胶囊、字幕、进度条、播放按钮、历史抽屉、语速面板分别在各自组件里换材质。 */
+   头部胶囊、字幕、进度条、播放按钮分别在各自组件里换材质。 */
 .report-broadcast-player--dark {
   background: #0d0d0d;
 }

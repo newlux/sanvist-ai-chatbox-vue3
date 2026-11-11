@@ -21,14 +21,10 @@ import { useI18n } from "vue-i18n";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { getListenBroadcastConfig, getListenBroadcastPreference } from "@/api/listen-broadcast";
-import iconChipAsk from "@/assets/img/podcast-playing/icon-chip-ask.svg";
-import iconChipException from "@/assets/img/podcast-playing/icon-chip-exception.svg";
 import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
-import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
-import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import PodcastQaOverlay from "@/components/podcast-qa-overlay/index.vue";
 import ReportBroadcastPlayer from "@/components/report-broadcast-player/index.vue";
 import ReportInsight from "@/components/report-broadcast-player/report-insight.vue";
@@ -43,7 +39,7 @@ import { useReportInsights } from "@/hooks/useReportInsights";
 import { loadReportStyle, saveReportStyle } from "@/hooks/useReportStyle";
 import { loadReportVoice, resolveReportVoiceId } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { provideChatScope, useChatStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
+import { provideChatScope, useChatStore, useSystemStore, useUserStore } from "@/stores";
 import { stripMarkdownTables } from "@/utils/ai-stream";
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
 import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
@@ -70,12 +66,6 @@ const { locale, t } = useI18n();
 const chatScope = provideChatScope("podcast");
 const chatStore = useChatStore(chatScope);
 const userStore = useUserStore();
-/**
- * 纯净模式：关闭时底部才露出「消异常 / 回问问」快捷导航；
- * 打开时这两个入口整条不渲染（与首页底部快捷入口同一套开关）。
- */
-const settingsStore = useSettingsStore();
-const { pureMode } = storeToRefs(settingsStore);
 const { inputText, isLoading } = storeToRefs(chatStore);
 const { safeAreaStyle, safeTopPx } = useSafeArea();
 /** PC 端内嵌时播报头部露出「最小化」 */
@@ -106,21 +96,11 @@ const {
   chatViewportStyle,
   keyboardHeight,
   voiceKeyboardHeight,
-  composerDockOffset,
   syncWindowHeight,
   setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
 } = useChatViewport();
-/**
- * 播报主体高度避让：除输入栏高度外再减去键盘高度。
- * 键盘弹起时播报内容整体留在键盘上方，避免字幕被键盘压住、输入栏被播报层遮挡。
- */
-const broadcastDockOffset = computed(() =>
-  `calc(${composerDockOffset.value} + ${Math.max(0, Number(keyboardHeight.value) || 0)}px)`,
-);
-/** 快捷导航贴在输入栏正上方，键盘弹起时随输入栏一起抬升。 */
-const quickNavStyle = computed(() => ({ bottom: `calc(${composerDockOffset.value} + 4px)` }));
 const reportQaAnswer = ref("");
 const reportQaLoading = ref(false);
 /** 思考态小标题：直接展示接口 chat-messages 下发的 subtitle 文案。 */
@@ -153,8 +133,6 @@ const showReportVoiceSelector = ref(false);
  */
 const systemStore = useSystemStore();
 const preferenceDark = computed(() => showReportVoiceSelector.value && systemStore.isDark);
-/** 是否由播报页「偏好设置」进入配置流程：决定关闭配置页时回播报页还是退出页面。 */
-const preferenceEntry = ref(false);
 /**
  * 是否「直接起播」（`?direct=1`）：对话里命中 <WORK_REPORT> 标签、首页概览卡「去收听」、
  * 底部胶囊「听汇报」这些入口都带它，跳过「选助手 → 选汇报内容」两步，
@@ -190,8 +168,6 @@ const insightLeaving = ref(false);
 const insightAnimated = ref(true);
 /** 播报播放态，由播放器上抛，用于收起态重播按钮的图标切换。 */
 const broadcastPlaying = ref(false);
-/** 播报内容加载中（准备中/字幕骨架屏）：期间隐藏底部消异常、回问问快捷导航。 */
-const broadcastPreparing = ref(false);
 /** 退场定时器句柄，卸载或让位给 QA 时必须清掉。 */
 let insightLeaveTimer: ReturnType<typeof setTimeout> | null = null;
 /** 洞察列表本次页面访问只加载一次，避免重播后再次收起时又闪骨架屏。 */
@@ -478,7 +454,6 @@ function playAnswerTts(answer: string) {
  * 还原进页流程：先进偏好选择（选助手 → 选汇报内容），确认后才进播报页。
  */
 function startReportVoiceSelection() {
-  preferenceEntry.value = false;
   reportBroadcastParams.value = null;
   reportBroadcastPortrait.value = "";
   // 偏好选择器优先于「正在加载偏好」骨架屏：两者都打开时先看选择器
@@ -604,29 +579,13 @@ function applyReportBroadcastParams(voice: ReportVoiceOption, styleCode: string,
   showReportVoiceSelector.value = false;
 }
 
-/**
- * 播报页「偏好设置」入口：复用同一套「选助手 → 选汇报内容」两步流程。
- * 这里刻意不调用 startReportVoiceSelection()——那条路会清空 params，
- * 而本入口需要在用户中途退出时原样退回原来那一轮播报。
- */
-function openReportPreference() {
-  stopPlaybackOnLeave();
-  preferenceEntry.value = true;
-  showReportVoiceSelector.value = true;
-}
-
 function closeReportVoiceSelector() {
   showReportVoiceSelector.value = false;
-  // 从偏好设置进来的：params 一直保留着，直接退回播报页，不退出整个页面。
-  if (preferenceEntry.value) {
-    preferenceEntry.value = false;
-    return;
-  }
+  // 选择器只在进页偏好流程里出现，关掉即退出场景
   backFromScene();
 }
 
 function confirmReportVoice(voice: ReportVoiceOption, style: ListenBroadcastStyle, moduleCodes: string[]) {
-  preferenceEntry.value = false;
   reportBroadcastParams.value = {
     voice: voice.id,
     styleCode: style.code,
@@ -682,17 +641,9 @@ function clearInsightLeaveTimer() {
 }
 
 /**
- * 点「消异常」进异常列表：先把播报与答案朗读都停下来再切洞察层，
- * 否则列表已经铺出来了，耳朵里还在念。
- */
-function openInsightFromQuickNav() {
-  stopPlaybackOnLeave();
-  showInsight();
-}
-
-/**
- * 播报播放结束或收到 open_insight 导航时，页内切换为洞察视图；仅首次加载列表。
- * animated 只在这两个入口传 true，异常处理回到列表时直接呈现，不做过渡。
+ * 收到 open_insight 导航或用户主动看异常时，页内切换为洞察视图；仅首次加载列表。
+ * 播报自然结束不再自动切过来，停留在播报视图的结束态（可重播 / 退出）。
+ * animated 目前没有入口传 true，异常处理回到列表时直接呈现，不做过渡。
  */
 function showInsight(animated = false) {
   hasShownInsight = true;
@@ -758,7 +709,6 @@ function replayInsightBroadcast() {
 
 function onBroadcastPlaybackChange(payload: { playing: boolean; loading: boolean }) {
   broadcastPlaying.value = payload.playing;
-  broadcastPreparing.value = payload.loading;
 }
 
 // 继续播报：字幕区从问答态还原回播报文字，同时停掉答案朗读。
@@ -1544,7 +1494,7 @@ onBeforeUnmount(() => {
         }"
         :params="reportBroadcastParams"
         :portrait="reportBroadcastPortrait"
-        :dock-offset="broadcastDockOffset"
+        dock-offset="0px"
         :qa-loading="reportQaLoading"
         :qa-subtitle="reportQaSubtitle"
         :qa-answer="reportQaAnswer"
@@ -1554,8 +1504,6 @@ onBeforeUnmount(() => {
         @dismiss-qa="dismissReportQa"
         @minimize="onMinimize"
         @exit-report="closeReportBroadcast"
-        @open-preference="openReportPreference"
-        @broadcast-finished="showInsight(true)"
         @playback-change="onBroadcastPlaybackChange"
       />
       <!-- 播报结束后页内原地形变出的洞察层：透明容器，不做整层位移 -->
@@ -1581,56 +1529,6 @@ onBeforeUnmount(() => {
           @replay="replayInsightBroadcast"
         />
       </view>
-      <!-- 播报视图底部快捷导航：消异常 → 异常列表，回问问 → 回首页；洞察态隐藏避免盖住列表；
-           进页偏好加载中（骨架屏）与播报准备中（字幕骨架屏）也隐藏；
-           受纯净模式控制：纯净模式关闭才出现，打开则整条不渲染 -->
-      <view
-        v-if="!pureMode && !insightVisible && !preferenceLoading && !broadcastPreparing && !voiceQueryActive"
-        class="podcast-page__quick-nav"
-        :style="quickNavStyle"
-      >
-        <view class="podcast-page__quick-nav-button" @tap="openInsightFromQuickNav">
-          <image class="podcast-page__quick-nav-icon" :src="iconChipException" mode="aspectFit" />
-          <text class="podcast-page__quick-nav-text">
-            {{ t("podcast-quick-nav-alerts") }}
-          </text>
-        </view>
-        <view class="podcast-page__quick-nav-button" @tap="closeReportBroadcast">
-          <image class="podcast-page__quick-nav-icon" :src="iconChipAsk" mode="aspectFit" />
-          <text class="podcast-page__quick-nav-text">
-            {{ t("podcast-quick-nav-ask") }}
-          </text>
-        </view>
-      </view>
-      <!-- 点击说话：点一下交回页面开流式语音提问（与首页同一套链路），不再走内部长按手势 -->
-      <AiChatInput
-        v-if="!voiceQueryActive"
-        v-model="inputText"
-        :compact-voice-listening="true"
-        :dark="pageDark"
-        :is-loading="isLoading"
-        :keyboard-height="keyboardHeight"
-        :voice-keyboard-height="voiceKeyboardHeight"
-        :tap-to-talk="true"
-        @send="sendPodcastMessage"
-        @stop="stopPodcastAnswer"
-        @voice-query-start="startVoiceQuery"
-        @input-focus="setTextInputFocused(true)"
-        @input-blur="setTextInputFocused(false)"
-        @voice-input-focus="setVoiceInputFocused(true)"
-        @voice-input-blur="setVoiceInputFocused(false)"
-        @dock-height-change="setInputDockHeight"
-      />
-      <!-- 录音中：输入栏换成「取消 / 声纹 / 计时 + 发送」这一条（与首页一致） -->
-      <AiVoiceQueryBar
-        v-else
-        :level="voiceLevel"
-        :seconds="voiceSeconds"
-        :busy="voiceFinishing"
-        :dark="pageDark"
-        @cancel="cancelVoiceQuery"
-        @submit="stopVoiceQuery"
-      />
       <!-- 追问卡（首页同款弹层）：答案要求补充/确认时自动弹起，作答后按同一链路继续提问 -->
       <AiSlotDrawer
         :slots="reportQaSlots"
@@ -1737,24 +1635,6 @@ onBeforeUnmount(() => {
     background: #0d0d0d;
   }
 
-  .podcast-page__quick-nav-button {
-    border-color: #212121;
-    background: #212121;
-  }
-
-  .podcast-page__quick-nav-button:active {
-    background: #303030;
-  }
-
-  .podcast-page__quick-nav-text {
-    color: #ffffff;
-  }
-
-  // 图标是 #6B6B6B 线性图标，深底下反相成白
-  .podcast-page__quick-nav-icon {
-    filter: brightness(0) invert(1);
-  }
-
   :deep(.chat-input) {
     background: #0d0d0d;
   }
@@ -1819,7 +1699,7 @@ onBeforeUnmount(() => {
 .chat-header__statusbar {
   width: 100%;
   flex: 0 0 auto;
-  background: transparent;
+  background: #fafafa;
 }
 
 .podcast-page__chat {
@@ -1865,49 +1745,6 @@ onBeforeUnmount(() => {
   z-index: 0;
   overflow: hidden;
   background: transparent;
-}
-
-/* —— 播报视图底部快捷导航（浅色稿 195:2002 Tool Chips）——
-   第一枚 chip 距左 20px（= 容器 padding 0/20 + 第一枚自身位置），两枚间距 8px */
-.podcast-page__quick-nav {
-  position: absolute;
-  left: 40rpx;
-  z-index: 3;
-  display: flex;
-  gap: 16rpx;
-}
-
-/* Chip 195:2003 / 195:2014：82×36，圆角 16，1px 描边 #EFEFEF，
-   内边距 0/12，图标与文字间距 6；设计稿填充 visible:false，故不铺底色 */
-.podcast-page__quick-nav-button {
-  display: flex;
-  height: 72rpx;
-  align-items: center;
-  gap: 12rpx;
-  padding: 0 24rpx;
-  border: 2rpx solid #efefef;
-  border-radius: 32rpx;
-  box-sizing: border-box;
-  background: transparent;
-}
-
-.podcast-page__quick-nav-button:active {
-  background: rgba(13, 13, 13, 0.0361);
-}
-
-/* 按钮左侧图标（消异常 / 回问问）：16×16，色值 #000000（设计稿矢量填充） */
-.podcast-page__quick-nav-icon {
-  width: 32rpx;
-  height: 32rpx;
-  flex: 0 0 32rpx;
-}
-
-/* 文案：12px Medium #0D0D0D */
-.podcast-page__quick-nav-text {
-  color: #0d0d0d;
-  font-size: 24rpx;
-  font-weight: 500;
-  line-height: 1;
 }
 
 @keyframes podcast-broadcast-hide {

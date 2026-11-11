@@ -1853,6 +1853,12 @@ async function onScrollTop() {
 
 onLoad((options) => {
   isDemoPage = options?.mode === "demo";
+  /**
+   * 初始页就要按服务端 `/settings` 决定是否开纯净模式（顶部三颗图标 + 底部胶囊入口的显隐）。
+   * App.vue 的 onLaunch 已经拉过一次且不 await，这里只在「还没拿到」时补一次；
+   * store 里做了并发去重，两处同时在飞也只会发一个 `GET /settings`。
+   */
+  if (!settingsStore.loaded) void settingsStore.load();
   syncPageStage();
   const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("ASK", "PODCAST");
   if (sessionId) {
@@ -1988,6 +1994,7 @@ onBeforeUnmount(() => {
         :share-selected-round-count="shareSelectedRoundCount"
         :voice-listening="voiceListening || voiceQueryActive"
         :listen-idle="islandListenFromWelcome"
+        :pure-mode="pureMode"
         restartable
         @back="backToWelcome"
         @restart="onRestartToStart"
@@ -2350,8 +2357,9 @@ $color-white: #ffffff;
   position: relative;
   // 顶部毛玻璃层的高度 = 悬浮头部在内容里的占位：
   // 两者共用一个值，消息正好从渐隐的下沿起步，往上滚就被模糊掉
-  --chat-top-inset: calc(constant(safe-area-inset-top) + 300rpx);
-  --chat-top-inset: calc(env(safe-area-inset-top) + 300rpx);
+  // 250rpx（125px）仍高于 200rpx（100px）的实色头部，首条内容再往上收 25px
+  --chat-top-inset: calc(constant(safe-area-inset-top) + 250rpx);
+  --chat-top-inset: calc(env(safe-area-inset-top) + 250rpx);
 }
 
 /* 初始页 → 对话页：整页淡入。
@@ -2410,15 +2418,15 @@ $color-white: #ffffff;
 // 顶部毛玻璃渐隐（对应设计稿 722:152「回答」头部底板）：
 // 不铺白色底 —— 透明 + 背后模糊，消息滚到头部下面还能看见字，只是被虚化；
 // 「渐变」体现在模糊强度上：上沿最糊，往下渐弱到完全清晰，接住正文，没有硬边。
-// 高度 = 刘海安全区 + 300rpx（与 --chat-top-inset 一致，消息正好从渐隐下沿起步）。
+// 高度 = 刘海安全区 + 250rpx（与 --chat-top-inset 一致，消息正好从渐隐下沿起步）。
 .ai-page__top-fade {
   position: absolute;
   z-index: 1;
   top: 0;
   right: 0;
   left: 0;
-  height: calc(constant(safe-area-inset-top) + 300rpx);
-  height: calc(env(safe-area-inset-top) + 300rpx);
+  height: calc(constant(safe-area-inset-top) + 250rpx);
+  height: calc(env(safe-area-inset-top) + 250rpx);
   pointer-events: none;
   // 只模糊、不遮挡（老内核拿不到 backdrop-filter 时，退化成下面那层极淡的雾，文字照样看得见）
   backdrop-filter: blur(16rpx); // 8px

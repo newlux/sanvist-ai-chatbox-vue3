@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import closeRecordingIcon from "@/assets/img/icon-close-recording.svg";
 
 /**
  * 语音提问底部条 —— 还原 Ardot「起始态 • 唤醒-智能体移动到顶部」(70:1614) 的 Voice Pill。
@@ -21,7 +22,7 @@ defineOptions({
 const { t } = useI18n();
 
 const props = defineProps({
-  /** 实时音量 0~1（已平滑）：整体缩放声纹，基线高度仍是设计稿那 16 根 */
+  /** 实时音量 0~1（已平滑，由 useVoiceQuery 的音量采样给出）：驱动逐根竖线的律动幅度 */
   level: { type: Number, default: 0 },
   /** 已录秒数：右侧那枚 1s */
   seconds: { type: Number, default: 0 },
@@ -37,8 +38,9 @@ const emit = defineEmits<{
 }>();
 
 /**
- * 声纹每根线的基准高度（rpx）：按设计稿的高低起伏形态扩到 32 根，
- * 数量按「铺满左圆与计时之间的整条空间」来定，间距由 space-between 均分。
+ * 声纹高度权重的取池（rpx）：数值取自设计稿那段声纹的高低起伏形态。
+ * 每送进一个时间片就按顺序取一个值（循环），决定这一片"满音量时能长多高"——
+ * 同一片在向右滚动的过程中形状固定，变的只是位置。
  */
 const BAR_HEIGHTS = [
   10,
@@ -75,16 +77,93 @@ const BAR_HEIGHTS = [
   6,
 ];
 
-/**
- * 整体振幅：静息 0.55 倍（收着，留出「说话变高」的余量），音量拉满到 1.5 倍
- * （再高最高那根会顶出胶囊）。单根线自己还有一段 CSS 呼吸动画，两者相乘才是最终起伏 ——
- * 只靠整体缩放的话，矮线（4rpx 量级）上下变化不到 1px，肉眼看不出在动。
- */
-const waveScale = computed(() => {
+/* ===================== 声纹律动（先铺满，再向左滚）=====================
+   两个阶段，都是每 WAVE_STEP_MS 往最右侧追加一个时间片：
+   1) 填充期：只追加、不移除，既有片 index 不变 —— 整排不动，从左到右一根根长出来；
+   2) 滚动期：铺满容器后，追加新片的同时把最左那片移出（shift），
+      剩余片 index 全部 -1 → 整体向左平移一格：新片从右侧进来，图案从右往左流，
+      左端移出容器被 overflow 裁掉，一直滚下去。
+   每个时间片的高度只由「采样那一刻的音量」决定：
+     height = 静音小线 + sqrt(level) × 1.2 × 该片的固定权重
+   - 静音时 level=0 → 每片都是 BAR_IDLE_HEIGHT（6rpx）的小竖线，整排像均匀的小点；
+   - 说话时按音量长高，不再有任何自发周期性跳动；
+   - 权重由 BAR_HEIGHTS 轮取，保证同一片在滚动过程中形状不变（变化的是位置，不是形状），
+     这才是「流动」而不是「原地闪烁」；
+   - 位置用 translateX(index × 步进) 表达，并配同样时长的 transform 过渡，滚动是连续的。 */
+/** 推进间隔：一格 70ms */
+const WAVE_STEP_MS = 70;
+/** 一格步进：线宽 4rpx + 间隙 4rpx */
+const WAVE_STEP_RPX = 8;
+/** 测不到容器宽度时的兜底格数（按约 320rpx 的可视宽度估） */
+const DEFAULT_FILL_TARGET = 40;
+/** 没有声音时每根线的高度：一条很小的竖线 */
+const BAR_IDLE_HEIGHT = 6;
+const BAR_MAX_HEIGHT = 42; // 容器高 44rpx，留 2rpx 余量，最高的线也不会顶出胶囊
+
+interface WaveSlice {
+  id: number;
+  height: number;
+}
+
+/** 时间片按「越靠右越新」排：index 0 是最旧的一片，末尾是最新采样 */
+const slices = ref<WaveSlice[]>([]);
+/** 铺满容器需要多少片：挂载后按容器实际宽度算，测不到就用兜底值 */
+const fillTarget = ref(DEFAULT_FILL_TARGET);
+let sliceSeq = 0;
+let scrolling = false;
+let waveTimer: ReturnType<typeof setInterval> | null = null;
+
+/** 量一次波形容器的可见宽度，换算成"铺满要几格"（多留一格，右边缘不留缝） */
+function measureFillTarget() {
+  const instance = getCurrentInstance();
+  if (!instance) return;
+  uni
+    .createSelectorQuery()
+    .in(instance.proxy)
+    .select(".voice-query__wave")
+    .boundingClientRect((rect) => {
+      const width = Number((rect as { width?: number } | null)?.width || 0);
+      if (width <= 0) return;
+      const step = uni.upx2px(WAVE_STEP_RPX);
+      if (step <= 0) return;
+      fillTarget.value = Math.max(1, Math.ceil(width / step) + 1);
+      if (slices.value.length >= fillTarget.value) scrolling = true;
+    })
+    .exec();
+}
+
+function buildSlice(): WaveSlice {
   const level = Math.min(1, Math.max(0, props.level));
-  // 开平方压一下动态范围：正常说话的 RMS 只到 0.1~0.3，线性映射时整排幅度几乎不变
-  const shaped = Math.sqrt(level);
-  return (0.55 + shaped * 0.95).toFixed(3);
+  const gain = Math.sqrt(level) * 1.2;
+  const weight = BAR_HEIGHTS[sliceSeq % BAR_HEIGHTS.length] / BAR_MAX_HEIGHT;
+  const height = Math.min(BAR_MAX_HEIGHT, BAR_IDLE_HEIGHT + gain * BAR_MAX_HEIGHT * weight);
+  sliceSeq += 1;
+  return { id: sliceSeq, height };
+}
+
+function pushSlice() {
+  // 两阶段都往最右侧追加：填充期只长不理，滚动期再挤掉最左一片
+  slices.value.push(buildSlice());
+  if (!scrolling) {
+    // 填充期：既有片 index 不变 → 整排不动，只是从左到右长出来
+    if (slices.value.length >= fillTarget.value) scrolling = true;
+    return;
+  }
+  // 滚动期：左侧移出一片，剩余片 index -1 → 整体向左平移一格，新片从右侧补进来
+  if (slices.value.length > fillTarget.value) slices.value.shift();
+}
+
+onMounted(() => {
+  measureFillTarget();
+  pushSlice();
+  waveTimer = setInterval(pushSlice, WAVE_STEP_MS);
+});
+
+onBeforeUnmount(() => {
+  if (waveTimer) {
+    clearInterval(waveTimer);
+    waveTimer = null;
+  }
 });
 
 const secondsText = computed(() => `${props.seconds}s`);
@@ -110,9 +189,11 @@ function onSubmit() {
 
   <!-- 设计稿 70:1651 Voice Pill：327×44 / r45 / rgba(13,13,13,0.38) / 左右 24 距底 36 -->
   <view class="voice-query" :class="{ 'voice-query--dark': dark }">
-    <!-- 设计稿 70:1653 Group 109：36×36 浅色圆 + 深灰 ×（左内边距 6、上 4） -->
+    <!-- 设计稿 70:1653 Group 109：36×36 圆 + ×。
+         改用导出的整圆图标 icon-close-recording.svg（36×36，白 33.6% 圆底 + 白色 ×），
+         圆底随图一起进来，容器不再铺底色 -->
     <view class="voice-query__cancel" @tap="emit('cancel')">
-      <view class="voice-query__cross" />
+      <image class="voice-query__cancel-img" :src="closeRecordingIcon" mode="aspectFit" />
     </view>
 
     <!-- 整段声纹与计时都可点发送；热区不随声纹的缩放动画缩小。 -->
@@ -122,12 +203,16 @@ function onSubmit() {
       :aria-disabled="busy"
       @tap.stop="onSubmit"
     >
-      <view class="voice-query__wave" :style="{ '--wave-scale': waveScale }">
+      <!-- 时间轴：每 70ms 从右侧送进一个新片，铺满后整条带子向左平移（见 pushSlice） -->
+      <view class="voice-query__wave">
         <view
-          v-for="(height, index) in BAR_HEIGHTS"
-          :key="index"
+          v-for="(slice, index) in slices"
+          :key="slice.id"
           class="voice-query__bar"
-          :style="{ '--bar-h': `${height}rpx`, '--bar-i': index }"
+          :style="{
+            height: `${slice.height}rpx`,
+            transform: `translateX(${index * WAVE_STEP_RPX}rpx) translateY(-50%)`,
+          }"
         />
       </view>
       <text class="voice-query__time">
@@ -289,45 +374,22 @@ function onSubmit() {
   }
 }
 
-/* 设计稿 70:1653 / 70:1656：36×36 圆（72rpx），r18（36rpx），底 rgba(255,255,253,0.336) */
+/* 左按钮热区：设计稿 70:1653 的 36×36（72rpx）。
+   圆底与 × 都在 icon-close-recording.svg 里（36×36 画布，圆 #FFFFFD 33.6% + 白 ×），
+   所以这里不再铺背景，只保证尺寸与居中 */
 .voice-query__cancel {
-  position: relative;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   width: 72rpx;
   height: 72rpx;
-  border-radius: 36rpx;
-  background: rgba(255, 255, 253, 0.336);
 }
 
-/* 设计稿 70:1654 / 70:1655：两条 16.97px（33.94rpx）长、2px（4rpx）粗的线交叉 90°。
-   浅色稿的胶囊是中灰、X 落在更亮的浅灰圆上，用深灰才看得清（原来是白色，压在深色胶囊上） */
-.voice-query__cross {
-  position: relative;
-  width: 33.94rpx;
-  height: 33.94rpx;
-
-  &::before,
-  &::after {
-    position: absolute;
-    top: 50%;
-    left: 0;
-    width: 100%;
-    height: 4rpx;
-    margin-top: -2rpx;
-    background: rgba(13, 13, 13, 0.6);
-    content: "";
-  }
-
-  &::before {
-    transform: rotate(45deg);
-  }
-
-  &::after {
-    transform: rotate(-45deg);
-  }
+/* 图标按 36px（72rpx）1:1 挂，与设计稿圆尺寸一致 */
+.voice-query__cancel-img {
+  width: 72rpx;
+  height: 72rpx;
 }
 
 /* 声纹铺满左圆与计时之间的整条剩余空间（原来是固定 174rpx，右侧留一大段空白）。
@@ -347,39 +409,24 @@ function onSubmit() {
   cursor: default;
 }
 .voice-query__wave {
-  display: flex;
+  position: relative;
   flex: 1 1 auto;
-  align-items: center;
-  justify-content: space-between;
   min-width: 0;
   height: 44rpx;
   margin: 0 16rpx 0 22rpx;
-  transform: scaleY(var(--wave-scale, 1)); // 整排跟随音量
-  transform-origin: center center;
-  transition: transform 90ms linear;
+  overflow: hidden; // 滚到最右边的片直接裁掉，右端不露头
 }
 
-/* 每根线：宽度固定 4rpx，高度取 --bar-h，
-   再叠一段带相位差的呼吸动画 —— 只靠整排缩放，矮线几乎看不出在动 */
+/* 每根线绝对定位，横向位置 = index × 8rpx（行内 translateX 给），
+   transition 与推进间隔同长：滚动期 index 整体 -1 时匀速左移，看上去是带子在向左流 */
 .voice-query__bar {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 50%;
+  left: 0;
   width: 4rpx;
-  height: var(--bar-h);
   border-radius: 4rpx;
   background: #ffffff;
-  transform-origin: center center;
-  animation: voice-bar-pulse 1s ease-in-out infinite alternate;
-  animation-delay: calc(var(--bar-i) * -0.06s);
-}
-
-@keyframes voice-bar-pulse {
-  from {
-    transform: scaleY(0.45);
-  }
-
-  to {
-    transform: scaleY(1);
-  }
+  transition: transform 70ms linear, height 70ms linear;
 }
 
 /* 设计稿 70:1652：14px=28rpx / 行高 20px=40rpx / Regular / #FFFFFF。
@@ -471,16 +518,6 @@ function onSubmit() {
 /* 深色外观：设计稿无此态，仅夜间模式兜底（数值按同比例反色） */
 .voice-query--dark {
   background: rgba(242, 242, 245, 0.16);
-}
-
-.voice-query--dark .voice-query__cancel {
-  background: rgba(255, 255, 253, 0.2);
-}
-
-/* 深底 + 浅圆：X 换回白色 */
-.voice-query--dark .voice-query__cross::before,
-.voice-query--dark .voice-query__cross::after {
-  background: #ffffff;
 }
 
 .voice-query--dark .voice-query__bar {

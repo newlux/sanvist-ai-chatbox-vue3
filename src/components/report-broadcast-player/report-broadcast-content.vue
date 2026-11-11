@@ -183,8 +183,9 @@ watch(() => props.currentSeq, updateTranscriptScroll);
 
 /* —— 打字机（设计稿 195:1985）：当前播报段落逐字出现，不一次性摊开 ——
    只作用于「当前段」：已播完的段落保持全文，未播到的段落在浅色稿里不渲染，
-   所以视觉上是「正在念的这一句在长字」，和播报节奏一致。 */
-const TYPE_INTERVAL_MS = 50;
+   所以视觉上是「正在念的这一句在长字」，和播报节奏一致。
+   80ms/字（约 12 字/秒）：比原先 50ms 更慢，突出「边念边长」的打字机手感。 */
+const TYPE_INTERVAL_MS = 80;
 /** 当前段落已打出的字数：切句归零，暂停冻结，恢复后接着打 */
 const typedLength = ref(0);
 let typingTimer: ReturnType<typeof setInterval> | null = null;
@@ -287,8 +288,11 @@ onBeforeUnmount(() => {
             class="report-broadcast-content__segment"
             :class="`report-broadcast-content__segment--${item.role}`"
           >
-            <!-- 当前段走打字机（逐字出现），已播完的段落保持全文 -->
-            {{ item.role === "current" ? item.text.slice(0, typedLength) : item.text }}
+            <!-- 当前段走打字机（逐字出现），已播完的段落保持全文；光标跟在最后一个字后面 -->
+            {{ item.role === "current" ? item.text.slice(0, typedLength) : item.text }}<text
+              v-if="item.role === 'current'"
+              class="report-broadcast-content__caret"
+            />
           </text>
         </view>
       </scroll-view>
@@ -362,21 +366,21 @@ onBeforeUnmount(() => {
   overflow: visible;
 }
 /* 头像位：tell.gif 画布 3840×3840、透明底且图形居中（三角约占中间 40%），
-   等比缩到 180px（360rpx）后由舞台 flex 居中即可，不做裁剪 */
+   等比缩到 240px（480rpx）后由舞台 flex 居中即可，不做裁剪 */
 .report-broadcast-content__portrait-wrap {
   position: relative;
   display: flex;
-  width: 360rpx;
-  height: 360rpx;
-  flex: 0 0 360rpx;
+  width: 480rpx;
+  height: 480rpx;
+  flex: 0 0 480rpx;
   align-items: center;
   justify-content: center;
 }
 .report-broadcast-content__portrait {
   position: relative;
   z-index: 1;
-  width: 360rpx;
-  height: 360rpx;
+  width: 480rpx;
+  height: 480rpx;
 }
 .report-broadcast-content__glow {
   position: absolute;
@@ -456,6 +460,32 @@ onBeforeUnmount(() => {
   font-size: 36rpx;
   font-weight: 700;
   line-height: 50rpx;
+}
+/* 打字机光标：竖线贴在当前段最后一个字后面。
+   填充用播报页品牌渐变（#3D21CD → #1999FE → #C067FA → #FD90C4），整体 60% 不透明，
+   1.1s 阶梯闪烁；高度用 1em 跟随段落字号，两个主题共用 */
+.report-broadcast-content__caret {
+  display: inline-block;
+  width: 4rpx;
+  height: 1em;
+  margin-left: 6rpx;
+  border-radius: 2rpx;
+  vertical-align: -0.18em;
+  opacity: 0.6;
+  background-image: linear-gradient(180deg, #3d21cd 0%, #1999fe 33.33%, #c067fa 66.67%, #fd90c4 100%);
+  animation: podcast-caret-blink 1.1s steps(1) infinite;
+}
+
+@keyframes podcast-caret-blink {
+  0%,
+  55% {
+    opacity: 0.6;
+  }
+
+  55.01%,
+  100% {
+    opacity: 0;
+  }
 }
 /* —— 录音中的实时转写：占用字幕区，排版沿用「当前句」的字号，像把播报文字换成用户的话 —— */
 .report-broadcast-content__voice {
@@ -605,10 +635,10 @@ onBeforeUnmount(() => {
    - 上下渐隐：底色跟随页面底色 #FAFAFA，文字淡出不出现色块接缝 */
 .report-broadcast-content--light {
   /**
-   * 头像位放 tell.gif：画布 3840×3840、透明底，等比缩到 180px（360rpx），
+   * 头像位放 tell.gif：画布 3840×3840、透明底，等比缩到 240px（480rpx），
    * 图形本体约占画布中间 40%（其余是透明留白），按「画布中心 = 头像位中心」摆放：
    *   - 舞台高度 110px（220rpx）= 设计稿头像位 112px；
-   *   - 360rpx 画布相对 220rpx 舞台上下各溢出 70rpx（35px），溢出部分全透明，不遮字幕。
+   *   - 480rpx 画布相对 220rpx 舞台上下各溢出 130rpx（65px），溢出部分全透明，不遮字幕。
    */
   .report-broadcast-content__portrait-stage {
     position: relative;
@@ -618,19 +648,19 @@ onBeforeUnmount(() => {
 
   .report-broadcast-content__portrait-wrap {
     position: absolute;
-    top: -70rpx; /* (220 - 360) / 2：画布垂直居中 */
+    top: -130rpx; /* (220 - 480) / 2：画布垂直居中 */
     left: 50%;
-    width: 360rpx; /* 180px */
-    height: 360rpx; /* 180px */
-    margin-left: -180rpx;
+    width: 480rpx; /* 240px */
+    height: 480rpx; /* 240px */
+    margin-left: -240rpx;
   }
 
   .report-broadcast-content__portrait {
     position: absolute;
     top: 0;
     left: 0;
-    width: 360rpx; /* 180px */
-    height: 360rpx; /* 180px */
+    width: 480rpx; /* 240px */
+    height: 480rpx; /* 240px */
   }
 
   .report-broadcast-content__glow {
