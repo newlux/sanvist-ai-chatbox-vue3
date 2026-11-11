@@ -33,6 +33,8 @@ const props = defineProps({
   loadSessions: { type: Function, default: undefined },
   selectedSessionId: { type: [String, Number], default: "" },
   generating: { type: Boolean, default: false },
+  /** 欢迎首页只显示菜单栏，三角图仍由居中的欢迎层展示。 */
+  showIsland: { type: Boolean, default: true },
   shareMode: { type: Boolean, default: false },
   shareSelectAllDisabled: { type: Boolean, default: false },
   shareAllChecked: { type: Boolean, default: false },
@@ -40,7 +42,7 @@ const props = defineProps({
   backOnly: { type: Boolean, default: false },
   /**
    * 左侧按钮显示「返回」箭头（emit back），替掉默认的历史对话抽屉按钮。
-   * 任务协同页在纯净模式关闭时传 true：左侧返回上级页面，右侧仍是关闭小程序。
+   * 作业指导、任务协同两种纯净模式下都传 true：左侧返回上一页，右侧仍返回宿主首页。
    * （与 backOnly 的区别：backOnly 连右侧按钮和语音播报开关一起收掉，这里只换左侧。）
    */
   backOnLeft: { type: Boolean, default: false },
@@ -648,7 +650,7 @@ onBeforeUnmount(() => {
           <!-- 顶部中间「灵动岛」+ 下方状态胶囊
                Ardot 722:69（浅色思考中）/ 722:489（浅色回答中）：胶囊只在生成中出现
                未生成时只留圆形灵动岛，胶囊整体不渲染 -->
-          <view class="chat-header__island-wrap">
+          <view v-if="showIsland" class="chat-header__island-wrap">
             <view
               class="chat-header__island"
               :class="{ 'chat-header__island--thinking': thinking }"

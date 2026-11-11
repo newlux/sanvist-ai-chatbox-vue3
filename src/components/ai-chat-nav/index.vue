@@ -3,10 +3,8 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
-import iconParts from "@/assets/img/icon-parts.svg";
 import iconRepair from "@/assets/img/icon-repair.svg";
 import iconVox from "@/assets/img/icon-vox.svg";
-import { PARTS_ASSISTANT_EMBED_URL } from "@/config";
 import { usePcMode } from "@/hooks/usePcMode";
 
 /** 快捷入口。mode=page 另开专属页面（url 指向对应场景页） */
@@ -67,7 +65,7 @@ const { t } = useI18n();
 
 const { isPc } = usePcMode();
 
-// 入口：听汇报 / 作业指导 / 任务协同 / 维修助理 / 配件助手，全部另开专属场景页
+// 入口：听汇报 / 作业指导 / 任务协同 / 维修助理，全部另开专属场景页
 const DEFAULT_NAV_ITEMS: NavItem[] = [
   {
     key: "vox-core",
@@ -103,25 +101,16 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
     mode: "page",
     url: "/pages/repair/index",
   },
-  {
-    key: "parts-master-ai",
-    titleKey: "nav-parts",
-    icon: iconParts,
-    subagent: "parts",
-    // 与维修助理一致：pushWindow 直达三方 H5；url 里带的是目标地址，
-    // 首页点击时解析出来交给 utils/parts-h5，本地壳页 /pages/parts/index 只做兜底
-    mode: "page",
-    url: `/pages/parts/index?url=${encodeURIComponent(PARTS_ASSISTANT_EMBED_URL)}`,
-  },
 ];
 
 /** PC 端不展示的底部入口：作业指导只在 APP 端保留。 */
 const PC_HIDDEN_NAV_KEYS = new Set(["fix-master-ai"]);
 
 const navItems = computed(() => {
-  const items = Array.isArray(props.items) && props.items.length
+  const configuredItems = Array.isArray(props.items) && props.items.length
     ? props.items
     : DEFAULT_NAV_ITEMS;
+  const items = configuredItems.filter(item => item.key !== "parts-master-ai" && item.subagent !== "parts");
 
   // 仅 PC 端收起「作业指导」；APP 容器与手机浏览器 isPc=false，菜单保持原样
   if (!isPc.value) return items;

@@ -1780,16 +1780,9 @@ async function loadTodayListenBroadcast() {
 }
 
 function syncPageStage() {
-  if (isDemoPage) {
+  // 已有对话继续展示；新进入不再因旧的唤醒标记跳过欢迎首页。
+  if (isDemoPage || chatStore.messages.length) {
     pageStage.value = "chat";
-    return;
-  }
-  try {
-    if (!userStore.isVisitor && uni.getStorageSync(AI_ASK_WELCOME_DONE_KEY)) {
-      pageStage.value = "chat";
-    }
-  } catch (error) {
-    logger.error("caught error", error);
   }
 }
 
@@ -1934,6 +1927,34 @@ onBeforeUnmount(() => {
 
 <template>
   <view class="ai-page" :class="{ 'ai-page--dark': isDark }">
+    <AiChatHeader
+      v-if="!pureMode || pageStage === 'chat'"
+      :show-island="pageStage === 'chat'"
+      v-model:sessions="sessions"
+      class="ai-page__header"
+      plain-bg
+      :load-sessions="getAISessionList"
+      :selected-session-id="aiSessionId"
+      :generating="isLoading"
+      :realtime-tts-playing="realtimeTts.playing.value"
+      :share-mode="shareSheetVisible"
+      :share-select-all-disabled="shareSelectAllDisabled"
+      :share-all-checked="shareAllChecked"
+      :share-selected-round-count="shareSelectedRoundCount"
+      :voice-listening="voiceListening || voiceQueryActive"
+      :listen-idle="islandListenFromWelcome"
+      restartable
+      round-buttons
+      @back="backToWelcome"
+      @restart="onRestartToStart"
+      @new-conversation="startNewConversation"
+      @session-click="onSessionClick"
+      @session-delete="onSessionDelete"
+      @session-delete-batch="onSessionDeleteBatch"
+      @session-rename="onSessionRename"
+      @share-select-all="onShareSelectAll"
+    />
+
     <!-- 欢迎页：起飞动画期间继续挂载，logo 滑到顶部再收起 -->
     <AiWelcome
       v-if="showWelcome"
@@ -1970,30 +1991,7 @@ onBeforeUnmount(() => {
       <!-- 顶部白色渐变：页面上沿由白向下渐隐，压住线稿背景与滚上来的内容 -->
       <view class="ai-page__top-fade" />
       <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
-      <AiChatHeader
-        v-model:sessions="sessions"
-        class="ai-page__header"
-        plain-bg
-        :load-sessions="getAISessionList"
-        :selected-session-id="aiSessionId"
-        :generating="isLoading"
-        :realtime-tts-playing="realtimeTts.playing.value"
-        :share-mode="shareSheetVisible"
-        :share-select-all-disabled="shareSelectAllDisabled"
-        :share-all-checked="shareAllChecked"
-        :share-selected-round-count="shareSelectedRoundCount"
-        :voice-listening="voiceListening || voiceQueryActive"
-        :listen-idle="islandListenFromWelcome"
-        restartable
-        @back="backToWelcome"
-        @restart="onRestartToStart"
-        @new-conversation="startNewConversation"
-        @session-click="onSessionClick"
-        @session-delete="onSessionDelete"
-        @session-delete-batch="onSessionDeleteBatch"
-        @session-rename="onSessionRename"
-        @share-select-all="onShareSelectAll"
-      />
+
       <AiMessageList
         :key="chatListKey"
         top-inset="var(--chat-top-inset, 300rpx)"
@@ -2327,6 +2325,7 @@ $color-white: #ffffff;
 }
 
 .ai-page {
+  position: relative;
   min-height: 100vh;
   height: 100%;
   box-sizing: border-box;
@@ -2394,7 +2393,7 @@ $color-white: #ffffff;
 // 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）。
 // 这里必须是 1010：历史抽屉（内部 1000）的层级帽由这一层决定，
 // 底部 slot 抽屉是 1002，小于它就会被压住（附件弹窗 1020 仍在其上）
-.ai-page__chat > .ai-page__header {
+.ai-page > .ai-page__header {
   position: absolute;
   top: 0;
   right: 0;

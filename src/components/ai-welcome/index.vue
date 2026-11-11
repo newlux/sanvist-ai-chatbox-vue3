@@ -8,6 +8,7 @@ import voiceWaveIcon from "@/assets/img/icon-voice-wave-dark.svg";
 import listenLogo from "@/assets/img/listen.gif";
 import saniLogo from "@/assets/img/sani-logo.gif";
 import { useSafeArea } from "@/hooks/useSafeArea";
+import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 
 /**
  * 初始页（首页 welcome 态）：中间 SANI 图标 +「Hey,SANI」，底部一条静态输入栏。
@@ -236,6 +237,7 @@ onBeforeUnmount(() => {
     <view class="welcome__composer">
       <image
         class="welcome__composer-plus"
+        @tap.stop="showAttachmentComingSoon"
         src="@/assets/img/icon-plus.svg"
         mode="aspectFit"
       />
