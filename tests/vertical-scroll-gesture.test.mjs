@@ -20,7 +20,8 @@ function stub(t, name, value) {
     else delete globalThis[name];
   });
 }
-function fixture(t, pointer = false, selector) {
+function fixture(t, pointer = false, selector, touchCapable = false) {
+  stub(t, 'window', touchCapable ? { ontouchstart: null } : {});
   stub(t, 'PointerEvent', pointer ? class {} : undefined);
   stub(t, 'getComputedStyle', node => ({ overflowY: node.overflowY }));
   const outer = { overflowY: 'auto', scrollHeight: 2000, clientHeight: 600, scrollTop: 200, parentElement: null };
@@ -35,7 +36,7 @@ function fixture(t, pointer = false, selector) {
       handlers.set(name, handler);
     },
     removeEventListener(name, handler, capture) {
-      assert.equal(capture, true);
+      assert.equal(capture.capture, true);
       assert.equal(handlers.get(name), handler);
       handlers.delete(name);
     },
@@ -103,5 +104,45 @@ test('鼠标拖动不当成触摸竖滑', t => {
   const { outer, fire } = fixture(t, true);
   fire('pointerdown', 100, 200, { pointerType: 'mouse' });
   fire('pointermove', 100, 140, { pointerType: 'mouse' });
+  assert.equal(outer.scrollTop, 200);
+});
+
+
+test('iOS 同时支持 Pointer 和 Touch 时优先绑定 Touch，纵滑不依赖 Pointer 事件', t => {
+  const { outer, handlers, fire } = fixture(t, true, undefined, true);
+  assert.equal(handlers.has('pointerdown'), false);
+  assert.equal(handlers.has('touchstart'), true);
+  fire('touchstart', 100, 200, { touches: [{ clientX: 100, clientY: 200 }] });
+  const move = fire('touchmove', 102, 140, { touches: [{ clientX: 102, clientY: 140 }] });
+  assert.equal(outer.scrollTop, 260);
+  assert.equal(move.prevented, true);
+  assert.equal(move.stopped, true);
+});
+
+test('iOS Pointer 取消不打断 Touch 竖滑，连续移动继续滚动', t => {
+  const { outer, fire } = fixture(t, true, undefined, true);
+  fire('touchstart', 100, 200, { touches: [{ clientX: 100, clientY: 200 }] });
+  fire('touchmove', 100, 170, { touches: [{ clientX: 100, clientY: 170 }] });
+  fire('pointercancel', 100, 170);
+  fire('touchmove', 100, 130, { touches: [{ clientX: 100, clientY: 130 }] });
+  assert.equal(outer.scrollTop, 270);
+});
+
+test('安卓双事件设备只消费 Touch 一次，不重复累加 Pointer 位移', t => {
+  const { outer, fire } = fixture(t, true, undefined, true);
+  fire('pointerdown', 100, 200);
+  fire('touchstart', 100, 200, { touches: [{ clientX: 100, clientY: 200 }] });
+  fire('pointermove', 100, 140);
+  fire('touchmove', 100, 140, { touches: [{ clientX: 100, clientY: 140 }] });
+  assert.equal(outer.scrollTop, 260);
+});
+
+test('双事件触屏上的横滑与轻点仍放行，不影响表格和图表原有交互', t => {
+  const { outer, fire } = fixture(t, true, undefined, true);
+  fire('touchstart', 100, 200, { touches: [{ clientX: 100, clientY: 200 }] });
+  const move = fire('touchmove', 160, 202, { touches: [{ clientX: 160, clientY: 202 }] });
+  const end = fire('touchend', 160, 202, { touches: [] });
+  assert.equal(move.prevented, undefined);
+  assert.equal(end.prevented, undefined);
   assert.equal(outer.scrollTop, 200);
 });

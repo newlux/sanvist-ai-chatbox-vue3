@@ -1,20 +1,20 @@
 <script setup lang="ts">
 import type { ThinkStep } from "@/utils/ai-stream";
-import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
-import tellGif from "@/assets/img/tell.gif";
+import thinkGif from "@/assets/img/think.gif";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { useSystemStore } from "@/stores";
+import { resolveMotionElement } from "@/utils/voice-message-motion";
 
 const props = defineProps<{
-  /** 所选音色头像：头像位已统一改用 tell.gif 动图，仅为父级传参兼容保留 */
+  /** 所选音色头像：头像位已统一改用 think.gif 动图，仅为父级传参兼容保留 */
   portrait?: string;
   playing: boolean;
   loading: boolean;
   currentSeq: number | null;
-  nextText: string;
   transcriptSegments: Array<{ seq: number; text: string }>;
   /** 归一化播报进度（0~1），由播放器周期估算。 */
   progress: number;
@@ -39,56 +39,66 @@ const { t } = useI18n();
  */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
-const instance = getCurrentInstance();
-const transcriptScrollTop = ref(0);
-/**
- * 滚动视图的真实位置。transcriptScrollTop 是单向受控值，用户手动滚动时不会同步，
- * 一旦两者脱节，切句时以受控值为基数算出的目标位置就是错的，高亮回不到中间。
- */
-let transcriptRealScrollTop = 0;
-/** 自动居中滚动进行中：动画中间态不回写受控值，否则会自己打断自己。 */
-let transcriptAutoCentering = false;
-let transcriptAutoCenterTimer: ReturnType<typeof setTimeout> | null = null;
-/** 手动滚动停手后延迟这么久，若无新滚动就把当前高亮段拉回中间（不等下一句切句）。 */
-const TRANSCRIPT_RECENTER_DELAY_MS = 3000;
-let transcriptRecenterTimer: ReturnType<typeof setTimeout> | null = null;
+const transcriptViewportRef = ref<unknown>(null);
+const transcriptTrackRef = ref<unknown>(null);
+const transcriptHasScrolled = ref(false);
+let bottomFrame: number | null = null;
+let bottomQueued = false;
+let contentResizeObserver: ResizeObserver | null = null;
 
-/** 取消已排定的「停手回中」，避免用户继续滚动时半路被打断。 */
-function cancelTranscriptRecenter() {
-  if (!transcriptRecenterTimer) return;
-  clearTimeout(transcriptRecenterTimer);
-  transcriptRecenterTimer = null;
+function getTranscriptScroller() {
+  const component = transcriptViewportRef.value as { $getMain?: () => unknown } | null;
+  // uni H5 暴露的 main 才是滚动节点；外层 .uni-scroll-view 只是包装层。
+  const main = resolveMotionElement(component?.$getMain?.());
+  if (main) return main;
+  const root = resolveMotionElement(transcriptViewportRef.value);
+  return root?.querySelector<HTMLElement>(".uni-scroll-view > .uni-scroll-view")
+    || root?.querySelector<HTMLElement>(".uni-scroll-view")
+    || root;
 }
 
-/** 每次手动滚动都重新计时：只有真正停下来 TRANSCRIPT_RECENTER_DELAY_MS 才回中。 */
-function scheduleTranscriptRecenter() {
-  cancelTranscriptRecenter();
-  // 暂停时用户通常在看文字，不打扰；恢复播放后由切句逻辑接管回中
-  if (!props.playing) return;
-  transcriptRecenterTimer = setTimeout(() => {
-    transcriptRecenterTimer = null;
-    updateTranscriptScroll();
-  }, TRANSCRIPT_RECENTER_DELAY_MS);
+/** 只负责滚到底部；列表仅包含已开始播放的句子，不再计算居中和回中。 */
+function scrollTranscriptToBottom() {
+  if (bottomQueued) return;
+  bottomQueued = true;
+  void nextTick(() => {
+    const apply = () => {
+      bottomFrame = null;
+      bottomQueued = false;
+      if (props.voiceRecording || qaVisible.value || showTranscriptSkeleton.value) return;
+      const scroller = getTranscriptScroller();
+      if (!scroller) return;
+      const bottom = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      // 未溢出时自然从顶部展示；只有超高、正在播放时才跟随到底部。
+      if (bottom <= 1) {
+        if (scroller.scrollTop !== 0) scroller.scrollTop = 0;
+        transcriptHasScrolled.value = false;
+        return;
+      }
+      if (props.playing && Math.abs(scroller.scrollTop - bottom) > 1) scroller.scrollTop = bottom;
+      transcriptHasScrolled.value = scroller.scrollTop > 1;
+    };
+    // 等待 WebView 完成这次布局后再读 scrollHeight，不读取插入前的旧高度。
+    if (typeof requestAnimationFrame === "function") bottomFrame = requestAnimationFrame(apply);
+    else apply();
+  });
 }
-
-/**
- * 记录真实滚动位置；手动滚动时同步受控值到真实位置，
- * 保证下次自动居中的目标值与旧值不同，scroll-view 才会真正滚动。
- */
-function onTranscriptScroll(e: { detail?: { scrollTop?: number } }) {
-  const top = Number(e?.detail?.scrollTop ?? 0);
-  if (!Number.isFinite(top)) return;
-  transcriptRealScrollTop = top;
-  if (transcriptAutoCentering) return;
-  transcriptScrollTop.value = Math.max(0, top);
-  // 手动滚动：排定停手后回中，高亮段重新回到中间阅读带
-  scheduleTranscriptRecenter();
-}
+watch(transcriptTrackRef, value => {
+  contentResizeObserver?.disconnect();
+  contentResizeObserver = null;
+  const element = resolveMotionElement(value);
+  if (element && typeof ResizeObserver !== "undefined") {
+    // 只监听内容高度以保持贴底，不计算段落坐标或居中位置。
+    contentResizeObserver = new ResizeObserver(scrollTranscriptToBottom);
+    contentResizeObserver.observe(element);
+  }
+}, { flush: "post" });
 const showTranscriptSkeleton = computed(
   () => props.loading && props.transcriptSegments.length === 0,
 );
 /** 按住说话的识别/问答态：字幕区让位给「正在理解」与回答结果。 */
 const qaVisible = computed(() => Boolean(props.qaLoading || props.qaAnswer));
+
 /**
  * 识别中标题下方的文字：全部来自 chat-messages 流——
  * 先放后端下发的当前过程文案，再补上 think 步骤里的执行说明（同文去重）。
@@ -104,90 +114,29 @@ const qaTextLines = computed(() => {
   (props.qaSteps || []).forEach(step => push(step?.message));
   return lines;
 });
-const transcriptItems = computed(() => {
-  const items = props.transcriptSegments.map(segment => ({
-    key: `segment-${segment.seq}`,
-    role: (segment.seq === props.currentSeq
-      ? "current"
-      : segment.seq < (props.currentSeq ?? Infinity)
-        ? "previous"
-        : "next") as "previous" | "current" | "next",
-    text: segment.text,
-  }));
-  /**
-   * 浅色稿 195:1985 只有「当前播报段落」一块文字，配合打字机逐句摊开：
-   * 还没播到的段落先不渲染，字幕随播报一句一句长出来，不是一进页就把全稿摊平。
-   * 深色稿（1193:2708）保留原来的「下一句」淡显预览，不动。
-   */
-  if (!isDark.value) return items.filter(item => item.role !== "next");
-  if (
-    props.nextText &&
-    props.currentSeq !== null &&
-    !items.some(item => item.key === `segment-${props.currentSeq + 1}`)
-  ) {
-    items.push({ key: `segment-${props.currentSeq + 1}`, role: "next", text: props.nextText });
-  }
-  return items;
-});
-
-function updateTranscriptScroll() {
-  if (!props.playing || props.currentSeq === null) return;
-  const targetSeq = props.currentSeq;
-  void nextTick(() => {
-    if (!props.playing || props.currentSeq !== targetSeq) return;
-    const query = uni.createSelectorQuery().in(instance?.proxy);
-    query.select(".report-broadcast-content__transcript-content").boundingClientRect();
-    query.select(`#segment-${targetSeq}`).boundingClientRect();
-    query.exec((rects) => {
-      if (!props.playing || props.currentSeq !== targetSeq) return;
-      const viewport = rects?.[0] as UniApp.NodeInfo | undefined;
-      const current = rects?.[1] as UniApp.NodeInfo | undefined;
-      if (
-        !viewport
-        || !current
-        || typeof viewport.top !== "number"
-        || typeof viewport.bottom !== "number"
-        || typeof current.top !== "number"
-        || typeof current.bottom !== "number"
-      ) {
-        return;
-      }
-
-      // 预留上下渐隐和底部反馈区，当前播报段落只在中间阅读带内定位。
-      const safeTop = viewport.top + Math.min(80, (viewport.bottom - viewport.top) * 0.25);
-      const safeBottom = viewport.bottom - Math.min(112, (viewport.bottom - viewport.top) * 0.35);
-      const currentHeight = current.bottom - current.top;
-      const targetTop = currentHeight >= safeBottom - safeTop
-        ? safeTop
-        : safeTop + (safeBottom - safeTop - currentHeight) / 2;
-      const offset = current.top - targetTop;
-      if (Math.abs(offset) > 1) {
-        // 已经在自动回中，取消可能残留的停手排定，避免重复触发
-        cancelTranscriptRecenter();
-        // 以「真实滚动位置」为基数校正：受控值可能因用户手动滚动而与真实位置脱节，
-        // 用脱节的受控值做基数会把高亮滚偏，甚至新旧值相同导致 scroll-view 不滚动（表现为不复原）。
-        const nextTop = Math.max(0, Math.round(transcriptRealScrollTop + offset));
-        transcriptAutoCentering = true;
-        transcriptScrollTop.value = nextTop;
-        transcriptRealScrollTop = nextTop;
-        if (transcriptAutoCenterTimer) clearTimeout(transcriptAutoCenterTimer);
-        // 与 scroll-with-animation 的动画时长同量级，动画结束后恢复手动滚动回写
-        transcriptAutoCenterTimer = setTimeout(() => {
-          transcriptAutoCentering = false;
-        }, 360);
-      }
-    });
-  });
-}
-watch(() => props.currentSeq, updateTranscriptScroll);
+// 播放器在音频 onplay 时追加当前句；未播放分片只留在音频缓存中。
+const transcriptItems = computed(() => props.transcriptSegments.map(segment => ({
+  key: `segment-${segment.seq}`,
+  role: segment.seq === props.currentSeq ? "current" : "previous",
+  text: segment.text,
+})));
 
 /* —— 打字机（设计稿 195:1985）：当前播报段落逐字出现，不一次性摊开 ——
-   只作用于「当前段」：已播完的段落保持全文，未播到的段落在浅色稿里不渲染，
+   只作用于「当前段」：已播完的段落保持全文，未开始播放的句子不加入列表，
    所以视觉上是「正在念的这一句在长字」，和播报节奏一致。
    80ms/字（约 12 字/秒）：比原先 50ms 更慢，突出「边念边长」的打字机手感。 */
 const TYPE_INTERVAL_MS = 80;
 /** 当前段落已打出的字数：切句归零，暂停冻结，恢复后接着打 */
 const typedLength = ref(0);
+watch([
+  transcriptItems,
+  typedLength,
+  transcriptViewportRef,
+  () => props.playing,
+  () => props.voiceRecording,
+  qaVisible,
+  showTranscriptSkeleton,
+], scrollTranscriptToBottom, { flush: "post" });
 let typingTimer: ReturnType<typeof setInterval> | null = null;
 
 function stopTyping() {
@@ -227,8 +176,8 @@ watch(() => props.playing, syncTyping);
 watch(() => currentSegmentLength(), syncTyping);
 
 onBeforeUnmount(() => {
-  if (transcriptAutoCenterTimer) clearTimeout(transcriptAutoCenterTimer);
-  cancelTranscriptRecenter();
+  contentResizeObserver?.disconnect();
+  if (bottomFrame !== null) cancelAnimationFrame(bottomFrame);
   stopTyping();
 });
 
@@ -243,6 +192,7 @@ onBeforeUnmount(() => {
     :class="{
       'report-broadcast-content--dark': isDark,
       'report-broadcast-content--light': !isDark,
+      'report-broadcast-content--reading': !qaVisible && !voiceRecording,
     }"
   >
     <view class="report-broadcast-content__portrait-gap" />
@@ -250,13 +200,13 @@ onBeforeUnmount(() => {
       <view class="report-broadcast-content__glow report-broadcast-content__glow--blue" />
       <view class="report-broadcast-content__glow report-broadcast-content__glow--red" />
       <!-- 左右声波已去掉（深色稿同步移除，浅色稿本就没有）：头像位只剩图形本体 -->
-      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 tell 动图，深浅色共用 tell.gif，
-           画布 3840×3840 透明底、图形居中，两种主题都直接叠 -->
+      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 think 动图，深浅色共用 think.gif，
+           画布 768×384 透明底，使用 aspectFill 裁掉左右留白，两种主题共用 -->
       <view class="report-broadcast-content__portrait-wrap">
         <image
           class="report-broadcast-content__portrait"
-          :src="tellGif"
-          mode="aspectFit"
+          :src="thinkGif"
+          mode="aspectFill"
         />
       </view>
       <!-- 暂停/播放按钮已按浅色稿 195:1927 去掉：画板头像位只有头像本身，没有播放控件 -->
@@ -273,14 +223,16 @@ onBeforeUnmount(() => {
         </view>
       </view>
       <scroll-view
+        ref="transcriptViewportRef"
         v-show="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
         class="report-broadcast-content__transcript-content"
         scroll-y
-        :scroll-top="transcriptScrollTop"
-        :scroll-with-animation="playing"
-        @scroll="onTranscriptScroll"
+        @scroll="scrollTranscriptToBottom"
       >
-        <view class="report-broadcast-content__transcript-track">
+        <view
+          ref="transcriptTrackRef"
+          class="report-broadcast-content__transcript-track"
+        >
           <text
             v-for="item in transcriptItems"
             :id="item.key"
@@ -332,12 +284,8 @@ onBeforeUnmount(() => {
         <MarkdownRenderer class="report-broadcast-content__qa-answer" :content="qaAnswer" />
       </scroll-view>
       <view
-        v-if="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
+        v-if="transcriptHasScrolled && !showTranscriptSkeleton && !qaVisible && !voiceRecording"
         class="report-broadcast-content__top-fade"
-      />
-      <view
-        v-if="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
-        class="report-broadcast-content__bottom-fade"
       />
     </view>
   </view>
@@ -365,8 +313,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   overflow: visible;
 }
-/* 头像位：tell.gif 画布 3840×3840、透明底且图形居中（三角约占中间 40%），
-   等比缩到 240px（480rpx）后由舞台 flex 居中即可，不做裁剪 */
+/* 头像位保持 480rpx 正方形；think.gif 为 2:1 画布，aspectFill 等比裁掉两侧透明留白。 */
 .report-broadcast-content__portrait-wrap {
   position: relative;
   display: flex;
@@ -381,6 +328,9 @@ onBeforeUnmount(() => {
   z-index: 1;
   width: 480rpx;
   height: 480rpx;
+  /* 仅缩小动画本体，保留原占位，避免字幕位置随之跳动。 */
+  transform: scale(0.5);
+  transform-origin: center;
 }
 .report-broadcast-content__glow {
   position: absolute;
@@ -409,6 +359,10 @@ onBeforeUnmount(() => {
   width: 100%;
   min-height: 0;
   flex: 1 1 auto;
+  /* 底部累计留白 120px（原 40px 再增加 80px），滚动区域和渐隐一起上移。 */
+  margin-bottom: 240rpx;
+  /* 距 logo 再靠近约 20px，底部留白保持不变。 */
+  margin-top: -40rpx;
   padding: 32rpx 88rpx 0;
   box-sizing: border-box;
   overflow: hidden;
@@ -416,13 +370,17 @@ onBeforeUnmount(() => {
 .report-broadcast-content__transcript-content {
   width: 100%;
   height: 100%;
+  :deep(.uni-scroll-view) {
+    overflow-anchor: none;
+    scroll-behavior: auto;
+  }
 }
 .report-broadcast-content__transcript-track {
   display: flex;
-  min-height: 100%;
-  padding-bottom: 180rpx;
   box-sizing: border-box;
   flex-direction: column;
+  justify-content: flex-start;
+  padding-bottom: 24rpx;
   gap: 12rpx;
 }
 .report-broadcast-content__skeleton {
@@ -449,6 +407,7 @@ onBeforeUnmount(() => {
 }
 .report-broadcast-content__segment {
   display: block;
+  flex-shrink: 0;
   color: #e0e0e0;
   font-size: 38rpx;
   font-weight: 500;
@@ -506,7 +465,7 @@ onBeforeUnmount(() => {
   text-align: center;
   word-break: break-word;
 }
-/* —— 点击说话的识别/问答态：占用字幕区，文案与呼吸灯光晕整体居中 —— */
+/* —— 点击说话的识别/问答态：占用字幕区，文案与呼吸灯光晕整体跟随 —— */
 .report-broadcast-content__qa-loading {
   position: relative;
   display: flex;
@@ -591,26 +550,12 @@ onBeforeUnmount(() => {
   top: 0;
   right: 0;
   left: 0;
-  height: 160rpx;
+  height: 72rpx;
+  max-height: 30%;
   pointer-events: none;
-  // background: linear-gradient(180deg, #fff 0%, rgb(255 255 255 / 86%) 52%, rgb(255 255 255 / 0%) 100%);
+  background: linear-gradient(180deg, #fff 0%, rgb(255 255 255 / 86%) 40%, rgb(255 255 255 / 0%) 100%);
 }
 /* 播放/暂停按钮已按浅色稿 195:1927 移除（节点样式一并删掉，不留死代码） */
-.report-broadcast-content__bottom-fade {
-  position: absolute;
-  z-index: 2;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 180rpx;
-  pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    rgb(255 255 255 / 0%) 0%,
-    rgb(255 255 255 / 86%) 58%,
-    #fff 100%
-  );
-}
 .report-broadcast-content__play-btn {
   display: flex;
   width: 48rpx;
@@ -629,13 +574,13 @@ onBeforeUnmount(() => {
 
 /* ===== 浅色主题：Ardot 195:1927「日常运营助手-听播-正在播放」=====
    只按浅色稿的坐标与材质实现，深色稿（1193:2708）继续走下面的 --dark 块：
-   - 头像位 195:2031：换成 tell.gif 动图，画布 3840×3840 等比缩到 180px 摆放
+   - 头像位 195:2031：换成 think.gif 动图，画布 768×384 等比缩到 180px 摆放
    - 光晕：浅色稿无此元素，隐藏（声波两个主题都已去掉）
    - 字幕 195:1985：左 44 / 右 48（文本宽 283），头像底 → 文字顶 49px，18/26 Medium #0D0D0D
    - 上下渐隐：底色跟随页面底色 #FAFAFA，文字淡出不出现色块接缝 */
 .report-broadcast-content--light {
   /**
-   * 头像位放 tell.gif：画布 3840×3840、透明底，等比缩到 240px（480rpx），
+   * 头像位放 think.gif：画布 768×384、透明底，等比缩到 240px（480rpx），
    * 图形本体约占画布中间 40%（其余是透明留白），按「画布中心 = 头像位中心」摆放：
    *   - 舞台高度 110px（220rpx）= 设计稿头像位 112px；
    *   - 480rpx 画布相对 220rpx 舞台上下各溢出 130rpx（65px），溢出部分全透明，不遮字幕。
@@ -648,7 +593,7 @@ onBeforeUnmount(() => {
 
   .report-broadcast-content__portrait-wrap {
     position: absolute;
-    top: -130rpx; /* (220 - 480) / 2：画布垂直居中 */
+    top: -130rpx; /* (220 - 480) / 2：画布垂直跟随 */
     left: 50%;
     width: 480rpx; /* 240px */
     height: 480rpx; /* 240px */
@@ -691,22 +636,9 @@ onBeforeUnmount(() => {
   }
 
   .report-broadcast-content__top-fade {
-    // background: linear-gradient(
-    //   180deg,
-    //   #fafafa 0%,
-    //   rgb(250 250 250 / 86%) 52%,
-    //   rgb(250 250 250 / 0%) 100%
-    // );
+    background: linear-gradient(180deg, #fafafa 0%, rgb(250 250 250 / 86%) 40%, rgb(250 250 250 / 0%) 100%);
   }
 
-  .report-broadcast-content__bottom-fade {
-    background: linear-gradient(
-      180deg,
-      rgb(250 250 250 / 0%) 0%,
-      rgb(250 250 250 / 86%) 58%,
-      #fafafa 100%
-    );
-  }
 }
 
 /* ===== 深色主题：播报内容区（Ardot 1193:2708 正在播放 / 1193:3357 正在回答 / 1193:1864 中途提问）=====
@@ -718,7 +650,7 @@ onBeforeUnmount(() => {
    - 答案卡 1193:3413：底 #1A1A1A + 1px #303030 描边，正文 #FFFFFF；标题 #FFFFFF、过程说明 #8F8F8F
    - 骨架屏：浅色 #F2F3F5→#E5E7EB 的流光换成 #212121→#303030 */
 .report-broadcast-content--dark {
-  /* 头像位同样用 tell.gif：透明底素材直接叠在 #0D0D0D 上，
+  /* 头像位同样用 think.gif：透明底素材直接叠在 #0D0D0D 上，
      不再需要 screen 混合或径向遮罩去消方形色差 */
 
   .report-broadcast-content__glow--blue {
@@ -739,22 +671,9 @@ onBeforeUnmount(() => {
   }
 
   .report-broadcast-content__top-fade {
-    // background: linear-gradient(
-    //   180deg,
-    //   #0d0d0d 0%,
-    //   rgb(13 13 13 / 86%) 52%,
-    //   rgb(13 13 13 / 0%) 100%
-    // );
+    background: linear-gradient(180deg, #0d0d0d 0%, rgb(13 13 13 / 86%) 40%, rgb(13 13 13 / 0%) 100%);
   }
 
-  .report-broadcast-content__bottom-fade {
-    background: linear-gradient(
-      180deg,
-      rgb(13 13 13 / 0%) 0%,
-      rgb(13 13 13 / 86%) 58%,
-      #0d0d0d 100%
-    );
-  }
 
   .report-broadcast-content__voice-text {
     color: #ffffff;
@@ -777,5 +696,15 @@ onBeforeUnmount(() => {
   .report-broadcast-content__qa-answer :deep(p) {
     color: #ffffff !important;
   }
+}
+/* 播报态采用短阅读区：先从顶部逐句展示，超高后滚底，上方旧文字渐隐。
+   通过区域位置形成页面中下部的视觉重心，不再给段落塞半屏留白来强制居中。 */
+.report-broadcast-content--reading .report-broadcast-content__transcript {
+  flex: 0 1 360rpx;
+  height: 360rpx;
+  max-height: 24vh;
+  margin-top: auto;
+  margin-bottom: max(240rpx, 30vh);
+  padding-top: 0;
 }
 </style>

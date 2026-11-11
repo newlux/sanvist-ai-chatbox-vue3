@@ -76,7 +76,6 @@ export function useListenBroadcastPlayer() {
   const currentSeq = ref<number | null>(null);
   const previousText = ref("");
   const currentText = ref("");
-  const nextText = ref("");
   const transcriptSegments = ref<Array<{ seq: number; text: string }>>([]);
   const error = ref<Error | null>(null);
   const playbackRate = ref(loadReportPlaybackRate());
@@ -210,12 +209,10 @@ export function useListenBroadcastPlayer() {
       chunk = readyQueue.shift();
     }
     if (!chunk) {
-      nextText.value = "";
       completeIfDrained(id);
       return;
     }
 
-    nextText.value = String(readyQueue[0]?.text || "");
     // 续播点已找到：置回 1，后续分句无需再按序号过滤。
     startFromSeq = 1;
     const source = resolveAudioSource(chunk);
@@ -223,21 +220,6 @@ export function useListenBroadcastPlayer() {
       logger.warn("跳过缺少音频数据的听播分片", { seq: chunk.seq });
       playNext(id);
       return;
-    }
-
-    loading.value = false;
-    playing.value = true;
-    sessionHasPlayed = true;
-    previousText.value = currentText.value;
-    currentSeq.value = chunk.seq ?? null;
-    currentText.value = String(chunk.text || "");
-    const text = String(chunk.text || "");
-    if (
-      typeof chunk.seq === "number" &&
-      text &&
-      !transcriptSegments.value.some(segment => segment.seq === chunk.seq)
-    ) {
-      transcriptSegments.value.push({ seq: chunk.seq, text });
     }
 
     let audio: Howl | null = null;
@@ -258,6 +240,21 @@ export function useListenBroadcastPlayer() {
       html5: true,
       autoplay: true,
       format: resolveAudioFormat(source, chunk),
+      onplay() {
+        if (id !== sessionId || !audio || activeAudio !== audio) return;
+        if (paused.value) { audio.pause(); return; }
+        loading.value = false;
+        playing.value = true;
+        sessionHasPlayed = true;
+        if (currentSeq.value !== chunk.seq) previousText.value = currentText.value;
+        currentSeq.value = chunk.seq ?? null;
+        currentText.value = String(chunk.text || "");
+        const text = currentText.value;
+        if (typeof chunk.seq === "number" && text
+          && !transcriptSegments.value.some(segment => segment.seq === chunk.seq)) {
+          transcriptSegments.value.push({ seq: chunk.seq, text });
+        }
+      },
       onend() {
         if (id !== sessionId || !audio || activeAudio !== audio) return;
         activeAudio = null;
@@ -275,19 +272,8 @@ export function useListenBroadcastPlayer() {
       const chunk = pendingChunks.get(nextSeq);
       pendingChunks.delete(nextSeq);
       nextSeq += 1;
-      if (chunk) {
-        readyQueue.push(chunk);
-        const text = String(chunk.text || "");
-        if (
-          typeof chunk.seq === "number" &&
-          text &&
-          !transcriptSegments.value.some(segment => segment.seq === chunk.seq)
-        ) {
-          transcriptSegments.value.push({ seq: chunk.seq, text });
-        }
-      }
+      if (chunk) readyQueue.push(chunk);
     }
-    if (activeAudio) nextText.value = String(readyQueue[0]?.text || "");
     playNext(id);
   }
 
@@ -308,7 +294,7 @@ export function useListenBroadcastPlayer() {
       flushRemainingChunks(id);
       return;
     }
-    if (typeof chunk.seq !== "number" || pendingChunks.has(chunk.seq)) return;
+    if (typeof chunk.seq !== "number" || allChunks.has(chunk.seq)) return;
     pendingChunks.set(chunk.seq, chunk);
     allChunks.set(chunk.seq, chunk);
     drainContiguousChunks(id);
@@ -354,9 +340,10 @@ export function useListenBroadcastPlayer() {
 
   /** 周期估算播放进度：已完成句数 + 当前句内比例，再除以已收到的总句数。 */
   function updateProgress() {
-    const total = transcriptSegments.value.length;
+    const sequences = [...allChunks.keys()].sort((a, b) => a - b);
+    const total = sequences.length;
     if (!total || currentSeq.value == null) return;
-    const index = transcriptSegments.value.findIndex(segment => segment.seq === currentSeq.value);
+    const index = sequences.indexOf(currentSeq.value);
     if (index < 0) return;
     let fraction = 0;
     if (activeAudio) {
@@ -380,8 +367,12 @@ export function useListenBroadcastPlayer() {
    * 暂停中仅换队列、恢复时从新位置继续；播完态拖动等同从该句重播；流还在收时不打断。
    */
   function seekToSegment(seq: number) {
-    const index = transcriptSegments.value.findIndex(segment => segment.seq === seq);
+    const sequences = [...allChunks.keys()].sort((a, b) => a - b);
+    const index = sequences.indexOf(seq);
     if (index < 0) return;
+    // 回退/跳播后，显示区仍只保留该位置之前真正播过的文字。
+    transcriptSegments.value = transcriptSegments.value.filter(segment => segment.seq < seq);
+    currentSeq.value = null;
     clearGapTimer();
     if (activeAudio) {
       const audio = activeAudio;
@@ -400,7 +391,7 @@ export function useListenBroadcastPlayer() {
     readyQueue = upcoming;
     nextSeq = (upcoming.length ? (upcoming[upcoming.length - 1].seq ?? seq) : seq) + 1;
     finished.value = false;
-    playbackProgress.value = index / Math.max(1, transcriptSegments.value.length);
+    playbackProgress.value = index / Math.max(1, sequences.length);
     progressMonotonic = false;
     if (progressMonotonicTimer) clearTimeout(progressMonotonicTimer);
     progressMonotonicTimer = setTimeout(() => {
@@ -459,7 +450,6 @@ export function useListenBroadcastPlayer() {
     currentSeq.value = null;
     previousText.value = "";
     currentText.value = "";
-    nextText.value = "";
     transcriptSegments.value = [];
     error.value = null;
     allChunks.clear();
@@ -575,7 +565,6 @@ export function useListenBroadcastPlayer() {
     seekToSegment,
     previousText,
     currentText,
-    nextText,
     transcriptSegments,
     error,
   };

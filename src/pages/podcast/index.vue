@@ -1702,6 +1702,12 @@ onBeforeUnmount(() => {
   background: #fafafa;
 }
 
+/* 安全区自身有底色，不能只修改页面根节点，否则深色下仍会留下白带。 */
+.podcast-page--dark .chat-header__statusbar,
+.podcast-page--preference-dark .chat-header__statusbar {
+  background: #0d0d0d;
+}
+
 .podcast-page__chat {
   position: relative;
   display: flex;

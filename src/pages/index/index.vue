@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { createSpeechEndDetector } from "@/utils/asr/speech-end-detector";
 import AiVoiceHoldOverlay from "@/components/ai-voice-hold-overlay/index.vue";
 import { useVoiceQueryGesture } from "@/hooks/useVoiceQueryGesture";
 import type {
@@ -942,15 +943,14 @@ let voiceSeq = 0;
 /** 已发过 finish、正在等 final：静音检测 / 手动发送都可能触发，用它防重 */
 const voiceFinishing = ref(false);
 let voiceTickTimer: ReturnType<typeof setInterval> | null = null;
-/** 静音收尾：连续这么久没声音就认为说完了（文档建议 1.5s） */
-const VOICE_SILENCE_MS = 1500;
 /** 一直没听到人声的兜底：别让麦克风空转 */
 const VOICE_NO_SPEECH_MS = 8000;
 let voiceNoSpeechTimer: ReturnType<typeof setTimeout> | null = null;
-/** 判定「有声音」的 RMS 阈值，低于它按静音算 */
-const VOICE_LEVEL_THRESHOLD = 0.015;
-let voiceSilenceSince = 0;
 let voiceHeard = false;
+const speechEndDetector = createSpeechEndDetector({
+  onSilence: stopVoiceQuery,
+  isPaused: () => voiceHoldActive.value,
+});
 /**
  * 本轮走哪条录音链路。
  * - stream：WebAudio 采集 + WebSocket 流式 ASR，能逐字出文字（iOS / 普通浏览器）；
@@ -1015,8 +1015,8 @@ function resetVoiceQuery() {
   voiceFinishing.value = false;
   voiceLevel.value = 0;
   voiceSeconds.value = 0;
-  voiceSilenceSince = 0;
   voiceHeard = false;
+  speechEndDetector.reset();
   if (voiceNoSpeechTimer) {
     clearTimeout(voiceNoSpeechTimer);
     voiceNoSpeechTimer = null;
@@ -1107,8 +1107,8 @@ async function startVoiceQuery() {
   voiceFinishing.value = false;
   voiceLevel.value = 0;
   voiceSeconds.value = 0;
-  voiceSilenceSince = 0;
   voiceHeard = false;
+  speechEndDetector.reset();
   voiceQueryActive.value = true;
   voiceTranscript.value = "";
   // 开口了就把问候 / 快捷提问收起（以前是插占位气泡时顺带清掉的）
@@ -1165,6 +1165,10 @@ async function startVoiceQuery() {
     const session = openAsrStreamSession({
       onPartial(text) {
         if (seq !== voiceSeq) return;
+        if (!voiceFinishing.value) {
+          speechEndDetector.observeTranscript(text);
+          if (text.trim()) voiceHeard = true;
+        }
         // partial 是「完整文本的当前版本」：整体替换顶部那条实时文字，不要自己拼接
         voiceTranscript.value = text;
       },
@@ -1250,8 +1254,8 @@ function degradeToNativeVoice(reason: string) {
   }
   voiceSeconds.value = 0;
   voiceLevel.value = 0;
-  voiceSilenceSince = 0;
   voiceHeard = false;
+  speechEndDetector.reset();
   voiceTickTimer = setInterval(() => {
     voiceSeconds.value += 1;
   }, 1000);
@@ -1265,8 +1269,9 @@ function degradeToNativeVoice(reason: string) {
  */
 async function startNativeVoiceQuery(seq: number) {
   voiceBackend = "native";
-  voiceSilenceSince = 0;
+
   voiceHeard = false;
+  speechEndDetector.reset();
   try {
     const granted = await ensureNativePermission("record_audio");
     if (seq !== voiceSeq) return;
@@ -1412,6 +1417,7 @@ async function finishNativeVoiceQuery() {
 function stopVoiceQuery() {
   if (!voiceQueryActive.value || voiceFinishing.value) return;
   voiceFinishing.value = true;
+  speechEndDetector.reset();
   // 计时停在这里：底部条要显示「最终录了几秒」，不要再涨
   if (voiceTickTimer) {
     clearInterval(voiceTickTimer);
@@ -1439,27 +1445,11 @@ function cancelVoiceQuery() {
 
 /** 静音检测：说过话之后连续 1.5s 没声音就自动收尾，用户不用再点一次 */
 function onVoiceLevel(level: number) {
-  if (voiceHoldActive.value) {
-    voiceSilenceSince = 0;
-    voiceLevel.value += (Math.min(1, Math.max(0, level / 0.15)) - voiceLevel.value) * 0.35;
-    return;
-  }
-  // 声纹用的音量：RMS 0.15 已经算大声，再乘一次平滑，跳动才跟得上 100ms 的采样
   const normalized = Math.min(1, Math.max(0, level / 0.15));
   voiceLevel.value += (normalized - voiceLevel.value) * 0.35;
-
-  if (level >= VOICE_LEVEL_THRESHOLD) {
-    voiceHeard = true;
-    voiceSilenceSince = 0;
-    return;
+  if (voiceQueryActive.value && !voiceFinishing.value) {
+    voiceHeard = speechEndDetector.observeLevel(level);
   }
-  if (!voiceHeard) return;
-  if (!voiceSilenceSince) {
-    voiceSilenceSince = performance.now();
-    return;
-  }
-  if (performance.now() - voiceSilenceSince < VOICE_SILENCE_MS) return;
-  stopVoiceQuery();
 }
 
 /**
@@ -1924,6 +1914,7 @@ onUnload(() => {
   realtimeTts.stop();
 });
 onBeforeUnmount(() => {
+  speechEndDetector.reset();
   clearRepairSummaryPolling();
   stopNativeResume();
   uni.$off("listen-report-marked", refreshListenReportState);

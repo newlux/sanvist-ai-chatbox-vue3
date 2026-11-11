@@ -1,3 +1,4 @@
+import { createSpeechEndDetector } from "@/utils/asr/speech-end-detector";
 import { onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
@@ -13,12 +14,8 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
 
 const logger = createLogger("voice-query");
 
-/** 静音收尾：连续这么久没声音就认为说完了 */
-const VOICE_SILENCE_MS = 1500;
 /** 一直没听到人声的兜底：别让麦克风空转 */
 const VOICE_NO_SPEECH_MS = 8000;
-/** 判定「有声音」的 RMS 阈值，低于它按静音算 */
-const VOICE_LEVEL_THRESHOLD = 0.015;
 /** 原生通道整段识别的最长等待：超时就当没识别到，别把录音条一直挂在「识别中」 */
 const NATIVE_RECOGNIZE_TIMEOUT_MS = 30_000;
 /** 原生录音的硬上限：只做兜底，正常收尾靠用户点发送（↑） */
@@ -90,8 +87,11 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
   let voiceTickTimer: ReturnType<typeof setInterval> | null = null;
   let voiceNoSpeechTimer: ReturnType<typeof setTimeout> | null = null;
   let voicePinTimer: ReturnType<typeof setTimeout> | null = null;
-  let voiceSilenceSince = 0;
   let voiceHeard = false;
+  const speechEndDetector = createSpeechEndDetector({
+    onSilence: stopVoiceQuery,
+    isPaused: () => options.isHolding?.() ?? false,
+  });
   let voiceBackend: "stream" | "native" = "stream";
   let nativeVoiceStartup: Promise<void> | null = null;
   let nativeVoiceRecorder: VoiceRecorderInstance | null = null;
@@ -123,8 +123,8 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
     voiceFinishing.value = false;
     voiceLevel.value = 0;
     voiceSeconds.value = 0;
-    voiceSilenceSince = 0;
     voiceHeard = false;
+    speechEndDetector.reset();
     if (voiceNoSpeechTimer) {
       clearTimeout(voiceNoSpeechTimer);
       voiceNoSpeechTimer = null;
@@ -162,26 +162,11 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
 
   /** 静音检测：说过话之后连续 1.5s 没声音就自动收尾，用户不用再点一次 */
   function onVoiceLevel(level: number) {
-    // 声纹用的音量：RMS 0.15 已经算大声，再乘一次平滑，跳动才跟得上 100ms 的采样
     const normalized = Math.min(1, Math.max(0, level / 0.15));
     voiceLevel.value += (normalized - voiceLevel.value) * 0.35;
-    if (options.isHolding?.()) {
-      voiceSilenceSince = 0;
-      return;
+    if (voiceQueryActive.value && !voiceFinishing.value) {
+      voiceHeard = speechEndDetector.observeLevel(level);
     }
-
-    if (level >= VOICE_LEVEL_THRESHOLD) {
-      voiceHeard = true;
-      voiceSilenceSince = 0;
-      return;
-    }
-    if (!voiceHeard) return;
-    if (!voiceSilenceSince) {
-      voiceSilenceSince = performance.now();
-      return;
-    }
-    if (performance.now() - voiceSilenceSince < VOICE_SILENCE_MS) return;
-    stopVoiceQuery();
   }
 
   /** 带超时的整段识别：接口挂了也要把录音条收掉，不能一直挂在「识别中」 */
@@ -261,8 +246,9 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
   /** 原生录音通道：mPaaS microphoneStart/End + 整段识别（没有 partial，只有声纹和计时） */
   async function startNativeVoiceQuery(seq: number) {
     voiceBackend = "native";
-    voiceSilenceSince = 0;
+
     voiceHeard = false;
+    speechEndDetector.reset();
     try {
       const granted = await ensureNativePermission("record_audio");
       if (seq !== voiceSeq) return;
@@ -345,8 +331,8 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
     }
     voiceSeconds.value = 0;
     voiceLevel.value = 0;
-    voiceSilenceSince = 0;
     voiceHeard = false;
+    speechEndDetector.reset();
     voiceTickTimer = setInterval(() => {
       voiceSeconds.value += 1;
     }, 1000);
@@ -357,6 +343,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
   function stopVoiceQuery() {
     if (!voiceQueryActive.value || voiceFinishing.value) return;
     voiceFinishing.value = true;
+    speechEndDetector.reset();
     // 计时停在这里：底部条要显示「最终录了几秒」，不要再涨
     if (voiceTickTimer) {
       clearInterval(voiceTickTimer);
@@ -390,8 +377,8 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
     voiceFinishing.value = false;
     voiceLevel.value = 0;
     voiceSeconds.value = 0;
-    voiceSilenceSince = 0;
     voiceHeard = false;
+    speechEndDetector.reset();
     voiceQueryActive.value = true;
 
     // 本轮提问一开始就落成占位气泡并顶到头部下沿：partial 回填只改内容、不换位置
@@ -450,6 +437,10 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
       const session = openAsrStreamSession({
         onPartial(text) {
           if (seq !== voiceSeq || !voicePlaceholderId.value) return;
+          if (!voiceFinishing.value) {
+            speechEndDetector.observeTranscript(text);
+            if (text.trim()) voiceHeard = true;
+          }
           // partial 是「完整文本的当前版本」：整体替换气泡内容，不要自己拼接
           options.patchPlaceholder(voicePlaceholderId.value, text);
         },
@@ -518,6 +509,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
   }
 
   onBeforeUnmount(() => {
+    speechEndDetector.reset();
     if (voiceTickTimer) clearInterval(voiceTickTimer);
     if (voiceNoSpeechTimer) clearTimeout(voiceNoSpeechTimer);
     if (voicePinTimer) clearTimeout(voicePinTimer);

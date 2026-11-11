@@ -103,7 +103,12 @@ export function bindVerticalScrollGesture(root: HTMLElement, selector?: string) 
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? target.clientHeight : 1;
     target.scrollTop += event.deltaY * unit;
   }
-  const pointer = typeof PointerEvent !== 'undefined';
+  // iOS 同时支持 Pointer/Touch。浏览器接管嵌套滚动时可能先派发 pointercancel，
+  // 不能仅凭 PointerEvent 存在就丢掉后续 touchmove；竖滑需在 Touch 事件上阻止默认行为。
+  // 只绑定一套事件，避免安卓同时派发两套事件时重复滚动。
+  const view = root.ownerDocument?.defaultView ?? (typeof window !== 'undefined' ? window : null);
+  const touch = Boolean(view && 'ontouchstart' in view);
+  const pointer = !touch && typeof PointerEvent !== 'undefined';
   const events: Array<[string, EventListener]> = pointer
     ? [['pointerdown', start], ['pointermove', move], ['pointerup', end], ['pointercancel', end]]
     : [['touchstart', start], ['touchmove', move], ['touchend', end], ['touchcancel', end]];
@@ -112,6 +117,6 @@ export function bindVerticalScrollGesture(root: HTMLElement, selector?: string) 
   return () => {
     active = false;
     stopMomentum();
-    events.forEach(([name, handler]) => root.removeEventListener(name, handler, true));
+    events.forEach(([name, handler]) => root.removeEventListener(name, handler, { capture: true }));
   };
 }

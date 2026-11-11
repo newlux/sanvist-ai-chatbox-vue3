@@ -46,7 +46,6 @@ const {
   currentSeq,
   playbackProgress,
   seekToSegment,
-  nextText,
   transcriptSegments,
   error,
 } = useListenBroadcastPlayer();
@@ -139,7 +138,6 @@ defineExpose({ pause, resume, restart: play, togglePlayback, stop });
       :playing="playing"
       :loading="loading"
       :current-seq="currentSeq"
-      :next-text="nextText"
       :transcript-segments="transcriptSegments"
       :progress="playbackProgress"
       :qa-loading="qaLoading"
