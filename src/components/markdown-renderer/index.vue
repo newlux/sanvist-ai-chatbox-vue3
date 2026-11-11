@@ -3,6 +3,7 @@ import MarkdownIt from "markdown-it";
 import mpHtml from "mp-html/dist/uni-app/components/mp-html/mp-html.vue";
 import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
 import { createLogger } from "@/utils/logger";
+import { useVerticalScrollGesture } from "@/hooks/useVerticalScrollGesture";
 
 defineOptions({ name: "MarkdownRenderer" });
 const props = defineProps({
@@ -12,6 +13,8 @@ const props = defineProps({
 });
 const emit = defineEmits(["ready"]);
 const logger = createLogger("markdown");
+const markdownRoot = ref<unknown>(null);
+useVerticalScrollGesture(markdownRoot, "table, ._table");
 /**
  * 是否渲染在深色 AI 气泡里：由 AiBubbleV2 provide（Ardot 1193:5104 深色稿）。
  * mp-html 把排版写成行内 style，scoped 样式压不住，正文换色只能走 tagStyle；
@@ -397,6 +400,7 @@ function onParseError(e) {
 
 <template>
   <mpHtml
+    ref="markdownRoot"
     :key="renderVersion"
     class="markdown-renderer"
     :class="{ 'markdown-renderer--dark': darkContainer }"
@@ -423,6 +427,8 @@ function onParseError(e) {
 
 <style lang="scss" scoped>
 .markdown-renderer {
+  :deep(table),
+  :deep(._table) { touch-action: pan-x; }
   display: block;
   width: 100%;
   min-width: 0;

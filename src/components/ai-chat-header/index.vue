@@ -1167,9 +1167,7 @@ onBeforeUnmount(() => {
   gap: 12rpx; // 6px，与 bar 的 gap 一致
 }
 
-/* ===== 白底圆形图标按钮（任务协同页设计稿：纯净模式两态一致的头部样式）=====
-   左右每颗图标都套一层 88rpx（44px）白圆 + 轻微投影，图标本身尺寸不变，
-   顺带把点击热区撑到 44×44 的设计口径 */
+/* 三个助手共用 44×44 的点击热区和间距；图标不铺圆形背景。 */
 .ai-chat-header--round {
   .chat-header__bar {
     gap: 20rpx; // 10px：圆与圆之间比裸图标（6px）略宽
@@ -1178,25 +1176,25 @@ onBeforeUnmount(() => {
   .chat-header__icon-btn {
     width: 88rpx;
     height: 88rpx;
-    border-radius: 50%;
-    background: #ffffff;
-    box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.06);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .chat-header__right {
     gap: 16rpx; // 8px：喇叭与关闭两颗圆之间的间距
   }
 
-  // 选中 / 按压反馈：圆形按钮上只压透明度，颜色不变
+  // 按压只改变图标透明度，点击热区与间距保持不变。
   .chat-header__icon-btn:active {
     opacity: 0.7;
   }
 }
 
-/* 深色：白圆换成比页面底亮一档的深灰，投影收掉（暗底上的投影看不出来） */
+/* 深色同样不铺底色。 */
 .ai-chat-header--round.ai-chat-header--dark {
   .chat-header__icon-btn {
-    background: #262626;
+    background: transparent;
     box-shadow: none;
   }
 }

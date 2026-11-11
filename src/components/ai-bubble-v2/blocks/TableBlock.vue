@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, inject } from "vue";
+import { computed, inject, ref } from "vue";
+import { useVerticalScrollGesture } from "@/hooks/useVerticalScrollGesture";
 
 defineOptions({ name: "TableBlock" });
 
@@ -34,49 +35,18 @@ const rows = computed(() => rawRows.value.map(row => Array.from(
 )));
 const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
 
-/**
- * 竖向滚动放行（H5）。
- *
- * 表格是嵌在纵向消息列表中的横向滚动容器。
- *
- * 两条路分开处理：
- * - **手指**使用 touch-action: auto，允许浏览器按手势方向滚动表格或外层列表。
- *   pan-x 会禁止从表格开始的原生纵向平移，并不会把它转交给父级；
- * - **鼠标滚轮** CSS 管不到，这里把纵向 deltaY 转给外层滚动容器。
- */
-/** 外层能竖向滚的祖先：消息列表的内层滚动 div */
-function findScrollableAncestor(from: HTMLElement | null) {
-  let node = from?.parentElement || null;
-  while (node) {
-    const overflowY = getComputedStyle(node).overflowY;
-    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) {
-      return node;
-    }
-    node = node.parentElement;
-  }
-  return null;
-}
-
-/** 横向 wheel（deltaX 为主）留给表格自己滚；纵向一律转给外层列表 */
-function onTableWheel(event: WheelEvent) {
-  // 只服务 H5；小程序端没有 wheel，也没有 DOM 度量
-  if (typeof document === "undefined") return;
-  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-  const scroller = findScrollableAncestor(event.currentTarget as HTMLElement | null);
-  if (!scroller) return;
-  if (event.cancelable) event.preventDefault();
-  scroller.scrollTop += event.deltaY;
-}
+const tableRoot = ref<unknown>(null);
+useVerticalScrollGesture(tableRoot);
 </script>
 
 <template>
   <scroll-view
+    ref="tableRoot"
     class="table-block"
     :class="{ 'table-block--dark': darkContainer }"
     scroll-x
     :show-scrollbar="false"
     enhanced
-    @wheel="onTableWheel"
   >
     <view class="table-block__table" :style="{ minWidth: tableWidth }">
       <view class="table-block__row table-block__row--head">
@@ -107,9 +77,9 @@ function onTableWheel(event: WheelEvent) {
   border-radius: 20rpx;
   background: transparent;
 
-  // 保留横向滚动，同时放行从表格开始的纵向手势；uni 内层需穿透 scoped。
+  // 横向由浏览器滚表格，纵向由捕获监听显式转给外层，避免安卓嵌套滚动截断。
   :deep(.uni-scroll-view) {
-    touch-action: auto;
+    touch-action: pan-x;
   }
 }
 .table-block__table {

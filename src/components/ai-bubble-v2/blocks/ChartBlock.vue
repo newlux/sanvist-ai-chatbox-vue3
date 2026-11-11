@@ -3,6 +3,7 @@ import type { EChartsType } from "echarts/core";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from "vue";
 import { clone, init } from "@/utils/echarts";
 import { createLogger } from "@/utils/logger";
+import { useVerticalScrollGesture } from "@/hooks/useVerticalScrollGesture";
 
 defineOptions({ name: "ChartBlock" });
 
@@ -14,6 +15,8 @@ const props = defineProps({
 });
 
 const logger = createLogger("chart");
+const chartRoot = ref<unknown>(null);
+useVerticalScrollGesture(chartRoot);
 const chartEl = ref<unknown>(null);
 const chartWidth = ref(320);
 const failed = ref(false);
@@ -525,7 +528,7 @@ onBeforeUnmount(disposeChart);
 </script>
 
 <template>
-  <view class="chart-block" :class="[{ 'chart-block--embedded': embedded }]">
+  <view ref="chartRoot" class="chart-block" :class="[{ 'chart-block--embedded': embedded }]">
     <scroll-view
       v-show="!failed"
       class="chart-block__scroll"
@@ -584,6 +587,8 @@ onBeforeUnmount(disposeChart);
   -webkit-overflow-scrolling: touch;
 }
 .chart-block__canvas {
+  touch-action: pan-x !important;
+  :deep(*) { touch-action: pan-x !important; }
   width: 100%;
   min-height: 280px;
   overflow: hidden;

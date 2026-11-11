@@ -415,8 +415,10 @@ const USER_GESTURE_IDLE_MS = 1200;
 let userScrollGesture = false;
 let gestureReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 let gestureBound: HTMLElement | null = null;
+const SCROLL_GESTURE_EVENTS = ["touchstart", "touchmove", "pointerdown", "pointermove", "wheel"];
 
-function markUserScrollGesture() {
+function markUserScrollGesture(event?: Event) {
+  if (event?.type.startsWith("pointer") && (event as PointerEvent).pointerType === "mouse") return;
   userScrollGesture = true;
   if (gestureReleaseTimer) clearTimeout(gestureReleaseTimer);
   // 撤手后的惯性滚动还会继续派发 scroll，晚一点再把手势标记收回
@@ -426,18 +428,15 @@ function markUserScrollGesture() {
   }, USER_GESTURE_IDLE_MS);
 }
 
-/** H5：在列表外层挂手势监听（触摸 / 滚轮事件从内层滚动容器冒泡上来） */
+/** H5：在列表外层捕获手势，先于内层表格/图表处理。 */
 function bindScrollGesture() {
   // #ifdef H5
   const list = document.querySelector(".msg-list") as HTMLElement | null;
   if (!list || list === gestureBound) return;
-  gestureBound?.removeEventListener("touchstart", markUserScrollGesture);
-  gestureBound?.removeEventListener("touchmove", markUserScrollGesture);
-  gestureBound?.removeEventListener("wheel", markUserScrollGesture);
+  SCROLL_GESTURE_EVENTS.forEach(name => gestureBound?.removeEventListener(name, markUserScrollGesture, true));
   gestureBound = list;
-  list.addEventListener("touchstart", markUserScrollGesture, { passive: true });
-  list.addEventListener("touchmove", markUserScrollGesture, { passive: true });
-  list.addEventListener("wheel", markUserScrollGesture, { passive: true });
+  // 先于表格/图表的捕获监听识别手势，竖滑时仍能正确关闭自动贴底。
+  SCROLL_GESTURE_EVENTS.forEach(name => list.addEventListener(name, markUserScrollGesture, { passive: true, capture: true }));
   // #endif
 }
 
@@ -931,9 +930,7 @@ onBeforeUnmount(() => {
   // #ifdef H5
   if (gestureReleaseTimer) clearTimeout(gestureReleaseTimer);
   gestureReleaseTimer = null;
-  gestureBound?.removeEventListener("touchstart", markUserScrollGesture);
-  gestureBound?.removeEventListener("touchmove", markUserScrollGesture);
-  gestureBound?.removeEventListener("wheel", markUserScrollGesture);
+  SCROLL_GESTURE_EVENTS.forEach(name => gestureBound?.removeEventListener(name, markUserScrollGesture, true));
   gestureBound = null;
   // #endif
 });
