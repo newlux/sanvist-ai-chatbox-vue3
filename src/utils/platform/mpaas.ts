@@ -293,6 +293,46 @@ export async function closeWebview() {
 }
 
 /**
+ * 关容器的两个 JSAPI：
+ * - `popWindow` 在宿主里一定存在（chatbox 原来的 `closeWebview()` 就是它），
+ *   但它只关当前 webview；
+ * - `closeMiniPro` 只有部分宿主版本提供，语义就是「退出小程序」。
+ */
+const CONTAINER_CLOSE_APIS = {
+  popWindow: { timeoutMs: 3000 },
+  closeMiniPro: { timeoutMs: 1500 },
+} as const;
+
+export type CloseContainerPrefer = keyof typeof CONTAINER_CLOSE_APIS;
+
+/**
+ * 关闭当前容器，把返回交回宿主（退出按钮的统一出口）。
+ *
+ * 与甘特离线包（sanvist-gantt-offline 的 `utils/platform/mpaas.ts`）同一套退出流程，
+ * 顺序由 `prefer` 决定，失败一路降级，最后 `history.back` 兜底：
+ * - `"popWindow"`（默认，首页口径）：popWindow → closeMiniPro → history.back；
+ * - `"closeMiniPro"`（作业指导 / 任务协同口径）：强制先走 closeMiniPro → popWindow → history.back。
+ *
+ * 两个方向都不能「只发一次就走」：宿主版本没实现对应 JSAPI 时按钮会毫无反应。
+ */
+export async function closeContainer(prefer: CloseContainerPrefer = "popWindow"): Promise<void> {
+  const order: CloseContainerPrefer[] = prefer === "closeMiniPro"
+    ? ["closeMiniPro", "popWindow"]
+    : ["popWindow", "closeMiniPro"];
+
+  for (const api of order) {
+    try {
+      await callNative(api, {}, { timeoutMs: CONTAINER_CLOSE_APIS[api].timeoutMs, silentTimeout: true });
+      return;
+    } catch (error) {
+      logger.warn(`${api} 不可用，尝试下一种退出方式`, error);
+    }
+  }
+
+  if (typeof history !== "undefined") history.back();
+}
+
+/**
  * 保存图片到系统相册。
  * 宿主约定：入参 { base64 }（不带 data:image/...;base64, 前缀），
  * 出参 { success: true|false, code }。失败时 success 为 false，抛出去让调用方降级。

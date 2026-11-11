@@ -34,6 +34,7 @@ import { useSafeArea } from "@/hooks/useSafeArea";
 import { useVoiceQuery } from "@/hooks/useVoiceQuery";
 import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
 import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
+import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -69,6 +70,13 @@ const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
 /** 语音播报总开关（头部喇叭）：关掉后本页的「自动播报」整条链路都不动作，手动播报按钮照常 */
 const settingsStore = useSettingsStore();
+/**
+ * 纯净模式（设置弹层 → 纯净模式）：与任务协同页一套口径，只管头部左上角那颗按钮。
+ * - 开启：左侧 = 历史对话抽屉（纯净模式下没有别的入口进历史）；
+ * - 关闭：左侧 = 返回上级页面。
+ * 右上角两种模式都是「关闭当前小程序」，见 onCloseWindow。
+ */
+const { pureMode } = storeToRefs(settingsStore);
 /** 一键回到底部的箭头：深色模式换 arrow-down-dark.png（浅色箭头压在暗底上看不清） */
 const scrollBottomIcon = computed(() => (isDark.value ? arrowDownDarkIcon : arrowDownIcon));
 /**
@@ -877,6 +885,15 @@ function onBack() {
 }
 
 /**
+ * 右上角「关闭当前小程序」：强制走 closeMiniPro 退出小程序
+ * （宿主没有这个 JSAPI 时依次退到 popWindow、history.back），
+ * 关容器前的游客态清理见 utils/exit-mini-program。
+ */
+function onCloseWindow() {
+  exitMiniProgram("closeMiniPro");
+}
+
+/**
  * 长按顶部三角图标 5 秒：回到首页初始「你好三一」页。
  * 首页本身是「初始页 / 对话页」两个态（pageStage）：清掉「欢迎页已完成」标记后重载首页，
  * 首页 onLoad 的 syncPageStage 才会落到 welcome 态（否则会因标记残留 / 旧实例仍停在对话态）。
@@ -1202,7 +1219,11 @@ onUnload(() => {
         :share-selected-round-count="shareSelectedRoundCount"
         :voice-listening="voiceQueryActive"
         restartable
+        :back-on-left="!pureMode"
+        close-on-right
+        round-buttons
         @back="onBack"
+        @close="onCloseWindow"
         @restart="onRestartToStart"
         @new-conversation="startNewConversation"
         @session-click="onSessionClick"

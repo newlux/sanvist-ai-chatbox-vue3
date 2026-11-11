@@ -44,8 +44,6 @@ import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import {
   AI_ASK_WELCOME_DONE_KEY,
-  LISTEN_REPORT_CURRENT_DATE_KEY,
-  LISTEN_REPORT_DATE_KEY,
   REPAIR_NAV_INTENT_ENTER,
   REPAIR_NAV_INTENT_FAULT_CODE,
 } from "@/config";
@@ -59,14 +57,15 @@ import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, us
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
 import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
+import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
-import { closeWebview, ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
+import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { openPartsAssistant } from "@/utils/parts-h5";
 import { openRepairAssistant } from "@/utils/repair-h5";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
-import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
+import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene, openChatScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
@@ -792,6 +791,8 @@ function onGoListenReport() {
  * 底部快捷入口点击（仅纯净模式关闭时可见）：
  * - mode=inline（配件助手）：就地切换智能体，再点一次取消；
  * - 听汇报：先固定当天早报日期，再进播报页（与卡片入口同一套逻辑）；
+ * - 作业指导 / 任务协同：openChatScene 走 uni 页面栈，留在主 webview 里
+ *   （这样它们右上角的「退出」才是关掉整个小程序；开成独立窗口就只会回首页）；
  * - 其余 page 入口：navigateToScene 到对应的场景页。
  */
 function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; url?: string }) {
@@ -822,7 +823,7 @@ function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; 
     void openPartsAssistant({ url: readPartsEmbedUrl(targetUrl) });
     return;
   }
-  void navigateToScene(targetUrl);
+  void openChatScene(targetUrl);
 }
 
 /**
@@ -1613,24 +1614,14 @@ async function goToChat(options?: { holdMs?: number }) {
   welcomeFlyTimer = setTimeout(land, WELCOME_FLY_MS);
 }
 
+/**
+ * 头部右上角那颗房子按钮：关闭当前小程序（交回宿主）。
+ * 游客态的听播临时态由本页自己收掉，其余（清身份 / 清听播存储 / popWindow / 退栈兜底）
+ * 与作业指导、任务协同页共用一份实现，见 utils/exit-mini-program。
+ */
 function backToWelcome() {
-  if (userStore.isVisitor) {
-    try {
-      uni.removeStorageSync(LISTEN_REPORT_DATE_KEY);
-      uni.removeStorageSync(LISTEN_REPORT_CURRENT_DATE_KEY);
-    } catch (error) {
-      logger.warn("failed to reset visitor listen report state", error);
-    }
-    listenBroadcast.value = null;
-    userStore.setVisitorRole(null);
-    userStore.setUserId("");
-  }
-  // 嵌在宿主 APP 里时，返回交回 mPaaS 容器
-  if (isMpaasReady()) {
-    void closeWebview().catch(error => logger.warn("popWindow failed", error));
-    return;
-  }
-  if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 });
+  if (userStore.isVisitor) listenBroadcast.value = null;
+  exitMiniProgram();
 }
 
 /**
@@ -1917,6 +1908,9 @@ onShow(() => {
 // useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
   realtimeTts.stop();
+  // 录音中跳走（作业指导 / 任务协同现在是同窗口压栈，onHide 必定触发）：
+  // 断流收麦，别让麦克风在后台继续采
+  resetVoiceQuery();
 });
 onUnload(() => {
   realtimeTts.stop();

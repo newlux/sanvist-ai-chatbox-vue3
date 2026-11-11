@@ -39,6 +39,24 @@ const props = defineProps({
   shareSelectedRoundCount: { type: Number, default: 0 },
   backOnly: { type: Boolean, default: false },
   /**
+   * 左侧按钮显示「返回」箭头（emit back），替掉默认的历史对话抽屉按钮。
+   * 任务协同页在纯净模式关闭时传 true：左侧返回上级页面，右侧仍是关闭小程序。
+   * （与 backOnly 的区别：backOnly 连右侧按钮和语音播报开关一起收掉，这里只换左侧。）
+   */
+  backOnLeft: { type: Boolean, default: false },
+  /**
+   * 右侧最右那颗按钮点击时 emit close（关闭当前小程序）。
+   * 图标沿用回首页那颗房子（icon-home.svg），只是把行为从「回首页」换成「关闭」。
+   * 任务协同页固定传 true。
+   */
+  closeOnRight: { type: Boolean, default: false },
+  /**
+   * 左右图标做成白底圆形按钮（任务协同页的设计稿口径）：
+   * 88rpx 白圆 + 轻微投影，图标仍是原来的 44~48rpx。
+   * 不传时保持原来的裸图标（首页 / 作业指导页不变）。
+   */
+  roundButtons: { type: Boolean, default: false },
+  /**
    * 头部底色透明（首页对话页用）：页面把它做成悬浮层，消息可以滚到头部下面，
    * 由页面顶部的毛玻璃层负责渐隐；其它页面保持原来的实底渐变。
    */
@@ -67,6 +85,7 @@ const props = defineProps({
 });
 const emit = defineEmits([
   "back",
+  "close",
   "clear",
   "new-conversation",
   "session-click",
@@ -270,6 +289,10 @@ function getSessionKey(session: SessionItem) {
 
 function onBackTap() {
   emit("back");
+}
+/** 右上角「关闭当前小程序」：把关闭动作交给页面（页面负责 popWindow / 兜底返回） */
+function onCloseTap() {
+  emit("close");
 }
 function onShareSelectAllTap() {
   if (!props.shareSelectAllDisabled) emit("share-select-all");
@@ -594,6 +617,7 @@ onBeforeUnmount(() => {
     :class="{
       'ai-chat-header--plain': plainBg && !shareMode,
       'ai-chat-header--dark': darkPlain,
+      'ai-chat-header--round': roundButtons && !shareMode,
     }"
   >
     <view class="chat-header">
@@ -603,7 +627,7 @@ onBeforeUnmount(() => {
       <!-- 头部（设计稿 722:69：50px 高、左右 20px、图标 24×24 垂直居中）；灵动岛是浮层，不参与这一行的布局 -->
       <view class="chat-header__bar">
         <template v-if="!shareMode">
-          <view v-if="props.backOnly" class="chat-header__icon-btn" @tap="onBackTap">
+          <view v-if="props.backOnly || props.backOnLeft" class="chat-header__icon-btn" @tap="onBackTap">
             <image
               src="@/assets/img/voice-assistant/voice-back.svg"
               mode="aspectFit"
@@ -713,7 +737,18 @@ onBeforeUnmount(() => {
               <image :src="autoTtsIcon" mode="aspectFit" class="chat-header__icon-tts-img" />
             </view>
 
-            <view v-if="canMinimize" class="chat-header__icon-btn" @tap="onMinimize">
+            <!-- 关闭当前小程序（任务协同 / 作业指导页固定走这一颗）：交回 mPaaS 容器 popWindow。
+                 图标沿用回首页那颗房子（icon-home.svg），只有点击行为是关闭 -->
+            <view v-if="props.closeOnRight" class="chat-header__icon-btn" @tap="onCloseTap">
+              <view class="chat-header__icon-atlas">
+                <image
+                  src="@/assets/img/icon-home.svg"
+                  mode="aspectFit"
+                  class="chat-header__icon-atlas-img"
+                />
+              </view>
+            </view>
+            <view v-else-if="canMinimize" class="chat-header__icon-btn" @tap="onMinimize">
               <image
                 :src="minimizeIcon"
                 mode="aspectFit"
@@ -1128,6 +1163,40 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   align-items: center;
   gap: 12rpx; // 6px，与 bar 的 gap 一致
+}
+
+/* ===== 白底圆形图标按钮（任务协同页设计稿：纯净模式两态一致的头部样式）=====
+   左右每颗图标都套一层 88rpx（44px）白圆 + 轻微投影，图标本身尺寸不变，
+   顺带把点击热区撑到 44×44 的设计口径 */
+.ai-chat-header--round {
+  .chat-header__bar {
+    gap: 20rpx; // 10px：圆与圆之间比裸图标（6px）略宽
+  }
+
+  .chat-header__icon-btn {
+    width: 88rpx;
+    height: 88rpx;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.06);
+  }
+
+  .chat-header__right {
+    gap: 16rpx; // 8px：喇叭与关闭两颗圆之间的间距
+  }
+
+  // 选中 / 按压反馈：圆形按钮上只压透明度，颜色不变
+  .chat-header__icon-btn:active {
+    opacity: 0.7;
+  }
+}
+
+/* 深色：白圆换成比页面底亮一档的深灰，投影收掉（暗底上的投影看不出来） */
+.ai-chat-header--round.ai-chat-header--dark {
+  .chat-header__icon-btn {
+    background: #262626;
+    box-shadow: none;
+  }
 }
 
 .chat-header__icon-spacer {

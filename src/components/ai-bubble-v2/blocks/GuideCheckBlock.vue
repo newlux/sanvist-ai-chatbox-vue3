@@ -6,6 +6,7 @@ import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconShare from "@/assets/img/icon-action-share.svg";
 import saniIcon from "@/assets/img/icon-sani.png";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
+import { useSettingsStore } from "@/stores";
 import { normalizeGuideUrl, previewGuideImages } from "@/utils/guide-content";
 import { consumeStepTtsSwitch, consumeSummaryTts, requestStepTtsSwitch } from "@/utils/guide-step-tts";
 import { stripOptionPrefix } from "@/utils/option-label";
@@ -70,6 +71,9 @@ const emit = defineEmits<{
  * MarkdownRenderer 才能排出深色正文（加粗 strong / 正文 p 的颜色跟随主题）。
  */
 provide("ai-bubble-dark", computed(() => props.dark));
+
+/** 语音播报总开关（ai-chat-header 喇叭）只掐「自动播报」链路：关掉时自动续播不再出声，手动按钮照常 */
+const settingsStore = useSettingsStore();
 
 /** 卡片根节点：分享时整卡截图用（uni 的 view 在部分端会包一层组件实例） */
 const rootRef = ref<HTMLElement | { $el?: HTMLElement } | null>(null);
@@ -187,6 +191,8 @@ onMounted(() => {
   emit("card-ready");
   if (!consumeStepTtsSwitch(stepIndex.value)) return;
   if (!props.ttsEnabled) return;
+  // 语音播报总开关关掉：切步的自动续播不播（手动点播报按钮走 onTtsTap，不受开关影响）
+  if (!settingsStore.autoTtsEnabled) return;
   emit("tts-click");
 });
 
@@ -198,6 +204,8 @@ onMounted(() => {
 watch(() => String(props.payload?.summary || ""), (value) => {
   if (!value || !props.ttsEnabled) return;
   if (!consumeSummaryTts()) return;
+  // 语音播报总开关关掉：小结的自动播报也不响（手动点播报按钮照常）
+  if (!settingsStore.autoTtsEnabled) return;
   emit("tts-click", value);
 }, { flush: "post" });
 
