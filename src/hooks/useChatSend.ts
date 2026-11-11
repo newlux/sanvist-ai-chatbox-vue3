@@ -16,7 +16,7 @@ import { buildInitialBlocks, consumeChatStream, parseReportInteraction, parseRep
 /** 只发附件、没有文字时替代 query 的兜底提问（网关要求 query 非空） */
 import { saveCurrentListenReportDate, saveCurrentListenReportLanguage } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
-import { navigateToScene } from "@/utils/scene-navigation";
+import { navigateToScene, openChatScene } from "@/utils/scene-navigation";
 
 const logger = createLogger("chat");
 
@@ -652,8 +652,8 @@ export function useChatSend(scope?: string, handlers?: {
     /**
      * 工作流结束事件（workflow_finished）带上跳转目标时的收尾：直接切到对应助手页。
      *
-     * 与其它页面跳转一致走 navigateToScene（mPaaS 下开新场景窗口，Web 下退化为 navigateTo）。
-     * 已经停在目标页时不重复跳自己；同一轮只处理一次。
+     * 统一走 openChatScene：作业指导 / 任务协同留在主 webview（同窗口压栈），
+     * 其余场景页仍开独立窗口；已经停在目标页时不重复跳自己；同一轮只处理一次。
      *
      * @returns 是否已经触发跳转，调用方据此跳过本轮后续的听播出口
      */
@@ -665,7 +665,7 @@ export function useChatSend(scope?: string, handlers?: {
       const current = pages[pages.length - 1];
       if (current && `/${String(current.route || "")}` === route) return false;
       logger.info("[chat] assistant target switched scene", { target, route });
-      void navigateToScene(route).catch(error => logger.error("failed to open assistant scene", error));
+      void openChatScene(route).catch(error => logger.error("failed to open assistant scene", error));
       return true;
     }
 

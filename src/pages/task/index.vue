@@ -799,11 +799,12 @@ function onBack() {
 }
 
 /**
- * 右上角「关闭当前小程序」：与首页右上角那颗房子按钮同一套行为
- * （游客态清听播临时态 + popWindow，没有桥时退栈兜底），见 utils/exit-mini-program。
+ * 右上角「关闭当前小程序」：强制走 closeMiniPro 退出小程序
+ * （宿主没有这个 JSAPI 时依次退到 popWindow、history.back），
+ * 关容器前的游客态清理见 utils/exit-mini-program。
  */
 function onCloseWindow() {
-  exitMiniProgram();
+  exitMiniProgram("closeMiniPro");
 }
 
 /**

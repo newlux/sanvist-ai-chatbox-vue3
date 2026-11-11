@@ -64,6 +64,30 @@ export function isSceneWindowRoot() {
   return startupQuery.nativeSceneWindow === "1" && getCurrentPages().length <= 1;
 }
 
+/**
+ * 必须留在**主 webview** 里打开的对话类场景页：
+ * 这两页右上角的「退出」要真的关掉整个小程序（回宿主 App），
+ * 一旦被 `openWebview` 开成独立窗口，popWindow / closeMiniPro 只会关掉那一层窗口、露出首页。
+ */
+const IN_APP_CHAT_ROUTES = ["/pages/guide/index", "/pages/task/index"];
+
+/**
+ * 打开对话类场景页：作业指导 / 任务协同走 uni 页面栈（同窗口），
+ * 其余页面（播报、维修、配件、甘特等）仍开独立场景窗口。
+ *
+ * 判定只认路径，忽略 query（guide 会带 deviceModel / experience 等参数）。
+ * 同窗口打开后 `backFromScene()` 走 navigateBack 回上一级，
+ * 与「退出按钮 = 关闭小程序」互不影响。
+ */
+export function openChatScene(url: string): Promise<void> {
+  const path = String(url || "").split("?")[0];
+  if (IN_APP_CHAT_ROUTES.includes(path)) {
+    uni.navigateTo({ url });
+    return Promise.resolve();
+  }
+  return navigateToScene(url);
+}
+
 /** 从初始页跳出去的一次性标记：首页回来时要停在初始页，而不是被 syncPageStage 拽回对话页 */
 const RETURN_TO_WELCOME_KEY = "ai-ask-return-to-welcome";
 

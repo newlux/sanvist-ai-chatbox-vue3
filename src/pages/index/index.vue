@@ -65,7 +65,7 @@ import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCa
 import { openPartsAssistant } from "@/utils/parts-h5";
 import { openRepairAssistant } from "@/utils/repair-h5";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
-import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
+import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene, openChatScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
@@ -791,6 +791,8 @@ function onGoListenReport() {
  * 底部快捷入口点击（仅纯净模式关闭时可见）：
  * - mode=inline（配件助手）：就地切换智能体，再点一次取消；
  * - 听汇报：先固定当天早报日期，再进播报页（与卡片入口同一套逻辑）；
+ * - 作业指导 / 任务协同：openChatScene 走 uni 页面栈，留在主 webview 里
+ *   （这样它们右上角的「退出」才是关掉整个小程序；开成独立窗口就只会回首页）；
  * - 其余 page 入口：navigateToScene 到对应的场景页。
  */
 function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; url?: string }) {
@@ -821,7 +823,7 @@ function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; 
     void openPartsAssistant({ url: readPartsEmbedUrl(targetUrl) });
     return;
   }
-  void navigateToScene(targetUrl);
+  void openChatScene(targetUrl);
 }
 
 /**
@@ -1906,6 +1908,9 @@ onShow(() => {
 // useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
   realtimeTts.stop();
+  // 录音中跳走（作业指导 / 任务协同现在是同窗口压栈，onHide 必定触发）：
+  // 断流收麦，别让麦克风在后台继续采
+  resetVoiceQuery();
 });
 onUnload(() => {
   realtimeTts.stop();
