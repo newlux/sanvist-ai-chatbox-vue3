@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import AiAttachmentPicker from "@/components/ai-attachment-picker/index.vue";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
+import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { usePressDelay } from "@/hooks/usePressDelay";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { createLogger } from "@/utils/logger";
@@ -93,9 +93,6 @@ const {
   attachments,
   hasIncompleteAttachments,
   hasFailedAttachments,
-  openAttachmentPicker,
-  chooseImages,
-  chooseFilesFromNative,
   removeAttachment,
   retryAttachment,
   takeUploadedFiles,
@@ -754,31 +751,10 @@ defineExpose({
   cancelGlobalVoiceHold,
 });
 
-/** 附件来源弹窗：设计稿 1321:39 底部面板（拍照识配件 / 上传识配件） */
-const isAttachmentPickerOpen = ref(false);
-
-async function onOpenAttachmentPicker() {
-  if (props.attachmentDisabled || props.isLoading || voice.isRecognizing) return;
-  if (attachments.value.length >= 3) {
-    openAttachmentPicker(); // 触顶提示
-    return;
-  }
-
-  // 统一先弹设计稿面板，不再直接唤起原生选择器：
-  // 原生弹窗（imageChoose）会立刻盖住面板，用户点「+」看到的就不是这一屏了。
-  // 具体选择器在面板选项里再按环境分流 —— mPaaS 走原生 imageChoose，浏览器走 uni.chooseImage。
-  // 面板贴在屏幕底部，键盘还开着会被整块挡住，先收键盘（遮罩层级低于面板，不挡点击）
-  if (keyboardOpen.value || voiceKeyboardOpen.value) onDismissKeyboard();
-  isAttachmentPickerOpen.value = true;
-}
-
-function onPickAttachmentSource(source: "camera" | "album" | "file") {
-  isAttachmentPickerOpen.value = false;
-  if (source === "file") {
-    void chooseFilesFromNative();
-  } else {
-    void chooseImages([source]);
-  }
+/** 附件功能上线前，所有 + 入口仅展示提示，不唤起选图抽屉或原生选择器。 */
+function onOpenAttachmentPicker() {
+  if (props.attachmentDisabled || voice.isRecognizing) return;
+  showAttachmentComingSoon();
 }
 
 watch(
@@ -1055,7 +1031,7 @@ onBeforeUnmount(() => {
         <view
           v-if="!(attachmentDisabled || voice.isRecognizing)"
           class="input-bar__plus"
-          @tap="onOpenAttachmentPicker"
+          @tap.stop="onOpenAttachmentPicker"
         >
           <image src="@/assets/img/icon-plus.svg" mode="aspectFit" />
         </view>
@@ -1167,13 +1143,7 @@ onBeforeUnmount(() => {
       </view>
     </view>
 
-    <!-- 附件来源弹窗：设计稿 1321:39 底部面板（拍照识配件 / 上传识配件）；
-         步骤卡仍用该组件的居中弹窗（variant 默认 legacy） -->
-    <AiAttachmentPicker
-      v-model:visible="isAttachmentPickerOpen"
-      variant="design"
-      @pick="onPickAttachmentSource"
-    />
+
   </view>
 </template>
 

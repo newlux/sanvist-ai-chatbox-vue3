@@ -7,13 +7,14 @@ import { closeContainer, isMpaasReady } from "@/utils/platform/mpaas";
 const logger = createLogger("exit-mini-program");
 
 /**
- * 关闭当前小程序（把 webview 交回宿主），作业指导 / 任务协同页右上角的退出按钮共用这一份。
+ * 关闭当前小程序 / 回宿主首页，作业指导 / 任务协同页右上角那颗房子按钮共用这一份。
  *
- * 退出流程对齐甘特离线包的「返回宿主」（见 `closeContainer`），顺序可按页面指定：
+ * 出口流程对齐甘特离线包的「返回宿主」（见 `closeContainer`），顺序可按页面指定：
  * - `"popWindow"`（默认，首页口径）：popWindow → closeMiniPro → history.back；
- * - `"closeMiniPro"`（作业指导 / 任务协同口径）：强制先走 closeMiniPro → popWindow → history.back。
+ * - `"closeMiniPro"`（退出小程序口径）：closeMiniPro → popWindow → history.back；
+ * - `"goHome"`（作业指导 / 任务协同口径）：调原生 goHome 回 App 首页，没有这个 JSAPI 时退到 popWindow → history.back。
  *
- * 关容器之前先做游客态清理：清掉听播的临时存储与身份，下次进来重新走初始化（与首页口径一致）。
+ * 离开之前先做游客态清理：清掉听播的临时存储与身份，下次进来重新走初始化（与首页口径一致）。
  * 没有 bridge（浏览器 / 直接用 url 打开）时先退 uni 页面栈，栈里只有本页再走 history.back。
  */
 export function exitMiniProgram(prefer: CloseContainerPrefer = "popWindow") {

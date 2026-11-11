@@ -3,6 +3,7 @@ import MarkdownIt from "markdown-it";
 import mpHtml from "mp-html/dist/uni-app/components/mp-html/mp-html.vue";
 import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
 import { createLogger } from "@/utils/logger";
+import { useVerticalScrollGesture } from "@/hooks/useVerticalScrollGesture";
 
 defineOptions({ name: "MarkdownRenderer" });
 const props = defineProps({
@@ -12,6 +13,8 @@ const props = defineProps({
 });
 const emit = defineEmits(["ready"]);
 const logger = createLogger("markdown");
+const markdownRoot = ref<unknown>(null);
+useVerticalScrollGesture(markdownRoot, "table, ._table");
 /**
  * 是否渲染在深色 AI 气泡里：由 AiBubbleV2 provide（Ardot 1193:5104 深色稿）。
  * mp-html 把排版写成行内 style，scoped 样式压不住，正文换色只能走 tagStyle；
@@ -79,10 +82,13 @@ const rawTagStyle = {
   code: "padding: 2rpx 6rpx; border-radius: 4rpx; background: #f3f5f7; color: #d63200; font-size: 24rpx;",
   pre: "margin: 8rpx 0; padding: 16rpx; border-radius: 12rpx; background: #fff; overflow-x: auto; font-size: 24rpx; line-height: 36rpx; white-space: pre;",
   img: "max-width: 100%; height: auto; display: block; margin: 12rpx 0; border-radius: 8rpx;",
-  // 表格：表头格子铺淡蓝底 #E1F0FF，单元格之间与表格外框统一 #E8E8E8 细线
-  table: "width: max-content; min-width: 100%; margin: 12rpx 0; border-collapse: collapse; background: transparent; font-size: 24rpx; white-space: nowrap;",
-  th: "min-width: 160rpx; padding: 10rpx 12rpx; border: 1px solid #e8e8e8; background: #e1f0ff; font-weight: 600; text-align: left; vertical-align: top; white-space: nowrap; word-break: keep-all;",
-  td: "min-width: 160rpx; padding: 10rpx 12rpx; border: 1px solid #e8e8e8; text-align: left; vertical-align: top; white-space: nowrap; word-break: keep-all;",
+  // 表格：表头格子铺淡蓝底 #E1F0FF，单元格之间与表格外框统一 #E8E8E8 细线。
+  // 单元格不强制 nowrap：mp-html 在 App 端（安卓 WebView）给表格包的横向滚动层
+  // 触摸滚动不可靠（只有拖拽选中才滚），内容会超出屏幕被裁切；
+  // 改为自动换行让表格收缩进容器，内容完整可见，H5 / App 两端行为一致。
+  table: "width: 100%; margin: 12rpx 0; border-collapse: collapse; background: transparent; font-size: 24rpx; word-break: break-word; overflow-wrap: break-word;",
+  th: "min-width: 0; padding: 10rpx 12rpx; border: 1px solid #e8e8e8; background: #e1f0ff; font-weight: 600; text-align: left; vertical-align: top; word-break: break-word; overflow-wrap: break-word;",
+  td: "min-width: 0; padding: 10rpx 12rpx; border: 1px solid #e8e8e8; text-align: left; vertical-align: top; word-break: break-word; overflow-wrap: break-word;",
 };
 
 /**
@@ -397,13 +403,14 @@ function onParseError(e) {
 
 <template>
   <mpHtml
+    ref="markdownRoot"
     :key="renderVersion"
     class="markdown-renderer"
     :class="{ 'markdown-renderer--dark': darkContainer }"
     :content="renderedHtml"
     :tag-style="tagStyle"
     :selectable="true"
-    :scroll-table="true"
+    :scroll-table="false"
     :preview-img="true"
     :copy-link="false"
     :lazy-load="false"
@@ -423,6 +430,8 @@ function onParseError(e) {
 
 <style lang="scss" scoped>
 .markdown-renderer {
+  :deep(table),
+  :deep(._table) { touch-action: pan-x; }
   display: block;
   width: 100%;
   min-width: 0;

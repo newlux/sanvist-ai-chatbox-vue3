@@ -293,32 +293,42 @@ export async function closeWebview() {
 }
 
 /**
- * 关容器的两个 JSAPI：
+ * 关容器 / 回首页的三个 JSAPI：
  * - `popWindow` 在宿主里一定存在（chatbox 原来的 `closeWebview()` 就是它），
  *   但它只关当前 webview；
- * - `closeMiniPro` 只有部分宿主版本提供，语义就是「退出小程序」。
+ * - `closeMiniPro` 只有部分宿主版本提供，语义就是「退出小程序」；
+ * - `goHome` 是宿主自己的「回首页」导航（不销毁当前 webview，由原生把页面切回去），
+ *   作业指导 / 任务协同右上角的房子按钮走这一条。
  */
 const CONTAINER_CLOSE_APIS = {
   popWindow: { timeoutMs: 3000 },
   closeMiniPro: { timeoutMs: 1500 },
+  goHome: { timeoutMs: 2000 },
 } as const;
 
 export type CloseContainerPrefer = keyof typeof CONTAINER_CLOSE_APIS;
 
+/** 各出口的降级顺序：宿主版本没实现对应 JSAPI 时按钮不能毫无反应 */
+const CONTAINER_CLOSE_ORDER: Record<CloseContainerPrefer, CloseContainerPrefer[]> = {
+  // 首页口径
+  popWindow: ["popWindow", "closeMiniPro"],
+  // 退出小程序口径
+  closeMiniPro: ["closeMiniPro", "popWindow"],
+  // 回首页口径：先打原生 goHome；没有这个 JSAPI 时至少把当前窗口关掉，露出宿主首页
+  goHome: ["goHome", "popWindow"],
+};
+
 /**
- * 关闭当前容器，把返回交回宿主（退出按钮的统一出口）。
+ * 关闭当前容器 / 回宿主首页（退出、回主页按钮的统一出口）。
  *
  * 与甘特离线包（sanvist-gantt-offline 的 `utils/platform/mpaas.ts`）同一套退出流程，
  * 顺序由 `prefer` 决定，失败一路降级，最后 `history.back` 兜底：
  * - `"popWindow"`（默认，首页口径）：popWindow → closeMiniPro → history.back；
- * - `"closeMiniPro"`（作业指导 / 任务协同口径）：强制先走 closeMiniPro → popWindow → history.back。
- *
- * 两个方向都不能「只发一次就走」：宿主版本没实现对应 JSAPI 时按钮会毫无反应。
+ * - `"closeMiniPro"`（退出小程序口径）：closeMiniPro → popWindow → history.back；
+ * - `"goHome"`（作业指导 / 任务协同的回主页口径）：goHome → popWindow → history.back。
  */
 export async function closeContainer(prefer: CloseContainerPrefer = "popWindow"): Promise<void> {
-  const order: CloseContainerPrefer[] = prefer === "closeMiniPro"
-    ? ["closeMiniPro", "popWindow"]
-    : ["popWindow", "closeMiniPro"];
+  const order = CONTAINER_CLOSE_ORDER[prefer] || CONTAINER_CLOSE_ORDER.popWindow;
 
   for (const api of order) {
     try {

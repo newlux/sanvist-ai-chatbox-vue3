@@ -1,5 +1,6 @@
 import type { AskSlotOption, AskSlotPayload, ChatResponseMode, ChatStreamEvent, Identifier, SendChatMessageParams } from "@/api/chat/types";
 import { createLogger } from "@/utils/logger";
+import { parseWorkReportTag } from "./work-report-tag";
 
 const logger = createLogger("ai-stream-protocol");
 
@@ -156,7 +157,7 @@ export function splitMarkdownTables(source: string): DifyHistoryBlockData[] {
 
 export interface DifyHistoryBlockData {
   type: "answer" | "table" | "chart" | "image" | "video" | "source" | "suggestion" | "ask-slot"
-    | "assistant-navigation" | "guide-step" | "guide-check" | "guide-suggestion" | "guide-lead" | "gantt" | "voice";
+    | "assistant-navigation" | "guide-step" | "guide-check" | "guide-suggestion" | "guide-lead" | "gantt" | "voice" | "report-card";
   payload: Record<string, unknown>;
 }
 
@@ -638,12 +639,22 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
   }
   appendAnswer(source.slice(cursor));
   const result: DifyHistoryBlockData[] = [];
+  let report: ReturnType<typeof parseWorkReportTag> | undefined;
   for (const block of blocks) {
     if (block.type === "answer") {
-      result.push(...splitMarkdownTables(String(block.payload.content || "")));
+      // 历史只存原始 answer，没有实时流程追加的入口卡；复用标签解析还原正文和卡片。
+      // 历史已是整轮最终结果，未闭合标签也按实时流结束时的规则处理。
+      const content = String(block.payload.content || "");
+      const parsed = parseWorkReportTag(content);
+      if (parsed.matched) report = parsed;
+      const text = parsed.matched ? parsed.text : content;
+      if (text.trim()) result.push(...splitMarkdownTables(text));
     } else {
       result.push(block);
     }
+  }
+  if (report) {
+    result.push({ type: "report-card", payload: { date: report.date, language: report.language } });
   }
   if (result.length) return result;
   // 命中过协议但没产出 block（例如整条 answer 只有播报层）时不能回落成原文，否则会把 JSON 泄漏到气泡。

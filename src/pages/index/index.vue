@@ -65,7 +65,7 @@ import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCa
 import { openPartsAssistant } from "@/utils/parts-h5";
 import { openRepairAssistant } from "@/utils/repair-h5";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
-import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene, openChatScene } from "@/utils/scene-navigation";
+import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
@@ -791,9 +791,8 @@ function onGoListenReport() {
  * 底部快捷入口点击（仅纯净模式关闭时可见）：
  * - mode=inline（配件助手）：就地切换智能体，再点一次取消；
  * - 听汇报：先固定当天早报日期，再进播报页（与卡片入口同一套逻辑）；
- * - 作业指导 / 任务协同：openChatScene 走 uni 页面栈，留在主 webview 里
- *   （这样它们右上角的「退出」才是关掉整个小程序；开成独立窗口就只会回首页）；
- * - 其余 page 入口：navigateToScene 到对应的场景页。
+ * - 其余 page 入口（含作业指导 / 任务协同）：navigateToScene 到对应的场景页，
+ *   mPaaS 下 pushWindow 新开一个 webview，Web 下退化为 navigateTo。
  */
 function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; url?: string }) {
   if (item?.mode === "inline") {
@@ -823,7 +822,7 @@ function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; 
     void openPartsAssistant({ url: readPartsEmbedUrl(targetUrl) });
     return;
   }
-  void openChatScene(targetUrl);
+  void navigateToScene(targetUrl);
 }
 
 /**
@@ -1781,16 +1780,9 @@ async function loadTodayListenBroadcast() {
 }
 
 function syncPageStage() {
-  if (isDemoPage) {
+  // 已有对话继续展示；新进入不再因旧的唤醒标记跳过欢迎首页。
+  if (isDemoPage || chatStore.messages.length) {
     pageStage.value = "chat";
-    return;
-  }
-  try {
-    if (!userStore.isVisitor && uni.getStorageSync(AI_ASK_WELCOME_DONE_KEY)) {
-      pageStage.value = "chat";
-    }
-  } catch (error) {
-    logger.error("caught error", error);
   }
 }
 
@@ -1914,9 +1906,6 @@ onShow(() => {
 // useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
   realtimeTts.stop();
-  // 录音中跳走（作业指导 / 任务协同现在是同窗口压栈，onHide 必定触发）：
-  // 断流收麦，别让麦克风在后台继续采
-  resetVoiceQuery();
 });
 onUnload(() => {
   realtimeTts.stop();
@@ -1944,6 +1933,34 @@ onBeforeUnmount(() => {
 
 <template>
   <view class="ai-page" :class="{ 'ai-page--dark': isDark }">
+    <AiChatHeader
+      v-if="!pureMode || pageStage === 'chat'"
+      :show-island="pageStage === 'chat'"
+      v-model:sessions="sessions"
+      class="ai-page__header"
+      plain-bg
+      :load-sessions="getAISessionList"
+      :selected-session-id="aiSessionId"
+      :generating="isLoading"
+      :realtime-tts-playing="realtimeTts.playing.value"
+      :share-mode="shareSheetVisible"
+      :share-select-all-disabled="shareSelectAllDisabled"
+      :share-all-checked="shareAllChecked"
+      :share-selected-round-count="shareSelectedRoundCount"
+      :voice-listening="voiceListening || voiceQueryActive"
+      :listen-idle="islandListenFromWelcome"
+      restartable
+      round-buttons
+      @back="backToWelcome"
+      @restart="onRestartToStart"
+      @new-conversation="startNewConversation"
+      @session-click="onSessionClick"
+      @session-delete="onSessionDelete"
+      @session-delete-batch="onSessionDeleteBatch"
+      @session-rename="onSessionRename"
+      @share-select-all="onShareSelectAll"
+    />
+
     <!-- 欢迎页：起飞动画期间继续挂载，logo 滑到顶部再收起 -->
     <AiWelcome
       v-if="showWelcome"
@@ -2338,6 +2355,7 @@ $color-white: #ffffff;
 }
 
 .ai-page {
+  position: relative;
   min-height: 100vh;
   height: 100%;
   box-sizing: border-box;
@@ -2406,7 +2424,7 @@ $color-white: #ffffff;
 // 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）。
 // 这里必须是 1010：历史抽屉（内部 1000）的层级帽由这一层决定，
 // 底部 slot 抽屉是 1002，小于它就会被压住（附件弹窗 1020 仍在其上）
-.ai-page__chat > .ai-page__header {
+.ai-page > .ai-page__header {
   position: absolute;
   top: 0;
   right: 0;

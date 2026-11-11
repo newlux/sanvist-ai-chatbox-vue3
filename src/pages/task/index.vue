@@ -45,7 +45,7 @@ import { onNativeEvent } from "@/utils/platform/mpaas";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
-import { isWelcomeDone, markWelcomeDone } from "@/utils/welcome-done";
+import { markWelcomeDone } from "@/utils/welcome-done";
 
 /**
  * 任务协同页（基于首页 home 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
@@ -80,7 +80,7 @@ const isDark = computed(() => systemStore.isDark);
  * 纯净模式（设置弹层 → 纯净模式）：决定头部左上角那颗按钮是谁。
  * - 开启：左侧 = 历史对话抽屉（纯净模式下没有别的入口进历史）；
  * - 关闭：左侧 = 返回上级页面（原有的多入口导航还在，历史走别处）。
- * 右上角两种模式都是「关闭当前小程序」，见 onCloseWindow。
+ * 右上角两种模式都是「返回宿主首页」，见 onGoHome。
  */
 const settingsStore = useSettingsStore();
 const { pureMode } = storeToRefs(settingsStore);
@@ -799,12 +799,12 @@ function onBack() {
 }
 
 /**
- * 右上角「关闭当前小程序」：强制走 closeMiniPro 退出小程序
+ * 右上角房子按钮「返回主页」：调用宿主原生 goHome 回 App 首页
  * （宿主没有这个 JSAPI 时依次退到 popWindow、history.back），
- * 关容器前的游客态清理见 utils/exit-mini-program。
+ * 回首页前的游客态清理见 utils/exit-mini-program。
  */
-function onCloseWindow() {
-  exitMiniProgram("closeMiniPro");
+function onGoHome() {
+  exitMiniProgram("goHome");
 }
 
 /**
@@ -990,10 +990,7 @@ onLoad((options) => {
   chatStore.resetConversation();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
-  // 已完成过 SANI 唤醒（首页对话态 / 本页欢迎层起飞都会置位）→ 直达对话态，
-  // 不再铺整屏欢迎层：老用户从首页快捷入口切过来体验更顺。
-  // 注：不判断 isVisitor —— App 启动即 setVisitor(true)（游客恒定态），加它会导致永远跳过不了。
-  if (isWelcomeDone()) enterChatNow();
+  // 每次进入保留欢迎首页；纯净模式只在开始对话后显示顶部菜单。
 });
 
 onMounted(() => {
@@ -1039,6 +1036,36 @@ onUnload(() => {
 
 <template>
   <view class="ai-page" :class="{ 'ai-page--dark': isDark }" :style="safeAreaStyle">
+    <AiChatHeader
+      v-if="!pureMode || pageStage === 'chat'"
+      :show-island="pageStage === 'chat'"
+      ref="chatHeader"
+      v-model:sessions="sessions"
+      class="ai-page__header"
+      plain-bg
+      :load-sessions="getAISessionList"
+      :selected-session-id="aiSessionId"
+      :generating="isLoading"
+      :share-mode="shareSheetVisible"
+      :share-select-all-disabled="shareSelectAllDisabled"
+      :share-all-checked="shareAllChecked"
+      :share-selected-round-count="shareSelectedRoundCount"
+      :voice-listening="voiceQueryActive"
+      restartable
+      back-on-left
+      close-on-right
+      round-buttons
+      @back="onBack"
+      @close="onGoHome"
+      @restart="onRestartToStart"
+      @new-conversation="startNewConversation"
+      @session-click="onSessionClick"
+      @session-delete="onSessionDelete"
+      @session-delete-batch="onSessionDeleteBatch"
+      @session-rename="onSessionRename"
+      @share-select-all="onShareSelectAll"
+    />
+
     <!-- 欢迎层：与首页初始页同款（Hey,SANI + logo + 点击说话 / 键盘）；
          起飞动画期间继续挂载，logo 滑到顶部灵动岛再收起 -->
     <AiWelcome
@@ -1063,33 +1090,7 @@ onUnload(() => {
       <!-- 顶部毛玻璃渐隐：与首页对话页同一层，状态栏 / 头部区域半透明，内容滚上来只会被虚化 -->
       <view class="ai-page__top-fade" />
       <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
-      <AiChatHeader
-        ref="chatHeader"
-        v-model:sessions="sessions"
-        class="ai-page__header"
-        plain-bg
-        :load-sessions="getAISessionList"
-        :selected-session-id="aiSessionId"
-        :generating="isLoading"
-        :share-mode="shareSheetVisible"
-        :share-select-all-disabled="shareSelectAllDisabled"
-        :share-all-checked="shareAllChecked"
-        :share-selected-round-count="shareSelectedRoundCount"
-        :voice-listening="voiceQueryActive"
-        restartable
-        :back-on-left="!pureMode"
-        close-on-right
-        round-buttons
-        @back="onBack"
-        @close="onCloseWindow"
-        @restart="onRestartToStart"
-        @new-conversation="startNewConversation"
-        @session-click="onSessionClick"
-        @session-delete="onSessionDelete"
-        @session-delete-batch="onSessionDeleteBatch"
-        @session-rename="onSessionRename"
-        @share-select-all="onShareSelectAll"
-      />
+
       <AiMessageList
         :key="chatListKey"
         :asr-tip-ready="asrTipReady"
@@ -1343,6 +1344,7 @@ $color-border-light: #efefef;
 $color-white: #ffffff;
 
 .ai-page {
+  position: relative;
   min-height: 100vh;
   height: 100%;
   box-sizing: border-box;
@@ -1392,7 +1394,7 @@ $color-white: #ffffff;
 // 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）。
 // 这里必须是 1010：历史抽屉（内部 1000）的层级帽由这一层决定，
 // 底部 slot 抽屉是 1002，小于它就会被压住（附件弹窗 1020 仍在其上）
-.ai-page__chat > .ai-page__header {
+.ai-page > .ai-page__header {
   position: absolute;
   top: 0;
   right: 0;

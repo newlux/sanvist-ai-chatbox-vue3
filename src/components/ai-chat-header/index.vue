@@ -33,6 +33,8 @@ const props = defineProps({
   loadSessions: { type: Function, default: undefined },
   selectedSessionId: { type: [String, Number], default: "" },
   generating: { type: Boolean, default: false },
+  /** 欢迎首页只显示菜单栏，三角图仍由居中的欢迎层展示。 */
+  showIsland: { type: Boolean, default: true },
   shareMode: { type: Boolean, default: false },
   shareSelectAllDisabled: { type: Boolean, default: false },
   shareAllChecked: { type: Boolean, default: false },
@@ -40,14 +42,14 @@ const props = defineProps({
   backOnly: { type: Boolean, default: false },
   /**
    * 左侧按钮显示「返回」箭头（emit back），替掉默认的历史对话抽屉按钮。
-   * 任务协同页在纯净模式关闭时传 true：左侧返回上级页面，右侧仍是关闭小程序。
+   * 作业指导、任务协同两种纯净模式下都传 true：左侧返回上一页，右侧仍返回宿主首页。
    * （与 backOnly 的区别：backOnly 连右侧按钮和语音播报开关一起收掉，这里只换左侧。）
    */
   backOnLeft: { type: Boolean, default: false },
   /**
-   * 右侧最右那颗按钮点击时 emit close（关闭当前小程序）。
-   * 图标沿用回首页那颗房子（icon-home.svg），只是把行为从「回首页」换成「关闭」。
-   * 任务协同页固定传 true。
+   * 右侧最右那颗按钮点击时 emit close，由页面决定行为
+   * （作业指导 / 任务协同 = 调原生 goHome 回宿主首页）。
+   * 图标沿用回首页那颗房子（icon-home.svg）。
    */
   closeOnRight: { type: Boolean, default: false },
   /**
@@ -648,7 +650,7 @@ onBeforeUnmount(() => {
           <!-- 顶部中间「灵动岛」+ 下方状态胶囊
                Ardot 722:69（浅色思考中）/ 722:489（浅色回答中）：胶囊只在生成中出现
                未生成时只留圆形灵动岛，胶囊整体不渲染 -->
-          <view class="chat-header__island-wrap">
+          <view v-if="showIsland" class="chat-header__island-wrap">
             <view
               class="chat-header__island"
               :class="{ 'chat-header__island--thinking': thinking }"
@@ -737,8 +739,8 @@ onBeforeUnmount(() => {
               <image :src="autoTtsIcon" mode="aspectFit" class="chat-header__icon-tts-img" />
             </view>
 
-            <!-- 关闭当前小程序（任务协同 / 作业指导页固定走这一颗）：交回 mPaaS 容器 popWindow。
-                 图标沿用回首页那颗房子（icon-home.svg），只有点击行为是关闭 -->
+            <!-- 返回主页（任务协同 / 作业指导页固定走这一颗）：点击 emit close，
+                 页面里调原生 goHome 回宿主首页。图标沿用 house（icon-home.svg） -->
             <view v-if="props.closeOnRight" class="chat-header__icon-btn" @tap="onCloseTap">
               <view class="chat-header__icon-atlas">
                 <image
@@ -1165,9 +1167,7 @@ onBeforeUnmount(() => {
   gap: 12rpx; // 6px，与 bar 的 gap 一致
 }
 
-/* ===== 白底圆形图标按钮（任务协同页设计稿：纯净模式两态一致的头部样式）=====
-   左右每颗图标都套一层 88rpx（44px）白圆 + 轻微投影，图标本身尺寸不变，
-   顺带把点击热区撑到 44×44 的设计口径 */
+/* 三个助手共用 44×44 的点击热区和间距；图标不铺圆形背景。 */
 .ai-chat-header--round {
   .chat-header__bar {
     gap: 20rpx; // 10px：圆与圆之间比裸图标（6px）略宽
@@ -1176,25 +1176,25 @@ onBeforeUnmount(() => {
   .chat-header__icon-btn {
     width: 88rpx;
     height: 88rpx;
-    border-radius: 50%;
-    background: #ffffff;
-    box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.06);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .chat-header__right {
     gap: 16rpx; // 8px：喇叭与关闭两颗圆之间的间距
   }
 
-  // 选中 / 按压反馈：圆形按钮上只压透明度，颜色不变
+  // 按压只改变图标透明度，点击热区与间距保持不变。
   .chat-header__icon-btn:active {
     opacity: 0.7;
   }
 }
 
-/* 深色：白圆换成比页面底亮一档的深灰，投影收掉（暗底上的投影看不出来） */
+/* 深色同样不铺底色。 */
 .ai-chat-header--round.ai-chat-header--dark {
   .chat-header__icon-btn {
-    background: #262626;
+    background: transparent;
     box-shadow: none;
   }
 }
