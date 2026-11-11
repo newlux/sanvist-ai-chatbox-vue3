@@ -194,6 +194,8 @@ const settingsLanguage = computed<"zh_CN" | "en_US">({
 const isSettingsSheetOpen = ref(false);
 
 function onOpenSettingsSheet() {
+  // 设置接管遮罩前先关闭历史抽屉，避免关闭设置后还残留上一层遮罩。
+  closeDrawer();
   isSettingsSheetOpen.value = true;
 }
 /** PC 端内嵌时头部露出「最小化」，替换原来的「回到首页」图标 */
