@@ -400,7 +400,7 @@ const showAssistantCallbackResult = computed(
 /** 回流卡片副标题：故障诊断与快问快答文案不同，缺省沿用故障诊断；轮询中沿用过程状态文案。 */
 const assistantCallbackStatusText = computed(() =>
   showAssistantCallbackResult.value
-    ? props.assistantCallbackStatus || "诊断报告生成已完成"
+    ? props.assistantCallbackStatus || t("repair-callback-done")
     : processStatusText.value,
 );
 

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { createLogger } from "@/utils/logger";
+import { createRepairChannelId } from "@/utils/repair-bridge";
 import { buildRepairH5Url } from "@/utils/repair-h5";
 import { consumePendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -22,19 +23,36 @@ const loadError = ref("");
 const repairIframeRef = ref<HTMLIFrameElement | null>(null);
 const repairNavigationContext = ref<Record<string, unknown>>({});
 const repairDetailConversationId = ref("");
+/**
+ * 通知通道 id：与 pushWindow 那条链路同一个参数（`repairChannelId`），
+ * 三方页收到后会把消息打上同一个 id —— 壳页是 iframe，用不了 mPaaS 通知，
+ * 这个 id 只用来对齐两端报文，避免旧窗口的消息串进来。
+ */
+const repairChannelId = createRepairChannelId();
 
 type RepairInboundMessage =
   | { type: "navigate_back"; source: "maix-chat" }
   | { type: "query_question" };
 
-const iframeSrc = computed(() => {
-  console.log("🚀 ~ embedUrl.value:", embedUrl.value);
-  return embedUrl.value;
-});
+const iframeSrc = computed(() => embedUrl.value);
 
 const embedStyle = computed(() => ({
   paddingTop: `${safeTopPx.value}px`,
 }));
+
+/** 日志用：只取 URL 的参数名，ciphertext / access_token 这类鉴权值不落日志 */
+function urlParamNames(url: string) {
+  try {
+    const names: string[] = [];
+    new URL(url).searchParams.forEach((_value, key) => {
+      names.push(key);
+    });
+    return names;
+  }
+  catch {
+    return [];
+  }
+}
 
 /** 地址口径与 pushWindow 直达共用一处（utils/repair-h5），这里只补上壳页才有的上下文来源。 */
 function buildEmbedUrl() {
@@ -43,13 +61,18 @@ function buildEmbedUrl() {
       sessionId: String(repairNavigationContext.value.sessionId || "").trim(),
       conversationId: String(repairNavigationContext.value.conversationId || "").trim(),
       chatConversationId: repairDetailConversationId.value,
+      channelId: repairChannelId,
     });
     loadError.value = "";
-    logger.info("sanvist h5 url ready");
+    logger.info("维修壳页 iframe 地址已就绪", {
+      channelId: repairChannelId,
+      params: urlParamNames(embedUrl.value),
+      hasChannelParam: embedUrl.value.includes("repairChannelId="),
+    });
   }
   catch (error) {
     loadError.value = "三方页面加载失败";
-    logger.error("failed to build sanvist h5 url", error);
+    logger.error("维修壳页 iframe 地址生成失败", error);
   }
 }
 
@@ -64,7 +87,9 @@ function getRepairOrigin() {
 
 function isRepairInboundMessage(value: unknown): value is RepairInboundMessage {
   if (!value || typeof value !== "object") return false;
-  const payload = value as Partial<RepairInboundMessage>;
+  const payload = value as Partial<RepairInboundMessage> & { channelId?: unknown };
+  // 带了 channelId 就必须是本次通道的，否则是旧 iframe / 旧窗口的迟到消息
+  if (payload.channelId && String(payload.channelId) !== repairChannelId) return false;
   return (payload.type === "navigate_back" && payload.source === "maix-chat")
     || payload.type === "query_question";
 }
@@ -72,10 +97,14 @@ function isRepairInboundMessage(value: unknown): value is RepairInboundMessage {
 function postToRepair(payload: Record<string, unknown>) {
   const repairWindow = repairIframeRef.value?.contentWindow;
   const origin = getRepairOrigin();
-  if (!repairWindow || !origin) return false;
+  if (!repairWindow || !origin) {
+    logger.warn("iframe 还没就绪，消息未发出", { origin: origin || "(空)", payload });
+    return false;
+  }
 
-  console.log("🚀 ~ postToRepair ~ payload:", payload);
-  repairWindow.postMessage(payload, origin);
+  const message = { channelId: repairChannelId, ...payload };
+  logger.info("发给维修 H5（iframe postMessage）", message);
+  repairWindow.postMessage(message, origin);
   return true;
 }
 
@@ -97,9 +126,15 @@ function handleQueryQuestion() {
 function handleRepairMessage(event: MessageEvent) {
   if (event.source !== repairIframeRef.value?.contentWindow) return;
   if (event.origin !== getRepairOrigin()) return;
-  if (!isRepairInboundMessage(event.data)) return;
+  if (!isRepairInboundMessage(event.data)) {
+    logger.debug("忽略 iframe 消息（非约定类型 / 别的通道）", event.data);
+    return;
+  }
+
+  logger.info("收到维修 H5 消息（iframe postMessage）", event.data);
 
   if (event.data.type === "navigate_back") {
+    logger.info("维修 H5 要求返回上一场景");
     backFromScene();
     return;
   }

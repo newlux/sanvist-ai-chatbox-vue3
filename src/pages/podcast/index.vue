@@ -843,6 +843,8 @@ function onReportQaNavigationConfirm(payload: AssistantNavigationPayload) {
   void openRepairAssistant({
     sessionId: String(payload.sessionId || ""),
     conversationId: String(payload.conversationId || ""),
+    // 三方页进来会 query_question 来要这句提问（另一个 webview，走通知通道回给它）
+    question: String(payload.context?.query || ""),
     // 上下文只在降级回本地壳页时才落盘（直连三方页走 URL 参数）
     onFallback: () => {
       stashPendingRepairNavigationContext({

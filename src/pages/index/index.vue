@@ -18,6 +18,7 @@ import type { AttachmentSource } from "@/hooks/useComposerAttachments";
 import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
 import type { AsrStreamSession } from "@/utils/asr/asr-stream-session";
 import type { PcmCapture } from "@/utils/asr/pcm-capture";
+import type { RepairCaseReport } from "@/utils/repair-callback";
 import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -27,6 +28,7 @@ import { animateVoiceMessageArrival, readVoiceMessageOrigin } from "@/utils/voic
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
 import { getConversationSummary } from "@/api/conversation-summary";
 import { getTodayListenBroadcast } from "@/api/listen-broadcast";
+import { getRepairInformationState } from "@/api/repair";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import arrowDownIcon from "@/assets/img/arrow-down.png";
 import arrowDownDarkIcon from "@/assets/img/arrow-down-dark.png";
@@ -63,9 +65,10 @@ import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture"
 import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
-import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
-import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { openPartsAssistant } from "@/utils/parts-h5";
+import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
+import { getRepairConversationId } from "@/utils/repair-bridge";
+import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, parseRepairCaseReport, stashPendingRepairCallback } from "@/utils/repair-callback";
 import { openRepairAssistant } from "@/utils/repair-h5";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
@@ -321,10 +324,11 @@ function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
 function onAssistantCallbackOpen(conversationId: string) {
   const id = String(conversationId || "").trim();
   if (!id) return;
+  logger.info("维修助理回流卡点「看详情」", { conversationId: id });
   clearPendingRepairCallback();
   void openRepairAssistant({
     chatConversationId: id,
-    // 降级回本地壳页时要把详情会话带上，壳页据此拼 `/chat/{id}`
+    // 降级回本地壳页时要把会话 id 带上，壳页据此拼 `/repair/{id}`
     fallbackUrl: `/pages/repair/index?conversationId=${encodeURIComponent(id)}`,
   });
 }
@@ -340,16 +344,28 @@ const REPAIR_ENTER_CONFIRM_TEXT = "确认进入维修助理";
 /**
  * 真正进维修助理：pushWindow 直达三方维修 H5（上下文走 URL 参数），
  * 只有降级回本地壳页时才落盘 pending 上下文；返回后靠 pending 回调拉 summary。
+ *
+ * 提问另外走通知通道交给三方页：它在另一个 webview 里，进来就会 `query_question`
+ * 来要这句话（见 utils/repair-bridge），URL 上不带问题本体。
  */
 function enterRepairAssistant(payload: AssistantNavigationPayload) {
   const aiAskConversationId = String(payload.conversationId || "").trim();
   const aiAskSessionId = String(payload.sessionId || "").trim();
+  // 真机排查：确认后端下发的 intent / 上下文到齐了没
+  logger.info("进入维修助理（后端 navigation 下发）", {
+    intent: payload.context?.intent || "(空)",
+    sessionId: aiAskSessionId || "(空)",
+    conversationId: aiAskConversationId || "(空)",
+    questionLength: String(payload.context?.query || "").length,
+  });
   if (aiAskConversationId && aiAskSessionId) {
     stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
   }
   void openRepairAssistant({
     sessionId: aiAskSessionId,
     conversationId: aiAskConversationId,
+    question: String(payload.context?.query || ""),
+    // 降级回本地壳页时上下文才落盘（直连三方页走 URL + 通知通道）
     onFallback: () => {
       stashPendingRepairNavigationContext({
         ...payload.context,
@@ -411,7 +427,11 @@ function clearRepairSummaryPolling() {
 
 function startRepairSummaryCallback() {
   const task = consumePendingRepairCallback();
-  if (!task) return;
+  if (!task) {
+    logger.debug("没有待消费的维修助理回调任务，跳过回流摘要轮询");
+    return;
+  }
+  logger.info("开始轮询维修助理回流摘要", task);
 
   clearRepairSummaryPolling();
   repairSummaryPollingAttempts = 0;
@@ -424,10 +444,11 @@ function startRepairSummaryCallback() {
     loading: true,
     sessionId: chatStore.aiSessionId,
     messageId: null,
-    waitingText: "维修助理-快速问答",
-    assistantCallbackTitle: "维修助理-快速问答",
+    // 文案都走词条：切中英文后新推出来的卡片跟着变（已落到消息里的文案不会再改）
+    waitingText: t("repair-callback-title"),
+    assistantCallbackTitle: t("repair-callback-title"),
     // 状态文案由气泡统一补「...」，这里只写标题本体，避免卡片上出现重复省略号
-    processStatus: { phase: "thinking", title: "故障诊断中" },
+    processStatus: { phase: "thinking", title: t("repair-callback-status-diagnosing") },
   });
   chatStore.scrollToBottom(true);
 
@@ -435,8 +456,11 @@ function startRepairSummaryCallback() {
    * 已经补到卡片上的维修助理会话 ID。
    * 诊断中没有回填明细，但 ID 一到位就要让卡片可点（气泡只按这个字段决定是否显示右箭头），
    * 所以要单独记一份，避免每轮都重复 patch，也避免 Completed 回包没带 ID 时把它覆盖成空。
+   *
+   * 初值取三方页在通道里回传过的会话 id（conversation_created）：
+   * 摘要接口这次没带回 id 时，卡片照样能点进详情。
    */
-  let patchedConversationId = "";
+  let patchedConversationId = getRepairConversationId();
 
   const poll = async () => {
     repairSummaryPollingAttempts += 1;
@@ -444,54 +468,95 @@ function startRepairSummaryCallback() {
       const data = await getConversationSummary(task);
       const summaryPayload = JSON.stringify(data);
       const summary = parseRepairCallbackSummary(summaryPayload);
-      // 结果就绪：先把卡片标题/副标题/明细/会话 ID 补到消息上，再走回流接口。
-      const applySummary = () => chatStore.patchMessageById(aiMsgId, {
-        assistantCallbackTitle: summary.title,
-        assistantCallbackStatus: summary.statusText,
-        assistantCallbackDetails: summary.details,
-        assistantCallbackConversationId: summary.repairConversationId || patchedConversationId,
-      });
-      /**
-       * 结果就绪：只有下面两种情况才结束轮询并回流。
-       * - 无 status：快速问答没有状态字段，首次取到结果就回流；
-       * - Completed：诊断报告已完成。
-       * Diagnosing 是「诊断中」，服务端此时返回的 conclusion / treatment 还只是
-       * 「当前故障案例报告还未生成」这种占位文案，提前回流会把占位内容当成结论写进卡片，
-       * 而且会走到下面的 return，把 setTimeout 掐断 —— 表现就是只请求了一次、不再轮询。
-       * 所以 Diagnosing 一律放行到末尾继续轮询，等状态收敛成 Completed。
-       * repairConversationId 只决定卡片能不能点进详情（为空时气泡不渲染箭头），
-       * 不能拿它当作「结果就绪」的依据。
-       */
       const status = String(data.status || "");
-      if (!status || status === "Completed") {
-        clearRepairSummaryPolling();
-        applySummary();
-        await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: "维修助理-快速问答" });
-        return;
-      }
+      const conversationId = String(summary.repairConversationId || patchedConversationId || "").trim();
+      // 真机排查：每次轮询的状态与是否带回会话 id
+      logger.debug("回流摘要返回", {
+        attempt: repairSummaryPollingAttempts,
+        status: status || "(空)",
+        conversationId: conversationId || "(空)",
+      });
 
       /**
-       * 还没到 Completed（如 Diagnosing 诊断中）：结论仍是占位文案，明细 / 副标题一律不写；
-       * 但只要服务端这次带回了 repairConversationId，就立刻把卡片补成可点击的，
-       * 用户不用等诊断结束也能点右箭头跳到维修助理看诊断详情。
-       * 只补这一个字段，不碰明细，也不打断下面的轮询。
+       * 会话 ID 一到位就先补到卡片上（气泡只按这个字段决定是否渲染右箭头）：
+       * 不用等报告生成完，用户随时能点进维修助理看诊断详情。
        */
-      const conversationId = summary.repairConversationId;
       if (conversationId && conversationId !== patchedConversationId) {
         patchedConversationId = conversationId;
         chatStore.patchMessageById(aiMsgId, { assistantCallbackConversationId: conversationId });
       }
+
+      /** 结果就绪：把卡片标题 / 副标题 / 明细 / 会话 ID 补齐，再走回流接口。 */
+      const finish = async (details: Array<{ label: string; value: string }>, reason: string) => {
+        clearRepairSummaryPolling();
+        chatStore.patchMessageById(aiMsgId, {
+          assistantCallbackTitle: summary.title,
+          assistantCallbackStatus: summary.statusText,
+          assistantCallbackDetails: details,
+          assistantCallbackConversationId: patchedConversationId,
+        });
+        logger.info("回流摘要已就绪，回填卡片并回流", {
+          attempt: repairSummaryPollingAttempts,
+          reason,
+          status: status || "(无 status)",
+          conversationId: patchedConversationId || "(空)",
+          details: details.map(item => item.label),
+        });
+        await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: t("repair-callback-quick-qa") });
+      };
+
+      /**
+       * 快速问答：回流数据没有 status，首次取到就是结果，直接回流。
+       */
+      if (!status) {
+        await finish(summary.details, "无 status（快速问答）");
+        return;
+      }
+
+      /**
+       * 机型诊断：以三方「案例报告」为准 ——
+       * 机型 / 故障现象 / 交互排查第一条 / 交互维修第一条四项都有值才算生成完成（见 parseRepairCaseReport）。
+       *
+       * 原来按后端 status=Completed 判断，会在四项还没填全（结论还是占位文案）时就回流；
+       * 现在 status 只当兜底：拿不到会话 ID 或三方接口失败时，退回旧口径，
+       * 避免三方接口一抖动，卡片就永远等不到回流。
+       */
+      let caseReport: RepairCaseReport | null = null;
+      if (conversationId) {
+        try {
+          caseReport = parseRepairCaseReport(await getRepairInformationState(conversationId));
+        }
+        catch (error) {
+          logger.warn("案例报告状态查询失败，本轮退回 status 口径", { conversationId, status }, error);
+        }
+      }
+      const ready = caseReport ? caseReport.ready : status === "Completed";
+      if (ready) {
+        await finish(
+          caseReport?.details || summary.details,
+          caseReport ? "案例报告四项已齐" : `status=${status}`,
+        );
+        return;
+      }
+      // 缺哪一项一眼能看出来：filled 里没有的 label 就是三方还没填的
+      logger.debug("案例报告还没生成完，继续轮询", {
+        attempt: repairSummaryPollingAttempts,
+        status,
+        hasConversationId: Boolean(conversationId),
+        filled: caseReport?.details.map(item => item.label) || [],
+      });
     }
     catch (error) {
-      logger.error("failed to query repair conversation summary", error);
+      logger.error("回流摘要接口失败", { attempt: repairSummaryPollingAttempts }, error);
     }
 
     if (repairSummaryPollingAttempts >= REPAIR_SUMMARY_MAX_ATTEMPTS) {
       clearRepairSummaryPolling();
+      logger.warn("回流摘要轮询次数用尽，标记为未完成", { attempts: repairSummaryPollingAttempts });
       chatStore.patchMessageById(aiMsgId, {
-        content: "维修助理结果暂未生成，请稍后再试。",
+        content: t("repair-callback-timeout"),
         loading: false,
-        processStatus: { phase: "failed", title: "故障诊断未完成" },
+        processStatus: { phase: "failed", title: t("repair-callback-status-failed") },
       });
       return;
     }
@@ -1875,6 +1940,7 @@ function refreshListenReportState() {
 }
 
 const stopNativeResume = onNativeEvent("resume", () => {
+  logger.info("原生 resume：从场景窗口回到本页，尝试消费维修助理回调");
   refreshListenReportState();
   // 维修助理是独立场景窗口：关窗回到本页时原 webview 一直在，不会经历 onHide/onShow，
   // 只靠 onShow 消费回调会漏，这里在原生 resume 上补一次（重复调用有 pending 判空，安全）。

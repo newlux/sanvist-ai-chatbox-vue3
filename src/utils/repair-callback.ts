@@ -1,3 +1,5 @@
+import type { RepairInformationPayload } from "@/api/repair/types";
+
 const PENDING_REPAIR_CALLBACK_KEY = "pending-repair-callback";
 
 export interface PendingRepairCallback {
@@ -66,7 +68,7 @@ export interface RepairCallbackSummary {
 
 /** 故障诊断（回流数据带 status） */
 const DIAGNOSIS_TITLE = "维修助理-机型诊断";
-const DIAGNOSIS_STATUS = "诊断报告生成已完成";
+const DIAGNOSIS_STATUS = "案例报告生成已完成";
 /** 快速问答（回流数据没有 status） */
 const QUICK_ANSWER_TITLE = "维修助理-快问快答";
 const QUICK_ANSWER_STATUS = "答案回复已生成";
@@ -79,6 +81,42 @@ function pickRepairCallbackDetails(data: Record<string, unknown>) {
     { label: "结论", value: String(data.conclusion || "") },
     { label: "处理", value: String(data.treatment || "") },
   ].filter(item => item.value);
+}
+
+export interface RepairCaseReport {
+  /** 机型 / 故障现象 / 交互排查 / 交互维修四项都有值才算「案例报告生成完成」 */
+  ready: boolean;
+  /** 卡片明细：设备 / 问题 / 结论 / 处理，空值不展示 */
+  details: Array<{ label: string; value: string }>;
+}
+
+/**
+ * 从三方「案例报告状态」里取卡片四行。
+ *
+ * 字段口径（三方约定）：
+ * - 设备 = `state.device_model.model_name`
+ * - 问题 = `state.fault_symptoms[0].text`
+ * - 结论 = `state.troubleshooting_steps[0].text`
+ * - 处理 = `state.repair_steps[0].text`
+ *
+ * 四项齐了才算报告生成完成 —— 这条判断取代了原来「后端 status=Completed」的口径，
+ * 因为后者会在结论还是占位文案、四项还没填全的时候就到 Completed。
+ */
+export function parseRepairCaseReport(payload?: RepairInformationPayload | null): RepairCaseReport {
+  const state = payload?.state;
+  const device = String(state?.device_model?.model_name || "").trim();
+  const problem = String(state?.fault_symptoms?.[0]?.text || "").trim();
+  const conclusion = String(state?.troubleshooting_steps?.[0]?.text || "").trim();
+  const treatment = String(state?.repair_steps?.[0]?.text || "").trim();
+  return {
+    ready: Boolean(device && problem && conclusion && treatment),
+    details: [
+      { label: "设备", value: device },
+      { label: "问题", value: problem },
+      { label: "结论", value: conclusion },
+      { label: "处理", value: treatment },
+    ].filter(item => item.value),
+  };
 }
 
 /** 解析回流数据，得到卡片标题、副标题与明细 */

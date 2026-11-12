@@ -204,6 +204,88 @@ export function callNativeSilently(apiName: string, params: Record<string, unkno
   });
 }
 
+/**
+ * 向宿主投递一条自定义事件通知（`postNotification`）。
+ *
+ * mPaaS 的 H5 自定义事件是两段式：
+ * - 发：`AlipayJSBridge.call("postNotification", { name, data })`，事件交给宿主；
+ * - 收：`addNotifyListener({ name })` 注册的常驻回调里拿到 `data`（见下面的 addNativeNotifyListener）。
+ *
+ * 跨 webview 的场景（维修助理是 pushWindow 打开的三方 H5）只有这条链路走得通，
+ * iframe 那套 `postMessage` 够不着另一个 webview。
+ *
+ * 返回 true = 通知已经交给宿主；false = 没有 bridge（浏览器 / PC 内嵌），
+ * 调用方据此降级。宿主对 postNotification 不一定回调，所以这里不等回调、也不当失败处理。
+ */
+export async function postNativeNotification(name: string, data: Record<string, unknown> = {}): Promise<boolean> {
+  const bridge = await waitForMpaas(800);
+  if (!bridge) {
+    logger.warn(`[mpaas] postNotification ${name} 跳过：没有 bridge（非 mPaaS 容器）`, data);
+    return false;
+  }
+  try {
+    logger.info(`[mpaas] postNotification ${name} 发出`, data);
+    bridge.call("postNotification", { name, data }, () => {});
+    return true;
+  }
+  catch (error) {
+    logger.warn(`[mpaas] postNotification ${name} 调用失败`, error);
+    return false;
+  }
+}
+
+/**
+ * 注册宿主通知监听（H5 自定义事件的接收端）。
+ *
+ * 注意它**不是**一次调用一次回调：
+ * `addNotifyListener` 的第三个参数是常驻处理函数，宿主每次把别的 webview 里
+ * `postNotification` 的 `data` 原样推进来；注销只能靠 `removeNotifyListener`。
+ * 所以这里不能走 callNative（那是「一次调用一个 resolve」的收口）。
+ *
+ * 同名监听在宿主侧通常只保留最新一个，重复注册前建议先 `removeNativeNotifyListener`。
+ * 返回 false = 没有 bridge，调用方按「收不到通知」降级。
+ */
+export async function addNativeNotifyListener(
+  name: string,
+  handler: (payload: BridgeResult) => void,
+  options: { keep?: boolean; waitReadyMs?: number } = {},
+): Promise<boolean> {
+  const params = { name, keep: options.keep === false ? "false" : "true" };
+  logger.debug(`[mpaas] addNotifyListener 请求`, params);
+  const bridge = await waitForMpaas(options.waitReadyMs ?? 1500);
+  if (!bridge) {
+    logger.warn(`[mpaas] addNotifyListener ${name} 不可用：没有 bridge（非 mPaaS 容器）`);
+    return false;
+  }
+  try {
+    bridge.call("addNotifyListener", params, handler);
+    logger.info(`[mpaas] addNotifyListener ${name} 已注册`);
+    return true;
+  }
+  catch (error) {
+    logger.warn(`[mpaas] addNotifyListener ${name} 调用失败`, error);
+    return false;
+  }
+}
+
+/** 注销宿主通知监听（与 addNativeNotifyListener 成对使用） */
+export async function removeNativeNotifyListener(name: string): Promise<boolean> {
+  const bridge = await waitForMpaas(800);
+  if (!bridge) {
+    logger.debug(`[mpaas] removeNotifyListener ${name} 跳过：没有 bridge`);
+    return false;
+  }
+  try {
+    bridge.call("removeNotifyListener", { name }, () => {});
+    logger.info(`[mpaas] removeNotifyListener ${name} 已注销`);
+    return true;
+  }
+  catch (error) {
+    logger.warn(`[mpaas] removeNotifyListener ${name} 调用失败`, error);
+    return false;
+  }
+}
+
 /** token 失效：前端换不了，只能通知宿主重新下发 */
 export function notifyTokenExpiration() {
   callNativeSilently("tokenExpiration");

@@ -1017,7 +1017,7 @@ export function useChatSend(scope?: string, handlers?: {
         interrupted: false,
         sessionId: conversationId,
         messageId: null,
-        waitingText: options.waitingText || "维修助理-快速问答",
+        waitingText: options.waitingText || t("repair-callback-quick-qa"),
         processStatus: { phase: "thinking" },
       });
     }

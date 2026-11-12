@@ -5,6 +5,9 @@
  * payload 仅 4 字段：externalUserId / name / timestamp / nonce。
  */
 import forge from "node-forge";
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("sanvist-h5");
 
 /** 明文 UTF-8 字节上限（RSA-OAEP 2048 上限约 190 字节）。 */
 const PAYLOAD_MAX_BYTES = 190;
@@ -16,6 +19,12 @@ const PROD_FRONTEND = "https://maix-bm.irootech.com/repair";
 /** 仅 `pnpm build:h5` 注入 production，其余命令都走测试地址。 */
 const DEFAULT_FRONTEND =
   import.meta.env.VITE_SANVIST_H5_FRONTEND === "production" ? PROD_FRONTEND : TEST_FRONTEND;
+
+/**
+ * 三方站点的根地址（`https://maix-bm.irootech.com`）。
+ * 调三方的接口（如案例报告状态）时用它拼 baseURL，避免另写一份域名跟前端地址漂移。
+ */
+export const SANVIST_H5_ORIGIN = new URL(DEFAULT_FRONTEND).origin;
 const DEFAULT_SOURCE = "sanvist";
 const DEFAULT_SYS_CODE = "sanvist";
 const DEFAULT_EXTERNAL_USER_ID = "shengmz2";
@@ -56,7 +65,7 @@ export interface SanvistH5EncryptOptions {
   userId?: string;
   sessionId?: string;
   conversationId?: string;
-  /** 维修助理详情页的会话 ID，作为 `/chat/{id}` 路径参数。 */
+  /** 维修助理详情页的会话 ID，直接接在 frontend 后面（`/repair/{id}`）。 */
   chatConversationId?: string;
   /**
    * 外观主题：直接透传设置弹层里选中的外观值（system / light / dark），
@@ -217,16 +226,19 @@ export function buildSanvistH5Url(options: SanvistH5EncryptOptions = {}): Sanvis
   /**
    * 路径：入口直接落在 frontend（`https://maix-bm.irootech.com/repair`），不再补 `/chat` ——
    * 三方最新版把对话页放在根路径上，旧的 `/repair/chat` 是历史地址。
-   * 只有「维修助理详情」才带子路径 `/chat/{chatConversationId}`，它由三方单独路由。
+   *
+   * 「快问快答 / 诊断中 / 诊断完成」这些回流卡点进去要带上会话 id，
+   * 三方约定直接接在 repair 后面：`https://maix-bm.irootech.com/repair/{conversationId}?source=...`，
+   * 其余 query 一个不动。
    */
-  const detailPath = chatConversationId ? `/chat/${encodeURIComponent(chatConversationId)}` : "";
+  const detailPath = chatConversationId ? `/${encodeURIComponent(chatConversationId)}` : "";
   const url = decodeGatewayHost(composeUrl(frontend, detailPath, params));
   // 只打目标路径与参数名：ciphertext / access_token 都是鉴权值，不落日志
-  console.log(
-    "🚀 ~ buildSanvistH5Url ~ target:",
-    `${frontend}${detailPath}`,
-    params.toString().split("&").map(pair => pair.split("=")[0]),
-  );
+  const paramNames: string[] = [];
+  params.forEach((_value, key) => {
+    paramNames.push(key);
+  });
+  logger.info("sanvist h5 地址已拼好", { target: `${frontend}${detailPath}`, params: paramNames });
 
   return {
     payload,
