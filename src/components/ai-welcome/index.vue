@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PropType } from "vue";
-import { computed, nextTick, onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import brandLetterA from "@/assets/img/icon-A.png";
 import brandLetterI from "@/assets/img/icon-I.png";
@@ -8,7 +8,7 @@ import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
 import voiceWaveIcon from "@/assets/img/icon-voice-wave-dark.svg";
 import listenLogo from "@/assets/img/listen.gif";
-import saniLogo from "@/assets/img/sani-logo.gif";
+import welcomeLogVideo from "@/assets/video/welcome_log.webm";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
@@ -80,6 +80,58 @@ const LISTEN_READY_TIMEOUT_MS = 120;
 
 let startFired = false;
 let readyTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 主视觉视频的原生节点 id：uni 的 video 组件外面包了一层，只能靠 querySelector 拿内层（H5 形态） */
+const LOGO_VIDEO_ID = "welcome-logo-video";
+
+/**
+ * WebKit（iOS / iPadOS / macOS Safari，含 iOS 上的 Chrome、微信等套壳）不认 WebM 里的 alpha 通道，
+ * 会把「透明底发光三角」直接画在一块黑底上；只有这条链路需要退回亮度抠像。
+ * Chromium 系（Android WebView、支付宝 Android 容器）能吃到视频自带的 alpha，三角才是实心的。
+ */
+const needsLumaKey = (() => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const apple = /iPad|iPhone|iPod/i.test(ua)
+    || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 0);
+  const chromium = /Chrome|Chromium|CriOS|Edg\//i.test(ua);
+  return apple || (!chromium && /Safari/i.test(ua));
+})();
+
+function nativeLogoVideo() {
+  try {
+    return document.querySelector<HTMLVideoElement>(`#${LOGO_VIDEO_ID} video`);
+  }
+  catch {
+    return null;
+  }
+}
+
+/** 补一次静音播放：优先让三角自己转起来，失败（策略拦）就等首次点击 */
+function playLogoVideo() {
+  const el = nativeLogoVideo();
+  if (!el) return;
+  el.muted = true;
+  void el.play().catch(() => {});
+}
+
+/** 自动播放被拦时的兜底：等一次用户交互再续播，只生效一次（与 logo-preview 同一套口径） */
+function resumeLogoOnce() {
+  disarmLogoResume();
+  playLogoVideo();
+}
+
+function disarmLogoResume() {
+  document.removeEventListener("touchstart", resumeLogoOnce);
+  document.removeEventListener("click", resumeLogoOnce);
+}
+
+onMounted(() => {
+  // uni 不保证把 muted 落到原生节点，没有 muted 的 video 一定被自动播放策略拦下
+  playLogoVideo();
+  document.addEventListener("touchstart", resumeLogoOnce, { passive: true });
+  document.addEventListener("click", resumeLogoOnce);
+});
 
 function fireStart(mode?: "hold", target?: EventTarget) {
   if (startFired) return;
@@ -221,6 +273,7 @@ function onRightTap() {
 
 onBeforeUnmount(() => {
   clearSpeakHold();
+  disarmLogoResume();
   if (readyTimer) {
     clearTimeout(readyTimer);
     readyTimer = null;
@@ -234,6 +287,15 @@ onBeforeUnmount(() => {
     :class="{ 'welcome--leaving': leaving, 'welcome--landed': landed, 'welcome--dark': dark }"
     :style="safeAreaStyle"
   >
+    <!-- 亮度抠像（只给 WebKit 用）：alpha = 0.33R + 0.5G + 0.16B，把黑底抠成透明、亮部保持不透明。
+         必须 sRGB，线性空间下算出的 alpha 会偏亮。
+         Chromium 直接吃视频自带的 alpha，不会引用这个滤镜 -->
+    <!-- <svg class="welcome__luma-key" width="0" height="0" aria-hidden="true">
+      <filter id="welcomeLumaKey" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0.33 0.5 0.16 0 0" />
+      </filter>
+    </svg> -->
+
     <view class="welcome__hero">
       <!-- 标题行：Hey,SANI 里除 A / I 两张位图外，其余字母统一吃一条线性渐变。
            渐变铺在整行容器上再 background-clip: text，子级 text 只留字形（文字颜色透明），
@@ -248,15 +310,33 @@ onBeforeUnmount(() => {
         </view>
       </view>
       <!-- 主视觉：原 306:2783 容器 134×134 / 306:2791 图 110×110，投影 0 3 9 rgba(0,0,0,.14)
+           图改用 welcome_log.webm（6s 循环的「透明底发光三角」，alpha 由 VP9 带出来），
+           视觉与原来的 sani-logo.gif 一致；
            起飞时整组按父页面给的 transform 滑到对话页顶部的灵动岛位置；
            点下去先切成 listen.gif（与对话页灵动岛同一套交叉溶解），再往上走 -->
       <view class="welcome__logo">
         <view class="welcome__logo-fly" :style="logoStyle">
-          <image
+          <!-- uni 的 video 组件自带播放器 UI（controls 默认 true、中央还有一颗播放钮），
+               这里全部关掉，只当一块会动的图用；muted 必须给，否则自动播放会被策略拦掉 -->
+          <video
+            :id="LOGO_VIDEO_ID"
             class="welcome__logo-img"
-            :class="{ 'welcome__logo-img--out': leaving && listenMounted }"
-            :src="saniLogo"
-            mode="aspectFit"
+            :class="{ 'welcome__logo-img--out': leaving && listenMounted, 'welcome__logo-img--keyed': needsLumaKey }"
+            :src="welcomeLogVideo"
+            :autoplay="true"
+            :muted="true"
+            :loop="true"
+            :controls="false"
+            :show-center-play-btn="false"
+            :show-play-btn="false"
+            :show-progress="false"
+            :show-fullscreen-btn="false"
+            object-fit="cover"
+            preload="auto"
+            playsinline
+            webkit-playsinline
+            disablepictureinpicture
+            aria-hidden="true"
           />
           <image
             v-if="listenMounted"
@@ -304,7 +384,7 @@ onBeforeUnmount(() => {
       </view>
       <view
         v-else class="welcome__composer-voice"
-          ref="speakButtonRef"
+        ref="speakButtonRef"
         @touchstart="onSpeakPressStart" @touchmove="onSpeakPressMove"
         @touchend="clearSpeakHold" @touchcancel="clearSpeakHold"
         @mousedown="onSpeakPressStart" @mouseup="clearSpeakHold"
@@ -376,6 +456,15 @@ onBeforeUnmount(() => {
 .welcome--leaving .welcome__disclaimer {
   opacity: 0;
   transition: opacity 240ms ease;
+}
+
+/* 亮度抠像的滤镜定义容器：只提供 id，不占布局、不拦截点击 */
+.welcome__luma-key {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 /* 标题 + 图标一组，垂直水平居中；底部输入条固定占最后一行 */
@@ -475,9 +564,26 @@ onBeforeUnmount(() => {
 }
 
 .welcome__logo-img {
-  // 透明 PNG 用 drop-shadow 才能沿三角轮廓投影
+  // 视频是 1920×960 的「透明底发光三角」（三角本体约占画面 40% × 69%）：
+  // cover 让 2:1 画面按高度铺满这个 110 方框，左右两侧透明区被裁掉，
+  // 三角落在方框中央约 88 × 76，与原来的 sani-logo.gif 视觉相当
+  object-fit: cover;
+  // 视频自带 alpha（VP9 alpha_mode=1）：Chromium 那条链路三角就是实心的，
+  // drop-shadow 直接沿透明边缘投影，不需要再做亮度抠像
   filter: drop-shadow(0 6rpx 18rpx rgba(0, 0, 0, 0.14));
   transition: opacity 220ms ease;
+}
+
+// uni 的 video 组件自带 .uni-video-container 黑底：视频透明后这层黑底会整块露出来，必须清掉
+.welcome__logo-img :deep(.uni-video-container) {
+  background: transparent;
+}
+
+// iOS / macOS 的 WebKit 不认 WebM 的 alpha 通道，会把三角直接画在黑底上：
+// 这条链路退回「亮度抠像」把黑底抠掉（代价是三角偏灰，但不会出现黑方块）。
+// 抠像必须排在 drop-shadow 前面，阴影才会沿着三角轮廓走而不是沿整块方框
+.welcome__logo-img--keyed {
+  filter: url("#welcomeLumaKey") drop-shadow(0 6rpx 18rpx rgba(0, 0, 0, 0.14));
 }
 
 /* 点「点击说话」后常态图淡出，让给 listen.gif */
@@ -708,6 +814,11 @@ onBeforeUnmount(() => {
 /* 主视觉的投影：浅色稿是黑 14%，深底上等于没有，加浓一档让三角浮起来 */
 .welcome--dark .welcome__logo-img {
   filter: drop-shadow(0 6rpx 24rpx rgba(0, 0, 0, 0.55));
+}
+
+/* WebKit 那条链路要用亮度抠像，这里必须连 url() 一起带上，否则黑底整块冒出来 */
+.welcome--dark .welcome__logo-img--keyed {
+  filter: url("#welcomeLumaKey") drop-shadow(0 6rpx 24rpx rgba(0, 0, 0, 0.55));
 }
 
 .welcome--dark .welcome__disclaimer-text {
