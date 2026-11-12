@@ -33,7 +33,7 @@ export interface StreamBlockUpdate {
   metadata?: MessageEndEvent["metadata"];
   /**
    * 本轮流中出现的「直接切页」目标（assistant_scene 事件）：
-   * work_guidance_assistant / task_coordination_assistant，由 useChatSend 映射成路由。
+   * operations_assistant / work_guidance_assistant / task_coordination_assistant，由 useChatSend 映射成路由。
    */
   assistantScene?: string;
   /**
@@ -231,17 +231,26 @@ export function applyEventToBlocks(
     case "guide_suggestion": {
       const options = Array.isArray(event.data?.options) ? event.data.options : [];
       if (!options.length) return base;
-      const suggestionIndex = blocks.filter(block => block.type === "guide-suggestion").length;
-      const question = String(event.data?.question || "").trim();
+      /**
+       * 与表格 / 图表同理：同一张追问卡会被重复下发（流式正文里给过一次，
+       * workflow_finished 的 outputs.answer 再回灌一次），不能每次新开一块。
+       * 追问卡的 question 允许为空（协议只给 note / options），此时 id 无法按题目稳定，
+       * 按「已有数量」递增就会把同一张卡拆成两块 —— 气泡里出现两份「可继续了解」。
+       * 这里按整包内容去重：内容完全相同的卡写回原块，内容不同（新一轮追问）才新开。
+       */
+      const key = payloadKey(event.data);
+      const duplicated = blocks.find(
+        block => block.type === "guide-suggestion" && payloadKey(block.payload) === key,
+      );
+      const suggestionId = duplicated?.id
+        || stablePayloadId(
+          "guide-suggestion",
+          [String(event.data?.question || "").trim()],
+          blocks.filter(block => block.type === "guide-suggestion").length,
+        );
       return {
         ...base,
-        blocks: upsertBlock(
-          blocks,
-          stablePayloadId("guide-suggestion", [question], suggestionIndex),
-          "guide-suggestion",
-          event.data,
-          true,
-        ),
+        blocks: upsertBlock(blocks, suggestionId, "guide-suggestion", event.data, true),
         receivedContent: true,
       };
     }
@@ -356,7 +365,7 @@ export function applyEventToBlocks(
       };
     }
     case "assistant_scene": {
-      // 直接切页的跳转指令（作业指导 / 任务协同）：不落 block、不占位，
+      // 直接切页的跳转指令（运营助手 / 作业指导 / 任务协同）：不落 block、不占位，
       // 只把目标带进快照，由 useChatSend 在整轮结束时切页，避免把 JSON / 空卡片留在气泡里。
       const target = String(event.data?.target || "").trim();
       if (!target) return base;

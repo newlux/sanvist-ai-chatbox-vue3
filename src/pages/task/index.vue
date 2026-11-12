@@ -8,7 +8,7 @@ import { useI18n } from "vue-i18n";
 import type { VoiceMessageOrigin } from "@/utils/voice-message-motion";
 import { chatMessageAnchorDomId } from "@/stores/modules/chat";
 import { animateVoiceMessageArrival, readVoiceMessageOrigin } from "@/utils/voice-message-motion";
-import type { AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload, Identifier } from "@/api/chat/types";
+import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload, GanttViewPayload, GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
 import arrowDownIcon from "@/assets/img/arrow-down.png";
@@ -22,12 +22,14 @@ import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
+import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
+import { useAssistantNavigation } from "@/hooks/useAssistantNavigation";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
@@ -403,6 +405,8 @@ function focusGuideStepCardAtTop() {
   if (stepId) chatStore.focusStepBlock(stepId);
 }
 
+const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(text => sendTaskMessage({ text }));
+
 /**
  * 追问卡片（COMPONENT scene=task / type=ask，与 scene=ask / type=slot 同一套数据）：
  * 单选点一下就作答；多选 / 一屏多题才出底部「确认提交」，把所选拼成答案发出去。
@@ -433,6 +437,11 @@ function closeAskSlotDrawer() {
 function onAskSlotDrawerHeightChange(height: number) {
   askSlotDrawerHeight.value = height;
   if (askSlotDrawerVisible.value && height > 0) nextTick(() => chatStore.scrollToBottom(true));
+}
+
+function onAskSlotPick(payload: { slot: AskSlotPayload; option: AskSlotOption }) {
+  applyPendingInitSession();
+  sendAskSlotSelection({ slot: payload.slot, selectedOptions: [payload.option] });
 }
 
 function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
@@ -1154,7 +1163,10 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         @guide-check-step-select="onGuideCheckStepSelect"
         @step-card-ready="focusGuideStepCardAtTop"
         @guide-suggestion-open="onGuideSuggestionOpen"
+        @assistant-navigation-open="onAssistantNavigationOpen"
+        @assistant-navigation-confirm="onAssistantNavigationConfirm"
         @ask-slot-open="onAskSlotOpen"
+        @ask-slot-pick="onAskSlotPick"
         @ask-slot-submit="onAskSlotSubmit"
         @gantt-open="onGanttOpen"
         @tts-click="onTtsClick"
@@ -1325,6 +1337,11 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         @submit="stopVoiceQuery"
       />
 
+      <AiAssistantNavigationSheet
+        v-model:visible="assistantNavigationVisible"
+        :payload="assistantNavigationPayload"
+        @confirm="onAssistantNavigationConfirm"
+      />
       <!-- 追问卡片（作业协同 type=ask / ai问问 type=slot）：单选点即作答，多选选完确认提交；
            作业协同不提供「其他输入」入口，只允许在选项里作答 -->
       <AiSlotDrawer

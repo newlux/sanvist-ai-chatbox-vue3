@@ -22,11 +22,13 @@ import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
 import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
+import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
+import { useAssistantNavigation } from "@/hooks/useAssistantNavigation";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
@@ -415,6 +417,8 @@ const {
   onCopySharePoster,
 } = useChatShare(sharePosterWrap, chatScope);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback(chatScope);
+
+const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(text => sendMessage({ text }));
 
 /**
  * 追问卡（COMPONENT scene=ask / type=slot）：与首页同一套口径。
@@ -1319,6 +1323,8 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"
         @step-card-ready="focusGuideStepCardAtTop"
+        @assistant-navigation-open="onAssistantNavigationOpen"
+        @assistant-navigation-confirm="onAssistantNavigationConfirm"
         @ask-slot-open="onAskSlotOpen"
         @ask-slot-pick="onAskSlotPick"
         @ask-slot-submit="onAskSlotSubmit"
@@ -1515,6 +1521,11 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         :keyboard-height="keyboardHeight"
         @submit="onGuideSuggestionSubmit"
         @height-change="onGuideSuggestionHeightChange"
+      />
+      <AiAssistantNavigationSheet
+        v-model:visible="assistantNavigationVisible"
+        :payload="assistantNavigationPayload"
+        @confirm="onAssistantNavigationConfirm"
       />
       <!-- 追问抽屉：多选题 / 填空 / 多步骤表单在气泡里排不下，统一走底部抽屉 -->
       <AiSlotDrawer

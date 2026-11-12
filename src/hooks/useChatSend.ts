@@ -1,3 +1,4 @@
+import { buildAskSlotQuery } from "@/utils/ask-slot-query";
 import type { AskSlotSubmitPayload, ChatFile, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type {
@@ -40,9 +41,10 @@ const QRCODE_PLACEHOLDER_PREFIX = /^q(?:r(?:c(?:o(?:de?)?)?)?)?$/i;
 const QRCODE_PAGE_ROUTE = "/pages/qrcode/index";
 /**
  * 工作流 `workflow_finished` 下发的跳转目标（target）→ 站内助手页。
- * 只认这两个：作业指导 / 任务协同；其余取值不跳转（避免被无关工作流带去别的页面）。
+ * 三个站内助手共用；维修 / 配件由指令卡确认后进入。
  */
 const ASSISTANT_TARGET_ROUTES: Record<string, string> = {
+  operations_assistant: "/pages/index/index",
   work_guidance_assistant: "/pages/guide/index",
   task_coordination_assistant: "/pages/task/index",
 };
@@ -1072,29 +1074,6 @@ export function useChatSend(scope?: string, handlers?: {
   function sendQuickPrompt(text: string) {
     chatStore.inputText = text;
     void sendMessage();
-  }
-
-  function buildAskSlotQuery(payload: AskSlotSubmitPayload) {
-    // 作业协同多步骤表单：按题目顺序拼「Q1: 问题，A1: 回答；Q2: …」
-    const answers = Array.isArray(payload.answers) ? payload.answers : [];
-    if (answers.length) {
-      return answers
-        .map((item, index) => `Q${index + 1}: ${item.question}，A${index + 1}: ${item.answer}`)
-        .join("；");
-    }
-
-    // 选项一律取 label 回发：value 是业务编码（如 time / space），对话里要给用户看得懂的文案
-    const selectedLabels = payload.selectedOptions
-      .map(option => String(option.label || option.value).trim())
-      .filter(Boolean);
-    // 「其他输入」填的自定义内容也算作答，跟选项一起按「、」拼进提问
-    const remark = String(payload.remark || "").trim();
-    /**
-     * 只发本次点击的内容，**不再拼上一轮的提问**（原 `original_query` 前缀）：
-     * 追问卡的选项本身就是一句完整意图（如「近 7 天：11 月 3 日至 11 月 9 日」），
-     * 再把上一问带进去会让后端把两轮问题合成一条重新理解，一串重复语义反而查不准。
-     */
-    return [selectedLabels.join("、"), remark].filter(Boolean).join("、");
   }
 
   function sendAskSlotSelection(payload: AskSlotSubmitPayload) {
