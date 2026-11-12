@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import type { Ref } from "vue";
+import { computed, inject, unref } from "vue";
 import { normalizeGuideUrl, previewGuideImages } from "@/utils/guide-content";
 
 defineOptions({ name: "GuideImageBlock" });
@@ -7,6 +8,10 @@ defineOptions({ name: "GuideImageBlock" });
 const props = defineProps({
   payload: { type: Object, default: () => ({}) },
 });
+
+/** 深色：这张块在气泡内渲染，跟随气泡 provide 的主题（与 GuideLeadBlock / GuideStepBlock 同一套取法） */
+const bubbleDark = inject<Ref<boolean> | null>("ai-bubble-dark", null);
+const isDark = computed(() => Boolean(bubbleDark ? unref(bubbleDark) : false));
 
 const items = computed(() => (Array.isArray(props.payload?.items) ? props.payload.items : [])
   .map(item => ({
@@ -23,7 +28,7 @@ function previewImage(current: string) {
 </script>
 
 <template>
-  <view v-if="items.length" class="guide-image-block">
+  <view v-if="items.length" class="guide-image-block" :class="{ 'guide-image-block--dark': isDark }">
     <view v-for="item in items" :key="item.chunk_id || item.url" class="guide-image-block__item">
       <image
         class="guide-image-block__image"
@@ -62,5 +67,20 @@ function previewImage(current: string) {
   color: #666666;
   font-size: 24rpx;
   line-height: 34rpx;
+}
+
+/* ===== 深色：跟随气泡主题（块底 6% 白、占位底更亮一档、次要文字 45% 白） ===== */
+.guide-image-block--dark {
+  .guide-image-block__item {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .guide-image-block__image {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .guide-image-block__caption {
+    color: rgba(255, 255, 255, 0.45);
+  }
 }
 </style>
