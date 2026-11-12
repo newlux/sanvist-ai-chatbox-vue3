@@ -1,4 +1,3 @@
-import { buildAskSlotQuery } from "@/utils/ask-slot-query";
 import type { AskSlotSubmitPayload, ChatFile, Identifier } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type {
@@ -12,9 +11,11 @@ import { useChatStream } from "@/hooks/useChatStream";
 import { saveReportStyleCode } from "@/hooks/useReportStyle";
 import { markReportVoiceSyncing, saveReportVoiceByStyle } from "@/hooks/useReportVoice";
 import { useChatStore, useSessionStore, useSettingsStore, useUserStore } from "@/stores";
-import { buildInitialBlocks, consumeChatStream, parseReportInteraction, parseReportStyleTag, parseRoleTaggedAnswer, parseVoiceStyleTag, parseWorkReportTag } from "@/utils/ai-stream";
+import { buildInitialBlocks, consumeChatStream, parseEmergencyTag, parseReportInteraction, parseReportStyleTag, parseRoleTaggedAnswer, parseVoiceStyleTag, parseWorkReportTag } from "@/utils/ai-stream";
+import { buildAskSlotQuery } from "@/utils/ask-slot-query";
 
 import { createLogger } from "@/utils/logger";
+import { urgentAllReportInsightEvents } from "@/utils/report-insight-urgent";
 import { navigateToScene } from "@/utils/scene-navigation";
 
 const logger = createLogger("chat");
@@ -222,6 +223,33 @@ function resolveReportStyleTurn(blocks: ReturnType<typeof buildInitialBlocks>) {
     matched: parsed.matched,
     style: parsed.style,
     text: parsed.text,
+    tagged: answerText !== parsed.text,
+  };
+}
+
+/**
+ * 「异常全部加急」标签 `<EMERGENCY>…</EMERGENCY>`：正文去掉标签源码，命中即触发一次批量加急。
+ *
+ * 标签可能出现在两种地方：
+ * - 流式正文（message 事件）里 → 从气泡正文里剥掉；
+ * - 只在 `workflow_finished.outputs.answer` 里（正文流没给）→ 从 metadata.outputs_answer 里剥掉，
+ *   否则二维码判定 / 听播兜底文本会带着尖括号。
+ */
+function resolveEmergencyTurn(
+  blocks: ReturnType<typeof buildInitialBlocks>,
+  outputsAnswer?: string,
+) {
+  const answerText = collectAnswerText(blocks);
+  const parsed = parseEmergencyTag(answerText);
+  const fallback = parseEmergencyTag(String(outputsAnswer || ""));
+  return {
+    /** 正文或 outputs.answer 任一命中标签 */
+    matched: parsed.matched || fallback.matched,
+    /** 剥完标签的气泡正文 */
+    text: parsed.text,
+    /** 剥完标签的 outputs.answer；没命中时 undefined，保持 metadata 原样 */
+    outputsAnswer: fallback.matched ? fallback.text : undefined,
+    /** 这一拍的正文是否被改写过 */
     tagged: answerText !== parsed.text,
   };
 }
@@ -528,6 +556,8 @@ export function useChatSend(scope?: string, handlers?: {
     let appliedVoiceStyle = "";
     /** 本轮已经执行过的语言切换指令：同样随快照重复出现，只处理第一次 */
     let appliedLanguageSwitch = "";
+    /** 本轮已经触发过的「异常全部加急」：标签随每一拍快照重复出现，只处理第一次 */
+    let emergencyUrgentStarted = false;
 
     /**
      * 音色切换标签落库：本机存储 + `/settings.voiceCode` 两处都写。
@@ -674,13 +704,33 @@ export function useChatSend(scope?: string, handlers?: {
         isStale: () => requestSeq !== chatStore.activeRequestSeq,
         onSnapshot: (snapshot) => {
           receivedContent = snapshot.receivedContent;
+          /**
+           * 「异常全部加急」标签 `<EMERGENCY>…</EMERGENCY>`：
+           * 正文先剥掉标签源码（气泡里不显示），命中即触发一次「拉全量异常列表 → 逐条加急」。
+           * 工作流可能只在 workflow_finished.outputs.answer 里给这个标签（正文流里没有），
+           * 所以 metadata.outputs_answer 也要看一遍并剥掉源码。
+           */
+          const emergencyTurn = resolveEmergencyTurn(snapshot.blocks, snapshot.metadata?.outputs_answer);
+          const emergencyBlocks = emergencyTurn.tagged
+            ? withAnswerText(snapshot.blocks, emergencyTurn.text)
+            : snapshot.blocks;
+          const turnMetadata = emergencyTurn.outputsAnswer === undefined
+            ? snapshot.metadata
+            : { ...snapshot.metadata, outputs_answer: emergencyTurn.outputsAnswer };
+          // metadata.emergency 来自 workflow_finished（标签可能在 outputs 的非 answer 字段里），
+          // 正文 / outputs_answer 命中则作为双保险；两者都只触发一次。
+          if ((emergencyTurn.matched || Boolean(snapshot.metadata?.emergency)) && !emergencyUrgentStarted) {
+            emergencyUrgentStarted = true;
+            logger.info("[chat] emergency tag matched, urgent all report events");
+            void urgentAllReportInsightEvents();
+          }
           // 二维码回答：老写法「整段 == QRCODE」不出气泡直接跳；新写法 <QRCODE>正文</QRCODE>
           // 保留气泡并展示尖括号里的正文，两种写法都会跳到二维码页。
-          const qrcodeTurn = resolveQrcodeTurn(snapshot.blocks, snapshot.metadata, snapshot.ended);
+          const qrcodeTurn = resolveQrcodeTurn(emergencyBlocks, turnMetadata, snapshot.ended);
           // 标签源码不落到气泡里：先把 answer 正文换成标签正文再写入消息
           let displayBlocks = qrcodeTurn.tagged
-            ? withAnswerText(snapshot.blocks, qrcodeTurn.text)
-            : snapshot.blocks;
+            ? withAnswerText(emergencyBlocks, qrcodeTurn.text)
+            : emergencyBlocks;
           /**
            * 身份切换标签 `<OWNER>…</OWNER>`（OWNER 老板 / ADMIN 设备管理员 / OPERATOR 操作手）：
            * 正文去掉标签，只留尖括号里的提示文字；角色码落到 userStore ——
@@ -754,9 +804,9 @@ export function useChatSend(scope?: string, handlers?: {
           const filteredBlocks = isNovice
             ? displayBlocks.filter(block => block.type !== "voice")
             : displayBlocks;
-          const displaySnapshot = displayBlocks === snapshot.blocks
+          const displaySnapshot = displayBlocks === snapshot.blocks && turnMetadata === snapshot.metadata
             ? snapshot
-            : { ...snapshot, blocks: filteredBlocks };
+            : { ...snapshot, blocks: filteredBlocks, metadata: turnMetadata };
           // 要跳页的这一轮不触发「回答完成」回调（页面会据此起自动听播，跳走就白播了）
           applySnapshot(aiMsgId, userMsgId, displaySnapshot, preserveProcessStatus, qrcodeTurn.matched || Boolean(sceneTarget));
           if (qrcodeTurn.matched) {

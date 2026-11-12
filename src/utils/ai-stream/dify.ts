@@ -1006,6 +1006,12 @@ export function createDifyEventNormalizer() {
             length: outputsAnswer.length,
           });
         }
+        /**
+         * `<EMERGENCY>…</EMERGENCY>`：工作流结束时下发的「异常全部加急」标记。
+         * 标签可能只写在 outputs 的其它字段里（不一定是 answer），所以整包扫一遍，
+         * 命中后在 metadata 上带一个布尔标记，由消费侧触发批量加急；标签源码由消费侧剥离。
+         */
+        const emergencyTagged = /<EMERGENCY\b/i.test(JSON.stringify(workflow));
         const answerEvents = parseOutputsAnswer
           ? extractSanvistEvents(outputsAnswer, references, false, receivedAnswer)
           : [];
@@ -1022,6 +1028,7 @@ export function createDifyEventNormalizer() {
               message,
               outputs_answer: outputsAnswer || undefined,
               assistant_target: assistantTarget || undefined,
+              emergency: emergencyTagged || undefined,
             },
           },
         ];

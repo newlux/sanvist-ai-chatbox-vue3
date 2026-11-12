@@ -468,6 +468,12 @@ export interface MessageEndEvent {
      * 出现时该轮回答直接切页，不弹确认框；其余取值忽略。
      */
     assistant_target?: string;
+    /**
+     * 工作流 `workflow_finished` 里带 `<EMERGENCY>…</EMERGENCY>` 标签时置 true：
+     * 该轮回答要求把异常列表里的条目全部加急（前端拉全量列表后逐条调加急接口）。
+     * 标签源码不进气泡，也不进听播文本。
+     */
+    emergency?: boolean;
   };
 }
 

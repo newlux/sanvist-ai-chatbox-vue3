@@ -10,7 +10,7 @@ import {
   getMessages,
   renameConversation,
 } from "@/api/chat";
-import { stripReportStyleTags, stripRoleTags, stripVoiceStyleTags } from "@/utils/ai-stream";
+import { stripEmergencyTags, stripReportStyleTags, stripRoleTags, stripVoiceStyleTags } from "@/utils/ai-stream";
 import { extractDifyHistoryBlocks } from "@/utils/ai-stream/dify";
 import { parseRepairCallbackSummary } from "@/utils/repair-callback";
 import { isPodcastSession } from "@/utils/session-scene";
@@ -101,13 +101,16 @@ export function mapHistoryMessages(
     const blocks = extractDifyHistoryBlocks(item?.answer)
       // 历史正文里的 <OWNER>…</OWNER> 身份标签只剔源码、不切身份；
       // <VOICE_STYLE style="…"> 音色、<REPORT_STYLE style="…"> 播报风格同样只剔源码、不改当前配置：
-      // 回看旧会话不该把当前音色 / 风格改回去
+      // 回看旧会话不该把当前音色 / 风格改回去；
+      // <EMERGENCY>…</EMERGENCY> 只剔源码、不重复触发加急动作
       .map(block => block.type === "answer"
         ? {
             ...block,
             payload: {
               ...block.payload,
-              content: stripReportStyleTags(stripVoiceStyleTags(stripRoleTags(String(block.payload.content || "")))),
+              content: stripEmergencyTags(
+                stripReportStyleTags(stripVoiceStyleTags(stripRoleTags(String(block.payload.content || "")))),
+              ),
             },
           }
         : block)

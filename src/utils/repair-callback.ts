@@ -69,8 +69,11 @@ export interface RepairCallbackSummary {
 /** 故障诊断（回流数据带 status） */
 const DIAGNOSIS_TITLE = "维修助理-机型诊断";
 const DIAGNOSIS_STATUS = "案例报告生成已完成";
-/** 快速问答（回流数据没有 status） */
-const QUICK_ANSWER_TITLE = "维修助理-快问快答";
+/**
+ * 快速问答（回流数据没有 status）：卡片大标题只保留「维修助理」，
+ * 不再拼「-快问快答」；问答类型看副标题（答案回复已生成）。
+ */
+const QUICK_ANSWER_TITLE = "维修助理";
 const QUICK_ANSWER_STATUS = "答案回复已生成";
 
 /** 从回流数据里取明细，空值不展示 */

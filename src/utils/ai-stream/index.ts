@@ -6,6 +6,8 @@ export type { ChunkData, ChunkDecoder } from "./chunkDecoder";
 
 export { createChunkDecoder } from "./chunkDecoder";
 export { createDifyEventNormalizer, extractDifyHistoryBlocks, toDifyChatMessagesRequest } from "./dify";
+export type { EmergencyTagResult } from "./emergency-tag";
+export { parseEmergencyTag, stripEmergencyTags } from "./emergency-tag";
 export type {
   ReportAdjustmentAction,
   ReportInteraction,
