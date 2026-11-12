@@ -165,6 +165,8 @@ const navActiveKey = ref("");
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用它做流式听播。
 const realtimeTts = useRealtimeTts();
+/** 播报光效开关：TTS 播放中点亮（左右下三向渐变 + 屏幕边缘纺锤体波纹），播报结束淡出并暂停 */
+const ttsAuraOn = computed(() => realtimeTts.playing.value);
 const {
   sendMessage: sendChatMessage,
   sendQuickPrompt,
@@ -2021,6 +2023,32 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       <view class="ai-chat-glow ai-chat-glow--red" />
       <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车）；深色下隐藏（见 .ai-page--dark） -->
       <AiChatBackdrop class="ai-page__backdrop" />
+      <!-- ===== 语音播报光效：左 / 右 / 下三向渐变 + 屏幕边缘「纺锤体」波纹 =====
+           播报期间点亮，播报结束整层 400ms 淡出并暂停全部动画；
+           底色层（z-index:-1，与线稿同层、排在其后）：只做背景，不覆盖气泡，pointer-events:none；
+           底部那条要铺到「点击说话」按钮的底部以下 —— 高度 = --dock-h（composerDockOffset，
+           输入栏实际高度 + 底部安全区），正好罩住输入栏整块到屏幕底缘 -->
+      <view
+        class="ai-page__tts-aura"
+        :class="{ 'ai-page__tts-aura--on': ttsAuraOn }"
+        :style="{ '--dock-h': composerDockOffset }"
+        aria-hidden="true"
+      >
+        <view class="ai-page__tts-aura-side ai-page__tts-aura-side--left">
+          <view class="ai-page__tts-aura-wave" />
+          <view class="ai-page__tts-aura-wave ai-page__tts-aura-wave--alt" />
+        </view>
+        <view class="ai-page__tts-aura-side ai-page__tts-aura-side--right">
+          <view class="ai-page__tts-aura-wave" />
+          <view class="ai-page__tts-aura-wave ai-page__tts-aura-wave--alt" />
+        </view>
+        <view class="ai-page__tts-aura-side ai-page__tts-aura-side--bottom">
+          <view class="ai-page__tts-aura-wave" />
+          <view class="ai-page__tts-aura-wave ai-page__tts-aura-wave--alt" />
+        </view>
+        <view class="ai-page__tts-ripple-ring" />
+        <view class="ai-page__tts-ripple-ring ai-page__tts-ripple-ring--alt" />
+      </view>
       <!-- 顶部白色渐变：页面上沿由白向下渐隐，压住线稿背景与滚上来的内容 -->
       <view class="ai-page__top-fade" />
       <!-- 顶部菜单统一由页面根节点的 AiChatHeader 渲染，避免两套按钮叠加。 -->
@@ -2380,9 +2408,10 @@ $color-white: #ffffff;
   position: relative;
   // 顶部毛玻璃层的高度 = 悬浮头部在内容里的占位：
   // 两者共用一个值，消息正好从渐隐的下沿起步，往上滚就被模糊掉
-  // 250rpx（125px）仍高于 200rpx（100px）的实色头部，首条内容再往上收 25px
-  --chat-top-inset: calc(constant(safe-area-inset-top) + 250rpx);
-  --chat-top-inset: calc(env(safe-area-inset-top) + 250rpx);
+  // 210rpx（105px）略高于 200rpx（100px）的实色头部：首条内容贴着头部下沿起步，
+  // 上一轮回答的尾巴不会在灵动岛下面露出一截被裁掉的字
+  --chat-top-inset: calc(constant(safe-area-inset-top) + 210rpx);
+  --chat-top-inset: calc(env(safe-area-inset-top) + 210rpx);
 }
 
 /* 初始页 → 对话页：整页淡入。
@@ -2441,15 +2470,15 @@ $color-white: #ffffff;
 // 顶部毛玻璃渐隐（对应设计稿 722:152「回答」头部底板）：
 // 不铺白色底 —— 透明 + 背后模糊，消息滚到头部下面还能看见字，只是被虚化；
 // 「渐变」体现在模糊强度上：上沿最糊，往下渐弱到完全清晰，接住正文，没有硬边。
-// 高度 = 刘海安全区 + 250rpx（与 --chat-top-inset 一致，消息正好从渐隐下沿起步）。
+// 高度 = 刘海安全区 + 210rpx（与 --chat-top-inset 一致，消息正好从渐隐下沿起步）。
 .ai-page__top-fade {
   position: absolute;
   z-index: 1;
   top: 0;
   right: 0;
   left: 0;
-  height: calc(constant(safe-area-inset-top) + 250rpx);
-  height: calc(env(safe-area-inset-top) + 250rpx);
+  height: calc(constant(safe-area-inset-top) + 210rpx);
+  height: calc(env(safe-area-inset-top) + 210rpx);
   pointer-events: none;
   // 只模糊、不遮挡（老内核拿不到 backdrop-filter 时，退化成下面那层极淡的雾，文字照样看得见）
   backdrop-filter: blur(16rpx); // 8px
@@ -2496,6 +2525,386 @@ $color-white: #ffffff;
     rgba(254, 0, 0, 0.1) 0%,
     rgba(254, 0, 0, 0) 100%
   );
+}
+
+/* ===== 语音播报光效（左 / 右 / 下三向渐变 + 屏幕边缘「纺锤体」波纹）=====
+   播报（useRealtimeTts playing）期间点亮，结束 400ms 淡出后暂停全部动画：
+   - 三向渐变：左缘中部一团蓝紫柔光（#3D21CD → #1999FE）、右缘中部一团紫粉柔光
+     （#C067FA → #FD90C4）、底部一整条蓝紫光 —— 高度 = --dock-h（输入栏实际高度 +
+     底部安全区），铺到「点击说话」按钮的底部以下、屏幕底缘；
+   - DJ 律动：每块里两道更深的「波峰带」错相扫过，波峰经过处颜色深一档（见 wave）；
+   - 边缘波纹：两道发光环从屏幕边缘一圈圈向内扩散，「纺锤体」= 横竖两个渐变 mask
+     取交集，每条边中部最亮、向两端（四角）收窄淡出；
+   - 所有的边（块边界、页面边缘、输入栏上沿）都让渐变提前归零，不出硬切线；
+   - 层 z-index:-1（与线稿背景同层、排在它后面）：在气泡文字之下，不挡任何点击。 */
+.ai-page__tts-aura {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 400ms ease;
+}
+
+.ai-page__tts-aura--on {
+  opacity: 1;
+}
+
+/* ===== 三向渐变光带 ===== */
+.ai-page__tts-aura-side {
+  position: absolute;
+  overflow: hidden; // 波峰带扫出块外时裁掉，不糊到内容上
+}
+
+/* 波峰带：一道比底色更深的色带在块内定向扫过，经过哪里哪里就深一档；
+   左右两条竖向扫（高 46%），底部横向扫（宽 46%）；两道颜色、周期、方向都不同，
+   交错出现才像连续波浪，而不是一条扫描线来回跑。位置由 animation 匀速推进。
+   峰值 alpha 走变量（--wave-a/b-alpha），深色模式下由 .ai-page--dark 统一加深。 */
+.ai-page__tts-aura-wave {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 46%;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--wave-a-rgb, 61, 33, 205), 0) 0%,
+    rgba(var(--wave-a-rgb, 61, 33, 205), var(--wave-a-alpha, 0.35)) 50%,
+    rgba(var(--wave-a-rgb, 61, 33, 205), 0) 100%
+  );
+  animation: tts-aura-wave-y 2.4s linear infinite;
+  will-change: transform;
+}
+
+.ai-page__tts-aura-wave--alt {
+  background: linear-gradient(
+    180deg,
+    rgba(var(--wave-b-rgb, 25, 153, 254), 0) 0%,
+    rgba(var(--wave-b-rgb, 25, 153, 254), var(--wave-b-alpha, 0.3)) 50%,
+    rgba(var(--wave-b-rgb, 25, 153, 254), 0) 100%
+  );
+  animation-duration: 3.2s;
+  animation-direction: reverse;
+  animation-delay: -1.3s;
+}
+
+/* 左：左缘蓝紫柔光，内边缘呈波浪。
+   三团椭圆错开纵向位置（22% / 48% / 74%）叠加 —— 每团横向半径 ≤48%（块宽的），
+   到块的内边缘（归一化 50%）之前就已归零，不会再切出一整条竖直线；
+   三团的横向半径各不相同，内边缘深浅错落，看起来就是起伏的波浪而不是直边。
+   下端止于底部光条的上沿（bottom = --dock-h，与底部块 height 对齐）：
+   上下两段各自归零后再衔接，角部不会出现两团叠加的深色块。 */
+.ai-page__tts-aura-side--left {
+  --wave-a-rgb: 61, 33, 205;
+  --wave-b-rgb: 25, 153, 254;
+
+  top: 0;
+  bottom: var(--dock-h, 200rpx);
+  left: 0;
+  width: 200rpx;
+  background:
+    radial-gradient(
+      ellipse 45% 20% at 0% 22%,
+      rgba(61, 33, 205, 0.18) 0%,
+      rgba(25, 153, 254, 0.1) 55%,
+      rgba(25, 153, 254, 0) 100%
+    ),
+    radial-gradient(
+      ellipse 48% 30% at 0% 48%,
+      rgba(61, 33, 205, 0.2) 0%,
+      rgba(25, 153, 254, 0.11) 55%,
+      rgba(25, 153, 254, 0) 100%
+    ),
+    radial-gradient(
+      ellipse 44% 22% at 0% 74%,
+      rgba(61, 33, 205, 0.17) 0%,
+      rgba(25, 153, 254, 0.09) 55%,
+      rgba(25, 153, 254, 0) 100%
+    );
+}
+
+/* 右：右缘紫粉柔光，内边缘同样三团波浪 */
+.ai-page__tts-aura-side--right {
+  --wave-a-rgb: 192, 103, 250;
+  --wave-b-rgb: 253, 144, 196;
+
+  top: 0;
+  bottom: var(--dock-h, 200rpx);
+  right: 0;
+  width: 200rpx;
+  background:
+    radial-gradient(
+      ellipse 45% 20% at 100% 22%,
+      rgba(192, 103, 250, 0.18) 0%,
+      rgba(253, 144, 196, 0.1) 55%,
+      rgba(253, 144, 196, 0) 100%
+    ),
+    radial-gradient(
+      ellipse 48% 30% at 100% 48%,
+      rgba(192, 103, 250, 0.2) 0%,
+      rgba(253, 144, 196, 0.11) 55%,
+      rgba(253, 144, 196, 0) 100%
+    ),
+    radial-gradient(
+      ellipse 44% 22% at 100% 74%,
+      rgba(192, 103, 250, 0.17) 0%,
+      rgba(253, 144, 196, 0.08) 55%,
+      rgba(253, 144, 196, 0) 100%
+    );
+}
+
+.ai-page__tts-aura-side--right .ai-page__tts-aura-wave--alt {
+  animation-delay: -0.6s; // 与左块错开，两边不同步
+}
+
+/* 下：只罩「点击说话」那一条（高度 = 输入栏实际高度 --dock-h，到屏幕底缘），
+   不再往上探到快捷入口行。四层渐变：最底下是一层全宽线性打底（左右两端到
+   屏幕底角也始终有渐变色），上面三团椭圆横向错位（24% / 52% / 78%）——
+   每团纵向半径都让上边缘之前归零，且三团深浅错落，上边缘是波浪起伏的，
+   打底只给淡淡的一层，波浪的深浅差依然看得出来。 */
+.ai-page__tts-aura-side--bottom {
+  --wave-a-rgb: 61, 33, 205;
+  --wave-b-rgb: 25, 153, 254;
+
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: var(--dock-h, 200rpx);
+  background:
+    radial-gradient(
+      ellipse 30% 110% at 24% 100%,
+      rgba(61, 33, 205, 0.26) 0%,
+      rgba(25, 153, 254, 0.14) 45%,
+      rgba(25, 153, 254, 0) 78%
+    ),
+    radial-gradient(
+      ellipse 34% 120% at 52% 100%,
+      rgba(61, 33, 205, 0.3) 0%,
+      rgba(25, 153, 254, 0.16) 45%,
+      rgba(25, 153, 254, 0) 78%
+    ),
+    radial-gradient(
+      ellipse 30% 110% at 78% 100%,
+      rgba(61, 33, 205, 0.25) 0%,
+      rgba(25, 153, 254, 0.13) 45%,
+      rgba(25, 153, 254, 0) 78%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(61, 33, 205, 0) 0%,
+      rgba(61, 33, 205, 0.12) 55%,
+      rgba(61, 33, 205, 0.16) 100%
+    );
+}
+
+/* 底部是横向条带：波峰改成从左往右扫 */
+.ai-page__tts-aura-side--bottom .ai-page__tts-aura-wave {
+  --wave-a-alpha: 0.38;
+
+  width: 46%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--wave-a-rgb), 0) 0%,
+    rgba(var(--wave-a-rgb), var(--wave-a-alpha, 0.38)) 50%,
+    rgba(var(--wave-a-rgb), 0) 100%
+  );
+  animation-name: tts-aura-wave-x;
+  animation-duration: 2.6s;
+}
+
+.ai-page__tts-aura-side--bottom .ai-page__tts-aura-wave--alt {
+  --wave-b-alpha: 0.34;
+
+  background: linear-gradient(
+    90deg,
+    rgba(var(--wave-b-rgb), 0) 0%,
+    rgba(var(--wave-b-rgb), var(--wave-b-alpha, 0.34)) 50%,
+    rgba(var(--wave-b-rgb), 0) 100%
+  );
+  animation-duration: 3.4s;
+}
+
+/* ===== 波峰带的横向 / 纵向淡出（关键：消除扫动时被块边界切出的直线）=====
+   波峰带的渐变只在扫动方向上淡出，另一方向全程同深 —— 扫到哪，
+   哪条边就是一条生硬的直线。给每个方向的波峰带补上另一轴的渐隐 mask：
+   左右条（竖向扫）→ 横向淡出，且左右块方向相反（各自朝屏幕外缘淡出）；
+   底部条（横向扫）→ 纵向淡出，上边缘（输入栏上沿）不再是一条水平直线。
+   经过 mask 后波峰带在另一轴上也是中间深、两端透明，扫过时全部边缘都是淡出的。 */
+.ai-page__tts-aura-side--left .ai-page__tts-aura-wave {
+  -webkit-mask: linear-gradient(90deg, transparent 0%, #000 45%, #000 62%, transparent 100%);
+  mask: linear-gradient(90deg, transparent 0%, #000 45%, #000 62%, transparent 100%);
+}
+
+.ai-page__tts-aura-side--right .ai-page__tts-aura-wave {
+  -webkit-mask: linear-gradient(270deg, transparent 0%, #000 45%, #000 62%, transparent 100%);
+  mask: linear-gradient(270deg, transparent 0%, #000 45%, #000 62%, transparent 100%);
+}
+
+.ai-page__tts-aura-side--bottom .ai-page__tts-aura-wave {
+  -webkit-mask: linear-gradient(180deg, transparent 0%, #000 45%, #000 62%, transparent 100%);
+  mask: linear-gradient(180deg, transparent 0%, #000 45%, #000 62%, transparent 100%);
+}
+
+/* ===== 深色模式：底色更暗，光带整体加深一档，否则播报光看不出来 =====
+   三块的 background 整段覆盖（几何与浅色一致：左右三团 22/48/74，底部三团 + 打底），
+   各团峰值 alpha 约为浅色版的 1.8 倍；波峰带只抬 alpha 变量，形状 / 周期与浅色共用。 */
+.ai-page--dark .ai-page__tts-aura-side--left {
+  background:
+    radial-gradient(
+      ellipse 45% 20% at 0% 22%,
+      rgba(61, 33, 205, 0.36) 0%,
+      rgba(25, 153, 254, 0.2) 55%,
+      rgba(25, 153, 254, 0) 100%
+    ),
+    radial-gradient(
+      ellipse 48% 30% at 0% 48%,
+      rgba(61, 33, 205, 0.4) 0%,
+      rgba(25, 153, 254, 0.22) 55%,
+      rgba(25, 153, 254, 0) 100%
+    ),
+    radial-gradient(
+      ellipse 44% 22% at 0% 74%,
+      rgba(61, 33, 205, 0.34) 0%,
+      rgba(25, 153, 254, 0.18) 55%,
+      rgba(25, 153, 254, 0) 100%
+    );
+}
+
+.ai-page--dark .ai-page__tts-aura-side--right {
+  background:
+    radial-gradient(
+      ellipse 45% 20% at 100% 22%,
+      rgba(192, 103, 250, 0.36) 0%,
+      rgba(253, 144, 196, 0.2) 55%,
+      rgba(253, 144, 196, 0) 100%
+    ),
+    radial-gradient(
+      ellipse 48% 30% at 100% 48%,
+      rgba(192, 103, 250, 0.4) 0%,
+      rgba(253, 144, 196, 0.22) 55%,
+      rgba(253, 144, 196, 0) 100%
+    ),
+    radial-gradient(
+      ellipse 44% 22% at 100% 74%,
+      rgba(192, 103, 250, 0.34) 0%,
+      rgba(253, 144, 196, 0.18) 55%,
+      rgba(253, 144, 196, 0) 100%
+    );
+}
+
+.ai-page--dark .ai-page__tts-aura-side--bottom {
+  background:
+    radial-gradient(
+      ellipse 30% 110% at 24% 100%,
+      rgba(61, 33, 205, 0.5) 0%,
+      rgba(25, 153, 254, 0.28) 45%,
+      rgba(25, 153, 254, 0) 78%
+    ),
+    radial-gradient(
+      ellipse 34% 120% at 52% 100%,
+      rgba(61, 33, 205, 0.55) 0%,
+      rgba(25, 153, 254, 0.3) 45%,
+      rgba(25, 153, 254, 0) 78%
+    ),
+    radial-gradient(
+      ellipse 30% 110% at 78% 100%,
+      rgba(61, 33, 205, 0.48) 0%,
+      rgba(25, 153, 254, 0.26) 45%,
+      rgba(25, 153, 254, 0) 78%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(61, 33, 205, 0) 0%,
+      rgba(61, 33, 205, 0.22) 55%,
+      rgba(61, 33, 205, 0.3) 100%
+    );
+}
+
+.ai-page--dark .ai-page__tts-aura-wave {
+  --wave-a-alpha: 0.5;
+  --wave-b-alpha: 0.45;
+}
+
+.ai-page--dark .ai-page__tts-aura-side--bottom .ai-page__tts-aura-wave {
+  --wave-a-alpha: 0.52;
+}
+
+.ai-page--dark .ai-page__tts-aura-side--bottom .ai-page__tts-aura-wave--alt {
+  --wave-b-alpha: 0.48;
+}
+
+/* 波峰带从块外扫进来、再扫出块外，循环时看不出接缝 */
+@keyframes tts-aura-wave-y {
+  from {
+    transform: translate3d(0, -100%, 0);
+  }
+
+  to {
+    transform: translate3d(0, 320%, 0);
+  }
+}
+
+@keyframes tts-aura-wave-x {
+  from {
+    transform: translate3d(-100%, 0, 0);
+  }
+
+  to {
+    transform: translate3d(320%, 0, 0);
+  }
+}
+
+/* ===== 屏幕边缘「纺锤体」波纹 ===== */
+.ai-page__tts-ripple-ring {
+  position: absolute;
+  inset: 10rpx;
+  border-radius: 140rpx;
+  box-shadow:
+    inset 0 0 0 2rpx rgba(61, 33, 205, 0.5),
+    inset 0 0 90rpx 14rpx rgba(25, 153, 254, 0.14);
+  opacity: 0;
+  animation: tts-ripple-run 2.8s ease-out infinite;
+  will-change: transform, opacity;
+  -webkit-mask:
+    linear-gradient(90deg, transparent 0%, #000 16%, #000 84%, transparent 100%),
+    linear-gradient(180deg, transparent 0%, #000 12%, #000 88%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask:
+    linear-gradient(90deg, transparent 0%, #000 16%, #000 84%, transparent 100%),
+    linear-gradient(180deg, transparent 0%, #000 12%, #000 88%, transparent 100%);
+  mask-composite: intersect;
+}
+
+/* 第二道：换成紫粉（品牌渐变另一端），错相 1.4s */
+.ai-page__tts-ripple-ring--alt {
+  box-shadow:
+    inset 0 0 0 2rpx rgba(192, 103, 250, 0.4),
+    inset 0 0 90rpx 14rpx rgba(253, 144, 196, 0.12);
+  animation-delay: -1.4s;
+}
+
+/* 不播报时整体已淡出，暂停全部动画省掉无意义的重绘 */
+.ai-page__tts-aura:not(.ai-page__tts-aura--on) .ai-page__tts-aura-wave,
+.ai-page__tts-aura:not(.ai-page__tts-aura--on) .ai-page__tts-ripple-ring {
+  animation-play-state: paused;
+}
+
+/* 从边缘往里扫：起步贴边微扩，一路收缩到 90% 再熄灭，循环无接缝（首尾都不可见） */
+@keyframes tts-ripple-run {
+  0% {
+    opacity: 0;
+    transform: scale(1.015);
+  }
+
+  16% {
+    opacity: 0.9;
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
 }
 
 .session-loading {

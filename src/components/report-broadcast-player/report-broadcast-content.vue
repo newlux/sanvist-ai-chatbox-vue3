@@ -42,6 +42,8 @@ const isDark = computed(() => systemStore.isDark);
 const transcriptViewportRef = ref<unknown>(null);
 const transcriptTrackRef = ref<unknown>(null);
 const transcriptHasScrolled = ref(false);
+/** 字幕内容超出可视区（可滚动）时为 true：底部渐隐只在这种时候出现。 */
+const transcriptOverflow = ref(false);
 let bottomFrame: number | null = null;
 let bottomQueued = false;
 let contentResizeObserver: ResizeObserver | null = null;
@@ -69,6 +71,7 @@ function scrollTranscriptToBottom() {
       const scroller = getTranscriptScroller();
       if (!scroller) return;
       const bottom = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      transcriptOverflow.value = bottom > 1;
       // 未溢出时自然从顶部展示；只有超高、正在播放时才跟随到底部。
       if (bottom <= 1) {
         if (scroller.scrollTop !== 0) scroller.scrollTop = 0;
@@ -286,6 +289,11 @@ onBeforeUnmount(() => {
       <view
         v-if="transcriptHasScrolled && !showTranscriptSkeleton && !qaVisible && !voiceRecording"
         class="report-broadcast-content__top-fade"
+      />
+      <!-- 底部渐隐：与顶部渐隐对称，字幕溢出可滚动时压住底部边缘 -->
+      <view
+        v-if="transcriptOverflow && !showTranscriptSkeleton && !qaVisible && !voiceRecording"
+        class="report-broadcast-content__bottom-fade"
       />
     </view>
   </view>
@@ -555,6 +563,18 @@ onBeforeUnmount(() => {
   pointer-events: none;
   background: linear-gradient(180deg, #fff 0%, rgb(255 255 255 / 86%) 40%, rgb(255 255 255 / 0%) 100%);
 }
+/* 底部渐隐：与顶部渐隐对称，贴在字幕区底边，压住滚出的文字 */
+.report-broadcast-content__bottom-fade {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 72rpx;
+  max-height: 30%;
+  pointer-events: none;
+  background: linear-gradient(0deg, #fff 0%, rgb(255 255 255 / 86%) 40%, rgb(255 255 255 / 0%) 100%);
+}
 /* 播放/暂停按钮已按浅色稿 195:1927 移除（节点样式一并删掉，不留死代码） */
 .report-broadcast-content__play-btn {
   display: flex;
@@ -639,6 +659,10 @@ onBeforeUnmount(() => {
     background: linear-gradient(180deg, #fafafa 0%, rgb(250 250 250 / 86%) 40%, rgb(250 250 250 / 0%) 100%);
   }
 
+  .report-broadcast-content__bottom-fade {
+    background: linear-gradient(0deg, #fafafa 0%, rgb(250 250 250 / 86%) 40%, rgb(250 250 250 / 0%) 100%);
+  }
+
 }
 
 /* ===== 深色主题：播报内容区（Ardot 1193:2708 正在播放 / 1193:3357 正在回答 / 1193:1864 中途提问）=====
@@ -672,6 +696,10 @@ onBeforeUnmount(() => {
 
   .report-broadcast-content__top-fade {
     background: linear-gradient(180deg, #0d0d0d 0%, rgb(13 13 13 / 86%) 40%, rgb(13 13 13 / 0%) 100%);
+  }
+
+  .report-broadcast-content__bottom-fade {
+    background: linear-gradient(0deg, #0d0d0d 0%, rgb(13 13 13 / 86%) 40%, rgb(13 13 13 / 0%) 100%);
   }
 
 

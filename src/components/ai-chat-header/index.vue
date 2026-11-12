@@ -1094,12 +1094,13 @@ onBeforeUnmount(() => {
    渐隐底色 722:341 换成页面底 #1A1A1A；左右图标 722:342 / 722:345 在深色稿里是白线，
    svg / 位图统一 filter 反白：不新增资源，也不影响浅色稿（浅色下不加这个类） */
 .ai-chat-header--plain.ai-chat-header--dark {
-  background: linear-gradient(
-    180deg,
-    #1a1a1a 0%,
-    rgba(26, 26, 26, 0.92) 10%,
-    rgba(26, 26, 26, 0) 100%
-  );
+  // background: linear-gradient(
+  //   180deg,
+  //   #1a1a1a 0%,
+  //   rgba(26, 26, 26, 0.92) 10%,
+  //   rgba(26, 26, 26, 0) 100%
+  // );
+  background: #1a1a1a;
 
   .chat-header__icon-history-img,
   .chat-header__icon-atlas-img,
@@ -1217,10 +1218,12 @@ onBeforeUnmount(() => {
    Logo 62×62（722:340 / 页面实例 1187:41;722:340）：相对外沿 左 9 / 上 5.2，投影 0 3 9 rgba(0,0,0,.14)
 
    浮动定位：绝对定位浮在状态栏下沿，向下悬在内容之上，
-   不占布局、不撑高头部，也不改变两侧按钮的位置（pointer-events: none 不拦截点击） */
+   不占布局、不撑高头部，也不改变两侧按钮的位置（pointer-events: none 不拦截点击）；
+   top 略为负值：整组（三角 + 下方状态胶囊）比设计稿再往上收一点，
+   与对话内容一起上移，头部下沿下面不会再露出正文的一截字 */
 .chat-header__island-wrap {
   position: absolute;
-  top: 0;
+  top: -8rpx;
   left: 50%;
   z-index: 1;
   display: flex;

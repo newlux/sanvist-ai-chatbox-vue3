@@ -38,7 +38,9 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .voice-live {
   position: absolute;
-  top: max(var(--chat-top-inset, 300rpx), 150px);
+  // 130px = 与「提问顶到上方」的落点（ai-message-list 的 PIN_MESSAGE_TOP_MIN_Y_PX）同一条线，
+  // 说完收成提问气泡时文字不会上下跳
+  top: max(var(--chat-top-inset, 300rpx), 130px);
   right: 40rpx;
   left: 40rpx;
   z-index: 3;
