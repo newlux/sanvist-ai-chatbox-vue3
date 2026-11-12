@@ -6,8 +6,6 @@ import type {
   AskSlotOption,
   AskSlotPayload,
   AskSlotSubmitPayload,
-  AssistantNavigationAction,
-  AssistantNavigationPayload,
   GuideStepItem,
   GuideStepPayload,
   GuideStepSelectEvent,
@@ -45,12 +43,9 @@ import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
-import {
-  AI_ASK_WELCOME_DONE_KEY,
-  REPAIR_NAV_INTENT_ENTER,
-  REPAIR_NAV_INTENT_FAULT_CODE,
-} from "@/config";
+import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
+import { useAssistantNavigation } from "@/hooks/useAssistantNavigation";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatViewport } from "@/hooks/useChatViewport";
@@ -64,10 +59,9 @@ import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
-import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, stashPendingRepairCallback } from "@/utils/repair-callback";
+import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary } from "@/utils/repair-callback";
 import { openPartsAssistant } from "@/utils/parts-h5";
 import { openRepairAssistant } from "@/utils/repair-h5";
-import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
@@ -296,24 +290,13 @@ const askSlotQueue = ref<AskSlotPayload[]>([]);
 const askSlotDrawerVisible = ref(false);
 /** 追问卡实时高度（px）：卡片弹出时给消息列表加底部间距，最后一条内容不会被盖住 */
 const askSlotDrawerHeight = ref(0);
-const assistantNavigationPayload = ref<AssistantNavigationPayload | null>(null);
-const assistantNavigationVisible = ref(false);
+const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(sendUserPrompt);
 /** 底部「配件助手」点击后的地址输入弹层 */
 const partsJumpVisible = ref(false);
 let repairSummaryPollingTimer: ReturnType<typeof setTimeout> | null = null;
 let repairSummaryPollingAttempts = 0;
 const REPAIR_SUMMARY_POLL_INTERVAL_MS = 5_000;
 const REPAIR_SUMMARY_MAX_ATTEMPTS = 30;
-
-/**
- * 只有配件助手还会抛 open：维修助理（target=maintenance_assistant）已改成
- * 消息流里的内联卡，点按钮直接走 onAssistantNavigationConfirm，不再弹底部白板。
- */
-function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
-  if (payload.target !== "parts_assistant") return;
-  assistantNavigationPayload.value = payload;
-  assistantNavigationVisible.value = true;
-}
 
 /** 点维修助理回流卡：pushWindow 直达三方维修 H5 的详情页；已生成的回流结果看过就不再重复拉取。 */
 function onAssistantCallbackOpen(conversationId: string) {
@@ -325,71 +308,6 @@ function onAssistantCallbackOpen(conversationId: string) {
     // 降级回本地壳页时要把详情会话带上，壳页据此拼 `/chat/{id}`
     fallbackUrl: `/pages/repair/index?conversationId=${encodeURIComponent(id)}`,
   });
-}
-
-/**
- * 故障码确认卡点「确定」时回给后端的那句话。
- * 卡片本身不跳页，只把这句话当成一条提问发出去，由后端下发
- * target=maintenance_assistant && intent=ENTER_ASSISTANT 的 navigation 再跳维修助理页。
- * 后端若约定别的措辞，只改这一个常量即可。
- */
-const REPAIR_ENTER_CONFIRM_TEXT = "确认进入维修助理";
-
-/**
- * 真正进维修助理：pushWindow 直达三方维修 H5（上下文走 URL 参数），
- * 只有降级回本地壳页时才落盘 pending 上下文；返回后靠 pending 回调拉 summary。
- */
-function enterRepairAssistant(payload: AssistantNavigationPayload) {
-  const aiAskConversationId = String(payload.conversationId || "").trim();
-  const aiAskSessionId = String(payload.sessionId || "").trim();
-  if (aiAskConversationId && aiAskSessionId) {
-    stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
-  }
-  void openRepairAssistant({
-    sessionId: aiAskSessionId,
-    conversationId: aiAskConversationId,
-    onFallback: () => {
-      stashPendingRepairNavigationContext({
-        ...payload.context,
-        userId: userStore.userId,
-        sessionId: payload.sessionId,
-        conversationId: payload.conversationId,
-      });
-    },
-  });
-}
-
-/**
- * 「进入助手」的去向按 target + intent 分流：
- * - parts_assistant：底部弹层点「进入配件助手」→ 另开配件助手页
- *   （/pages/parts/index，全屏内嵌三方 H5）；
- * - maintenance_assistant + intent=ENTER_ASSISTANT：确认可进入 → 直接跳维修助理页；
- * - maintenance_assistant + intent=MAINT_FAULT_CODE：故障码确认卡，点「确定」不直接跳，
- *   而是把「确认进入维修助理」发回对话，等后端回 ENTER_ASSISTANT；
- * - 其它 intent（或没有）：不跳页。
- */
-async function onAssistantNavigationConfirm(
-  payload: AssistantNavigationPayload,
-  action?: AssistantNavigationAction,
-) {
-  if (payload.target === "parts_assistant") {
-    enterPartsAssistant();
-    return;
-  }
-  if (payload.target !== "maintenance_assistant") return;
-
-  const intent = String(payload.intent || "").trim().toUpperCase();
-  logger.debug("assistant navigation confirm", { target: payload.target, intent, action: action?.key });
-
-  if (intent === REPAIR_NAV_INTENT_ENTER) {
-    enterRepairAssistant(payload);
-    return;
-  }
-
-  if (intent === REPAIR_NAV_INTENT_FAULT_CODE) {
-    // 故障码确认卡：走一轮「确认」对话，跳转交给后端返回的 ENTER_ASSISTANT
-    sendUserPrompt(REPAIR_ENTER_CONFIRM_TEXT);
-  }
 }
 
 /**

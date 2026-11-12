@@ -9,13 +9,14 @@ const logger = createLogger("ai-stream-protocol");
  * - Dify `workflow_finished` 的 `target`（outputs.target / 顶层 target）
  * - 协议块 `<COMPONENT type="navigation">` 的 `data.target`
  *
+ * - operations_assistant → 运营助手页 `/pages/index/index`
  * - work_guidance_assistant → 作业指导页 `/pages/guide/index`
  * - task_coordination_assistant → 任务协同页 `/pages/task/index`
  *
  * 维修助理走 assistant-navigation 的内联确认卡、配件助手走底部确认层，都不在此列。
  * 具体路由映射在 `useChatSend`（ASSISTANT_TARGET_ROUTES）。
  */
-const ASSISTANT_SCENE_TARGETS = new Set(["work_guidance_assistant", "task_coordination_assistant"]);
+const ASSISTANT_SCENE_TARGETS = new Set(["operations_assistant", "work_guidance_assistant", "task_coordination_assistant"]);
 
 /** Dify `/chat-messages` 的请求体；只在网络边界使用 snake_case。 */
 export interface DifyChatMessagesRequest {
@@ -517,7 +518,7 @@ function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockD
 function parseAskStreamEvent(value: Record<string, unknown> | null) {
   /**
    * 跳转指令（`<COMPONENT type="navigation" data.target=...>`）：
-   * 作业指导 / 任务协同这两个目标不弹确认框，直接以 assistant_scene 事件切页。
+   * 运营助手 / 作业指导 / 任务协同这三个目标不弹确认框，直接以 assistant_scene 事件切页。
    * 先于 parseAskBlock 判定，避免被 navigation 白名单当未知卡片丢掉。
    */
   const directData = asRecord(value?.data) || {};
@@ -965,6 +966,7 @@ export function createDifyEventNormalizer() {
       const outputsAnswer = String(workflowOutputs.answer || "");
       /**
        * 跳转目标：工作流结束时在 `outputs.target` 下发（兼容 `data.data.target` / 事件顶层 `target`）。
+       * - operations_assistant → 运营助手页 `/pages/index/index`
        * - work_guidance_assistant → 作业指导页
        * - task_coordination_assistant → 任务协同页
        * 由消费侧（useChatSend）映射成站内路由并直接切页。
