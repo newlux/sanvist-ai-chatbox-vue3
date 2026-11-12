@@ -8,7 +8,9 @@ import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
 import voiceWaveIcon from "@/assets/img/icon-voice-wave-dark.svg";
 import listenLogo from "@/assets/img/listen.gif";
-import saniLogo from "@/assets/img/sani-logo.gif";
+// 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 2.5MB 的 gif 慢网下先空白）
+import saniLogoStatic from "@/assets/img/header-island-logo.png";
+import saniLogoGif from "@/assets/img/sani-logo.gif";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
@@ -68,6 +70,27 @@ const { t } = useI18n();
 const { safeAreaStyle } = useSafeArea();
 
 /**
+ * 中心图标「静态图 → 动图」的无感知切换。
+ *
+ * sani-logo.gif 约 2.5MB，直接当 src 时慢网下会先空一块再突然出现。
+ * 这里两层叠在同一个 220×220 盒子里：
+ * - 底层永远是 header-island-logo.png（静态图，几百 KB，先渲染）；
+ * - 动图层一开始 opacity:0（但已在下载），@load 到达后淡入、静态层同时淡出，
+ *   用户看到的只是图标从静止变动态，没有空白、没有跳变。
+ *
+ * 模块级缓存：组件会随首页 welcome / 对话页来回切反复挂载，已经加载过一次就
+ * 直接用动图，不必每次都重播一遍切换。
+ */
+let saniGifLoadedOnce = false;
+const saniGifReady = ref(saniGifLoadedOnce);
+
+function onSaniGifLoad() {
+  if (saniGifReady.value) return;
+  saniGifLoadedOnce = true;
+  saniGifReady.value = true;
+}
+
+/**
  * listen.gif 平时不挂载，等父页面确认「要起飞了」再创建这张图。
  *
  * 动图只要挂在页面上就在自己循环，挂载那一刻播到第几帧完全不可控，
@@ -75,6 +98,8 @@ const { safeAreaStyle } = useSafeArea();
  * 浏览器一定从第 0 帧开始播，于是「480ms 后扩散到最大」才是准的。
  */
 const listenMounted = ref(false);
+/** 起飞中（点击说话 + listen.gif 已挂载）：两种 SANI 图都要让位给 listen.gif */
+const logoDeparting = computed(() => props.leaving && listenMounted.value);
 /** 兜底时长：个别容器命中缓存不派发 load，不能让页面卡在欢迎页 */
 const LISTEN_READY_TIMEOUT_MS = 120;
 
@@ -252,11 +277,23 @@ onBeforeUnmount(() => {
            点下去先切成 listen.gif（与对话页灵动岛同一套交叉溶解），再往上走 -->
       <view class="welcome__logo">
         <view class="welcome__logo-fly" :style="logoStyle">
+          <!-- 静态图打底：动图就绪前一直显示，就绪后与动图交叉淡出（无感知切换） -->
           <image
             class="welcome__logo-img"
-            :class="{ 'welcome__logo-img--out': leaving && listenMounted }"
-            :src="saniLogo"
+            :class="{
+              'welcome__logo-img--covered': saniGifReady && !logoDeparting,
+              'welcome__logo-img--out': logoDeparting,
+            }"
+            :src="saniLogoStatic"
             mode="aspectFit"
+          />
+          <!-- 动图：加载期间保持透明（已在后台下载），load 后淡入；起飞时一起让位给 listen.gif -->
+          <image
+            class="welcome__logo-img welcome__logo-img--gif"
+            :class="{ 'welcome__logo-img--in': saniGifReady && !logoDeparting }"
+            :src="saniLogoGif"
+            mode="aspectFit"
+            @load="onSaniGifLoad"
           />
           <image
             v-if="listenMounted"
@@ -480,10 +517,27 @@ onBeforeUnmount(() => {
   transition: opacity 220ms ease;
 }
 
-/* 点「点击说话」后常态图淡出，让给 listen.gif */
+/* 点「点击说话」后常态图淡出，让给 listen.gif；
+   动图就绪时静态图也走这里淡出，与 --in 的动图交叉溶解 */
 .welcome__logo-img--out {
   opacity: 0;
   transition: opacity 360ms ease;
+}
+
+/* 动图层：未就绪前整体透明（图片已在下载），load 后由 --in 淡入。
+   与静态图的淡出同步，视觉上只是图标从静止变成动态，不出现空白或跳变 */
+.welcome__logo-img--gif {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.welcome__logo-img--in {
+  opacity: 1;
+}
+
+/* 动图接管后静态图淡出：与 --in 同为 220ms，两张图同步交叉，不出现重叠重影 */
+.welcome__logo-img--covered {
+  opacity: 0;
 }
 
 /* listen.gif 是 500×500 画布、图案只占中间 201×172，aspectFit 后图案会小一半多；
