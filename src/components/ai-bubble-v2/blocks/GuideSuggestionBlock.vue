@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import type { Ref } from "vue";
 import type { GuideSuggestionPayload } from "@/api/chat/types";
-import { computed } from "vue";
+import { computed, inject, unref } from "vue";
 import { stripOptionPrefix } from "@/utils/option-label";
 
 /**
@@ -16,9 +17,8 @@ defineOptions({ name: "GuideSuggestionBlock" });
 const props = defineProps({
   payload: { type: Object as () => GuideSuggestionPayload, required: true },
   /**
-   * 深色：这块由消息列表在气泡外独立渲染（步骤完成态底部的推荐问题）时拿不到
-   * 气泡 provide 的 ai-bubble-dark，需要外层显式传下来。嵌入气泡内它仍是浅色，
-   * 不加 provide——这里不用 MarkdownRenderer，且避免覆盖气泡自身的深色入口。
+   * 深色：气泡内由 ai-bubble-dark inject 跟随主题；气泡外独立渲染（步骤完成态底部的
+   * 推荐问题）拿不到 provide 时由外层显式传下来。两者任一为真即走深色稿。
    */
   dark: { type: Boolean, default: false },
 });
@@ -27,6 +27,9 @@ const emit = defineEmits<{
   /** 点某个选项：文案原样上抛，由页面当成下一轮提问发出去 */
   (e: "pick", text: string): void;
 }>();
+/** 气泡内渲染时跟随 ai-bubble-dark（与 GuideStepBlock / GuideLeadBlock 同一套取法） */
+const bubbleDark = inject<Ref<boolean> | null>("ai-bubble-dark", null);
+const isDark = computed(() => props.dark || Boolean(bubbleDark ? unref(bubbleDark) : false));
 
 /** 顶部提示语，如「请先确认机型；未选择角色时，我会按新手模式回答。」 */
 const note = computed(() => String(props.payload?.note || "").trim());
@@ -52,7 +55,7 @@ function onPick(label: string) {
 </script>
 
 <template>
-  <view v-if="note || question || options.length" class="guide-suggestion" :class="{ 'guide-suggestion--dark': dark }">
+  <view v-if="note || question || options.length" class="guide-suggestion" :class="{ 'guide-suggestion--dark': isDark }">
     <text v-if="note" class="guide-suggestion__note">
       {{ note }}
     </text>
