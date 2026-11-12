@@ -103,14 +103,15 @@ test('共享执行：配件弹层及维修确认/直接进入都执行在当前�
   nav.onAssistantNavigationConfirm(repair);
   assert.deepEqual(prompts, ['确认进入维修助理']);
   assert.equal(globalThis.navCalls.length, 1);
-  nav.onAssistantNavigationConfirm({ ...repair, intent: 'ENTER_ASSISTANT', sessionId: 's1', conversationId: 'c1', context: { deviceid: 'd1' } });
+  nav.onAssistantNavigationConfirm({ ...repair, intent: 'ENTER_ASSISTANT', sessionId: 's1', conversationId: 'c1', context: { deviceid: 'd1', query: '设备无法启动' } });
   assert.equal(globalThis.navCalls[1][0], 'callback');
   const [kind, options] = globalThis.navCalls[2];
   assert.equal(kind, 'repair');
   assert.equal(options.sessionId, 's1');
   assert.equal(options.conversationId, 'c1');
+  assert.equal(options.question, '设备无法启动');
   options.onFallback();
-  assert.deepEqual(globalThis.navCalls[3], ['context', { deviceid: 'd1', userId: 'user-1', sessionId: 's1', conversationId: 'c1' }]);
+  assert.deepEqual(globalThis.navCalls[3], ['context', { deviceid: 'd1', query: '设备无法启动', userId: 'user-1', sessionId: 's1', conversationId: 'c1' }]);
   nav.onAssistantNavigationConfirm({ ...repair, intent: 'UNKNOWN' });
   assert.equal(globalThis.navCalls.length, 4);
   delete globalThis.navCalls;

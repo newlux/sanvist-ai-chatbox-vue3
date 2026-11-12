@@ -40,6 +40,8 @@ export function useAssistantNavigation(sendPrompt: (query: string) => unknown) {
     void openRepairAssistant({
       sessionId: aiAskSessionId,
       conversationId: aiAskConversationId,
+      // 三方 WebView 通过通知通道获取本轮问题，不能在提取共享逻辑时丢失。
+      question: String(payload.context?.query || ""),
       onFallback: () => {
         stashPendingRepairNavigationContext({
           ...payload.context,

@@ -63,7 +63,7 @@ import { createLogger } from "@/utils/logger";
 import { openPartsAssistant } from "@/utils/parts-h5";
 import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import { getRepairConversationId } from "@/utils/repair-bridge";
-import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, parseRepairCaseReport, stashPendingRepairCallback } from "@/utils/repair-callback";
+import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, parseRepairCaseReport } from "@/utils/repair-callback";
 import { openRepairAssistant } from "@/utils/repair-h5";
 import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -314,83 +314,6 @@ function onAssistantCallbackOpen(conversationId: string) {
     // 降级回本地壳页时要把会话 id 带上，壳页据此拼 `/repair/{id}`
     fallbackUrl: `/pages/repair/index?conversationId=${encodeURIComponent(id)}`,
   });
-}
-
-/**
- * 故障码确认卡点「确定」时回给后端的那句话。
- * 卡片本身不跳页，只把这句话当成一条提问发出去，由后端下发
- * target=maintenance_assistant && intent=ENTER_ASSISTANT 的 navigation 再跳维修助理页。
- * 后端若约定别的措辞，只改这一个常量即可。
- */
-const REPAIR_ENTER_CONFIRM_TEXT = "确认进入维修助理";
-
-/**
- * 真正进维修助理：pushWindow 直达三方维修 H5（上下文走 URL 参数），
- * 只有降级回本地壳页时才落盘 pending 上下文；返回后靠 pending 回调拉 summary。
- *
- * 提问另外走通知通道交给三方页：它在另一个 webview 里，进来就会 `query_question`
- * 来要这句话（见 utils/repair-bridge），URL 上不带问题本体。
- */
-function enterRepairAssistant(payload: AssistantNavigationPayload) {
-  const aiAskConversationId = String(payload.conversationId || "").trim();
-  const aiAskSessionId = String(payload.sessionId || "").trim();
-  // 真机排查：确认后端下发的 intent / 上下文到齐了没
-  logger.info("进入维修助理（后端 navigation 下发）", {
-    intent: payload.context?.intent || "(空)",
-    sessionId: aiAskSessionId || "(空)",
-    conversationId: aiAskConversationId || "(空)",
-    questionLength: String(payload.context?.query || "").length,
-  });
-  if (aiAskConversationId && aiAskSessionId) {
-    stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
-  }
-  void openRepairAssistant({
-    sessionId: aiAskSessionId,
-    conversationId: aiAskConversationId,
-    question: String(payload.context?.query || ""),
-    // 降级回本地壳页时上下文才落盘（直连三方页走 URL + 通知通道）
-    onFallback: () => {
-      stashPendingRepairNavigationContext({
-        ...payload.context,
-        userId: userStore.userId,
-        sessionId: payload.sessionId,
-        conversationId: payload.conversationId,
-      });
-    },
-  });
-}
-
-/**
- * 「进入助手」的去向按 target + intent 分流：
- * - parts_assistant：底部弹层点「进入配件助手」→ 另开配件助手页
- *   （/pages/parts/index，全屏内嵌三方 H5）；
- * - maintenance_assistant + intent=ENTER_ASSISTANT：确认可进入 → 直接跳维修助理页；
- * - maintenance_assistant + intent=MAINT_FAULT_CODE：故障码确认卡，点「确定」不直接跳，
- *   而是把「确认进入维修助理」发回对话，等后端回 ENTER_ASSISTANT；
- * - 其它 intent（或没有）：不跳页。
- */
-async function onAssistantNavigationConfirm(
-  payload: AssistantNavigationPayload,
-  action?: AssistantNavigationAction,
-) {
-  if (payload.target === "parts_assistant") {
-    enterPartsAssistant();
-    return;
-  }
-  if (payload.target !== "maintenance_assistant") return;
-
-  const intent = String(payload.intent || "").trim().toUpperCase();
-  logger.debug("assistant navigation confirm", { target: payload.target, intent, action: action?.key });
-
-  if (intent === REPAIR_NAV_INTENT_ENTER) {
-    enterRepairAssistant(payload);
-    return;
-  }
-
-  if (intent === REPAIR_NAV_INTENT_FAULT_CODE) {
-    // 故障码确认卡：走一轮「确认」对话，跳转交给后端返回的 ENTER_ASSISTANT
-    sendUserPrompt(REPAIR_ENTER_CONFIRM_TEXT);
-  }
 }
 
 /**
