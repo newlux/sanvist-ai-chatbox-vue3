@@ -264,6 +264,7 @@
   "parts-jump-action": "Go",
   "parts-page-empty": "No URL provided",
   "guide-step-fallback-title": "Steps",
+  "guide-step-counter": "Step {index}/{total}",
   "common-select": "Please select",
   "slot-device-question": "Select a device to query",
   "slot-other-input": "Other",

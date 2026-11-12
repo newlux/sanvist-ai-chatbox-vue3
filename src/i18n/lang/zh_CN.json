@@ -265,6 +265,7 @@
   "parts-jump-action": "跳转",
   "parts-page-empty": "地址为空，无法打开",
   "guide-step-fallback-title": "操作步骤",
+  "guide-step-counter": "步骤{index}/{total}",
   "common-select": "请选择",
   "slot-device-question": "请选择要查询的设备",
   "slot-other-input": "其他输入",

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { GuideCheckPayload, GuideStepSelectEvent } from "@/api/chat/types";
 import { computed, onMounted, provide, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconShare from "@/assets/img/icon-action-share.svg";
@@ -74,6 +75,7 @@ provide("ai-bubble-dark", computed(() => props.dark));
 
 /** 语音播报总开关（ai-chat-header 喇叭）只掐「自动播报」链路：关掉时自动续播不再出声，手动按钮照常 */
 const settingsStore = useSettingsStore();
+const { t } = useI18n();
 
 /** 卡片根节点：分享时整卡截图用（uni 的 view 在部分端会包一层组件实例） */
 const rootRef = ref<HTMLElement | { $el?: HTMLElement } | null>(null);
@@ -270,7 +272,7 @@ function resolveRootElement(): HTMLElement | null {
         {{ headerTitle }}
       </text>
       <text v-if="showStep" class="guide-check-block__step">
-        步骤{{ stepIndex }}/{{ stepTotal }}
+        {{ t("guide-step-counter", { index: stepIndex, total: stepTotal }) }}
       </text>
     </view>
 
