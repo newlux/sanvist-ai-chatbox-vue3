@@ -34,6 +34,7 @@ import arrowDownDarkIcon from "@/assets/img/arrow-down-dark.png";
 import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
+import AudioRipple from "@/components/audio-ripple/index.vue";
 import AiChatHeader from "@/components/ai-chat-header/index.vue";
 import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiChatNav from "@/components/ai-chat-nav/index.vue";
@@ -95,6 +96,14 @@ const sessionStore = useSessionStore();
 /** 外观（设置弹层 → 深色）：首页问答态走 C 方案暗色 1193:2097 的底色与顶部渐隐 */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
+/**
+ * 播报声纹的弧段端点（0 = 右中，90 = 顶中，180 = 左中，270 = 底中，角度递增即沿边绕行）。
+ * 120 → 60 走 3/4 圈：左 → 底 → 右，顶部留 60° 缺口，正好是「左右 + 底部」三条边。
+ * colorSpeed 归零：颜色固定成「左紫 → 蓝 → 蓝紫 → 右粉」，不随动画旋转。
+ */
+const TTS_RIPPLE_APPEARANCE = { startAngle: 120, endAngle: 60, colorSpeed: 0 };
+/** 有任意一条消息正在播报（自动播报 / 手动点播都会置 ttsPlaying）就点亮全屏声纹 */
+const isTtsSpeaking = computed(() => (chatStore.messages || []).some(message => Boolean(message?.ttsPlaying)));
 /** 一键回到底部的箭头：深色模式换 arrow-down-dark.png（浅色箭头压在暗底上看不清） */
 const scrollBottomIcon = computed(() => (isDark.value ? arrowDownDarkIcon : arrowDownIcon));
 const sharePosterWrap = ref<unknown>(null);
@@ -2347,6 +2356,18 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         @confirm="onBadFeedbackConfirm"
       />
     </view>
+
+    <!-- 语音播报声纹（迁移自 audio-ripple）：播报期间沿屏幕左、底、右三边走渐变光带，
+         纯装饰层，不吃点击；pixel-ratio 压到 1 是为了全屏逐像素运算别拖慢主线程 -->
+    <AudioRipple
+      v-if="isTtsSpeaking"
+      class="ai-page__tts-ripple"
+      variant="output"
+      preview="speech"
+      :dark="isDark"
+      :pixel-ratio="1"
+      :output-appearance="TTS_RIPPLE_APPEARANCE"
+    />
   </view>
 </template>
 
@@ -2414,6 +2435,14 @@ $color-white: #ffffff;
   font-family: PingFang SC;
   overflow: hidden;
   overscroll-behavior: none;
+}
+
+/* 语音播报声纹（AudioRipple）：全屏铺满，只走左、底、右三边，压在内容之上但不吃点击 */
+.ai-page__tts-ripple {
+  position: fixed;
+  inset: 0;
+  z-index: 1025;
+  pointer-events: none;
 }
 
 .ai-page__chat {

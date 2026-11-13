@@ -866,6 +866,8 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   // background: #f3f3f3;
   // box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.04);
 }
+
+
 /* 没有正文只有独立卡片：不画白卡外壳，只留操作栏 */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body--bare {
   gap: 0;
