@@ -133,6 +133,15 @@ export interface ToolCallEvent {
   };
 }
 
+/** 对话正文到达前显示的临时提示。 */
+export interface TipsEvent {
+  event: "tips";
+  conversationId: Identifier;
+  messageId: Identifier;
+  taskId?: Identifier;
+  text: string;
+}
+
 export interface MessageEvent {
   event: "message";
   conversationId: Identifier;
@@ -497,6 +506,7 @@ export type ChatStreamEvent =
   | ThinkEvent
   | ToolCallEvent
   | MessageEvent
+  | TipsEvent
   | SubtitleEvent
   | RichContentEvent
   | ProtocolEvent

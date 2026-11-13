@@ -4,7 +4,7 @@ import type {
   MessageEndEvent,
 } from "@/api/chat/types";
 
-export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-suggestion"
+export type AiBlockType = "answer" | "tips" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-suggestion"
   | "guide-check" | "guide-lead" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error"
   // assistant-navigation 解析层一直在产出（历史/流式都走它），之前漏在联合类型里导致两处 TS 报错；
   // gantt 是调度视图入口卡（scene=task / type=gantt）；
@@ -140,8 +140,20 @@ export function applyEventToBlocks(
         },
       };
     }
+    case "tips": {
+      if (!event.text.trim() || blocks.some(block => block.type === "answer" && String(block.payload.content || "").trim())) return base;
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, "tips-0", "tips", { content: event.text }, true),
+        receivedContent: true,
+      };
+    }
     case "message": {
       if (!event.answer) return base;
+      if (blocks.some(block => block.type === "tips")) {
+        if (!event.answer.trim()) return base;
+        blocks = blocks.filter(block => block.type !== "tips");
+      }
       const answerBlocks = blocks.filter(block => block.type === "answer");
       // 低端安卓 WebView 不支持 ES2022 的 Array.prototype.at
       const lastBlock = blocks[blocks.length - 1];

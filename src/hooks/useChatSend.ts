@@ -432,6 +432,7 @@ export function useChatSend(scope?: string, handlers?: {
     if (index < 0) return;
     const aiMessage = chatStore.messages[index];
 
+    const hasTips = snapshot.blocks.some(block => block.type === "tips");
     if (snapshot.conversationId) chatStore.aiSessionId = snapshot.conversationId;
     chatStore.patchMessageById(aiMsgId, {
       blocks: snapshot.blocks,
@@ -446,7 +447,8 @@ export function useChatSend(scope?: string, handlers?: {
       loading: !snapshot.ended,
       interrupted: snapshot.metadata?.status === "stopped",
       ttsEnabled: Boolean(
-        snapshot.ended
+        !hasTips
+        && snapshot.ended
         && snapshot.metadata?.status !== "stopped"
         && (snapshot.conversationId ?? aiMessage.sessionId)
         && (snapshot.messageId ?? aiMessage.messageId),
@@ -465,6 +467,7 @@ export function useChatSend(scope?: string, handlers?: {
     // 仅在「真正答完一轮」时通知一次：避免中间 snapshot 重入；status=stopped 视作被打断，不算完成。
     if (
       !skipComplete
+      && !hasTips
       && snapshot.ended
       && snapshot.metadata?.status !== "stopped"
       && (snapshot.conversationId ?? aiMessage.sessionId)
@@ -846,7 +849,7 @@ export function useChatSend(scope?: string, handlers?: {
               notifyAnswerDelta(answerContent.slice(lastSeenAnswerLength), false);
               lastSeenAnswerLength = answerContent.length;
             }
-            if (snapshot.ended) notifyAnswerDelta("", true);
+            if (snapshot.ended && lastSeenAnswerLength > 0) notifyAnswerDelta("", true);
           }
         },
       });

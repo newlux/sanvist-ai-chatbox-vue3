@@ -179,7 +179,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
 
 <template>
   <AnswerBlock
-    v-if="block.type === 'answer'"
+    v-if="block.type === 'answer' || block.type === 'tips'"
     :content="block.payload.content || ''"
     :streaming="!block.complete"
     :embedded="embedded"
