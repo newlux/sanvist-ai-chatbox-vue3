@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { setLocale } from "@/i18n";
+import { clearVoiceInputLanguage } from "@/utils/asr/voice-language";
 import { getColorScheme } from "@/utils/platform/mpaas";
 
 /** 外观偏好：system 跟随系统深浅色，light / dark 为手动指定（对应设置弹层 722:2999 三段） */
@@ -163,6 +164,9 @@ export const useSystemStore = defineStore("system", () => {
     const nextLang = String(lang || "").trim();
     if (!nextLang) return Promise.resolve("");
 
+    // 界面语言一改就丢掉「上次语音识别语言」：播报重新跟界面语言走，避免
+    // 用户切到英文后还在用上一次中文语音输入的语言合成
+    clearVoiceInputLanguage();
     header.value = {
       ...header.value,
       Lang: nextLang,

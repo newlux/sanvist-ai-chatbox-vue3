@@ -7,9 +7,9 @@ import { useI18n } from "vue-i18n";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
-import iconArrowNext from "@/assets/img/icon-arrow-red.svg";
 import iconRepair from "@/assets/img/icon-repair-dark.svg";
 import saniIcon from "@/assets/img/icon-sani.png";
+import iconRightArrow from "@/assets/img/iocn-right-arrow.png";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { toInlineImageUrl } from "@/utils/image-preview";
@@ -393,15 +393,18 @@ const processSubtitleText = computed(() => {
 
 const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(processSubtitleText.value));
 
-/** 维修助理回流卡：轮询中显示「故障诊断中…」，回流完成后展示摘要详情。 */
+/** 维修助理回流卡：轮询中显示「故障诊断中…」并先把已取到的明细摆出来，回流完成后补齐状态文案。 */
 const showAssistantCallbackResult = computed(
   () => Boolean(props.assistantCallbackTitle) && !props.loading && !props.interrupted,
 );
-/** 回流卡片副标题：故障诊断与快问快答文案不同，缺省沿用故障诊断；轮询中沿用过程状态文案。 */
+/**
+ * 回流卡片副标题：
+ * - 轮询中沿用过程状态文案（故障诊断中…）；
+ * - 定稿后只认上层显式传入的文案 —— 传空就整行不渲染，
+ *   四项没填全时不许再显示「案例报告生成已完成」（缺的行显示「待识别」）。
+ */
 const assistantCallbackStatusText = computed(() =>
-  showAssistantCallbackResult.value
-    ? props.assistantCallbackStatus || t("repair-callback-done")
-    : processStatusText.value,
+  showAssistantCallbackResult.value ? props.assistantCallbackStatus : processStatusText.value,
 );
 
 function onAssistantCallbackOpen() {
@@ -614,19 +617,20 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
               <text class="ai-bubble-v2__assistant-callback-title">
                 {{ props.assistantCallbackTitle }}
               </text>
-              <text class="ai-bubble-v2__assistant-callback-status">
+              <text v-if="assistantCallbackStatusText" class="ai-bubble-v2__assistant-callback-status">
                 {{ assistantCallbackStatusText }}
               </text>
             </view>
             <image
               v-if="props.assistantCallbackConversationId"
               class="ai-bubble-v2__assistant-callback-arrow"
-              :src="iconArrowNext"
+              :src="iconRightArrow"
               mode="aspectFit"
             />
           </view>
+          <!-- 四行明细不等定稿：轮询中拿到多少先摆多少，缺的那行是「待识别」 -->
           <view
-            v-if="showAssistantCallbackResult && props.assistantCallbackDetails.length"
+            v-if="props.assistantCallbackDetails.length"
             class="ai-bubble-v2__assistant-callback-details"
           >
             <view
@@ -1486,6 +1490,38 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     border-color: transparent;
     background: transparent;
     box-shadow: none;
+  }
+
+  // ---- 维修助理回流卡：深色稿缺省，按回复卡同一材质（#212121 / 1px #303030）推导 ----
+  .ai-bubble-v2__assistant-callback-card {
+    border-color: #303030;
+    background: #212121;
+  }
+
+  // 图标是写死 #191B27 的深色 svg，深底上看不见；压成黑再反相成白
+  .ai-bubble-v2__assistant-callback-icon {
+    filter: brightness(0) invert(1);
+  }
+
+  .ai-bubble-v2__assistant-callback-title {
+    color: #ffffff;
+  }
+
+  // 副标题 / 序号 / 标签：与过程步骤态同一档灰，深底上仍可读
+  .ai-bubble-v2__assistant-callback-status,
+  .ai-bubble-v2__assistant-callback-index,
+  .ai-bubble-v2__assistant-callback-label {
+    color: #8f8f8f;
+  }
+
+  // 明细正文：与回复正文同档 80% 白
+  .ai-bubble-v2__assistant-callback-value {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  // 「看详情」箭头是黑色 png，深底上反相成白色，否则整颗看不见
+  .ai-bubble-v2__assistant-callback-arrow {
+    filter: brightness(0) invert(1);
   }
 
   // 步骤态 / 分区标签：#5D5D5D（与设计稿同值，显式写一遍，避免被深底吃掉）

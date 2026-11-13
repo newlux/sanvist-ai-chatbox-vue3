@@ -44,6 +44,7 @@ import { stripMarkdownTables } from "@/utils/ai-stream";
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
 import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
+import { resolveTtsLanguage } from "@/utils/asr/voice-language";
 import { getCurrentListenReportDate, getCurrentListenReportLanguage, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, permissionDeniedMessage } from "@/utils/platform/mpaas";
@@ -335,11 +336,12 @@ function cleanAnswerText(raw: string): string {
   return text;
 }
 
-function resolveAnswerTtsLanguage(): "zh" | "en" {
-  const raw = String(locale.value || "zh").toLowerCase();
-  if (raw.startsWith("zh")) return "zh";
-  if (raw.startsWith("en")) return "en";
-  return "zh";
+/**
+ * 问答回答的播报语言：优先本轮语音识别出来的语言（ASR 回传的 language），
+ * 没识别过才退回界面语言。
+ */
+function resolveAnswerTtsLanguage() {
+  return resolveTtsLanguage(locale.value);
 }
 
 function playNextAnswerTtsChunk(seq: number) {
@@ -1104,6 +1106,13 @@ async function startVoiceQuery() {
    * - 两条都不行（没有 WebSocket / 没有 WebAudio 且没有原生推流）才退到整段识别。
    */
   const useNativePcm = isNativePcmStreamSupported();
+  logger.warn("[voice] 开始一轮录音", {
+    seq,
+    backend: useNativePcm ? "native-pcm-stream" : "web-audio",
+    asrStream: isAsrStreamSupported(),
+    pcmSupported: isPcmCaptureSupported(),
+    mpaasReady: isMpaasReady(),
+  });
   if (!isAsrStreamSupported() || (!useNativePcm && !isPcmCaptureSupported())) {
     void startNativeVoiceQuery(seq);
     return;
@@ -1114,9 +1123,11 @@ async function startVoiceQuery() {
     const granted = await ensureNativePermission("record_audio");
     if (seq !== voiceSeq) return;
     if (!granted) {
+      logger.warn("[voice] 录音权限被拒", { seq });
       failVoiceQuery(permissionDeniedMessage("record_audio"));
       return;
     }
+    logger.info("[voice] 录音权限已授予，开始建 ASR 会话", { seq });
 
     const session = openAsrStreamSession({
       onPartial(text) {
@@ -1128,6 +1139,11 @@ async function startVoiceQuery() {
       onFinal(text) {
         if (seq !== voiceSeq) return;
         const query = String(text).trim();
+        logger.info("[voice] 拿到定稿文本", {
+          seconds: voiceSeconds.value,
+          chars: query.length,
+          text: query,
+        });
         // 占位气泡先留着：sendMessage 按 asrPending 找到它，原地改成正式提问
         resetVoiceQuery({ keepPlaceholder: true });
         // 静音 / 误触时服务端回空串：撤掉占位，提示重说，别拿空问题去提问
@@ -1164,6 +1180,10 @@ async function startVoiceQuery() {
       return;
     }
     voiceCapture = capture;
+    logger.info("[voice] 采集通道已就绪，等待实时字幕", {
+      seq,
+      backend: useNativePcm ? "native-pcm-stream" : "web-audio",
+    });
 
     /**
      * 8s 没人说话就自己收尾，别让麦克风空转。

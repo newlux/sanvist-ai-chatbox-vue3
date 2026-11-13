@@ -54,42 +54,42 @@ export function consumePendingRepairCallback() {
 /**
  * 回流卡片（AI 气泡里的 QA 卡片）文案与明细解析。
  * 回流数据整体是一段 JSON：故障诊断会带 status 字段，快速问答没有。
+ * 卡片形态统一：标题都只写「维修助理」，四项固定四行，没值的那行写「待识别」。
  */
 export interface RepairCallbackSummary {
   /** 卡片标题 */
   title: string;
-  /** 卡片副标题（标题下方那行状态文案） */
+  /** 卡片副标题（标题下方那行状态文案）；空串表示案例报告还没填全，卡片不显示这行 */
   statusText: string;
-  /** 卡片明细：设备 / 问题 / 结论 / 处理，空值会被过滤 */
+  /** 卡片明细：设备 / 问题 / 结论 / 处理，缺值的行是「待识别」 */
   details: Array<{ label: string; value: string }>;
   /** 维修助理侧会话 ID，有值时卡片可打开对应详情。 */
   repairConversationId: string;
 }
 
-/** 故障诊断（回流数据带 status） */
-const DIAGNOSIS_TITLE = "维修助理-机型诊断";
+/** 卡片标题：不再区分「快问快答 / 机型诊断」，统一只写「维修助理」 */
+const CALLBACK_TITLE = "维修助理";
+/** 案例报告四项齐全时的副标题 */
 const DIAGNOSIS_STATUS = "案例报告生成已完成";
-/**
- * 快速问答（回流数据没有 status）：卡片大标题只保留「维修助理」，
- * 不再拼「-快问快答」；问答类型看副标题（答案回复已生成）。
- */
-const QUICK_ANSWER_TITLE = "维修助理";
+/** 快速问答（回流数据没有 status）的副标题 */
 const QUICK_ANSWER_STATUS = "答案回复已生成";
+/** 四项里某一项还没值时，该行显示的占位文案 */
+const PENDING_VALUE = "待识别";
 
-/** 从回流数据里取明细，空值不展示 */
+/** 从回流数据里取明细：四项固定四行，没值的那行是「待识别」 */
 function pickRepairCallbackDetails(data: Record<string, unknown>) {
   return [
     { label: "设备", value: [data.equipmentCategory, data.model, data.deviceId].filter(Boolean).join(" ") },
     { label: "问题", value: String(data.problem || "") },
     { label: "结论", value: String(data.conclusion || "") },
     { label: "处理", value: String(data.treatment || "") },
-  ].filter(item => item.value);
+  ].map(item => ({ label: item.label, value: item.value.trim() || PENDING_VALUE }));
 }
 
 export interface RepairCaseReport {
   /** 机型 / 故障现象 / 交互排查 / 交互维修四项都有值才算「案例报告生成完成」 */
   ready: boolean;
-  /** 卡片明细：设备 / 问题 / 结论 / 处理，空值不展示 */
+  /** 卡片明细：固定设备 / 问题 / 结论 / 处理四行，没值的那行是「待识别」 */
   details: Array<{ label: string; value: string }>;
 }
 
@@ -102,8 +102,9 @@ export interface RepairCaseReport {
  * - 结论 = `state.troubleshooting_steps[0].text`
  * - 处理 = `state.repair_steps[0].text`
  *
- * 四项齐了才算报告生成完成 —— 这条判断取代了原来「后端 status=Completed」的口径，
- * 因为后者会在结论还是占位文案、四项还没填全的时候就到 Completed。
+ * 四行恒定展示：接口没回值（或压根没拿到 state）的那行写「待识别」，
+ * 不用空行或整块隐藏，用户能看出是哪一项还缺。
+ * `ready` 只决定副标题「案例报告生成已完成」显不显示 —— 四项没齐就不许说已完成。
  */
 export function parseRepairCaseReport(payload?: RepairInformationPayload | null): RepairCaseReport {
   const state = payload?.state;
@@ -114,32 +115,44 @@ export function parseRepairCaseReport(payload?: RepairInformationPayload | null)
   return {
     ready: Boolean(device && problem && conclusion && treatment),
     details: [
-      { label: "设备", value: device },
-      { label: "问题", value: problem },
-      { label: "结论", value: conclusion },
-      { label: "处理", value: treatment },
-    ].filter(item => item.value),
+      { label: "设备", value: device || PENDING_VALUE },
+      { label: "问题", value: problem || PENDING_VALUE },
+      { label: "结论", value: conclusion || PENDING_VALUE },
+      { label: "处理", value: treatment || PENDING_VALUE },
+    ],
   };
+}
+
+/**
+ * 案例报告的副标题文案：四项齐全才是「案例报告生成已完成」，缺任意一项返回空串。
+ * 空串在上层会被当成「这行不渲染」，避免出现「已完成 + 待识别」自相矛盾的卡片。
+ */
+export function repairCaseReportStatusText(report: RepairCaseReport) {
+  return report.ready ? DIAGNOSIS_STATUS : "";
 }
 
 /** 解析回流数据，得到卡片标题、副标题与明细 */
 export function parseRepairCallbackSummary(query: string): RepairCallbackSummary {
   const fallback: RepairCallbackSummary = {
-    title: DIAGNOSIS_TITLE,
-    statusText: DIAGNOSIS_STATUS,
-    details: [],
+    title: CALLBACK_TITLE,
+    // 解析不出数据等于四项全空：不给「已完成」，四行照留
+    statusText: "",
+    details: parseRepairCaseReport(null).details,
     repairConversationId: "",
   };
   if (!query) return fallback;
 
   try {
     const data = JSON.parse(query) as Record<string, unknown>;
-    // 快速问答没有 status 字段，只有故障诊断才有。
+    // 快速问答没有 status 字段，只有故障诊断才有；标题两种都只写「维修助理」，差异只落在副标题。
     const isDiagnosis = Boolean(data.status);
+    const details = pickRepairCallbackDetails(data);
+    // 四项没齐就不说「已完成」：副标题留空，气泡那边整行不渲染
+    const ready = details.every(item => item.value !== PENDING_VALUE);
     return {
-      title: isDiagnosis ? DIAGNOSIS_TITLE : QUICK_ANSWER_TITLE,
-      statusText: isDiagnosis ? DIAGNOSIS_STATUS : QUICK_ANSWER_STATUS,
-      details: pickRepairCallbackDetails(data),
+      title: CALLBACK_TITLE,
+      statusText: isDiagnosis ? (ready ? DIAGNOSIS_STATUS : "") : QUICK_ANSWER_STATUS,
+      details,
       repairConversationId: String(data.repairConversationId || data.repair_conversation_id || "").trim(),
     };
   }

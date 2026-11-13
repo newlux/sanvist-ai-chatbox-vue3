@@ -103,6 +103,11 @@ export async function startNativePcmCapture(handlers: NativePcmHandlers): Promis
   let lastSeq = -1;
   /** 收到过多少片：用来判断宿主是不是「start 成功但从不吐数据」 */
   let chunkCount = 0;
+  /** 重切成 100ms 一帧后真正推给 ASR 的帧数与字节数，收尾时打一条统计 */
+  let frameCount = 0;
+  let sentBytes = 0;
+  let peakLevel = 0;
+  const startedAt = Date.now();
   let watchdog: ReturnType<typeof setTimeout> | null = null;
 
   const unsubscribers = [
@@ -115,8 +120,13 @@ export async function startNativePcmCapture(handlers: NativePcmHandlers): Promis
         lastSeq = seq;
       }
       const bytes = decodeBase64(payload.base64 ?? payload.data);
-      if (!bytes.byteLength) return;
-      handlers.onLevel?.(measureLevel(bytes));
+      if (!bytes.byteLength) {
+        logger.debug("[pcm-native] 收到空分片（base64 解码后 0 字节）", { chunks: chunkCount, seq });
+        return;
+      }
+      const level = measureLevel(bytes);
+      if (level > peakLevel) peakLevel = level;
+      handlers.onLevel?.(level);
 
       const merged = new Uint8Array(carry.byteLength + bytes.byteLength);
       merged.set(carry, 0);
@@ -124,9 +134,22 @@ export async function startNativePcmCapture(handlers: NativePcmHandlers): Promis
       let offset = 0;
       while (merged.byteLength - offset >= FRAME_BYTES) {
         handlers.onFrame(merged.buffer.slice(offset, offset + FRAME_BYTES));
+        frameCount += 1;
+        sentBytes += FRAME_BYTES;
         offset += FRAME_BYTES;
       }
       carry = merged.slice(offset);
+      // 宿主 200ms 一片，5 片 = 1s 一条；每片都打会刷屏
+      if (chunkCount % 5 === 0) {
+        logger.debug("[pcm-native] 收到分片", {
+          chunks: chunkCount,
+          frames: frameCount,
+          bytes: sentBytes,
+          level: Number(level.toFixed(3)),
+          carry: carry.byteLength,
+          ms: Date.now() - startedAt,
+        });
+      }
     }),
     onNativeEvent("pcmStreamEnd", (payload) => {
       if (closed) return;
@@ -185,7 +208,16 @@ export async function startNativePcmCapture(handlers: NativePcmHandlers): Promis
         const padded = new Uint8Array(FRAME_BYTES);
         padded.set(carry);
         handlers.onFrame(padded.buffer);
+        frameCount += 1;
+        sentBytes += FRAME_BYTES;
       }
+      logger.info("[pcm-native] 采集已停止", {
+        ms: Date.now() - startedAt,
+        chunks: chunkCount,
+        frames: frameCount,
+        bytes: sentBytes,
+        peak: Number(peakLevel.toFixed(3)),
+      });
       teardown();
       void callNative("pcmStreamStop", {}, { timeoutMs: STOP_TIMEOUT_MS, silentTimeout: true })
         .catch(error => logger.warn("[pcm-native] pcmStreamStop 失败", error));

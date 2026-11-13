@@ -3,6 +3,7 @@ import { useI18n } from "vue-i18n";
 import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete.svg";
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
+import autoTtsOffDarkIcon from "@/assets/img/icon-tts-auto-off-dark.png";
 import autoTtsOffIcon from "@/assets/img/icon-tts-auto-off.png";
 import autoTtsOnIcon from "@/assets/img/icon-tts-auto-on.png";
 import listenLogoGif from "@/assets/img/listen.gif";
@@ -114,7 +115,6 @@ const systemStore = useSystemStore();
  */
 const settingsStore = useSettingsStore();
 const autoTtsEnabled = computed(() => settingsStore.autoTtsEnabled);
-const autoTtsIcon = computed(() => (autoTtsEnabled.value ? autoTtsOnIcon : autoTtsOffIcon));
 
 function onToggleAutoTts() {
   settingsStore.setAutoTtsEnabled(!autoTtsEnabled.value);
@@ -126,6 +126,14 @@ function onToggleAutoTts() {
  * 分享选择态是白底文字条，同理先不跟深色走。
  */
 const darkPlain = computed(() => props.plainBg && !props.shareMode && systemStore.isDark);
+/**
+ * 自动播报开关图标：关闭态在深色下换专用图（深色稿里是白线）。
+ * 换成专用图后不能再走头部的统一反相，否则白线会被反成黑色，见样式里 tts-switch--off 的 filter: none。
+ */
+const autoTtsIcon = computed(() => {
+  if (autoTtsEnabled.value) return autoTtsOnIcon;
+  return darkPlain.value ? autoTtsOffDarkIcon : autoTtsOffIcon;
+});
 const answering = computed(() => {
   if (!props.generating) return false;
   const list = chatStore.messages;
@@ -1109,6 +1117,11 @@ onBeforeUnmount(() => {
     filter: brightness(0) invert(1);
   }
 
+  // 自动播报「关闭态」深色下走专用图 icon-tts-auto-off-dark.png（本身就是白线），
+  // 再反相会变成黑色，所以这一种情况免掉反相
+  .chat-header__tts-switch--off .chat-header__icon-tts-img {
+    filter: none;
+  }
 }
 
 :deep(.uni-popup) {

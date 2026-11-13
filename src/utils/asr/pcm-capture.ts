@@ -205,6 +205,16 @@ export async function startPcmCapture(handlers: PcmCaptureHandlers): Promise<Pcm
   // 部分 WebView 建连后仍是 suspended，不显式唤醒的话 ScriptProcessor 一个回调都不会来
   await ensureContextRunning(context);
 
+  const startedAt = Date.now();
+  /** 首帧到达时打一条：判断 WebAudio 到底有没有开始出数据 */
+  let firstFrameAt = 0;
+  logger.info("[pcm] 采集已启动", {
+    sampleRate: context.sampleRate,
+    state: context.state,
+    android: isAndroidWebView(),
+    tracks: stream.getAudioTracks().map(track => ({ label: track.label, muted: track.muted, readyState: track.readyState })),
+  });
+
   const source = context.createMediaStreamSource(stream);
   const processor = context.createScriptProcessor(PROCESSOR_BUFFER_SIZE, 1, 1);
   // ScriptProcessor 必须接到 destination 才会被驱动；串一个 0 增益，避免把麦克风回放出来
@@ -249,6 +259,10 @@ export async function startPcmCapture(handlers: PcmCaptureHandlers): Promise<Pcm
       frameSquares = 0;
       frameCount += 1;
       if (level > peakLevel) peakLevel = level;
+      if (frameCount === 1) {
+        firstFrameAt = Date.now();
+        logger.info("[pcm] 首帧已产出", { ms: firstFrameAt - startedAt, level: Number(level.toFixed(3)) });
+      }
       handlers.onLevel?.(level);
       // 必须复制出去：pending 会被下一帧复用
       handlers.onFrame(pending.buffer.slice(0));
@@ -299,6 +313,13 @@ export async function startPcmCapture(handlers: PcmCaptureHandlers): Promise<Pcm
     if (stopped) return;
     stopped = true;
     clearTimeout(diagTimer);
+    logger.info("[pcm] 采集已停止", {
+      ms: Date.now() - startedAt,
+      frames: frameCount,
+      bytes: frameCount * FRAME_SAMPLES * 2,
+      peak: Number(peakLevel.toFixed(3)),
+      firstFrameMs: firstFrameAt ? firstFrameAt - startedAt : null,
+    });
     processor.onaudioprocess = null;
     try {
       source.disconnect();

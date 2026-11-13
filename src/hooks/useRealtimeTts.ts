@@ -7,6 +7,7 @@ import { useI18n } from "vue-i18n";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { resolveReportVoiceId, waitReportVoiceSynced } from "@/hooks/useReportVoice";
 import { useChatStore, useSettingsStore } from "@/stores";
+import { resolveTtsLanguage } from "@/utils/asr/voice-language";
 import { createLogger } from "@/utils/logger";
 import { markdownToPlainText } from "@/utils/markdown-to-text";
 
@@ -126,9 +127,12 @@ export function useRealtimeTts(scope?: string) {
   /** 用户手动停止过的消息：后续增量不再自动重启听播。 */
   const manualStopKeys = new Set<string>();
 
+  /**
+   * 播报语言：优先本轮语音识别出来的语言（ASR 回传的 language），
+   * 用户用英文提问、界面还是中文时，英文答案要按英文合成；没识别过才退回界面语言。
+   */
   function currentLanguage() {
-    const rawLanguage = String(locale.value || "zh").toLowerCase();
-    return rawLanguage.startsWith("zh") ? "zh" : rawLanguage.startsWith("en") ? "en" : "zh";
+    return resolveTtsLanguage(locale.value);
   }
 
   /**
@@ -137,6 +141,8 @@ export function useRealtimeTts(scope?: string) {
    */
   function buildTtsParams(text: string, language: string): RealtimeTtsParams {
     const voice = resolveReportVoiceId();
+    // 端上排查「播报语种不对」时，先看这里用的 language 是不是识别语言
+    logger.debug("tts 请求参数", { language, chars: text.length, voice: voice || "(默认)" });
     return { text, language, ...(voice ? { voice } : {}) };
   }
 
@@ -391,8 +397,7 @@ export function useRealtimeTts(scope?: string) {
     stop();
     streamFinished = false;
     const seq = ++sessionSeq;
-    const rawLanguage = String(locale.value || "zh").toLowerCase();
-    const language = rawLanguage.startsWith("zh") ? "zh" : rawLanguage.startsWith("en") ? "en" : "zh";
+    const language = currentLanguage();
     playingMessageId.value = messageId;
     playingMessageKey.value = String(message.id ?? messageId);
     playingStepId.value = stepId;

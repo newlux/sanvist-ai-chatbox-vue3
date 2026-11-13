@@ -343,6 +343,12 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
   function stopVoiceQuery() {
     if (!voiceQueryActive.value || voiceFinishing.value) return;
     voiceFinishing.value = true;
+    logger.info("[voice-query] 停止录音（等 final）", {
+      seconds: voiceSeconds.value,
+      backend: voiceBackend,
+      heard: voiceHeard,
+      level: Number(voiceLevel.value.toFixed(3)),
+    });
     speechEndDetector.reset();
     // 计时停在这里：底部条要显示「最终录了几秒」，不要再涨
     if (voiceTickTimer) {
@@ -366,6 +372,11 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
   /** 取消这一轮：直接断流，不发 finish、不落气泡 */
   function cancelVoiceQuery() {
     if (!voiceQueryActive.value) return;
+    logger.info("[voice-query] 取消录音", {
+      seconds: voiceSeconds.value,
+      backend: voiceBackend,
+      finishing: voiceFinishing.value,
+    });
     resetVoiceQuery();
   }
 
@@ -415,9 +426,11 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
      */
     const useNativePcm = isNativePcmStreamSupported();
     // 语音链路排查入口：这一轮走哪条采集通道、ASR 流式可不可用、带的是哪条 token
-    logger.warn("[voice-query] 开始一轮", {
+    logger.warn("[voice-query] 开始一轮录音", {
+      seq,
       backend: useNativePcm ? "native-pcm-stream" : "web-audio",
       asrStream: isAsrStreamSupported(),
+      pcmSupported: isPcmCaptureSupported(),
       token: describeRequestAuth(),
     });
     if (!isAsrStreamSupported() || (!useNativePcm && !isPcmCaptureSupported())) {
@@ -430,9 +443,11 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
       const granted = await ensureNativePermission("record_audio");
       if (seq !== voiceSeq) return;
       if (!granted) {
+        logger.warn("[voice-query] 录音权限被拒", { seq });
         failVoiceQuery(permissionDeniedMessage("record_audio"));
         return;
       }
+      logger.info("[voice-query] 录音权限已授予，开始建 ASR 会话", { seq });
 
       const session = openAsrStreamSession({
         onPartial(text) {
@@ -447,6 +462,11 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
         onFinal(text) {
           if (seq !== voiceSeq) return;
           const query = String(text).trim();
+          logger.info("[voice-query] 拿到定稿文本", {
+            seconds: voiceSeconds.value,
+            chars: query.length,
+            text: query,
+          });
           // 占位气泡的 id 要在 reset 清空之前留住：final 之后它要接着停在顶部
           const placeholderIdAfterFinal = voicePlaceholderId.value;
           if (query) options.onBeforeSubmit?.();
@@ -487,6 +507,10 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
         return;
       }
       voiceCapture = capture;
+      logger.info("[voice-query] 采集通道已就绪，等待实时字幕", {
+        seq,
+        backend: useNativePcm ? "native-pcm-stream" : "web-audio",
+      });
 
       /**
        * 8s 没人说话就自己收尾，别让麦克风空转。

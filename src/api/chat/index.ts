@@ -27,6 +27,7 @@ import type {
 import { i18n } from "@/i18n";
 import { toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
 import { isAsrServiceFailure } from "@/utils/asr-error";
+import { setVoiceInputLanguage } from "@/utils/asr/voice-language";
 import { createLogger } from "@/utils/logger";
 import { request } from "@/utils/request";
 
@@ -42,6 +43,15 @@ function rethrowAsrError(error: unknown): never {
     throw new Error(i18n.global.t("asr-no-content-retry"));
   }
   throw error;
+}
+
+/**
+ * 整段识别（url / base64 / upload）同样会回 `language`：
+ * 和流式那条一样记到 voice-language，回答播报按识别语言合成。
+ */
+function rememberRecognizedLanguage<T extends { language?: string }>(result: T) {
+  setVoiceInputLanguage(result?.language);
+  return result;
 }
 
 export { consumeTextToSpeechStream } from "./tts-stream";
@@ -336,7 +346,7 @@ export function recognizeSpeechByUrl(params: RecognizeSpeechByUrlParams) {
   return request.post<SpeechRecognitionResult>("/speech/asr/url/v2", {
     audioUrl: params.audioUrl,
     ...(params.language ? { language: params.language } : {}),
-  }, jsonOptions).json().catch(rethrowAsrError);
+  }, jsonOptions).json().then(rememberRecognizedLanguage).catch(rethrowAsrError);
 }
 
 /**
@@ -348,7 +358,7 @@ export function recognizeSpeechByBase64(params: RecognizeSpeechByBase64Params) {
     audioBase64: params.audioBase64,
     ...(params.mimeType ? { mimeType: params.mimeType } : {}),
     ...(params.language ? { language: params.language } : {}),
-  }, jsonOptions).json().catch(rethrowAsrError);
+  }, jsonOptions).json().then(rememberRecognizedLanguage).catch(rethrowAsrError);
 }
 
 export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {
@@ -358,7 +368,7 @@ export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {
     name: "file",
     fileType: "audio",
     timeout: params.timeout,
-  }).json().catch(rethrowAsrError);
+  }).json().then(rememberRecognizedLanguage).catch(rethrowAsrError);
 }
 
 /**

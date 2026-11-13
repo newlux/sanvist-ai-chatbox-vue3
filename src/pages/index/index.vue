@@ -63,7 +63,7 @@ import { createLogger } from "@/utils/logger";
 import { openPartsAssistant } from "@/utils/parts-h5";
 import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
 import { getRepairConversationId } from "@/utils/repair-bridge";
-import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, parseRepairCaseReport } from "@/utils/repair-callback";
+import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, parseRepairCaseReport, repairCaseReportStatusText } from "@/utils/repair-callback";
 import { openRepairAssistant } from "@/utils/repair-h5";
 import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
@@ -391,11 +391,11 @@ function startRepairSummaryCallback() {
       }
 
       /** 结果就绪：把卡片标题 / 副标题 / 明细 / 会话 ID 补齐，再走回流接口。 */
-      const finish = async (details: Array<{ label: string; value: string }>, reason: string) => {
+      const finish = async (details: Array<{ label: string; value: string }>, statusText: string, reason: string) => {
         clearRepairSummaryPolling();
         chatStore.patchMessageById(aiMsgId, {
           assistantCallbackTitle: summary.title,
-          assistantCallbackStatus: summary.statusText,
+          assistantCallbackStatus: statusText,
           assistantCallbackDetails: details,
           assistantCallbackConversationId: patchedConversationId,
         });
@@ -404,26 +404,14 @@ function startRepairSummaryCallback() {
           reason,
           status: status || "(无 status)",
           conversationId: patchedConversationId || "(空)",
-          details: details.map(item => item.label),
+          details: details.map(item => `${item.label}:${item.value}`),
         });
         await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: t("repair-callback-quick-qa") });
       };
 
       /**
-       * 快速问答：回流数据没有 status，首次取到就是结果，直接回流。
-       */
-      if (!status) {
-        await finish(summary.details, "无 status（快速问答）");
-        return;
-      }
-
-      /**
-       * 机型诊断：以三方「案例报告」为准 ——
-       * 机型 / 故障现象 / 交互排查第一条 / 交互维修第一条四项都有值才算生成完成（见 parseRepairCaseReport）。
-       *
-       * 原来按后端 status=Completed 判断，会在四项还没填全（结论还是占位文案）时就回流；
-       * 现在 status 只当兜底：拿不到会话 ID 或三方接口失败时，退回旧口径，
-       * 避免三方接口一抖动，卡片就永远等不到回流。
+       * 案例报告：明细一律取三方「案例报告状态」，四项固定四行，没值的那行是「待识别」。
+       * 拿不到（没会话 ID / 接口失败）就当四项全空，卡片照样出，不空着等。
        */
       let caseReport: RepairCaseReport | null = null;
       if (conversationId) {
@@ -431,23 +419,56 @@ function startRepairSummaryCallback() {
           caseReport = parseRepairCaseReport(await getRepairInformationState(conversationId));
         }
         catch (error) {
-          logger.warn("案例报告状态查询失败，本轮退回 status 口径", { conversationId, status }, error);
+          logger.warn("案例报告状态查询失败，本轮按未填全处理", { conversationId, status }, error);
         }
       }
-      const ready = caseReport ? caseReport.ready : status === "Completed";
-      if (ready) {
+
+      /**
+       * 卡片不等四项齐全：拿到多少先摆多少。
+       * 副标题只在四项全有值时才是「案例报告生成已完成」，缺任何一项就传空 —— 气泡那边空文案整行不渲染。
+       */
+      if (caseReport) {
+        chatStore.patchMessageById(aiMsgId, {
+          assistantCallbackTitle: summary.title,
+          assistantCallbackStatus: repairCaseReportStatusText(caseReport),
+          assistantCallbackDetails: caseReport.details,
+        });
+      }
+
+      /** 四项齐全：定稿回流。 */
+      if (caseReport?.ready) {
+        await finish(caseReport.details, repairCaseReportStatusText(caseReport), "案例报告四项已齐");
+        return;
+      }
+
+      /**
+       * 回流数据没有 status（历史口径里的快速问答）：首次取到就是结果，直接回流。
+       * 卡片形态不再分快问快答 / 机型诊断，有三方案例报告就按报告出，副标题同样只在四项齐全时给。
+       */
+      if (!status) {
         await finish(
           caseReport?.details || summary.details,
-          caseReport ? "案例报告四项已齐" : `status=${status}`,
+          caseReport ? repairCaseReportStatusText(caseReport) : summary.statusText,
+          "无 status（快速问答）",
         );
         return;
       }
-      // 缺哪一项一眼能看出来：filled 里没有的 label 就是三方还没填的
+
+      /**
+       * 拿不到三方状态的兜底：退回旧口径 status=Completed 就算结束，
+       * 明细按四项全空渲染（全「待识别」），避免三方接口一抖动，卡片就永远等不到回流。
+       */
+      if (!caseReport && status === "Completed") {
+        await finish(parseRepairCaseReport(null).details, "", `status=${status}`);
+        return;
+      }
+
+      // 缺哪一项一眼能看出来：日志里逐行打 label:value，值还是「待识别」的就是三方没填的
       logger.debug("案例报告还没生成完，继续轮询", {
         attempt: repairSummaryPollingAttempts,
         status,
         hasConversationId: Boolean(conversationId),
-        filled: caseReport?.details.map(item => item.label) || [],
+        details: caseReport?.details.map(item => `${item.label}:${item.value}`) || [],
       });
     }
     catch (error) {

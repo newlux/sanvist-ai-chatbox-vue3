@@ -205,6 +205,19 @@
         "enablePullDownRefresh": false,
         "disableScroll": true
       }
+    },
+    {
+      "path": "pages/persona-awakening/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "",
+        "transparentTitle": "always",
+        "allowsBounceVertical": "NO",
+        "enablePullDownRefresh": false,
+        "disableScroll": true,
+        "backgroundColor": "#0D0D0D"
+      }
     }
   ],
   "globalStyle": {

@@ -4,7 +4,6 @@ import { useI18n } from "vue-i18n";
 import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
 import iconRepair from "@/assets/img/icon-repair.svg";
-import iconVox from "@/assets/img/icon-vox.svg";
 import { usePcMode } from "@/hooks/usePcMode";
 
 /** 快捷入口。mode=page 另开专属页面（url 指向对应场景页） */
@@ -65,16 +64,9 @@ const { t } = useI18n();
 
 const { isPc } = usePcMode();
 
-// 入口：听汇报 / 作业指导 / 任务协同 / 维修助理，全部另开专属场景页
+// 入口：作业指导 / 任务协同 / 维修助理，全部另开专属场景页
+// 听汇报只在概览卡 / 对话里的入口卡出现，不再占底部胶囊位
 const DEFAULT_NAV_ITEMS: NavItem[] = [
-  {
-    key: "vox-core",
-    titleKey: "nav-report",
-    icon: iconVox,
-    subagent: "report",
-    mode: "page",
-    url: "/pages/podcast/index",
-  },
   {
     key: "fix-master-ai",
     titleKey: "nav-guide",
