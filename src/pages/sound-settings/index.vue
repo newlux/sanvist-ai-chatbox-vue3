@@ -5,7 +5,6 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { getListenBroadcastConfig } from "@/api/listen-broadcast";
 import backIcon from "@/assets/img/icon-sound-settings-back.svg";
-import waveActiveIcon from "@/assets/img/icon-sound-settings-wave-active.svg";
 import waveIcon from "@/assets/img/icon-sound-settings-wave.svg";
 import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
 import { saveReportVoiceByStyle } from "@/hooks/useReportVoice";
@@ -36,9 +35,10 @@ import { createLogger } from "@/utils/logger";
  *
  * 交互：
  * - 点整张音色卡 = 选中并立即落库；点右侧波形图标 = 试听（本地 wav），
- *   播放中图标换成蓝色音波条并做呼吸动效，再点一次停止；
+ *   播放中换成发起问答页「SANI 后面自动播报」那套 4 根蓝色声波条（错峰起伏），再点一次停止；
  * - 倍率每次切档（松手 / 点击档位）立即落库，不做节流；
- * - 落库成功「保存成功」、失败「保存失败，请稍后重试」，统一用页面正中的白底蓝边胶囊提示。
+ * - 落库成功「保存成功」、失败「保存失败，请稍后重试」，统一用页面正中的胶囊提示：
+ *   浅色白底蓝边黑字，深色近透明黑底（#0000000A）蓝边白字。
  *
  * 深色模式（203:1093 深色稿）：页面 #1A1A1A、卡片 #303030、文字 #FFFFFF / #8E8E8E、
  * 数值 #5D5D5D、强调 #1166D6、轨道 #F3F3F3；外观为深色时由 .sound-settings--dark 覆盖配色，
@@ -124,8 +124,7 @@ const selectedVoiceCode = computed(() => {
 });
 /** 当前值落在第几档（五档等分轨道，0 = 1.0x，4 = 2.0x） */
 const rateIndex = computed(() => nearestRateIndex(rate.value));
-/** 轨道中间三档的刻度点（1.2 / 1.5 / 1.8），两端由刻度文字表示 */
-const rateDots = computed(() => RATE_OPTIONS.slice(1, -1));
+/** 轨道上不再画中间三档刻度点，档位只由滑块位置 + 两端 1.0x / 2.0x 文字体现 */
 const rateRatio = computed(() => rateIndex.value / (RATE_OPTIONS.length - 1));
 /** 设计稿 180:183 文案「1.20x（默认）」：等于默认倍率时补后缀，浮点按误差判定 */
 const isDefaultRate = computed(() => Math.abs(rate.value - DEFAULT_RATE) < 0.001);
@@ -460,14 +459,6 @@ onMounted(async () => {
           >
             <view class="sound-settings__slider-track">
               <view class="sound-settings__slider-progress" :style="{ width: `${rateRatio * 100}%` }" />
-              <!-- 中间三档刻度点（1.2x / 1.5x / 1.8x），两端由下方 1.0x / 2.0x 文字表示，共 5 档 -->
-              <view
-                v-for="(option, index) in rateDots"
-                :key="option"
-                class="sound-settings__slider-dot"
-                :class="{ 'sound-settings__slider-dot--active': index + 1 <= rateIndex }"
-                :style="{ left: `${((index + 1) / (RATE_OPTIONS.length - 1)) * 100}%` }"
-              />
               <view class="sound-settings__slider-thumb" :style="{ left: `${rateRatio * 100}%` }" />
             </view>
           </view>
@@ -500,14 +491,18 @@ onMounted(async () => {
               <!-- 180:212 说明 12px #8E8E8E -->
               <text v-if="voice.slogan" class="sound-settings__voice-desc">{{ voice.slogan }}</text>
             </view>
-            <!-- 198:168 Frame 117：18×18 波形图标，点击试听（播放中换蓝色并做呼吸动效） -->
+            <!-- 198:168 Frame 117：18×18 波形图标，点击试听。
+                 播放中换成发起问答页「SANI 后面自动播报」那一套 4 根蓝色声波条（同尺寸、同动效） -->
             <view class="sound-settings__voice-play" @tap.stop="togglePreview(voice)">
-              <image
-                class="sound-settings__voice-icon"
-                :class="{ 'sound-settings__voice-icon--playing': playingCode === voice.code }"
-                :src="playingCode === voice.code ? waveActiveIcon : waveIcon"
-                mode="aspectFit"
-              />
+              <view v-if="playingCode === voice.code" class="sound-settings__voice-wave">
+                <view
+                  v-for="index in 4"
+                  :key="index"
+                  class="sound-settings__voice-wave-bar"
+                  :class="`sound-settings__voice-wave-bar--${index}`"
+                />
+              </view>
+              <image v-else class="sound-settings__voice-icon" :src="waveIcon" mode="aspectFit" />
             </view>
           </view>
         </view>
@@ -532,18 +527,20 @@ onMounted(async () => {
   background: #fafafa;
 }
 
-/* 保存结果提示：白底 + 1px（2rpx）#1166D6 描边 + 胶囊圆角，文字 15px（30rpx）#0D0D0D，
-   固定页面正中；pointer-events 关掉，不挡下面卡片的点击 */
+/* 保存结果提示：白底 + 1px（2rpx）#1166D6 描边 + 圆角 12px（24rpx），文字 15px（30rpx）#0D0D0D，
+   水平居中、垂直落在列表面板下段（「专业播报」与「灵动可爱」两张卡之间）；
+   深色底是近透明的 #0000000A，压到文字上会透出字影，位置往下调时要避开卡片文案 */
 .sound-settings__toast {
   position: fixed;
   z-index: 1200;
-  bottom: 20%;
+  /* 12% 再下移 4px（= 8rpx）：按 375×812 的截图换算，胶囊中心落在「专业播报」与「灵动可爱」两张卡之间 */
+  bottom: calc(12% - 8rpx);
   left: 50%;
   box-sizing: border-box;
   min-width: 200rpx;
   padding: 16rpx 36rpx;
   border: 2rpx solid #1166d6;
-  border-radius: 40rpx;
+  border-radius: 24rpx; /* 12px：比 8px 圆一点，但仍不是胶囊 */
   background: #ffffff;
   color: #0d0d0d;
   font-size: 30rpx;
@@ -665,22 +662,7 @@ onMounted(async () => {
   transition: width 120ms ease-out;
 }
 
-/* 五档刻度点：中间三档（1.2 / 1.5 / 1.8）画 4px（8rpx）圆点，
-   未选中在灰轨道上是 #D6D6D6，被蓝色进度覆盖后翻白，一眼能看出只有 5 档 */
-.sound-settings__slider-dot {
-  position: absolute;
-  top: 50%;
-  width: 8rpx;
-  height: 8rpx;
-  border-radius: 50%;
-  background: #d6d6d6;
-  transform: translate(-50%, -50%);
-  transition: background-color 120ms ease-out;
-}
-
-.sound-settings__slider-dot--active {
-  background: #ffffff;
-}
+/* 轨道上不画刻度点：档位只靠滑块位置 + 两端 1.0x / 2.0x 文字体现（拖动吸附逻辑不变） */
 
 /* 180:182：滑块 10×10（20×20rpx），白底 + 2px（4rpx）#1166D6 描边 */
 .sound-settings__slider-thumb {
@@ -816,21 +798,53 @@ onMounted(async () => {
   height: 36rpx;
 }
 
-/* 播放中：图标换成 #1166D6 版本并做呼吸动效，提示「正在试听」 */
-.sound-settings__voice-icon--playing {
-  animation: sound-settings-wave 0.9s ease-in-out infinite;
+/* 播放中：换成发起问答页自动播报那颗音频指示——4 根蓝色声波条错峰起伏（从左往右推进），
+   尺寸 32rpx 与气泡里那套完全一致，所以两处观感统一 */
+.sound-settings__voice-wave {
+  display: flex;
+  width: 32rpx;
+  height: 32rpx;
+  align-items: center;
+  justify-content: center;
+  gap: 4rpx;
 }
 
-@keyframes sound-settings-wave {
+.sound-settings__voice-wave-bar {
+  width: 4rpx;
+  height: 24rpx;
+  border-radius: 4rpx;
+  background: #1a6dff;
+  transform-origin: center center;
+  animation: sound-settings-voice-wave 0.9s ease-in-out infinite;
+}
+
+.sound-settings__voice-wave-bar--1 {
+  animation-delay: 0s;
+}
+
+.sound-settings__voice-wave-bar--2 {
+  animation-delay: 0.12s;
+}
+
+.sound-settings__voice-wave-bar--3 {
+  animation-delay: 0.24s;
+}
+
+.sound-settings__voice-wave-bar--4 {
+  animation-delay: 0.36s;
+}
+
+/* 与气泡里的 ai-bubble-tts-wave 同一组关键帧：只有高度起伏，宽度不变 */
+@keyframes sound-settings-voice-wave {
   0%,
   100% {
-    opacity: 1;
-    transform: scale(1);
+    transform: scaleY(0.35);
+    opacity: 0.6;
   }
 
   50% {
-    opacity: 0.45;
-    transform: scale(0.86);
+    transform: scaleY(1);
+    opacity: 1;
   }
 }
 
@@ -872,7 +886,7 @@ onMounted(async () => {
 
   /* 203:1205 Rectangle 181：轨道 299×4 #F3F3F3，圆角 4 —— 深色稿仍是近白轨道 */
   .sound-settings__slider-track {
-    background: #f3f3f3;
+    background: #5d5d5d;
   }
 
   /* 203:1200 Rectangle 182：已播进度 #1166D6，圆角 4 */
@@ -923,10 +937,18 @@ onMounted(async () => {
   /* 203:1124 Frame 18：「默认」徽标深色稿是白底 #FFFFFF + #1166D6 文字
      （浅色稿为 10% 蓝底 + 蓝字），圆角 5（10rpx）、内边距 1/5/1/5 */
   .sound-settings__voice-badge {
-    background: #ffffff;
-    color: #1166d6;
+   background: #003883;
+    color: #d3e6ff;
   }
 
   /* 203:1129 等 Frame 117：波形图标描边 #9E9E9E，与现有 SVG 色值一致，无需覆盖 */
+
+  /* 保存提示：深色下不再用白底胶囊，换成「近透明黑底 + #1166D6 描边 + 白字」，
+     贴在 #1A1A1A 页面上是一层更暗的浮标，不再是一块刺眼的白 */
+  .sound-settings__toast {
+    border-color: #1166d6;
+    background: #0000000a; /* rgba(0, 0, 0, 0.04)：比页面底再暗一点点 */
+    color: #ffffff;
+  }
 }
 </style>

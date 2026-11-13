@@ -92,9 +92,10 @@ const rawTagStyle = {
 };
 
 /**
- * 深色正文配色（Ardot 1193:5104）：
- * - 正文 p：1193:5140「设备运行状态正常…」14 / 24 / #FFFFFF 80%（行高 24px = 48rpx）
- * - 标题 / 加粗：设计稿没有标题态，取正文白的实色 #FFFFFF
+ * 深色正文配色（Ardot 1193:5104，正文色按需求从 80% 白抬到实色）：
+ * - 正文 p / li / 表格单元格：一律 #FFFFFF（行高 24px = 48rpx）
+ * - 标题 / 加粗：实色 #FFFFFF，与正文同级
+ * - 引用块保留次级灰白 #BABABA（引文语义，不与正文抢主次）
  * - 引用块 / 分割线 / 表格描边：与深色卡分隔线 1193:5139 同值 #303030
  * - code / pre：设计稿未给代码态，只把浅色底换成中性深色，文字保留原强调色
  * 只追加同名属性（后写的覆盖前面的），字号 / 行高 / 间距一律不动。
@@ -106,18 +107,19 @@ const darkTagOverrides: Record<string, string> = {
   h4: "color: #ffffff;",
   h5: "color: #ffffff;",
   h6: "color: #ffffff;",
-  p: "color: rgba(255, 255, 255, 0.8); line-height: 48rpx;",
+  // 正文一律纯白：深色稿原先给的是 80% 白，端上看着发灰，按需求统一抬到 #FFFFFF
+  p: "color: #ffffff; line-height: 48rpx;",
   strong: "color: #ffffff;",
-  li: "color: rgba(255, 255, 255, 0.8);",
+  li: "color: #ffffff;",
   blockquote: "color: #bababa; background: rgba(255, 255, 255, 0.06); border-left-color: #303030;",
   hr: "background: #303030;",
   pre: "background: #1a1a1a;",
   code: "background: #303030;",
-  // 表格：文字色与外部正文完全一致（同 p 的 80% 白），只换描边，不铺底
+  // 表格：文字色与外部正文完全一致（纯白），只换描边，不铺底
   // （浅色稿表头的 #E1F0FF 在这里要被顶掉，深底上铺淡蓝会看不清白字）
-  table: "color: rgba(255, 255, 255, 0.8);",
-  th: "border-color: #303030; background: transparent; color: rgba(255, 255, 255, 0.8);",
-  td: "border-color: #303030; color: rgba(255, 255, 255, 0.8);",
+  table: "color: #ffffff;",
+  th: "border-color: #303030; background: transparent; color: #ffffff;",
+  td: "border-color: #303030; color: #ffffff;",
 };
 
 // 首次渲染时才计算：根字号是 uni 启动后设的，模块加载期取到的可能还是浏览器默认值
@@ -281,8 +283,8 @@ function parseMarkdown(content) {
   }
 }
 
-/** 深色正文色（Ardot 1193:5140）：表格单元格要和表格外的正文同色 */
-const DARK_TEXT_COLOR = "rgba(255, 255, 255, 0.8)";
+/** 深色正文色：表格单元格要和表格外的正文同色（纯白，与 p / li 一致） */
+const DARK_TEXT_COLOR = "#ffffff";
 
 /**
  * 深色下把正文色直接写进表格标签的 style。
@@ -454,10 +456,10 @@ function onParseError(e) {
 /* ===== 深色容器（Ardot 1193:5104 → 正文 1193:5140）=====
    正文主体在 tagStyle 里换色，这里补不走行内样式的兜底：容器默认字色、纯文本降级、表格 */
 .markdown-renderer--dark {
-  color: rgba(255, 255, 255, 0.8);
+  color: #ffffff;
 
   .markdown-renderer__fallback {
-    color: rgba(255, 255, 255, 0.8);
+    color: #ffffff;
   }
 
   /* 表格：mp-html 会把 table / tr / th / td 重写成 table 布局的模拟结构，
@@ -466,7 +468,7 @@ function onParseError(e) {
      单元格里的 code / a 有自己的行内色，行内优先级更高，不受影响。 */
   :deep(table),
   :deep(table *) {
-    color: rgba(255, 255, 255, 0.8);
+    color: #ffffff;
   }
 }
 </style>

@@ -1458,10 +1458,10 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
    */
   margin: 20rpx 0;
 
-  // ---- 发问：气泡 1193:5111 ----
+  // ---- 发问：气泡 1193:5111（深色底抬到 #3A3A3A，比页面底 #1A1A1A 高两档，发问与回复一眼分得开）----
   &.ai-bubble-v2--user .ai-bubble-v2__body {
     border-color: #303030;
-    background: #1a1a1a;
+    background: #3a3a3a;
   }
 
   &.ai-bubble-v2--user .ai-bubble-v2__user-content,
@@ -1530,6 +1530,16 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     color: #5d5d5d;
   }
 
+  // 品牌行「SANI」：深色下固定 #FFFFFF。
+  // 浅色那套是 background-clip: text 的灰色流光，深底上又暗又花，所以连背景图、
+  // -webkit-text-fill-color、动画一起清掉；失败 / 停止两态（红 / 灰文案）保持原色不动。
+  .ai-bubble-v2__process-status:not(.ai-bubble-v2__process-status--failed):not(.ai-bubble-v2__process-status--stopped) .ai-bubble-v2__process-text {
+    color: #ffffff;
+    background-image: none;
+    -webkit-text-fill-color: #ffffff;
+    animation: none;
+  }
+
   // 语音播报图标 1193:5120：全部 #8F8F8F 线框。
   // 图标是自带颜色的 svg，先压成纯黑再反相到 #8F8F8F；点赞 / 点踩选中的那两颗保留品牌色
   .ai-bubble-v2__action-btn:not(.ai-bubble-v2__action-btn--liked):not(.ai-bubble-v2__action-btn--disliked) .ai-bubble-v2__action-icon {
@@ -1566,10 +1576,27 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   }
 
   // 胶囊材质与「身份选择」那组（GuideSuggestionBlock）深色态保持一致：
-  // 6% 白底 + 16% 白描边，正文色 #E5E5E5。
+  // 6% 白底 + 1px 内描边线性渐变 #5A5A5A → #F7F7F7 → #5A5A5A，正文色 #E5E5E5。
+  // 原生 border 只能单色，所以 border 留作占位（透明），渐变环用「渐变底 + mask 挖掉内容区」画。
   :deep(.ask-slot__option) {
-    border-color: rgba(255, 255, 255, 0.16);
-    background: rgba(255, 255, 255, 0.06);
+    position: relative;
+    border-color: transparent;
+    background: rgb(0 0 0 / 6%);
+  }
+
+  :deep(.ask-slot__option)::before {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    padding: 1px;
+    border-radius: 999rpx; /* 与胶囊半圆端一致 */
+    background: linear-gradient(135deg, #5a5a5a 0%, #f7f7f7 50%, #5a5a5a 100%);
+    content: "";
+    pointer-events: none;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
   }
 
   :deep(.ask-slot__option-letter),

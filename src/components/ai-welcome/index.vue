@@ -2,8 +2,8 @@
 import type { PropType } from "vue";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import brandLetterA from "@/assets/img/icon-A.png";
-import brandLetterI from "@/assets/img/icon-I.png";
+import heySaniDark from "@/assets/img/hey-sani-dark.svg";
+import heySaniLight from "@/assets/img/hey-sani-light.svg";
 import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
 import voiceWaveIcon from "@/assets/img/icon-voice-wave-dark.svg";
@@ -72,6 +72,13 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const { safeAreaStyle } = useSafeArea();
+
+/**
+ * 「Hey,SANI」整行字标：直接用设计导出的整行图，不再用文字 + background-clip 拼。
+ * - 浅色：hey-sani-light.svg（106×35，渐变字）
+ * - 深色：hey-sani-dark.svg（102.69×29，白色字标）
+ */
+const titleImage = computed(() => (props.dark ? heySaniDark : heySaniLight));
 
 /**
  * 中心图标「静态图 → 动图」的无感知切换。
@@ -270,17 +277,10 @@ onBeforeUnmount(() => {
     :style="safeAreaStyle"
   >
     <view class="welcome__hero">
-      <!-- 标题行：Hey,SANI 里除 A / I 两张位图外，其余字母统一吃一条线性渐变。
-           渐变铺在整行容器上再 background-clip: text，子级 text 只留字形（文字颜色透明），
-           这样渐变跨过 A / I 之后仍然是一条连续的 #3D21CD → #FD90C4 -->
+      <!-- 标题行「Hey,SANI」：直接用设计导出的整行字标，
+           浅色 hey-sani-light.svg（106×35）/ 深色 hey-sani-dark.svg（102.69×29） -->
       <view class="welcome__title">
-        <text class="welcome__title-hey">Hey,</text>
-        <view class="welcome__title-brand-row">
-          <text class="welcome__title-brand">S</text>
-          <image class="welcome__title-letter welcome__title-letter--a" :src="brandLetterA" mode="aspectFit" />
-          <text class="welcome__title-brand">N</text>
-          <image class="welcome__title-letter welcome__title-letter--i" :src="brandLetterI" mode="aspectFit" />
-        </view>
+        <image class="welcome__title-img" :src="titleImage" mode="aspectFit" />
       </view>
       <!-- 主视觉：原 306:2783 容器 134×134 / 306:2791 图 110×110，投影 0 3 9 rgba(0,0,0,.14)
            起飞时整组按父页面给的 transform 滑到对话页顶部的灵动岛位置；
@@ -449,57 +449,24 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 标题行「Hey,SANI」=====
-   设计稿 306:2801 / 306:2782：24px / Medium(500) / 行高 35px；1px = 2rpx，故 48rpx / 70rpx。
-   渐变色值统一为 90deg 四色 #3D21CD → #1999FE → #C067FA → #FD90C4（各 100% 不透明）。
-   渐变铺在整行容器上，再用 background-clip: text 裁到字形：
-   子级 text 一律透明填充，字形由父级背景着色，因此 H / e / y / , / S / N 是同一条连续渐变，
-   中间夹着的 A / I 位图不走这条背景（图片自身不透明），不需要逐字母切片或测量 */
+   整行直接贴设计导出的字标（颜色、渐变、字距都在图里，不再用文字 + background-clip 拼）：
+   - 浅色 hey-sani-light.svg：106×35 → 212×70rpx；
+   - 深色 hey-sani-dark.svg：102.69×29 → 206×58rpx（深色稿字号小一档，尺寸分开写） */
 .welcome__title {
   display: flex;
   align-items: center;
-  color: transparent;
-  background-image: linear-gradient(
-    90deg,
-    #3d21cd 0%,
-    #1999fe 33.33%,
-    #c067fa 66.67%,
-    #fd90c4 100%
-  );
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-size: 48rpx; // 306:2801 · 24px
-  font-weight: 500; // Medium
-  line-height: 70rpx; // 306:2801 · 35px
-  white-space: nowrap;
+  justify-content: center;
   transition: opacity 240ms ease;
 }
 
-/* 行容器：S / N 文字 + A / I 位图逐个紧贴，无 gap、无 margin，全靠 flex 排布；
-   按文字基线对齐后，四段的底边落在同一条基线上 */
-.welcome__title-brand-row {
-  display: flex;
-  align-items: baseline;
+.welcome__title-img {
+  width: 212rpx; // 106px
+  height: 70rpx; // 35px
 }
 
-/* 字母位图：icon-A.png 17×26、icon-I.png 7×26（素材实测尺寸，非设计稿标注）。
-   画布 26px 内字母本体只占 y 4..23（20px 高），比 306:2801 的 24px 字号 cap height（≈17px）高，
-   按 26px 原样挂会冒头顶 —— 显示高度收到 44rpx（22px），本体缩到 ≈17px，与 S / N 齐高；
-   宽度按同一比例换算：A 17×22/26 = 14.4px → 29rpx，I 7×22/26 = 5.9px → 12rpx */
-.welcome__title-letter {
-  flex: none;
-  height: 44rpx; // 22px
-  /* 画布底部还有 1.7px 透明留白：baseline 对齐会把画布底边贴到基线上，本体因此悬空 1.7px。
-     用 transform 视觉下移 3rpx（1.5px）把留白补回来，不动布局、也不引入 margin */
-  transform: translateY(3rpx);
-}
-
-.welcome__title-letter--a {
-  width: 29rpx; // 14.4px
-}
-
-.welcome__title-letter--i {
-  width: 12rpx; // 5.9px
+.welcome--dark .welcome__title-img {
+  width: 206rpx; // 102.69px
+  height: 58rpx; // 29px
 }
 
 .welcome__logo {
@@ -762,17 +729,7 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
-/* 深色下整行仍是同一条渐变，只把四色换成深色稿那一组（1193:1848，
-   与 report-insight 的重播角标同一套）：浅色稿的起始色 #3D21CD 打在 #1A1A1A 上第一段几乎糊成一片 */
-.welcome--dark .welcome__title {
-  background-image: linear-gradient(
-    90deg,
-    #a7aaf9 0%,
-    #75b6fa 33.33%,
-    #a8a9f9 66.67%,
-    #f08fc2 100%
-  );
-}
+/* 标题行深色稿不再需要额外覆盖：hey-sani-dark.svg 自己就是深色那套白字标 */
 
 /* 输入条控件的材质换成「白色 8%」：浅色稿的 #0D0D0D 3.61% 在深底上等于没有 */
 .welcome--dark .welcome__composer-voice,

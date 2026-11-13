@@ -3,8 +3,8 @@ import { useI18n } from "vue-i18n";
 import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete.svg";
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
-import autoTtsOffDarkIcon from "@/assets/img/icon-tts-auto-off-dark.png";
 import autoTtsOffIcon from "@/assets/img/icon-tts-auto-off.png";
+import autoTtsOffSvgIcon from "@/assets/img/icon-tts-auto-off.svg";
 import autoTtsOnIcon from "@/assets/img/icon-tts-auto-on.png";
 import listenLogoGif from "@/assets/img/listen.gif";
 import minimizeIcon from "@/assets/img/min_icon.png";
@@ -128,12 +128,12 @@ function onToggleAutoTts() {
  */
 const darkPlain = computed(() => props.plainBg && !props.shareMode && systemStore.isDark);
 /**
- * 自动播报开关图标：关闭态在深色下换专用图（深色稿里是白线）。
- * 换成专用图后不能再走头部的统一反相，否则白线会被反成黑色，见样式里 tts-switch--off 的 filter: none。
+ * 自动播报开关图标：关闭态在深色下换 icon-tts-auto-off.svg（#6B6B6B 线稿 + 斜杠缺口）。
+ * 走这张图时不能套头部的统一反相，否则线稿会被整片染白、缺口糊掉，见样式里 tts-switch--off 的 filter: none。
  */
 const autoTtsIcon = computed(() => {
   if (autoTtsEnabled.value) return autoTtsOnIcon;
-  return darkPlain.value ? autoTtsOffDarkIcon : autoTtsOffIcon;
+  return darkPlain.value ? autoTtsOffSvgIcon : autoTtsOffIcon;
 });
 const answering = computed(() => {
   if (!props.generating) return false;
@@ -1134,8 +1134,8 @@ onBeforeUnmount(() => {
     filter: brightness(0) invert(1);
   }
 
-  // 自动播报「关闭态」深色下走专用图 icon-tts-auto-off-dark.png（本身就是白线），
-  // 再反相会变成黑色，所以这一种情况免掉反相
+  // 自动播报「关闭态」深色下走 icon-tts-auto-off.svg（#6B6B6B 线稿 + 斜杠缺口），
+  // 套反相会被整片染白、缺口糊掉，所以这一种情况免掉反相
   .chat-header__tts-switch--off .chat-header__icon-tts-img {
     filter: none;
   }

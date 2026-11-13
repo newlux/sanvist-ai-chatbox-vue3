@@ -623,7 +623,7 @@ function resolveRootElement(): HTMLElement | null {
   max-width: 100%;
   padding: 18rpx 28rpx;
   border: 1px solid #e6e6e6;
-  border-radius: 32rpx;
+  border-radius: 999rpx; /* 真胶囊：左右两端半圆，不再用 32rpx 的圆角矩形 */
   background: #ffffff;
 }
 
@@ -802,9 +802,27 @@ function resolveRootElement(): HTMLElement | null {
     color: #e5e5e5 !important;
   }
 
+  /* 胶囊描边与追问卡同一套：1px 内描边线性渐变 #5A5A5A → #F7F7F7 → #5A5A5A，
+     border 留作占位（透明），渐变环用「渐变底 + mask 挖掉内容区」画 */
   .guide-check-block__option {
-    border-color: rgba(255, 255, 255, 0.16);
+    position: relative;
+    border-color: transparent;
     background: rgba(255, 255, 255, 0.06);
+  }
+
+  .guide-check-block__option::before {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    padding: 1px;
+    border-radius: 999rpx; /* 与胶囊半圆端一致 */
+    background: linear-gradient(135deg, #5a5a5a 0%, #f7f7f7 50%, #5a5a5a 100%);
+    content: "";
+    pointer-events: none;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
   }
 
   .guide-check-block__option-letter,

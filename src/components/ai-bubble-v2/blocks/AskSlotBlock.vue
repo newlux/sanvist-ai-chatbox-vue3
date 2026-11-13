@@ -174,7 +174,7 @@ function submitRemark() {
 <style scoped>
 /* ===== 追问卡（内联形态）=====
    问题行 14px / Medium；选项与「身份选择」那组胶囊（GuideSuggestionBlock）同一套材质：
-   白底 + 1px #E6E6E6 描边 + 32rpx 圆角，左侧 A｜文案，纵向排列、左对齐、间距 10px。
+   白底 + 1px #E6E6E6 描边 + 全圆角胶囊（999rpx），左侧 A｜文案，纵向排列、左对齐、间距 10px。
    单选 / 多选用同一套胶囊，不再有整行铺满的变体 */
 .ask-slot {
   display: flex;
@@ -204,7 +204,7 @@ function submitRemark() {
   max-width: 100%;
   padding: 18rpx 28rpx;
   border: 1px solid #e6e6e6;
-  border-radius: 32rpx;
+  border-radius: 999rpx; /* 真胶囊：左右两端半圆，不再用 32rpx 的圆角矩形 */
   background: #ffffff;
 }
 

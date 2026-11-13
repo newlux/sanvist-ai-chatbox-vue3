@@ -1822,6 +1822,20 @@ const showScrollToBottom = computed(
     && (messages.value?.length || 0) > 0,
 );
 
+/**
+ * 一键回到底部的垂直位置：输入栏高（含键盘抬起）+ 24rpx 间隙。
+ *
+ * 底部快捷入口（作业指导 / 任务协同 / 维修助理）展示时，整条导航贴在输入栏正上方
+ * （72rpx 高 + 16rpx 上间距 = 88rpx），箭头必须再让开这一段，否则会压在胶囊上。
+ * 用 max() 兼容键盘抬起：navigation 只跟 dock 走，键盘弹起时输入栏更高，取大的那个。
+ */
+const scrollBottomStyle = computed(() => {
+  const clearance = navVisible.value
+    ? `max(${composerBottomInset.value}, calc(${composerDockOffset.value} + 88rpx))`
+    : composerBottomInset.value;
+  return { bottom: `calc(${clearance} + 24rpx)` };
+});
+
 function onScrollToBottomTap() {
   // 点了就恢复「跟随底部」，后续流式增量会继续贴底
   // 落点是「真末尾」（含最后一条消息的操作栏 / 参考来源），不能用 scrollToBottom：
@@ -2120,12 +2134,12 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         @height-change="voiceLiveHeight = $event"
       />
       <!-- 一键回到底部：离底时出现，贴底自动隐藏；
-           垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙；
+           垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙，底部胶囊展示时再让开 88rpx（见 scrollBottomStyle）；
            水平居中，只放 arrow-down.png（无白底 / 阴影，见 .chat-scroll-bottom） -->
       <view
         v-if="showScrollToBottom && !voicePanelOpen"
         class="chat-scroll-bottom"
-        :style="{ bottom: `calc(${composerBottomInset} + 24rpx)` }"
+        :style="scrollBottomStyle"
         @tap="onScrollToBottomTap"
       >
         <image

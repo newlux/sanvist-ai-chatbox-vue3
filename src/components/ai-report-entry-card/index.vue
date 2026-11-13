@@ -9,7 +9,7 @@ import { isListenReportListened, openListenReportPage } from "@/utils/listen-rep
  *
  * 版式（设计稿 px，1px = 2rpx，描边仍用 px）：
  *   卡片 315×104（= 375 页宽 − 左右各 30），圆角 16，**填充 visible=false（透明，只有描边）**，
- *   描边 1px 三色标渐变：#AAAAAA 1.67% → #F2F2F2 44.16% → #AAAAAA 100%（近似对角走向）；
+ *   描边 1px 内描边三色标线性渐变：#AAAAAA 1.67% → #F2F2F2 44.16% → #AAAAAA 100%（近似对角走向）；
  *   内边距 18；
  *   标题行 20 高：「听汇报」14px Medium #0D0D0D + 间距 10 + 「已收听」徽标
  *     （12px #5D5D5D、底 #E9E9E9、圆角 4、内边距 1/6、高 19）+ 箭头（距卡片右边缘约 4.8）；
@@ -19,8 +19,9 @@ import { isListenReportListened, openListenReportPage } from "@/utils/listen-rep
  * 交互：整卡可点。点击把 date / language 写进「当前播报」再带 direct=1 起播报页
  * （逻辑在 utils/listen-report 的 openListenReportPage，与旧的一跳了之链路同一份）。
  *
- * 深色：设计稿没有深色稿，材质沿用同目录回复卡的一套（描边 #303030、标题 #FFFFFF、
- * 次要文字 rgba(255,255,255,.45)、正文 rgba(255,255,255,.8)、徽标 8% 白底）。
+ * 深色：设计稿没有深色稿，材质沿用同目录回复卡的一套（标题 #FFFFFF、次要文字 rgba(255,255,255,.45)、
+ * 正文 rgba(255,255,255,.8)、徽标 8% 白底）；描边不跟浅色的灰阶，单独用蓝白渐变
+ * #72BEFF 1.67% → #F9F9F9 44.16% → #72BEFF 100%（同一走向）。
  */
 defineOptions({ name: "AiReportEntryCard" });
 
@@ -117,7 +118,8 @@ function onTap() {
 
 /* 1px 渐变描边：设计稿里卡片填充 visible=false，只剩描边。
    用「渐变底 + mask 挖掉内容区」画 1px 环，不引入内描边颜色近似值。
-   渐变走向取设计稿 gradientTransform（起点左下 → 终点右上，约 69.6°）。 */
+   渐变走向取设计稿 gradientTransform（起点左下 → 终点右上，约 69.6°）；
+   浅色色标保持设计原样 #AAAAAA → #F2F2F2 → #AAAAAA（蓝白那组只给深色用）。 */
 .report-entry::before {
   position: absolute;
   inset: 0;
@@ -210,10 +212,12 @@ function onTap() {
   word-break: break-word;
 }
 
-/* ===== 深色（设计稿无深色稿）：沿用气泡回复卡同一套材质 ===== */
+/* ===== 深色（设计稿无深色稿）：材质沿用气泡回复卡同一套，描边单独用蓝白渐变 ===== */
 .report-entry--dark {
+  /* 深色描边不用 #303030 那一档灰，按设计给的蓝白渐变来：
+     #72BEFF 1.67% → #F9F9F9 44.16% → #72BEFF 100%，走向与浅色一致（69.6deg） */
   &::before {
-    background: linear-gradient(69.6deg, #303030 1.67%, #3a3a3a 44.16%, #303030 100%);
+    background: linear-gradient(69.6deg, #72beff 1.67%, #f9f9f9 44.16%, #72beff 100%);
   }
 
   .report-entry__title {
