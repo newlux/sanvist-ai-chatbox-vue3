@@ -82,6 +82,29 @@ test('各条 TIPS 保留自己的处理状态，正式回复清除提示和附�
   assert.deepEqual(result.blocks.map(block => block.type), ['answer']);
 });
 
+test('正式引导卡到达时清除临时提示和处理状态，保留设备选项', async () => {
+  const normalize = createDifyEventNormalizer();
+  const component = { scene: 'guide', type: 'lead', data: { text: '请选择设备', options: ['设备 A'] } };
+  async function* source() {
+    yield { result: { event: 'status', data: { node: '返回固定作业引导卡', message: '返回固定作业引导卡' } } };
+    yield { result: { event: 'tips', text: '交给我就行了。' } };
+    for (const result of normalize({
+      ...references, event: 'message', answer: `<COMPONENT>${JSON.stringify(component)}</COMPONENT>`,
+    })) {
+      yield { result };
+    }
+    yield { result: { event: 'tips', text: '迟到的提示' } };
+  }
+
+  const snapshots = [];
+  const result = await consumeChatStream({ source: source(), flushIntervalMs: 0, onSnapshot: snapshot => snapshots.push(snapshot) });
+  assert.equal(snapshots[1].blocks[0].payload.processSubtitle, '返回固定作业引导卡');
+  assert.deepEqual(result.blocks.map(block => block.type), ['guide-lead']);
+  assert.deepEqual(result.blocks[0].payload.options, ['设备 A']);
+  assert.equal(result.processSubtitle, null);
+  assert.equal(result.processStatus.title, undefined);
+});
+
 test('工作流收尾重放提示时不重复追加', () => {
   const stream = turn();
   const answer = '<TIPS>正在查询</TIPS><TIPS>正在整理</TIPS>';

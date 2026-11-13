@@ -113,7 +113,26 @@ export function buildInitialBlocks(): AiBlock[] {
   return [];
 }
 
-export function applyEventToBlocks(
+const FINAL_REPLY_BLOCK_TYPES = new Set<AiBlockType>([
+  "answer", "guide-lead", "guide-step", "guide-check", "guide-suggestion",
+  "ask-slot", "table", "chart", "gantt", "assistant-navigation", "image", "video", "voice",
+]);
+
+function hasFinalReply(blocks: AiBlock[]) {
+  return blocks.some(block => FINAL_REPLY_BLOCK_TYPES.has(block.type)
+    && (block.type !== "answer" || Boolean(String(block.payload.content || "").trim())));
+}
+
+export function applyEventToBlocks(blocks: AiBlock[], event: ChatStreamEvent): StreamBlockUpdate {
+  const update = reduceEventToBlocks(blocks, event);
+  // 正式回复也可能由引导卡、表格等内容组成，收到可展示的回复后统一移除临时提示。
+  if (update.receivedContent && blocks.some(block => block.type === "tips") && hasFinalReply(update.blocks)) {
+    return { ...update, blocks: update.blocks.filter(block => block.type !== "tips"), processSubtitle: null };
+  }
+  return update;
+}
+
+function reduceEventToBlocks(
   blocks: AiBlock[],
   event: ChatStreamEvent,
 ): StreamBlockUpdate {
@@ -141,7 +160,7 @@ export function applyEventToBlocks(
       };
     }
     case "tips": {
-      if (!event.text.trim() || blocks.some(block => block.type === "answer" && String(block.payload.content || "").trim())) return base;
+      if (!event.text.trim() || hasFinalReply(blocks)) return base;
       const tipsIndex = blocks.filter(block => block.type === "tips").length;
       return {
         ...base,
@@ -151,10 +170,7 @@ export function applyEventToBlocks(
     }
     case "message": {
       if (!event.answer) return base;
-      if (blocks.some(block => block.type === "tips")) {
-        if (!event.answer.trim()) return base;
-        blocks = blocks.filter(block => block.type !== "tips");
-      }
+      if (!event.answer.trim() && blocks.some(block => block.type === "tips")) return base;
       const answerBlocks = blocks.filter(block => block.type === "answer");
       // 低端安卓 WebView 不支持 ES2022 的 Array.prototype.at
       const lastBlock = blocks[blocks.length - 1];

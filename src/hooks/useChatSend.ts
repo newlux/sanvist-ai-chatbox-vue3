@@ -433,6 +433,10 @@ export function useChatSend(scope?: string, handlers?: {
     const aiMessage = chatStore.messages[index];
 
     const hasTips = snapshot.blocks.some(block => block.type === "tips");
+    const replacedTips = !hasTips && aiMessage.blocks?.some(block => block.type === "tips");
+    const processSubtitle = replacedTips
+      ? snapshot.processSubtitle ?? null
+      : keepLastProcessSubtitle(snapshot.processSubtitle, aiMessage.processSubtitle);
     if (snapshot.conversationId) chatStore.aiSessionId = snapshot.conversationId;
     chatStore.patchMessageById(aiMsgId, {
       blocks: snapshot.blocks,
@@ -441,9 +445,7 @@ export function useChatSend(scope?: string, handlers?: {
       taskId: snapshot.taskId ?? aiMessage.taskId,
       durationMs: snapshot.metadata?.duration_ms ?? aiMessage.durationMs,
       processStatus: preserveProcessStatus ? aiMessage.processStatus : snapshot.processStatus ?? aiMessage.processStatus,
-      processSubtitle: preserveProcessStatus
-        ? aiMessage.processSubtitle
-        : keepLastProcessSubtitle(snapshot.processSubtitle, aiMessage.processSubtitle),
+      processSubtitle: preserveProcessStatus ? aiMessage.processSubtitle : processSubtitle,
       loading: !snapshot.ended,
       interrupted: snapshot.metadata?.status === "stopped",
       ttsEnabled: Boolean(
