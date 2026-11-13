@@ -156,6 +156,7 @@ const duplex = useDuplexVoice({
   },
   submit: text => { void sendTaskMessage({ text, markPreviousStopped: true }); },
   setGain: gain => realtimeTts.setPlaybackGain(gain),
+  playbackText: () => realtimeTts.playbackText.value,
   sessionId: () => chatStore.aiSessionId,
 });
 const { active: duplexActive, starting: duplexStarting, listening: duplexListening, transcript: duplexTranscript } = duplex;
@@ -757,7 +758,7 @@ function onTtsClick(index: number, textOverride = "") {
 
   realtimeTts.stop();
   stopHistoryTts();
-  if (msg.ttsPlaybackMode === "realtime") {
+  if (duplexActive.value || duplexStarting.value || msg.ttsPlaybackMode === "realtime") {
     void realtimeTts.togglePlay(msg, stepId, textOverride);
     return;
   }

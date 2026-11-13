@@ -16,6 +16,44 @@ interface Dependencies {
   onError: (message: string) => void;
   now?: () => number;
 }
+const PLAYBACK_TAIL_MS = 1800;
+const MAX_PLAYBACK_REFERENCES = 8;
+
+function normalizeSpeech(text: string) {
+  // 旧版 WebView 不支持 Unicode 属性转义。
+  return text.normalize("NFKC").toLowerCase()
+    .replace(/[^0-9a-z\u00c0-\u024f\u0370-\u04ff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g, "");
+}
+
+function resemblesPlayback(text: string, references: string[]) {
+  if (!references.length) return false;
+  const speech = normalizeSpeech(text);
+  if (speech && references.includes(speech)) return true;
+  const minimumLength = /[\u3400-\u9fff]/.test(speech) ? 4 : 8;
+  if (speech.length < minimumLength) return false;
+
+  const playback = references.join("");
+  if (playback.includes(speech)) return true;
+  if (speech.length < 10) return false;
+
+  // 少量 ASR 错字时比较相邻字对。要求大部分识别内容都与播报重合。
+  const pairs = new Map<string, number>();
+  for (let index = 1; index < playback.length; index += 1) {
+    const pair = playback.slice(index - 1, index + 1);
+    pairs.set(pair, (pairs.get(pair) || 0) + 1);
+  }
+  let matches = 0;
+  for (let index = 1; index < speech.length; index += 1) {
+    const pair = speech.slice(index - 1, index + 1);
+    const remaining = pairs.get(pair) || 0;
+    if (remaining > 0) {
+      matches += 1;
+      pairs.set(pair, remaining - 1);
+    }
+  }
+  return matches / (speech.length - 1) >= 0.84;
+}
+
 interface Segment {
   session?: AsrStreamSession;
   finishing: boolean;
@@ -24,6 +62,8 @@ interface Segment {
   partial: string;
   updatedAt: number;
   openedAt: number;
+  playbackReferences: string[];
+  lastPlaybackAt: number;
 }
 
 /** 持续持有麦克风；现有 ASR 为单次 final 协议，分句时轮换连接而不重开设备。 */
@@ -41,6 +81,37 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
   let failures = 0;
   let speechAt = -Infinity;
   let speechStart = 0;
+  let playbackText = "";
+  const recentPlayback: Array<{ text: string; endedAt: number }> = [];
+
+  function rememberPlayback(item: Segment) {
+    const references = item.playbackReferences;
+    const time = now();
+    if (!item.partial && time - item.lastPlaybackAt > PLAYBACK_TAIL_MS) references.length = 0;
+    for (const playback of recentPlayback) {
+      if (time - playback.endedAt > PLAYBACK_TAIL_MS) continue;
+      item.lastPlaybackAt = Math.max(item.lastPlaybackAt, playback.endedAt);
+      if (!references.includes(playback.text)) references.push(playback.text);
+    }
+    if (playbackText) {
+      item.lastPlaybackAt = time;
+      if (!references.includes(playbackText)) references.push(playbackText);
+    }
+    if (references.length > MAX_PLAYBACK_REFERENCES) {
+      references.splice(0, references.length - MAX_PLAYBACK_REFERENCES);
+    }
+  }
+
+  function setPlaybackText(text: string) {
+    const normalized = normalizeSpeech(text);
+    if (normalized === playbackText) return;
+    if (playbackText) {
+      recentPlayback.push({ text: playbackText, endedAt: now() });
+      if (recentPlayback.length > MAX_PLAYBACK_REFERENCES) recentPlayback.shift();
+    }
+    playbackText = normalized;
+    if (current) rememberPlayback(current);
+  }
   const emit = (patch: Partial<DuplexState>) => { state = { ...state, ...patch }; deps.onState({ ...state }); };
 
   function stop() {
@@ -72,7 +143,8 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
   function open(seq: number) {
     if (seq !== generation) return;
     if (segments.length >= 4) { fail('语音识别响应超时，请重新开启双工'); return; }
-    const item: Segment = { finishing: false, done: false, text: '', partial: '', updatedAt: now(), openedAt: now() };
+    const item: Segment = { finishing: false, done: false, text: '', partial: '', updatedAt: now(), openedAt: now(), playbackReferences: [], lastPlaybackAt: -Infinity };
+    rememberPlayback(item);
     segments.push(item);
     current = item;
     item.session = deps.openSession({
@@ -83,13 +155,13 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
         if (next && next !== item.partial) {
           item.partial = next;
           item.updatedAt = now();
-          emit({ transcript: next });
+          emit({ transcript: resemblesPlayback(next, item.playbackReferences) ? '' : next });
         }
       },
       onFinal(text) {
         if (seq !== generation || item.done) return;
         item.done = true;
-        item.text = text;
+        item.text = resemblesPlayback(text, item.playbackReferences) ? '' : text;
         item.session?.close();
         if (current === item) { current = null; open(seq); }
         if (!current?.partial) emit({ transcript: '' });
@@ -139,7 +211,11 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
       if (seq !== generation) return;
       const pending = deps.startCapture({
         isCurrent: () => seq === generation,
-        onFrame(frame) { if (seq === generation) current?.session?.pushFrame(frame); },
+        onFrame(frame) {
+          if (seq !== generation || !current) return;
+          rememberPlayback(current);
+          current.session?.pushFrame(frame);
+        },
         onLevel(level) {
           if (seq !== generation || !state.active) return;
           const time = now();
@@ -167,5 +243,5 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
       if (seq === generation) fail(error instanceof Error ? error.message : '无法开启双工语音');
     }
   }
-  return { start, stop, advance };
+  return { start, stop, advance, setPlaybackText };
 }

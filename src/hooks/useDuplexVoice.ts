@@ -11,6 +11,7 @@ export function useDuplexVoice(options: {
   cancelManual: () => unknown;
   submit: (text: string) => void;
   setGain: (gain: number) => void;
+  playbackText: () => string;
   sessionId: () => unknown;
 }) {
   const { locale, t } = useI18n();
@@ -45,6 +46,7 @@ export function useDuplexVoice(options: {
     },
     onError(message) { uni.showToast({ title: message, icon: 'none' }); },
   });
+  watch(options.playbackText, runtime.setPlaybackText, { flush: "sync", immediate: true });
   function stop() { return runtime.stop(); }
   function toggle() {
     if (active.value || starting.value) { stop(); return; }

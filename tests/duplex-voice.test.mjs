@@ -67,6 +67,51 @@ test('连续收音，两句分别定稿发送；识别连接轮换不重开麦�
   assert.deepEqual(f.submissions, ['第一句。', '第二句。']);
   assert.equal(f.starts, 1);
 });
+test('播报原文和少量错字的回读被过滤，麦克风仍可提交用户的插话', async t => {
+  const f = fixture(t);
+  await f.runtime.start();
+  f.runtime.setPlaybackText('本次巡检的设备运行状态全部正常。');
+  f.capture.onFrame(new ArrayBuffer(32));
+  f.sessions[0].handlers.onPartial('设备运行状态');
+  assert.equal(f.states.at(-1).transcript, '');
+  f.advance(1001);
+  f.sessions[0].handlers.onFinal('本次巡检的设备运行状太全部正常');
+  assert.deepEqual(f.submissions, []);
+
+  f.sessions[1].handlers.onPartial('停一下，查昨天的报警');
+  assert.equal(f.states.at(-1).transcript, '停一下，查昨天的报警');
+  f.advance(1001);
+  f.sessions[1].handlers.onFinal('停一下，查昨天的报警');
+  assert.deepEqual(f.submissions, ['停一下，查昨天的报警']);
+  assert.equal(f.starts, 1);
+  assert.equal(f.stops, 0);
+});
+
+test('播报结束后的回声尾音和迟到定稿仍会过滤', async t => {
+  const f = fixture(t);
+  await f.runtime.start();
+  f.runtime.setPlaybackText('今天的巡检已经完成。');
+  f.sessions[0].handlers.onPartial('巡检已经完成');
+  f.advance(1001);
+  f.runtime.setPlaybackText('');
+  f.advance(2500);
+  f.sessions[0].handlers.onFinal('今天的巡检已经完成');
+  assert.deepEqual(f.submissions, []);
+});
+
+test('播报结束一段时间后，用户主动复述同一句仍可发送', async t => {
+  const f = fixture(t);
+  await f.runtime.start();
+  f.runtime.setPlaybackText('巡检完成。');
+  f.runtime.setPlaybackText('');
+  f.advance(2500);
+  f.capture.onFrame(new ArrayBuffer(32));
+  f.sessions[0].handlers.onPartial('巡检完成');
+  f.advance(1001);
+  f.sessions[0].handlers.onFinal('巡检完成');
+  assert.deepEqual(f.submissions, ['巡检完成']);
+});
+
 test('partial 不发送，重复快照不延迟断句，持续静音不产生空问题', async t => {
   const f = fixture(t); await f.runtime.start(); f.advance(5000);
   assert.equal(f.sessions[0].finishes, 0);
