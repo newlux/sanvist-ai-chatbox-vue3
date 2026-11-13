@@ -1021,17 +1021,11 @@ onBeforeUnmount(() => {
         @retry="retryAttachment"
       />
 
-      <!--
-        底部输入栏：默认语音、键盘文本、发送三种状态。
-        文本态空闲（input-bar--plain）走灰色胶囊样式：无文字时右侧是声波（切语音），
-        有文字时右侧是黑圆上箭头（发送）。
-        回答生成中（思考中）整条输入栏照常展示，只把右侧的键盘/发送换成黑色停止按钮，
-        「按住说话」置灰并暂时禁用；点停止或生成结束即恢复。
-      -->
       <view
         class="input-bar"
         :class="{
           'input-bar--text': inputMode === 'text',
+          'input-bar--duplex': duplexEnabled,
           'input-bar--plain': inputMode === 'text' && !isLoading && !voice.isRecognizing,
         }"
       >
@@ -1126,17 +1120,13 @@ onBeforeUnmount(() => {
           <view v-if="duplexActive" class="input-bar__duplex-dot" />
         </view>
 
-        <!-- 右侧：生成中只有一个黑色停止按钮（#0D0D0D 圆 + 白色圆角方块），
-             其余时间才是「键盘 / 声波」切换钮或发送钮 -->
-        <view v-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
-          <image src="@/assets/img/icon-stop-circle.svg" mode="aspectFit" />
-        </view>
-        <!-- 右侧切换入口：设计稿 1204:337 键盘按钮（44×44 圆形，同一行最右）
-             语音态 = 键盘（切到文字输入）；文本态 = 声波（切回语音） -->
         <view
-          v-else-if="!showSendButton"
+          v-if="!isLoading && !showSendButton"
           class="input-bar__mode"
-          :class="{ 'input-bar__mode--disabled': voice.gesture.active || voice.isRecognizing }"
+          :class="{
+            'input-bar__mode--disabled': voice.gesture.active || voice.isRecognizing,
+            'input-bar__mode--mic': inputMode === 'text',
+          }"
           @tap="onToggleInputModeUi"
         >
           <image
@@ -1144,9 +1134,12 @@ onBeforeUnmount(() => {
             src="@/assets/img/icon-keyboard-dark.svg"
             mode="aspectFit"
           />
-          <image v-else src="@/assets/img/icon-voice-wave-dark.svg" mode="aspectFit" />
+          <image v-else src="@/assets/img/icon-mic-red.svg" mode="aspectFit" />
         </view>
-        <view v-else class="input-bar__send" @touchstart.stop.prevent="onTrySend">
+        <view v-else-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
+          <image src="@/assets/img/icon-stop-circle.svg" mode="aspectFit" />
+        </view>
+        <view v-else class="input-bar__send" @touchstart.stop.prevent="onTrySend" @tap.stop="onTrySend">
           <!-- 文本态：黑圆上箭头；语音态保持原红色发送 -->
           <image
             v-if="inputMode === 'text'"
@@ -1859,6 +1852,7 @@ onBeforeUnmount(() => {
 
 /* 双工与语音态键盘共用 44×44 圆形按钮样式 */
 .input-bar:not(.input-bar--text) .input-bar__mode,
+.input-bar--duplex .input-bar__mode,
 .input-bar__duplex {
   width: 88rpx;
   height: 88rpx;
@@ -1869,7 +1863,7 @@ onBeforeUnmount(() => {
 }
 
 /* 键盘与声波图标使用同一尺寸：20×20 → 40rpx */
-.input-bar:not(.input-bar--text) .input-bar__mode image,
+.input-bar__mode image,
 .input-bar__duplex image {
   width: 40rpx;
   height: 40rpx;
@@ -1965,6 +1959,19 @@ onBeforeUnmount(() => {
 }
 
 .input-bar__stop image {
+  width: 70rpx;
+  height: 70rpx;
+}
+
+/* 停止、发送与输入模式切换共用同一按钮位。 */
+.input-bar--duplex .input-bar__stop,
+.input-bar--duplex .input-bar__send {
+  flex: 0 0 88rpx;
+  width: 88rpx;
+  height: 88rpx;
+}
+
+.input-bar--duplex .input-bar__send image {
   width: 70rpx;
   height: 70rpx;
 }
@@ -2085,6 +2092,11 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
+/* 双工与切换按钮单独占列，文本框无需给右侧控件预留空间。 */
+.chat-input .input-bar--plain.input-bar--duplex .input-bar__text-field {
+  padding-right: 32rpx;
+}
+
 .chat-input .input-bar--plain .input-bar__textarea {
   font-size: 28rpx; // 14px，与首次输入文字一致
   line-height: 40rpx;
@@ -2099,8 +2111,8 @@ onBeforeUnmount(() => {
 /* 右侧切换钮：画在灰色胶囊内部右侧，不额外占列
    外层 padding 与语音态一致（40rpx = 20px），胶囊右边缘就在 40rpx 处，
    钮再内缩 20rpx → right 60rpx，与胶囊右边缘留 10px 呼吸位 */
-.chat-input .input-bar--plain .input-bar__mode,
-.chat-input .input-bar--plain .input-bar__send {
+.chat-input .input-bar--plain:not(.input-bar--duplex) .input-bar__mode,
+.chat-input .input-bar--plain:not(.input-bar--duplex) .input-bar__send {
   position: absolute;
   top: 50%;
   right: 60rpx; // 30px = 胶囊右边缘 20px + 内缩 10px
@@ -2111,12 +2123,6 @@ onBeforeUnmount(() => {
   padding: 0;
   background: transparent;
   transform: translateY(-50%);
-}
-
-/* 切换图标：与语音态胶囊里的键盘图标同尺寸（20px） */
-.chat-input .input-bar--plain .input-bar__mode image {
-  width: 40rpx; // 20px
-  height: 40rpx;
 }
 
 .chat-input .input-bar--plain .input-bar__send image {
@@ -2193,6 +2199,7 @@ onBeforeUnmount(() => {
   // 语音态：「按住说话」与右侧键盘（浅色是 #0D0D0D 3.61%）
   .input-bar__hold,
   .input-bar:not(.input-bar--text) .input-bar__mode,
+  .input-bar--duplex .input-bar__mode,
   .input-bar__duplex {
     background: #212121;
   }
@@ -2236,6 +2243,14 @@ onBeforeUnmount(() => {
   .input-bar.input-bar--text .input-bar__send image {
     filter: invert(1);
   }
+}
+
+.input-bar__mode--mic image {
+  filter: brightness(0) invert(5.1%);
+}
+
+.chat-input--dark .input-bar__mode--mic image {
+  filter: brightness(0) invert(1);
 }
 
 .input-bar__duplex {

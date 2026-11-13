@@ -11,7 +11,7 @@ const temp = await mkdtemp(path.join(tmpdir(), 'sanvist-welcome-hold-'));
 const outfile = path.join(temp, 'welcome.mjs');
 await build({
   stdin: {
-    contents: 'export { default as AiWelcome } from "./src/components/ai-welcome/index.vue"; export { createRenderer, ref, effectScope } from "vue"; export { useVoiceQueryGesture } from "./src/hooks/useVoiceQueryGesture";',
+    contents: 'export { default as AiWelcome } from "./src/components/ai-welcome/index.vue"; export { createRenderer, nextTick, ref, effectScope } from "vue"; export { useVoiceQueryGesture } from "./src/hooks/useVoiceQueryGesture";',
     resolveDir: process.cwd(), loader: 'ts',
   },
   outfile, bundle: true, platform: 'node', format: 'esm',
@@ -31,7 +31,7 @@ await build({
   } }],
 });
 after(() => rm(temp, { recursive: true, force: true }));
-const { AiWelcome, createRenderer, ref, effectScope, useVoiceQueryGesture } = await import(pathToFileURL(outfile));
+const { AiWelcome, createRenderer, nextTick, ref, effectScope, useVoiceQueryGesture } = await import(pathToFileURL(outfile));
 const previousHTMLElement = globalThis.HTMLElement;
 class HostElement extends EventTarget {
   constructor(type) { super(); this.type = type; this.props = {}; this.children = []; this.parent = null; }
@@ -70,6 +70,24 @@ test('初始输入栏直接展示双工按钮，点击走双工入口', t => {
   duplex.props.onTap({ stopPropagation() {} });
   assert.equal(toggles, 1);
   assert.deepEqual(calls, []);
+});
+
+test('键盘输入有草稿时发送占用切换按钮位，提交后恢复麦克风按钮', async (t) => {
+  const previousUni = globalThis.uni;
+  globalThis.uni = { hideKeyboard() {} };
+  t.after(() => { globalThis.uni = previousUni; });
+  const sent = [];
+  const { find } = mount(t, undefined, { inlineInput: true, duplexEnabled: true, onSendText: text => sent.push(text) });
+  find(props => props?.class === 'welcome__composer-kb').props.onTap();
+  await nextTick();
+  find(props => props?.class === 'welcome__composer-textarea').props.onInput({ detail: { value: '你好' } });
+  await nextTick();
+  assert.ok(find(props => props?.['aria-label'] === 'duplex-open'));
+  assert.equal(find(props => props?.class === 'welcome__composer-kb welcome__composer-kb--mic'), undefined);
+  find(props => props?.class === 'welcome__composer-kb welcome__composer-kb--send').props.onTap();
+  assert.deepEqual(sent, ['你好']);
+  await nextTick();
+  assert.ok(find(props => props?.class === 'welcome__composer-kb welcome__composer-kb--mic'));
 });
 
 test('欢迎页真实组件：长按在松手前启动并传递 hold 和原触点，后续 tap 不再启动', async t => {

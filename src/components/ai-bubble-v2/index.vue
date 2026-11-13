@@ -220,6 +220,7 @@ async function onUserMenuCopy() {
 }
 
 const isUser = computed(() => props.role === "user");
+const isStopped = computed(() => props.interrupted || props.processStatus?.phase === "stopped");
 const visibleBlocks = computed(() =>
   props.hideSuggestion
     ? props.blocks.filter(block => block && block.type !== "suggestion")
@@ -250,7 +251,8 @@ const isBareBody = computed(() =>
   && !props.content
   // 生成中的思考过程（过程状态行 / 过程副标题 / 等待条）要留在气泡卡片里，
   // 否则还没吐出正文时卡片外壳被去掉，灰色的思考文案会裸露在卡片外。
-  && !((props.loading || props.interrupted)
+  && !isStopped.value
+  && !(props.loading
     && (Boolean(props.processStatus) || Boolean(props.processSubtitle?.trim()) || Boolean(props.waitingText))),
 );
 
@@ -282,22 +284,16 @@ const hasStandaloneCard = computed(() =>
  * 带独立卡片（核对卡 / 调度视图入口卡）的那轮也不算。
  */
 const showBusyFallback = computed(
-  () => !props.loading && !props.interrupted && !hideBody.value && !hasStandaloneCard.value && isBareBody.value,
+  () => !props.loading && !isStopped.value && !hideBody.value && !hasStandaloneCard.value && isBareBody.value,
 );
 
-/**
- * 等待条：模型还没吐出内容时的占位。
- * 被中断后不撤掉，只把状态字改成「已停止」——否则没来得及出内容的那一轮
- * 会变成一个空气泡，用户看不出这轮发生了什么。
- */
-const showWaiting = computed(
-  () => Boolean(props.waitingText) && (props.loading || props.interrupted),
-);
+/** 等待条只用于模型尚未输出时，停止状态统一由品牌行展示。 */
+const showWaiting = computed(() => Boolean(props.waitingText) && props.loading && !isStopped.value);
 
 /**
  * 过程状态行文案随当前语言切换（英文界面下不再出现中文）：
  * 进行中不再显示后端下发的节点名（如「调用运营助手...」），与完成态统一成品牌署名 SANI，
- * 前面由模板配 sani 图标（26×26）；只有失败 / 停止保留提示文案。
+ * 前面由模板配 sani 图标（26×26），停止状态在品牌名后补充提示。
  */
 const processStatusText = computed(() => {
   const status = props.processStatus as { phase?: string; title?: string } | null;
@@ -307,16 +303,13 @@ const processStatusText = computed(() => {
   return "SANI";
 });
 
-/** 带 sani 图标的品牌行：进行中与完成态都显示，失败 / 停止只用文字 */
-const showBrandStatus = computed(() => {
-  const phase = props.processStatus?.phase;
-  return phase !== "failed" && phase !== "stopped";
-});
+/** 失败状态单独显示提示，停止状态复用品牌行。 */
+const showBrandStatus = computed(() => isStopped.value || props.processStatus?.phase !== "failed");
 
 /** 是否还在生成（首包前 processStatus 可能为空，用 loading 兜底） */
 const isGenerating = computed(() => {
   const phase = props.processStatus?.phase;
-  if (phase === "succeeded" || phase === "failed" || phase === "stopped") return false;
+  if (isStopped.value || phase === "succeeded" || phase === "failed") return false;
   return Boolean(props.loading) || phase === "thinking" || phase === "running";
 });
 
@@ -361,7 +354,7 @@ watch(
 onBeforeUnmount(stopElapsedTimer);
 
 const showProcessStatus = computed(
-  () => !isUser.value && (Boolean(processStatusText.value) || isGenerating.value),
+  () => !isUser.value && (isStopped.value || Boolean(processStatusText.value) || isGenerating.value),
 );
 
 /**
@@ -391,7 +384,7 @@ const processSubtitleText = computed(() => {
   return (isEnglish ? english : chinese) || parts[0];
 });
 
-const showProcessSubtitle = computed(() => showProcessStatus.value && Boolean(processSubtitleText.value));
+const showProcessSubtitle = computed(() => !isStopped.value && showProcessStatus.value && Boolean(processSubtitleText.value));
 
 /** 维修助理回流卡：轮询中显示「故障诊断中…」并先把已取到的明细摆出来，回流完成后补齐状态文案。 */
 const showAssistantCallbackResult = computed(
@@ -568,7 +561,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     </view>
 
     <view
-      v-if="(!isUser || props.content) && !hideBody"
+      v-if="(!isUser || props.content) && (!hideBody || isStopped)"
       class="ai-bubble-v2__body"
       :class="{
         'ai-bubble-v2__body--bare': isBareBody,
@@ -653,7 +646,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
         <view
           v-if="showProcessStatus && !props.assistantCallbackTitle"
           class="ai-bubble-v2__process-status"
-          :class="`ai-bubble-v2__process-status--${props.processStatus?.phase}`"
+          :class="`ai-bubble-v2__process-status--${isStopped ? 'stopped' : props.processStatus?.phase}`"
         >
           <!-- 品牌署名：sani 图标 26×26（52rpx）+ 文案 SANI，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
           <image
@@ -663,7 +656,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
             mode="aspectFit"
           />
           <text class="ai-bubble-v2__process-text">
-            {{ processStatusText }}
+            {{ isStopped ? "SANI" : processStatusText }}
           </text>
           <!-- 生成中实时秒数（单位 S），紧跟 SANI；可以播报后自动消失，位置让给语音图标 -->
           <text v-if="elapsedText" class="ai-bubble-v2__process-elapsed">
@@ -671,7 +664,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           </text>
           <!-- 语音播报按钮：SANI 后面常显（拉流 → spinner，播放 → 声波起伏，其余 → 静态语音图标） -->
           <view
-            v-if="props.processStatus?.phase === 'succeeded' && props.showActions && props.ttsEnabled"
+            v-if="!isStopped && props.processStatus?.phase === 'succeeded' && props.showActions && props.ttsEnabled"
             class="ai-bubble-v2__action-btn ai-bubble-v2__process-tts"
             @tap.stop="onTtsTap"
           >
@@ -701,23 +694,22 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
         <view
           v-if="showWaiting && !showProcessStatus && !props.assistantCallbackTitle"
           class="ai-bubble-v2__waiting"
-          :class="{ 'ai-bubble-v2__waiting--stopped': props.interrupted }"
         >
           <text class="ai-bubble-v2__waiting-mark">
             ✓
           </text>
           <text class="ai-bubble-v2__waiting-label">
-            {{ props.interrupted ? "已停止：" : "等待模型响应：" }}
+            等待模型响应：
           </text>
           <text class="ai-bubble-v2__waiting-query">
             {{ props.waitingText }}
           </text>
-          <text v-if="!props.interrupted" class="ai-bubble-v2__waiting-suffix">
+          <text class="ai-bubble-v2__waiting-suffix">
             努力链接中
           </text>
         </view>
         <AiContentBlocks
-          v-if="!props.assistantCallbackTitle"
+          v-if="!props.assistantCallbackTitle && !hideBody"
           :blocks="contentBlocks"
           :force-thinking-expanded="props.forceThinkingExpanded"
           :no-answer-group="props.noAnswerGroup"
@@ -733,6 +725,11 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           @guide-check-step-select="onGuideCheckStepSelect"
           @gantt-open="onGanttOpen"
         />
+        <view v-if="isStopped && !props.assistantCallbackTitle" class="ai-bubble-v2__busy-hint">
+          <text class="ai-bubble-v2__busy-hint-text ai-bubble-v2__stopped-text">
+            {{ t("process-status-stopped") }}
+          </text>
+        </view>
         <!-- 空回答兜底：回复区没有内容时给一句提示，位置就在操作栏上方 -->
         <view v-if="showBusyFallback && !props.assistantCallbackTitle" class="ai-bubble-v2__busy-hint">
           <text class="ai-bubble-v2__busy-hint-text">
@@ -1179,11 +1176,6 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   color: #a5a5a5;
   font-weight: 400;
 }
-// 已停止：和「等待响应」用同一行样式，只把状态字加深一点区分出来
-.ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-mark,
-.ai-bubble-v2__waiting--stopped .ai-bubble-v2__waiting-label {
-  color: #7b7b7b;
-}
 /* ===== 过程状态行：设计稿 1187:14「✓ 已完成 0.5m」=====
    12px / 18px / #5D5D5D，图标与文字间距 4px；
    状态行与下方正文之间不再画 1px #E8E8E8 分隔线（1187:40 Divider 已按需求去掉），
@@ -1289,7 +1281,6 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   white-space: nowrap;
 }
 .ai-bubble-v2__process-status--failed { color: #d54941; }
-.ai-bubble-v2__process-status--stopped { color: #999999; }
 @keyframes ai-bubble-process-shimmer {
   from { background-position: 200% 0; }
   to { background-position: -200% 0; }
@@ -1344,6 +1335,10 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   font-size: 28rpx;
   line-height: 40rpx;
   word-break: break-word;
+}
+
+.ai-bubble-v2__stopped-text {
+  color: #8f8f8f;
 }
 
 /* ===== 回答正文：设计稿 1187:14「设备运行状态正常…」/ 1187:37 参数列表 =====
@@ -1558,6 +1553,10 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
 
   .ai-bubble-v2__busy-hint-text {
     color: rgba(255, 255, 255, 0.8);
+  }
+
+  .ai-bubble-v2__stopped-text {
+    color: #999999;
   }
 
   // ---- 内联追问卡（AskSlotBlock）：深色下白底胶囊换成深底描边，否则在 #212121 卡片上很扎眼 ----

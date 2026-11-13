@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import brandLetterA from "@/assets/img/icon-A.png";
 import brandLetterI from "@/assets/img/icon-I.png";
 import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
+import microphoneIcon from "@/assets/img/icon-mic-red.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
 import voiceWaveIcon from "@/assets/img/icon-voice-wave-dark.svg";
 import listenLogo from "@/assets/img/listen.gif";
@@ -202,12 +203,7 @@ const textMode = ref(false);
 const draft = ref("");
 const textareaRef = ref<{ focus?: () => void } | null>(null);
 
-/** 右侧按钮图标：语音态是键盘；文本态没内容时是声波（切回语音），有内容时是发送 */
-const rightIcon = computed(() => {
-  if (!textMode.value) return keyboardIcon;
-  return draft.value.trim() ? sendUpIcon : voiceWaveIcon;
-});
-const rightIsSend = computed(() => textMode.value && Boolean(draft.value.trim()));
+const showSend = computed(() => textMode.value && Boolean(draft.value.trim()));
 
 /** 键盘弹起的高度：文本态把整条工具栏顶到键盘上方（页面高度不随键盘压缩） */
 const keyboardSpacerHeight = computed(() => (
@@ -242,16 +238,9 @@ function sendDraft() {
   emit("send-text", content);
 }
 
-function onRightTap() {
-  if (!textMode.value) {
-    onKeyboardTap();
-    return;
-  }
-  if (draft.value.trim()) {
-    sendDraft();
-    return;
-  }
-  exitTextMode();
+function onModeTap() {
+  if (textMode.value) exitTextMode();
+  else onKeyboardTap();
 }
 
 onBeforeUnmount(() => {
@@ -374,15 +363,19 @@ onBeforeUnmount(() => {
         <view v-if="duplexActive" class="welcome__composer-duplex-dot" />
       </view>
       <view
+        v-if="!showSend"
         class="welcome__composer-kb"
-        :class="{ 'welcome__composer-kb--send': rightIsSend }"
-        @tap="onRightTap"
+        :class="{ 'welcome__composer-kb--mic': textMode }"
+        @tap="onModeTap"
       >
         <image
           class="welcome__composer-kb-icon"
-          :src="rightIcon"
+          :src="textMode ? microphoneIcon : keyboardIcon"
           mode="aspectFit"
         />
+      </view>
+      <view v-else class="welcome__composer-kb welcome__composer-kb--send" @tap="sendDraft">
+        <image class="welcome__composer-kb-icon" :src="sendUpIcon" mode="aspectFit" />
       </view>
     </view>
 
@@ -719,7 +712,7 @@ onBeforeUnmount(() => {
   font-size: 28rpx;
 }
 
-/* 文本态有内容：右侧换成对话页那颗实心发送（不再套灰圆底） */
+/* 文本态有内容时单独显示发送按钮。 */
 .welcome__composer-kb--send {
   background: transparent;
 }
@@ -802,6 +795,14 @@ onBeforeUnmount(() => {
 .welcome--dark .welcome__composer-plus,
 .welcome--dark .welcome__composer-kb-icon {
   filter: invert(1);
+}
+
+.welcome__composer-kb--mic .welcome__composer-kb-icon {
+  filter: brightness(0) invert(5.1%);
+}
+
+.welcome--dark .welcome__composer-kb--mic .welcome__composer-kb-icon {
+  filter: brightness(0) invert(1);
 }
 
 /* 主视觉的投影：浅色稿是黑 14%，深底上等于没有，加浓一档让三角浮起来 */
