@@ -115,8 +115,9 @@ useVerticalScrollGesture(tableRoot);
 }
 
 /* ===== 深色主题：结构化表格块（Ardot 1193:5104 → 回复卡 1193:5116）=====
-   单元格文字与表格外的正文同色（实色 #FFFFFF，与 markdown 正文一致），
-   描边换成分隔线同值 #303030；尺寸 / 间距 / 字号不动 */
+   单元格文字与表格外的正文同色（实色 #FFFFFF，与 markdown 正文一致）；
+   外框 + 行分隔线 + 列分隔线一律 #303030；表头铺深蓝底 #173859；
+   尺寸 / 间距 / 字号不动 */
 .table-block--dark {
   border-color: #303030;
 
@@ -125,16 +126,15 @@ useVerticalScrollGesture(tableRoot);
     color: #ffffff;
   }
 
-  // 列分隔线跟随深色稿分隔线 #303030
+  // 列分隔线（表格内部竖线）跟随 #303030
   .table-block__cell {
     border-left-color: #303030;
   }
 
-  // 表头只靠字重区分，颜色与正文完全一致；
-  // 浅色稿的 #E1F0FF 表头底在深底下要顶掉，否则白字压淡蓝看不清
+  // 表头：深蓝底 #173859 + 白字加粗；浅色稿的 #E1F0FF 在这里顶掉
   .table-block__row--head {
     color: #ffffff;
-    background: transparent;
+    background: #173859;
   }
 }
 </style>

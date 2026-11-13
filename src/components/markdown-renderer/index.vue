@@ -115,11 +115,11 @@ const darkTagOverrides: Record<string, string> = {
   hr: "background: #303030;",
   pre: "background: #1a1a1a;",
   code: "background: #303030;",
-  // 表格：文字色与外部正文完全一致（纯白），只换描边，不铺底
-  // （浅色稿表头的 #E1F0FF 在这里要被顶掉，深底上铺淡蓝会看不清白字）
+  // 表格：文字色与外部正文完全一致（纯白）；表头换深蓝底 #173859（浅色稿的 #E1F0FF 顶掉），
+  // 外框与内部网格线一律 #303030 —— 完整重写 border，避免只改颜色时漏掉某条边
   table: "color: #ffffff;",
-  th: "border-color: #303030; background: transparent; color: #ffffff;",
-  td: "border-color: #303030; color: #ffffff;",
+  th: "border: 1px solid #303030; background: #173859; color: #ffffff;",
+  td: "border: 1px solid #303030; color: #ffffff;",
 };
 
 // 首次渲染时才计算：根字号是 uni 启动后设的，模块加载期取到的可能还是浏览器默认值
