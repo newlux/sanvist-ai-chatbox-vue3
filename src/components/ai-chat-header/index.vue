@@ -1206,10 +1206,12 @@ onBeforeUnmount(() => {
   }
 
   .chat-header__icon-btn {
-    width: 88rpx;
-    height: 88rpx;
-    border-radius: 0;
-    background: transparent;
+    width: 84rpx; // 42px 外径（含圆形描边）
+    height: 84rpx;
+    box-sizing: border-box; // 保证 84rpx 含描边
+    border-radius: 50%;
+    border: 2rpx solid #efefef; // 1px 描边
+    background: #fff; // 填充
     box-shadow: none;
   }
 
@@ -1223,10 +1225,11 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 深色同样不铺底色。 */
+/* 深色描边与填充。 */
 .ai-chat-header--round.ai-chat-header--dark {
   .chat-header__icon-btn {
-    background: transparent;
+    border-color: #303030;
+    background: #212121;
     box-shadow: none;
   }
 }
