@@ -12,12 +12,13 @@ const outfile = path.join(temp, 'tips.mjs');
 await build({
   stdin: {
     contents: `export { createDifyEventNormalizer, extractDifyHistoryBlocks } from './src/utils/ai-stream/dify';
-      export { applyEventToBlocks } from './src/utils/ai-stream/chatStreamParser';`,
+      export { applyEventToBlocks } from './src/utils/ai-stream/chatStreamParser';
+      export { consumeChatStream } from './src/utils/ai-stream/streamConsumer';`,
     resolveDir: process.cwd(),
   },
   outfile, bundle: true, platform: 'node', format: 'esm', define: { 'import.meta.env': '{}' },
 });
-const { createDifyEventNormalizer, extractDifyHistoryBlocks, applyEventToBlocks } = await import(pathToFileURL(outfile));
+const { createDifyEventNormalizer, extractDifyHistoryBlocks, applyEventToBlocks, consumeChatStream } = await import(pathToFileURL(outfile));
 const references = { conversation_id: 'c1', message_id: 'm1' };
 const wrap = content => `<SANVIST>${JSON.stringify({ event: 'answer', data: { content } })}</SANVIST>`;
 
@@ -61,6 +62,24 @@ test('多条 TIPS 按顺序保留，正式正文到达后一次清除', () => {
   assert.equal(stream.answer, '');
   stream.message('查询结果');
   assert.deepEqual(stream.displayed, [['answer', '查询结果']]);
+});
+
+test('各条 TIPS 保留自己的处理状态，正式回复清除提示和附属状态', async () => {
+  async function* source() {
+    yield { result: { event: 'status', data: { node: '查询设备', message: '查询设备', phase: 'running' } } };
+    yield { result: { event: 'tips', text: '正在查询' } };
+    yield { result: { event: 'tips', text: '正在整理' } };
+    yield { result: { event: 'subtitle', message: '整理结果 | Organizing results' } };
+    yield { result: { event: 'subtitle', message: '' } };
+    yield { result: { event: 'message', answer: '设备正常。' } };
+  }
+
+  const snapshots = [];
+  const result = await consumeChatStream({ source: source(), flushIntervalMs: 0, onSnapshot: snapshot => snapshots.push(snapshot) });
+  assert.deepEqual(snapshots[snapshots.length - 2].blocks.map(block => block.payload.processSubtitle), [
+    '查询设备', '整理结果 | Organizing results',
+  ]);
+  assert.deepEqual(result.blocks.map(block => block.type), ['answer']);
 });
 
 test('工作流收尾重放提示时不重复追加', () => {

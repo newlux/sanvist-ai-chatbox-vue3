@@ -57,6 +57,7 @@ export async function consumeChatStream(
 
   function foldEvent(event: ChatStreamEvent) {
     const update = applyEventToBlocks(snapshot.blocks, event);
+    const blocksChanged = snapshot.blocks !== update.blocks;
     snapshot.blocks = update.blocks;
     snapshot.receivedContent ||= update.receivedContent;
     if (update.conversationId) snapshot.conversationId = update.conversationId;
@@ -67,6 +68,24 @@ export async function consumeChatStream(
     if (update.languageSwitch) snapshot.languageSwitch = update.languageSwitch;
     if (update.processSubtitle !== undefined) snapshot.processSubtitle = update.processSubtitle;
     if (update.processStatus) snapshot.processStatus = update.processStatus;
+    // 提示之间的进度归到最近一条 TIPS。新提示出现后，前一条保留自己的状态。
+    const addedTip = event.event === "tips" && blocksChanged;
+    const changedStatus = Boolean(update.processSubtitle?.trim() || update.processStatus?.title?.trim());
+    if (addedTip || changedStatus) {
+      const status = snapshot.processSubtitle?.trim() || snapshot.processStatus?.title?.trim();
+      if (status) {
+        for (let index = snapshot.blocks.length - 1; index >= 0; index -= 1) {
+          const block = snapshot.blocks[index];
+          if (block.type !== "tips") continue;
+          if (block.payload.processSubtitle !== status) {
+            const blocks = [...snapshot.blocks];
+            blocks[index] = { ...block, payload: { ...block.payload, processSubtitle: status } };
+            snapshot.blocks = blocks;
+          }
+          break;
+        }
+      }
+    }
     if (event.event === "message_end") snapshot.ended = true;
   }
 

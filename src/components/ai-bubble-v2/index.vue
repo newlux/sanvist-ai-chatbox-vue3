@@ -367,9 +367,8 @@ const showProcessStatus = computed(
  */
 const SUBTITLE_STATUS_SUFFIX = /[\s·,，—-]*(正在执行|执行完成|执行中|已完成|进行中|is running|is executing|executing|running|completed|in progress)\s*$/i;
 
-const processSubtitleText = computed(() => {
-  // 各助手均优先展示 subtitle；只下发标准节点状态的工作流使用节点标题兜底。
-  const raw = String(props.processSubtitle || (isGenerating.value ? props.processStatus?.title : "") || "").trim();
+function formatProcessSubtitle(value: string) {
+  const raw = value.trim();
   if (!raw) return "";
   // 「|」是后端约定的「中文 | 英文」分隔符，全角竖线一并认
   const parts = raw
@@ -382,9 +381,15 @@ const processSubtitleText = computed(() => {
   const chinese = parts.find(part => /[\u4E00-\u9FFF]/.test(part));
   const english = parts.find(part => !/[\u4E00-\u9FFF]/.test(part));
   return (isEnglish ? english : chinese) || parts[0];
-});
+}
 
-const showProcessSubtitle = computed(() => !isStopped.value && showProcessStatus.value && Boolean(processSubtitleText.value));
+const processSubtitleText = computed(() =>
+  formatProcessSubtitle(props.processSubtitle || (isGenerating.value ? props.processStatus?.title : "") || ""),
+);
+const hasTips = computed(() => contentBlocks.value.some(block => block.type === "tips"));
+const showProcessSubtitle = computed(
+  () => !hasTips.value && !isStopped.value && showProcessStatus.value && Boolean(processSubtitleText.value),
+);
 
 /** 维修助理回流卡：轮询中显示「故障诊断中…」并先把已取到的明细摆出来，回流完成后补齐状态文案。 */
 const showAssistantCallbackResult = computed(
@@ -724,7 +729,16 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           @guide-suggestion-open="onGuideSuggestionOpen"
           @guide-check-step-select="onGuideCheckStepSelect"
           @gantt-open="onGanttOpen"
-        />
+        >
+          <template #tip-status="{ status }">
+            <view v-if="formatProcessSubtitle(status)" class="ai-bubble-v2__process-subtitle ai-bubble-v2__tip-status">
+              <text class="ai-bubble-v2__process-subtitle-label">{{ formatProcessSubtitle(status) }}</text>
+              <view v-if="isGenerating" class="ai-bubble-v2__process-subtitle-dots" aria-hidden="true">
+                <text v-for="dot in 3" :key="dot" class="ai-bubble-v2__process-subtitle-dot">.</text>
+              </view>
+            </view>
+          </template>
+        </AiContentBlocks>
         <view v-if="isStopped && !props.assistantCallbackTitle" class="ai-bubble-v2__busy-hint">
           <text class="ai-bubble-v2__busy-hint-text ai-bubble-v2__stopped-text">
             {{ t("process-status-stopped") }}
@@ -1207,6 +1221,10 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   text-overflow: clip;
   white-space: nowrap;
   animation: ai-bubble-subtitle-enter 180ms ease-out both;
+}
+.ai-bubble-v2__tip-status {
+  flex: none;
+  margin-bottom: 12rpx;
 }
 .ai-bubble-v2__process-subtitle-label {
   flex: 0 1 auto;
