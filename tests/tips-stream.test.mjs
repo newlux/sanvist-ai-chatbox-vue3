@@ -52,6 +52,25 @@ test('TIPS 标签分片解析为临时提示，空白不清除提示，首段正
   assert.deepEqual(stream.displayed, [['answer', '设备正常。\n\n检查完成。']]);
 });
 
+test('多条 TIPS 按顺序保留，正式正文到达后一次清除', () => {
+  const stream = turn();
+  stream.message('<TIPS>正在查询</TIPS>');
+  stream.message(wrap('<TIPS>正在整理</TIPS>'));
+  stream.message('\n');
+  assert.deepEqual(stream.displayed, [['tips', '正在查询'], ['tips', '正在整理']]);
+  assert.equal(stream.answer, '');
+  stream.message('查询结果');
+  assert.deepEqual(stream.displayed, [['answer', '查询结果']]);
+});
+
+test('工作流收尾重放提示时不重复追加', () => {
+  const stream = turn();
+  const answer = '<TIPS>正在查询</TIPS><TIPS>正在整理</TIPS>';
+  stream.message(answer);
+  stream.receive({ event: 'workflow_finished', data: { status: 'succeeded', outputs: { answer } } });
+  assert.deepEqual(stream.displayed, [['tips', '正在查询'], ['tips', '正在整理']]);
+});
+
 test('SANVIST answer 内的 TIPS 跨事件分片也不进入正文', () => {
   const stream = turn();
   stream.message(wrap('<TI'));

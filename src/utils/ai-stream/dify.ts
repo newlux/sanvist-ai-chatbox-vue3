@@ -843,8 +843,8 @@ export function createDifyEventNormalizer() {
       const raw = buffer.slice(openMarker.length, end);
       buffer = buffer.slice(end + closeMarker.length);
       if (tag === "TIPS") {
-        receivedTips = true;
         const text = raw.trim();
+        receivedTips ||= Boolean(text);
         if (!receivedAnswer && !skipAnswers && text) events.push({ event: "tips", ...references, text });
         continue;
       }
@@ -1041,11 +1041,13 @@ export function createDifyEventNormalizer() {
           protocolBuffer = "";
           wrappedAnswerBuffer = "";
         }
+        // 收尾快照会重放已显示的提示，只补正式内容。
+        const replayingTips = receivedTips;
         const answerEvents = parseOutputsAnswer
           ? extractSanvistEvents(outputsAnswer, references, false, receivedAnswer)
           : [];
         return [
-          ...answerEvents,
+          ...answerEvents.filter(event => !replayingTips || event.event !== "tips"),
           {
             event: "message_end",
             ...references,

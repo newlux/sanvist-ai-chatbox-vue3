@@ -142,9 +142,10 @@ export function applyEventToBlocks(
     }
     case "tips": {
       if (!event.text.trim() || blocks.some(block => block.type === "answer" && String(block.payload.content || "").trim())) return base;
+      const tipsIndex = blocks.filter(block => block.type === "tips").length;
       return {
         ...base,
-        blocks: upsertBlock(blocks, "tips-0", "tips", { content: event.text }, true),
+        blocks: upsertBlock(blocks, `tips-${tipsIndex}`, "tips", { content: event.text }, true),
         receivedContent: true,
       };
     }
