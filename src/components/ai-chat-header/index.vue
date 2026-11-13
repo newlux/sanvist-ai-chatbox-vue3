@@ -755,7 +755,6 @@ onBeforeUnmount(() => {
             <view
               v-if="!props.backOnly"
               class="chat-header__icon-btn chat-header__tts-switch"
-              :class="{ 'chat-header__tts-switch--off': !autoTtsEnabled }"
               @tap="onToggleAutoTts"
             >
               <image :src="autoTtsIcon" mode="aspectFit" class="chat-header__icon-tts-img" />
