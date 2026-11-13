@@ -14,6 +14,7 @@ import { markdownToPlainText } from "@/utils/markdown-to-text";
 const logger = createLogger("rt-tts");
 
 interface AudioItem {
+  text: string;
   dataUrl?: string | null;
   audioBase64?: string | null;
   format?: string | null;
@@ -99,6 +100,7 @@ export function useRealtimeTts(scope?: string) {
   const chatStore = useChatStore(scope);
   const settingsStore = useSettingsStore();
   const playing = ref(false);
+  const playbackText = ref("");
   const playingMessageId = ref<Identifier | null>(null);
   const playingMessageKey = ref<string | null>(null);
   /** 正在播的是哪一步（多步骤卡翻页时用来判断「同一消息、不同步骤」要不要重播） */
@@ -167,6 +169,7 @@ export function useRealtimeTts(scope?: string) {
   }
 
   function releaseAudio() {
+    playbackText.value = "";
     if (!activeAudio) return;
     try {
       activeAudio.stop();
@@ -228,6 +231,7 @@ export function useRealtimeTts(scope?: string) {
     audio.onEnded(() => {
       if (activeAudio !== audio) return;
       activeAudio = null;
+      playbackText.value = "";
       audio.destroy?.();
       playNext(messageId, seq);
     });
@@ -235,6 +239,7 @@ export function useRealtimeTts(scope?: string) {
       if (activeAudio !== audio) return;
       logger.info("跳过无法播放的语音句", { error });
       activeAudio = null;
+      playbackText.value = "";
       audio.destroy?.();
       playNext(messageId, seq);
     });
@@ -242,10 +247,11 @@ export function useRealtimeTts(scope?: string) {
       if (activeAudio !== audio) return;
       patchMessage(messageId, { ttsLoading: false, ttsPlaying: true });
     });
+    playbackText.value = item.text;
     audio.autoplay = true;
   }
 
-  function handleChunk(payload: unknown, messageId: Identifier, seq: number) {
+  function handleChunk(payload: unknown, messageId: Identifier, seq: number, text: string) {
     if (seq !== sessionSeq) return;
     if (!payload || typeof payload !== "object") return;
     const chunk = payload as RealtimeTtsChunk;
@@ -253,6 +259,7 @@ export function useRealtimeTts(scope?: string) {
     if (chunk.event === "done") return;
     if (typeof chunk.seq === "number") {
       audioQueue.push({
+        text,
         dataUrl: chunk.dataUrl ?? null,
         audioBase64: chunk.audioBase64 ?? null,
         format: chunk.format ?? null,
@@ -303,7 +310,7 @@ export function useRealtimeTts(scope?: string) {
         try {
           activeStream = consumeTextToSpeechStream(
             buildTtsParams(text, language),
-            payload => handleChunk(payload, messageId, seq),
+            payload => handleChunk(payload, messageId, seq, text),
             () => settle(),
             () => settle(),
           );
@@ -420,7 +427,7 @@ export function useRealtimeTts(scope?: string) {
 
       activeStream = consumeTextToSpeechStream(
         buildTtsParams(text, language),
-        payload => handleChunk(payload, messageId, seq),
+        payload => handleChunk(payload, messageId, seq, text),
         (error) => {
           if (seq !== sessionSeq) return;
           logger.warn("实时语音请求失败", error);
@@ -476,6 +483,7 @@ export function useRealtimeTts(scope?: string) {
 
   return {
     setPlaybackGain,
+    playbackText,
     togglePlay,
     feedAnswerDelta,
     stop,

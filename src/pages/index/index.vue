@@ -171,6 +171,7 @@ const duplex = useDuplexVoice({
   },
   submit: text => { void sendMessage({ text, markPreviousStopped: true }); },
   setGain: gain => realtimeTts.setPlaybackGain(gain),
+  playbackText: () => realtimeTts.playbackText.value,
   sessionId: () => chatStore.aiSessionId,
 });
 const { active: duplexActive, starting: duplexStarting, listening: duplexListening, transcript: duplexTranscript } = duplex;
