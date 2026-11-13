@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload } from "@/api/chat/types";
-import { computed, onMounted, ref } from "vue";
+import { computed, inject, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { stripOptionPrefix } from "@/utils/option-label";
 
@@ -34,6 +34,10 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
+/** 深色：跟随 AI 气泡主题（与 GuideSuggestionBlock / TableBlock 同一套取法） */
+const darkContainer = inject("ai-bubble-dark", computed(() => false));
+const isDark = computed(() => Boolean(darkContainer?.value));
 
 /**
  * 选项：文案先剥掉后端可能自带的「A |」序号。
@@ -117,7 +121,7 @@ function submitRemark() {
 </script>
 
 <template>
-  <view v-if="inline" class="ask-slot">
+  <view v-if="inline" class="ask-slot" :class="{ 'ask-slot--dark': isDark }">
     <text v-if="title" class="ask-slot__title">
       {{ title }}
     </text>
@@ -275,5 +279,58 @@ function submitRemark() {
 .ask-slot__remark-placeholder {
   color: #666666;
   font-size: 28rpx;
+}
+
+/* ===== 深色：与身份选择胶囊（GuideSuggestionBlock）同一套材质 ===== */
+.ask-slot--dark {
+  .ask-slot__title {
+    color: #e5e5e5;
+  }
+
+  /* 描边走 1px 内描边线性渐变 #5A5A5A → #F7F7F7 → #5A5A5A：
+     原生 border 只能单色，这里把 border 留作占位（透明），再用「渐变底 + mask 挖掉内容区」画 1px 环 */
+  .ask-slot__option {
+    position: relative;
+    border-color: transparent;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .ask-slot__option::before {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    padding: 1px;
+    border-radius: 999rpx; /* 与胶囊半圆端一致 */
+    background: linear-gradient(135deg, #5a5a5a 0%, #f7f7f7 50%, #5a5a5a 100%);
+    content: "";
+    pointer-events: none;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+
+  .ask-slot__option-letter,
+  .ask-slot__option-text {
+    color: #e5e5e5;
+  }
+
+  .ask-slot__option-divider {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  /* 「其他输入」：占位走 45% 白，已填写走正文色 */
+  .ask-slot__remark-placeholder-text {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .ask-slot__remark-filled,
+  .ask-slot__remark-input {
+    color: #e5e5e5;
+  }
+
+  .ask-slot__remark-placeholder {
+    color: rgba(255, 255, 255, 0.45);
+  }
 }
 </style>

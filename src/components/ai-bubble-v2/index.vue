@@ -1587,51 +1587,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     color: #999999;
   }
 
-  // ---- 内联追问卡（AskSlotBlock）：深色下白底胶囊换成深底描边，否则在 #212121 卡片上很扎眼 ----
-  :deep(.ask-slot__title) {
-    color: #ffffff;
-  }
-
-  // 胶囊材质与「身份选择」那组（GuideSuggestionBlock）深色态保持一致：
-  // 6% 白底 + 1px 内描边线性渐变 #5A5A5A → #F7F7F7 → #5A5A5A，正文色 #E5E5E5。
-  // 原生 border 只能单色，所以 border 留作占位（透明），渐变环用「渐变底 + mask 挖掉内容区」画。
-  :deep(.ask-slot__option) {
-    position: relative;
-    border-color: transparent;
-    background: rgb(0 0 0 / 6%);
-  }
-
-  :deep(.ask-slot__option)::before {
-    position: absolute;
-    inset: 0;
-    box-sizing: border-box;
-    padding: 1px;
-    border-radius: 999rpx; /* 与胶囊半圆端一致 */
-    background: linear-gradient(135deg, #5a5a5a 0%, #f7f7f7 50%, #5a5a5a 100%);
-    content: "";
-    pointer-events: none;
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-  }
-
-  :deep(.ask-slot__option-letter),
-  :deep(.ask-slot__option-text) {
-    color: #e5e5e5;
-  }
-
-  :deep(.ask-slot__option-divider) {
-    background: rgba(255, 255, 255, 0.2);
-  }
-
-  :deep(.ask-slot__remark-placeholder-text) {
-    color: #8f8f8f;
-  }
-
-  :deep(.ask-slot__remark-filled),
-  :deep(.ask-slot__remark-input) {
-    color: #ffffff;
-  }
+  // 内联追问卡（AskSlotBlock）的深色材质由组件自己按 ai-bubble-dark 处理，
+  // 与「身份选择」那组胶囊（GuideSuggestionBlock）同一套，不再在这里 :deep 覆盖。
 }
 </style>

@@ -73,6 +73,11 @@ const actions = computed<AssistantNavigationAction[]>(() => {
 /** 点了「暂不进入」：卡片收起，与弹层关闭同义 */
 const dismissed = ref(false);
 
+/** 选项序号：A / B / C…（与「身份选择」那组胶囊同一套写法） */
+function optionLetter(index: number) {
+  return String.fromCharCode(65 + index);
+}
+
 const hasOpened = ref(false);
 
 /**
@@ -124,17 +129,17 @@ function onActionTap(action: AssistantNavigationAction) {
     </text>
 
     <view class="assistant-nav__actions">
+      <!-- 与「身份选择」那组胶囊（GuideSuggestionBlock）同款：A｜文案 + 全圆角 -->
       <view
         v-for="(action, index) in actions"
         :key="action.key"
         class="assistant-nav__action"
-        :class="[
-          `assistant-nav__action--${action.style || 'default'}`,
-          // 设计稿里只有最末一项是 12px 圆角，其余 8px（与底部弹层同值）
-          index === actions.length - 1 ? 'assistant-nav__action--last' : '',
-        ]"
         @tap.stop="onActionTap(action)"
       >
+        <text class="assistant-nav__action-letter">
+          {{ optionLetter(index) }}
+        </text>
+        <view class="assistant-nav__action-divider" />
         <text class="assistant-nav__action-text">
           {{ action.label }}
         </text>
@@ -144,9 +149,9 @@ function onActionTap(action: AssistantNavigationAction) {
 </template>
 
 <style lang="scss" scoped>
-/* 内联跳转卡：材质与底部弹层（ai-assistant-navigation-sheet）一致，
-   只是从「贴底白板」改成排在回答正文下方 —— 标题 14px / #1A1A1A，
-   动作行 #F6F6F6、高 36px、左右内边距 12px，间距 8px */
+/* 内联跳转卡：标题 + 选项胶囊。
+   选项与「身份选择」那组胶囊（GuideSuggestionBlock，老板 / 设备管理员 / 操作手）同一套材质：
+   白底 + 1px #E6E6E6 描边 + 全圆角（999rpx），左侧 A｜文案，纵向排列、左对齐、间距 10px */
 .assistant-nav {
   display: flex;
   flex-direction: column;
@@ -158,82 +163,106 @@ function onActionTap(action: AssistantNavigationAction) {
 
 .assistant-nav__title {
   display: block;
-  font-family: "PingFang SC", sans-serif;
+  font-family: "PingFang SC", "Inter", sans-serif;
   font-size: 28rpx; // 14px
   font-weight: 400;
   line-height: 34rpx; // 17px
   color: #1a1a1a;
 }
 
+/* 选项组：纵向排列、左对齐，胶囊按内容宽度收缩 */
 .assistant-nav__actions {
   display: flex;
   flex-direction: column;
-  gap: 16rpx; // 8px：动作之间
+  align-items: flex-start;
 }
 
 .assistant-nav__action {
   display: flex;
   align-items: center;
   box-sizing: border-box;
-  height: 72rpx; // 36px
-  padding: 0 24rpx; // 12px
-  border-radius: 16rpx; // 8px
-  background: #f6f6f6;
-
-  &:active {
-    opacity: 0.7;
-  }
+  max-width: 100%;
+  padding: 18rpx 28rpx;
+  border: 1px solid #e6e6e6;
+  border-radius: 999rpx; // 真胶囊：左右两端半圆
+  background: #ffffff;
 }
 
-/* 设计稿原值：最末一项 12px 圆角，其余 8px */
-.assistant-nav__action--last {
-  border-radius: 24rpx; // 12px
+/* 段间距用 margin 而不是 flex gap：低端安卓 WebView 的 flex gap 支持不稳 */
+.assistant-nav__action + .assistant-nav__action {
+  margin-top: 20rpx; // 10px
 }
 
-.assistant-nav__action--primary {
-  background: #2f2b2b;
+.assistant-nav__action:active {
+  opacity: 0.7;
+}
+
+/* 序号：A / B / C… 与身份选择胶囊逐项对齐 */
+.assistant-nav__action-letter {
+  flex-shrink: 0;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  font-size: 28rpx;
+  font-weight: 600;
+  line-height: 40rpx;
+  color: #1a1a1a;
+}
+
+/* 字母与文案之间的细分隔线（设计稿里的「A｜」） */
+.assistant-nav__action-divider {
+  flex-shrink: 0;
+  width: 1px;
+  height: 26rpx;
+  margin: 0 16rpx;
+  background: #dcdcdc;
 }
 
 .assistant-nav__action-text {
-  font-family: "PingFang SC", sans-serif;
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+  font-family: "PingFang SC", "Inter", sans-serif;
   font-size: 28rpx; // 14px
   font-weight: 400;
-  line-height: 34rpx;
-  color: #000;
+  line-height: 40rpx;
+  color: #1a1a1a;
 }
 
-.assistant-nav__action--primary .assistant-nav__action-text {
-  color: #fff;
-}
-
-.assistant-nav__action--muted .assistant-nav__action-text {
-  color: #999;
-}
-
-/* ===== 深色：与其它块同一套材质（正文 #E5E5E5、块底 6% 白） ===== */
+/* ===== 深色：与身份选择胶囊同一套材质（块底 6% 白、正文 #E5E5E5） ===== */
 .assistant-nav--dark {
   .assistant-nav__title {
     color: #e5e5e5;
   }
 
+  /* 描边走 1px 内描边线性渐变 #5A5A5A → #F7F7F7 → #5A5A5A：
+     原生 border 只能单色，这里把 border 留作占位（透明），再用「渐变底 + mask 挖掉内容区」画 1px 环 */
   .assistant-nav__action {
+    position: relative;
+    border-color: transparent;
     background: rgba(255, 255, 255, 0.06);
   }
 
-  .assistant-nav__action--primary {
-    background: rgba(255, 255, 255, 0.92);
+  .assistant-nav__action::before {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    padding: 1px;
+    border-radius: 999rpx; // 与胶囊半圆端一致
+    background: linear-gradient(135deg, #5a5a5a 0%, #f7f7f7 50%, #5a5a5a 100%);
+    content: "";
+    pointer-events: none;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
   }
 
+  .assistant-nav__action-letter,
   .assistant-nav__action-text {
     color: #e5e5e5;
   }
 
-  .assistant-nav__action--primary .assistant-nav__action-text {
-    color: #1a1a1a;
-  }
-
-  .assistant-nav__action--muted .assistant-nav__action-text {
-    color: rgba(255, 255, 255, 0.45);
+  .assistant-nav__action-divider {
+    background: rgba(255, 255, 255, 0.2);
   }
 }
 </style>

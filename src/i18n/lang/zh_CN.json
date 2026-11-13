@@ -270,7 +270,6 @@
   "repair-callback-status-failed": "故障诊断未完成",
   "repair-callback-timeout": "维修助理结果暂未生成，请稍后再试。",
   "repair-callback-done": "案例报告生成已完成",
-  "repair-callback-answer-done": "答案回复已生成",
   "repair-callback-pending": "待识别",
   "repair-callback-label-device": "设备",
   "repair-callback-label-problem": "问题",

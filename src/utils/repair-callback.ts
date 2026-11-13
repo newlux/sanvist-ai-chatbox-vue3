@@ -81,10 +81,6 @@ function callbackTitle() {
 function diagnosisStatusText() {
   return t("repair-callback-done");
 }
-/** 快速问答（回流数据没有 status）的副标题 */
-function quickAnswerStatusText() {
-  return t("repair-callback-answer-done");
-}
 /** 四项里某一项还没值时，该行显示的占位文案 */
 function pendingValueText() {
   return t("repair-callback-pending");
@@ -167,7 +163,8 @@ export function parseRepairCallbackSummary(query: string): RepairCallbackSummary
     const ready = details.every(item => item.value !== pendingValueText());
     return {
       title: callbackTitle(),
-      statusText: isDiagnosis ? (ready ? diagnosisStatusText() : "") : quickAnswerStatusText(),
+      // 快速问答不再给副标题（原先的「答案回复已生成」已去掉），只有四项齐全的诊断才写「已完成」
+      statusText: isDiagnosis && ready ? diagnosisStatusText() : "",
       details,
       repairConversationId: String(data.repairConversationId || data.repair_conversation_id || "").trim(),
     };

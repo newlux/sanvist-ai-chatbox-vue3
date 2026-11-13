@@ -269,7 +269,6 @@
   "repair-callback-status-failed": "Fault diagnosis incomplete",
   "repair-callback-timeout": "The repair assistant result is not ready yet. Please try again later.",
   "repair-callback-done": "Case report generated",
-  "repair-callback-answer-done": "Answer generated",
   "repair-callback-pending": "Not identified",
   "repair-callback-label-device": "Device",
   "repair-callback-label-problem": "Issue",

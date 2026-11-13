@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, reactive } from "vue";
+import { computed, inject, reactive } from "vue";
+import { stripOptionPrefix } from "@/utils/option-label";
 
 defineOptions({ name: "SuggestionBlock" });
 
@@ -7,6 +8,10 @@ const props = defineProps({
   payload: { type: Object, default: () => ({}) },
 });
 const emit = defineEmits(["suggestion-tap"]);
+
+/** 深色：跟随 AI 气泡主题（与 GuideSuggestionBlock / AskSlotBlock 同一套取法） */
+const darkContainer = inject("ai-bubble-dark", computed(() => false));
+const isDark = computed(() => Boolean(darkContainer?.value));
 
 const DEFAULT_PLACEHOLDER = "其他情况，请补充描述";
 
@@ -30,8 +35,13 @@ function isInputItem(item: SuggestionItem | null | undefined): boolean {
 function itemKey(item: SuggestionItem | null, index: number) {
   return item && item.id != null ? item.id : index;
 }
+/** 选项序号：A / B / C…（与「身份选择」那组胶囊同一套写法） */
+function optionLetter(index: number) {
+  return String.fromCharCode(65 + index);
+}
+/** 文案：剥掉后端可能自带的「A |」序号，避免和前面渲染的字母重复 */
 function itemText(item: SuggestionItem | null | undefined) {
-  return String(item?.text || item?.label || "");
+  return stripOptionPrefix(String(item?.text || item?.label || ""));
 }
 function itemPlaceholder(item: SuggestionItem | null | undefined) {
   return String(item?.placeholder || itemText(item) || DEFAULT_PLACEHOLDER);
@@ -87,20 +97,24 @@ function submitInput(index: number) {
 </script>
 
 <template>
-  <view v-if="items.length" class="suggestion-block">
+  <view v-if="items.length" class="suggestion-block" :class="{ 'suggestion-block--dark': isDark }">
     <template v-for="(item, index) in items" :key="itemKey(item, index)">
-      <!-- 普通选项：点击即发送 -->
+      <!-- 普通选项：与「身份选择」那组胶囊（GuideSuggestionBlock）同款 A｜文案，点击即发送 -->
       <view
         v-if="!isInputItem(item)"
         class="suggestion-block__item"
         @tap.stop="onItemTap(item, index)"
       >
+        <text class="suggestion-block__letter">
+          {{ optionLetter(index) }}
+        </text>
+        <view class="suggestion-block__divider" />
         <text class="suggestion-block__text">
           {{ itemText(item) }}
         </text>
       </view>
 
-      <!-- 输入型选项 · 占位外观（如「其他 + 内容」，点击后输入） -->
+      <!-- 输入型选项 · 占位外观（如「其他 + 内容」，点击后输入）：与追问卡的「其他输入」同一套胶囊 -->
       <view
         v-else-if="!isEditing(index)"
         class="suggestion-block__item suggestion-block__item--input"
@@ -144,61 +158,89 @@ function submitInput(index: number) {
 </template>
 
 <style lang="scss" scoped>
+/* 追问 / 推荐问题胶囊：与「身份选择」那组胶囊（GuideSuggestionBlock，老板 / 设备管理员 / 操作手）
+   同一套材质 —— 白底 + 1px #E6E6E6 描边 + 全圆角（999rpx），左侧 A｜文案，
+   纵向排列、左对齐、间距 10px */
 .suggestion-block {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 16rpx;
+  gap: 20rpx; /* 10px：胶囊之间 */
   background: transparent;
 }
+
 .suggestion-block__item {
   display: flex;
   align-items: center;
   align-self: flex-start;
-  width: fit-content;
-  max-width: 100%;
   box-sizing: border-box;
-  padding: 16rpx 24rpx;
-  border: 1rpx solid #e3e3e3;
-  border-radius: 16rpx;
+  max-width: 100%;
+  padding: 18rpx 28rpx;
+  border: 1px solid #e6e6e6;
+  border-radius: 999rpx; /* 真胶囊：左右两端半圆 */
   background: #ffffff;
-  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.06);
 }
+
 .suggestion-block__item:active {
-  background: #f7f7f7;
+  opacity: 0.7;
 }
-.suggestion-block__item--input {
-  background: #ffffff;
-}
+
+/* 输入型选项展开成整行胶囊：端头仍按胶囊留白，右侧留给发送箭头 */
 .suggestion-block__item--editing {
   align-self: stretch;
   width: 100%;
-  padding: 8rpx 12rpx 8rpx 24rpx;
-  border: 2rpx solid #c8201e;
-  background: #ffffff;
+  padding: 8rpx 12rpx 8rpx 28rpx;
   box-shadow: none;
 }
-.suggestion-block__text {
-  color: #333333;
+
+/* 序号：A / B / C… 与身份选择胶囊逐项对齐 */
+.suggestion-block__letter {
+  flex-shrink: 0;
+  font-family: "PingFang SC", "Inter", sans-serif;
   font-size: 28rpx;
+  font-weight: 600;
   line-height: 40rpx;
+  color: #1a1a1a;
+}
+
+/* 字母与文案之间的细分隔线（设计稿里的「A｜」） */
+.suggestion-block__divider {
+  flex-shrink: 0;
+  width: 1px;
+  height: 26rpx;
+  margin: 0 16rpx;
+  background: #dcdcdc;
+}
+
+.suggestion-block__text {
+  min-width: 0;
+  color: #1a1a1a;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  font-size: 28rpx;
+  font-weight: 400;
+  line-height: 40rpx;
+  white-space: normal;
   word-break: break-word;
 }
+
 .suggestion-block__text--placeholder {
-  color: #b9bec7;
+  color: #666666;
 }
+
 .suggestion-block__input {
   flex: 1;
   min-width: 0;
   height: 56rpx;
   color: #1a1a1a;
-  font-size: 24rpx;
+  font-size: 28rpx;
   line-height: 56rpx;
 }
+
 .suggestion-block__input-placeholder {
-  color: #b9bec7;
-  font-size: 24rpx;
+  color: #666666;
+  font-size: 28rpx;
 }
+
 .suggestion-block__send {
   flex: 0 0 auto;
   display: flex;
@@ -208,13 +250,59 @@ function submitInput(index: number) {
   height: 56rpx;
   border-radius: 50%;
 }
+
 .suggestion-block__send-img {
   width: 56rpx;
   height: 56rpx;
   display: block;
 }
+
 .suggestion-block__send--disabled {
   opacity: 0.4;
   pointer-events: none;
+}
+
+/* ===== 深色：与身份选择胶囊（GuideSuggestionBlock）同一套材质（块底 6% 白、正文 #E5E5E5） ===== */
+.suggestion-block--dark {
+  /* 描边走 1px 内描边线性渐变 #5A5A5A → #F7F7F7 → #5A5A5A：
+     原生 border 只能单色，这里把 border 留作占位（透明），再用「渐变底 + mask 挖掉内容区」画 1px 环 */
+  .suggestion-block__item {
+    position: relative;
+    border-color: transparent;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .suggestion-block__item::before {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    padding: 1px;
+    border-radius: 999rpx; /* 与胶囊半圆端一致 */
+    background: linear-gradient(135deg, #5a5a5a 0%, #f7f7f7 50%, #5a5a5a 100%);
+    content: "";
+    pointer-events: none;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+
+  .suggestion-block__letter,
+  .suggestion-block__text {
+    color: #e5e5e5;
+  }
+
+  .suggestion-block__text--placeholder,
+  .suggestion-block__input-placeholder {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .suggestion-block__divider {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .suggestion-block__input {
+    color: #e5e5e5;
+  }
 }
 </style>
