@@ -9,14 +9,13 @@ import { pushActionOf } from "@/utils/push/push-payload";
  * 任务下发通知面板（sanvist.push/1 消息中心）。
  *
  * 独立组件：只依赖 `hooks/usePushNotification` 与 `utils/push/*`，不读写任何业务 store，
- * 放到哪个页面都只是「一块卡片」。当前挂在声音设置页，用于验证车载端推送链路。
+ * 由个性觉醒页按页面可见性挂载，接收车载端任务通知。
  *
  * 文案不走 i18n 词条：这份面板是随推送协议一起新增的独立文件，词条需要先进 i18n.csv
  * 再跑生成脚本（会重写 15 个语言包），为避免影响其它模块，这里按当前语言就地取词。
  */
 const props = withDefaults(
   defineProps<{
-    /** 深色模式：与声音设置页 .sound-settings--dark 同一套配色 */
     dark?: boolean;
     /** 设备号，默认取 config/push 里的联调账号 */
     deviceNo?: string;
@@ -33,6 +32,9 @@ const COPY = {
     title: "任务下发通知",
     connect: "开启推送",
     disconnect: "断开连接",
+    previewSound: "试听提示音",
+    soundBlocked: "自动播放受限，请点击试听提示音",
+    soundFailed: "提示音播放失败",
     clear: "清空记录",
     empty: "暂无推送消息，等待服务端下发…",
     first: "首次下发",
@@ -53,6 +55,9 @@ const COPY = {
     title: "Task push notices",
     connect: "Connect",
     disconnect: "Disconnect",
+    previewSound: "Test sound",
+    soundBlocked: "Autoplay blocked. Tap Test sound to enable audio.",
+    soundFailed: "Could not play the notification sound",
     clear: "Clear",
     empty: "No messages yet, waiting for the server…",
     first: "First dispatch",
@@ -73,7 +78,7 @@ const COPY = {
 
 const copy = computed(() => (String(locale.value || "").toLowerCase().startsWith("zh") ? COPY.zh : COPY.en));
 
-const { deviceNo, state, stateDetail, notices, running, unreadCount, connected, toggle, clear, markRead, openDetail } =
+const { deviceNo, state, stateDetail, notices, running, unreadCount, connected, soundIssue, playNoticeSound, toggle, clear, markRead, openDetail } =
   usePushNotification({
     deviceNo: props.deviceNo || undefined,
     autoStart: props.autoConnect,
@@ -145,6 +150,13 @@ function onOpen(record: PushMessageRecord) {
       <text class="push-panel__meta-text">{{ countText }}</text>
     </view>
 
+    <button class="push-panel__sound" @click="playNoticeSound(true)">
+      {{ copy.previewSound }}
+    </button>
+    <view v-if="soundIssue" class="push-panel__detail">
+      {{ soundIssue === "blocked" ? copy.soundBlocked : copy.soundFailed }}
+    </view>
+
     <view v-if="stateDetail" class="push-panel__detail">{{ stateDetail }}</view>
 
     <view v-if="!notices.length" class="push-panel__empty">{{ copy.empty }}</view>
@@ -176,7 +188,6 @@ function onOpen(record: PushMessageRecord) {
 </template>
 
 <style lang="scss" scoped>
-/* 与声音设置页的播放速度卡同一套规格：白底、圆角 12px（24rpx）、内边距 16px（32rpx） */
 .push-panel {
   display: flex;
   flex-direction: column;
@@ -249,6 +260,21 @@ function onOpen(record: PushMessageRecord) {
   color: #1166d6;
   font-size: 22rpx;
   line-height: 32rpx;
+}
+
+.push-panel__sound {
+  align-self: flex-start;
+  margin: 8rpx 0 0;
+  padding: 4rpx 0;
+  border: 0;
+  background: transparent;
+  color: #1166d6;
+  font-size: 22rpx;
+  line-height: 32rpx;
+}
+
+.push-panel__sound::after {
+  border: 0;
 }
 
 .push-panel__meta {
@@ -393,6 +419,10 @@ function onOpen(record: PushMessageRecord) {
 /* ===================== 深色模式（203:1093 深色稿同一套配色） ===================== */
 .push-panel--dark {
   background: #303030;
+
+  .push-panel__sound {
+    color: #9cc4ff;
+  }
 
   .push-panel__title {
     color: #ffffff;

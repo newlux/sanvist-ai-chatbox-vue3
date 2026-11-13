@@ -6,7 +6,6 @@ import { useI18n } from "vue-i18n";
 import { getListenBroadcastConfig } from "@/api/listen-broadcast";
 import backIcon from "@/assets/img/icon-sound-settings-back.svg";
 import waveIcon from "@/assets/img/icon-sound-settings-wave.svg";
-import PushNoticePanel from "@/components/push-notice-panel/index.vue";
 import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
 import { saveReportVoiceByStyle } from "@/hooks/useReportVoice";
 import { useSafeArea } from "@/hooks/useSafeArea";
@@ -40,13 +39,6 @@ import { createLogger } from "@/utils/logger";
  * - 倍率每次切档（松手 / 点击档位）立即落库，不做节流；
  * - 落库成功「保存成功」、失败「保存失败，请稍后重试」，统一用页面正中的胶囊提示：
  *   浅色白底蓝边黑字，深色近透明黑底（#0000000A）蓝边白字。
- *
- * 推送面板（声音卡上方那块「任务下发通知」）：
- * - 按《任务协同助手-车载端MQTT服务器-通信协议规范V2.0》接入 `sanvist.push/1`，
- *   走 MQTT over WebSocket（wss）订阅 `sanvist/v1/vehicle/{device_no}/dn/#`，QoS 1；
- * - 逻辑全部在 hooks/usePushNotification + utils/push，UI 在 components/push-notice-panel，
- *   本页只挂载组件，不参与连接与消息处理；点「查看详情」沿用既有通路
- *   （utils/schedule-ask 暂存 prompt → 任务对话页 onShow 自动发送）。
  *
  * 深色模式（203:1093 深色稿）：页面 #1A1A1A、卡片 #303030、文字 #FFFFFF / #8E8E8E、
  * 数值 #5D5D5D、强调 #1166D6、轨道 #F3F3F3；外观为深色时由 .sound-settings--dark 覆盖配色，
@@ -479,12 +471,6 @@ onMounted(async () => {
           </view>
         </view>
 
-        <!-- 任务下发通知（sanvist.push/1）：独立组件，走 MQTT over WebSocket，
-             内容全部在 components/push-notice-panel 里，本页只负责挂载 -->
-        <view class="sound-settings__push">
-          <PushNoticePanel :dark="pageDark" />
-        </view>
-
         <!-- 设计稿 180:246 Frame 135：声音列表面板 330×586，白底、内边距 16、卡片间距 6 -->
         <view class="sound-settings__list">
           <view
@@ -726,11 +712,6 @@ onMounted(async () => {
   font-weight: 400;
   line-height: 34rpx;
   text-align: center;
-}
-
-/* 推送面板与播放速度卡相距 12px（24rpx），与下方声音列表同距，尺寸全部由组件自己承担 */
-.sound-settings__push {
-  margin-top: 24rpx;
 }
 
 /* 设计稿 180:246：面板 330×586，白底、无圆角、内边距 16px（32rpx）；与上方卡片相距 12px（24rpx） */
