@@ -57,7 +57,7 @@ export interface UseVoiceQueryOptions {
   /** 识别成功、收起字幕前，供页面记录文字原位置以播放发送动画。 */
   onBeforeSubmit?: () => void;
   /** 开口前：停掉正在播的语音，避免外放被麦克风收进去 */
-  onStart?: () => void;
+  onStart?: () => void | Promise<unknown>;
 }
 
 /**
@@ -133,7 +133,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
       clearInterval(voiceTickTimer);
       voiceTickTimer = null;
     }
-    voiceCapture?.stop();
+    const captureReleased = voiceCapture?.stop();
     voiceCapture = null;
     voiceSession?.close();
     voiceSession = null;
@@ -153,6 +153,7 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
     nativePeakLevel = 0;
     // 没走到 final（取消 / 通道失败 / 权限被拒）：占位气泡已经没有内容可回填，撤掉
     if (!resetOptions?.keepPlaceholder) options.discardPlaceholder();
+    return captureReleased;
   }
 
   function failVoiceQuery(title: string) {
@@ -371,9 +372,9 @@ export function useVoiceQuery(options: UseVoiceQueryOptions) {
 
   async function startVoiceQuery() {
     // 开口前先把正在播的语音掐掉：一是会盖住用户说话，二是外放声音会被麦克风收进 ASR
-    options.onStart?.();
-
     const seq = ++voiceSeq;
+    await options.onStart?.();
+    if (seq !== voiceSeq) return;
     voiceFinishing.value = false;
     voiceLevel.value = 0;
     voiceSeconds.value = 0;

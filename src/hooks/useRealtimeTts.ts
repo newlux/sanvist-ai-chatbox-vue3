@@ -107,6 +107,12 @@ export function useRealtimeTts(scope?: string) {
   let streamFinished = false;
   let activeStream: TtsStreamHandle | null = null;
   let audioQueue: AudioItem[] = [];
+  let playbackGain = 1;
+  function setPlaybackGain(value: number) {
+    playbackGain = Math.max(0, Math.min(1, value));
+    if (activeAudio) activeAudio.volume = playbackGain;
+  }
+
   let activeAudio: ReturnType<typeof uni.createInnerAudioContext> | null = null;
 
   /** 流式听播会话的内部状态：输入侧（answer 文本）与请求链是否已全部结束。 */
@@ -203,6 +209,7 @@ export function useRealtimeTts(scope?: string) {
 
     const audio = uni.createInnerAudioContext();
     activeAudio = audio;
+    audio.volume = playbackGain;
 
     if (dataUrl) {
       audio.src = dataUrl;
@@ -463,6 +470,7 @@ export function useRealtimeTts(scope?: string) {
   onBeforeUnmount(stop);
 
   return {
+    setPlaybackGain,
     togglePlay,
     feedAnswerDelta,
     stop,

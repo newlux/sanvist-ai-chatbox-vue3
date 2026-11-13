@@ -50,16 +50,27 @@ const renderer = createRenderer({
   remove(node) { const index = node.parent?.children.indexOf(node); if (index >= 0) node.parent.children.splice(index, 1); },
   parentNode: node => node.parent, nextSibling: () => null,
 });
-function mount(t, handleStart) {
+function mount(t, handleStart, props = {}) {
   const calls = [];
   const root = { children: [] };
-  const app = renderer.createApp(AiWelcome, { onStartChat: (...args) => { calls.push(args); handleStart?.(...args); } });
+  const app = renderer.createApp(AiWelcome, { ...props, onStartChat: (...args) => { calls.push(args); handleStart?.(...args); } });
   app.mount(root);
   t.after(() => app.unmount());
-  const find = node => node.props?.class === 'welcome__composer-voice' ? node : node.children?.map(find).find(Boolean);
-  return { button: find(root), calls };
+  const find = (match, node = root) => match(node.props) ? node : node.children?.map(child => find(match, child)).find(Boolean);
+  return { button: find(props => props?.class === 'welcome__composer-voice'), calls, find };
 }
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('初始输入栏直接展示双工按钮，点击走双工入口', t => {
+  let toggles = 0;
+  const { find, calls } = mount(t, undefined, { duplexEnabled: true, onDuplexToggle: () => { toggles++; } });
+  const duplex = find(props => props?.['aria-label'] === 'duplex-open');
+  assert.ok(duplex);
+  assert.equal(duplex.props['aria-pressed'], false);
+  duplex.props.onTap({ stopPropagation() {} });
+  assert.equal(toggles, 1);
+  assert.deepEqual(calls, []);
+});
 
 test('欢迎页真实组件：长按在松手前启动并传递 hold 和原触点，后续 tap 不再启动', async t => {
   const { button, calls } = mount(t);

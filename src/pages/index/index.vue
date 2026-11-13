@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { createSpeechEndDetector } from "@/utils/asr/speech-end-detector";
 import AiVoiceHoldOverlay from "@/components/ai-voice-hold-overlay/index.vue";
+import { useDuplexVoice } from "@/hooks/useDuplexVoice";
 import { useVoiceQueryGesture } from "@/hooks/useVoiceQueryGesture";
 import type {
   AskSlotOption,
@@ -52,6 +53,7 @@ import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
@@ -72,6 +74,7 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
 defineOptions({ name: "AiChatPage" });
 const logger = createLogger("chat-page");
 const { t } = useI18n();
+const { safeAreaStyle } = useSafeArea();
 const userStore = useUserStore();
 provideChatScope(DEFAULT_CHAT_SCOPE);
 const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
@@ -162,6 +165,20 @@ const navActiveKey = ref("");
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用它做流式听播。
 const realtimeTts = useRealtimeTts();
+const duplex = useDuplexVoice({
+  cancelManual() {
+    return resetVoiceQuery();
+  },
+  submit: text => { void sendMessage({ text }); },
+  setGain: gain => realtimeTts.setPlaybackGain(gain),
+  sessionId: () => chatStore.aiSessionId,
+});
+const { active: duplexActive, starting: duplexStarting, listening: duplexListening, transcript: duplexTranscript } = duplex;
+const duplexStatus = computed(() => {
+  if (duplexStarting.value) return t('duplex-starting');
+  return duplexActive.value ? duplexTranscript.value || t('duplex-listening') : '';
+});
+
 const {
   sendMessage: sendChatMessage,
   sendQuickPrompt,
@@ -206,6 +223,7 @@ function sendUserPrompt(query: string) {
  * 还会被录进 ASR 里，必须按下即停。
  */
 function stopRealtimeTtsOnVoiceStart() {
+  void duplex.stop();
   realtimeTts.stop();
 }
 
@@ -996,7 +1014,7 @@ function resetVoiceQuery() {
     clearInterval(voiceTickTimer);
     voiceTickTimer = null;
   }
-  voiceCapture?.stop();
+  const captureReleased = voiceCapture?.stop();
   voiceCapture = null;
   voiceSession?.close();
   voiceSession = null;
@@ -1021,6 +1039,7 @@ function resetVoiceQuery() {
     chatStore.showQuickPrompts = true;
     chatStore.showQuickList = true;
   }
+  return captureReleased;
 }
 
 function failVoiceQuery(title: string) {
@@ -1065,6 +1084,10 @@ function resolveVoiceAnchorId() {
 }
 
 async function startVoiceQuery() {
+  const duplexRelease = duplex.stop();
+  const pendingVoiceSeq = voiceSeq;
+  await duplexRelease;
+  if (pendingVoiceSeq !== voiceSeq) return;
   /**
    * 按下「点击说话」的第一件事：把正在播的语音掐掉。
    * 一是用户要开口了，播报继续响会盖住他；二是外放的声音会被麦克风原样收进 ASR，
@@ -1421,6 +1444,11 @@ function onVoiceLevel(level: number) {
   if (voiceQueryActive.value && !voiceFinishing.value) {
     voiceHeard = speechEndDetector.observeLevel(level);
   }
+}
+
+function onWelcomeDuplexToggle() {
+  duplex.toggle();
+  void goToChat({ holdMs: 0 });
 }
 
 /**
@@ -1926,7 +1954,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
 </script>
 
 <template>
-  <view class="ai-page" :class="{ 'ai-page--dark': isDark }">
+  <view class="ai-page" :class="{ 'ai-page--dark': isDark }" :style="safeAreaStyle">
     <AiVoiceHoldOverlay
       :active="voiceHoldActive"
       :cancel-pending="voiceHoldCancelPending"
@@ -1935,6 +1963,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
     <AiChatHeader
       v-if="!pureMode || pageStage === 'chat'"
       :show-island="pageStage === 'chat'"
+      :duplex-status="duplexStatus"
       v-model:sessions="sessions"
       class="ai-page__header"
       plain-bg
@@ -1946,7 +1975,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       :share-select-all-disabled="shareSelectAllDisabled"
       :share-all-checked="shareAllChecked"
       :share-selected-round-count="shareSelectedRoundCount"
-      :voice-listening="voiceListening || voiceQueryActive"
+      :voice-listening="voiceListening || voiceQueryActive || duplexListening"
       :listen-idle="islandListenFromWelcome"
       restartable
       round-buttons
@@ -1969,6 +1998,10 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       :dark="isDark"
       inline-input
       :keyboard-height="keyboardHeight"
+      duplex-enabled
+      :duplex-active="duplexActive"
+      :duplex-starting="duplexStarting"
+      @duplex-toggle="onWelcomeDuplexToggle"
       @start-chat="startWelcomeVoiceFromGesture"
       @send-text="onWelcomeTextSend"
     >
@@ -1987,6 +2020,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
     <view
       v-if="pageStage === 'chat'"
       class="ai-page__chat ai-page__chat--enter"
+      :class="{ 'ai-page__chat--duplex': duplexStatus && !shareSheetVisible }"
       :style="chatEnterStyle"
     >
       <view class="ai-chat-glow ai-chat-glow--blue" />
@@ -2219,6 +2253,10 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       <AiChatInput
         v-else
         :voice-query-active="voiceQueryActive"
+        duplex-enabled
+        :duplex-active="duplexActive"
+        :duplex-starting="duplexStarting"
+        @duplex-toggle="duplex.toggle"
         ref="chatInputRef"
         v-model="inputText"
         :dark="isDark"
@@ -2358,6 +2396,10 @@ $color-white: #ffffff;
   --chat-top-inset: calc(env(safe-area-inset-top) + 210rpx);
 }
 
+.ai-page__chat--duplex {
+  --chat-top-inset: max(calc(env(safe-area-inset-top, 0px) + 300rpx), calc(var(--safe-top-px, 0px) + 260rpx));
+}
+
 /* 初始页 → 对话页：整页淡入。
    延迟由 --chat-enter-delay 控制（= listen.gif 停留时间），让淡入跟起飞同时开始，
    不会出现「logo 还挂在中间、对话页已经铺满」的割裂感 */
@@ -2419,8 +2461,7 @@ $color-white: #ffffff;
   top: 0;
   right: 0;
   left: 0;
-  height: calc(constant(safe-area-inset-top) + 210rpx);
-  height: calc(env(safe-area-inset-top) + 210rpx);
+  height: var(--chat-top-inset);
   pointer-events: none;
   // 只模糊、不遮挡（老内核拿不到 backdrop-filter 时，退化成下面那层极淡的雾，文字照样看得见）
   backdrop-filter: blur(16rpx); // 8px

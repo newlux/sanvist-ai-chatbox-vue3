@@ -35,6 +35,7 @@ const props = defineProps({
   generating: { type: Boolean, default: false },
   /** 欢迎首页只显示菜单栏，三角图仍由居中的欢迎层展示。 */
   showIsland: { type: Boolean, default: true },
+  duplexStatus: { type: String, default: "" },
   shareMode: { type: Boolean, default: false },
   shareSelectAllDisabled: { type: Boolean, default: false },
   shareAllChecked: { type: Boolean, default: false },
@@ -172,6 +173,11 @@ const islandAnyGifOn = computed(
 
 const logger = createLogger("chat-header");
 const { t, locale } = useI18n();
+const duplexDisplayText = computed(() => {
+  const status = props.duplexStatus.trim();
+  if (!status) return '';
+  return `${status.replace(/(?:\.{3,}|…)+$/, '')}...`;
+});
 const { safeTopPx, safeAreaStyle } = useSafeArea();
 /**
  * 抽屉顶部的「中 / EN」开关已下线（设计稿 309:3088 的位置让给了品牌头像），
@@ -621,6 +627,7 @@ onBeforeUnmount(() => {
     :class="{
       'ai-chat-header--plain': plainBg && !shareMode,
       'ai-chat-header--dark': darkPlain,
+      'ai-chat-header--duplex': showIsland && !shareMode && duplexStatus,
       'ai-chat-header--round': roundButtons && !shareMode,
     }"
   >
@@ -724,6 +731,11 @@ onBeforeUnmount(() => {
                 @load="stateGifLoaded.think = true"
                 @error="stateGifLoaded.think = false"
               />
+            </view>
+            <view v-if="duplexDisplayText" class="chat-header__duplex-status" role="status">
+              <view class="chat-header__duplex-lines">
+                <view class="chat-header__duplex-text">{{ duplexDisplayText }}</view>
+              </view>
             </view>
           </view>
 
@@ -1090,6 +1102,11 @@ onBeforeUnmount(() => {
   background: #fafafa;
 }
 
+.ai-chat-header--duplex {
+  min-height: calc(var(--safe-top-px, 0px) + 252rpx);
+  min-height: calc(max(var(--safe-top-px, 0px), env(safe-area-inset-top, 0px)) + 252rpx);
+}
+
 /* ===== 深色主题：首页问答态头部（Ardot 1193:2097 → 1193:2129 Component 2） =====
    渐隐底色 722:341 换成页面底 #1A1A1A；左右图标 722:342 / 722:345 在深色稿里是白线，
    svg / 位图统一 filter 反白：不新增资源，也不影响浅色稿（浅色下不加这个类） */
@@ -1231,6 +1248,41 @@ onBeforeUnmount(() => {
   align-items: center;
   transform: translateX(-50%);
   pointer-events: none;
+}
+
+.chat-header__duplex-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(76vw, 640rpx);
+  height: 76rpx;
+  margin-top: 8rpx;
+  color: #526a80;
+  font-size: 26rpx;
+  line-height: 38rpx;
+  text-align: center;
+}
+
+.chat-header__duplex-lines {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+// 文本按自然高度排版并贴底，新增一行时只把最早的一行推出可视区。
+.chat-header__duplex-text {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  line-height: 38rpx;
+  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.ai-chat-header--dark .chat-header__duplex-status {
+  color: #bdcddd;
 }
 
 .chat-header__island {

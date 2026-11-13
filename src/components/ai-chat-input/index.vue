@@ -13,6 +13,9 @@ import { getMicrophoneVolume } from "@/utils/platform/mpaas";
 const logger = createLogger("chat-input");
 
 const props = defineProps({
+  duplexEnabled: { type: Boolean, default: false },
+  duplexActive: { type: Boolean, default: false },
+  duplexStarting: { type: Boolean, default: false },
   modelValue: { type: String, default: "" },
   isLoading: { type: Boolean, default: false },
   /** 键盘高度(px)。 */
@@ -47,6 +50,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
+  "duplex-toggle",
   "send",
   "stop",
   "update:modelValue",
@@ -1109,6 +1113,19 @@ onBeforeUnmount(() => {
           />
         </view>
 
+        <view
+          v-if="duplexEnabled"
+          class="input-bar__duplex"
+          :class="{ 'input-bar__duplex--starting': duplexStarting }"
+          role="button"
+          :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
+          :aria-pressed="duplexActive"
+          @tap.stop="emit('duplex-toggle')"
+        >
+          <image src="@/assets/img/icon-voice-wave-dark.svg" mode="aspectFit" aria-hidden="true" />
+          <view v-if="duplexActive" class="input-bar__duplex-dot" />
+        </view>
+
         <!-- 右侧：生成中只有一个黑色停止按钮（#0D0D0D 圆 + 白色圆角方块），
              其余时间才是「键盘 / 声波」切换钮或发送钮 -->
         <view v-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
@@ -1840,8 +1857,9 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-/* 语音态右侧键盘按钮：设计稿 44×44 圆形，与加号同一底色 */
-.input-bar:not(.input-bar--text) .input-bar__mode {
+/* 双工与语音态键盘共用 44×44 圆形按钮样式 */
+.input-bar:not(.input-bar--text) .input-bar__mode,
+.input-bar__duplex {
   width: 88rpx;
   height: 88rpx;
   flex: 0 0 88rpx;
@@ -1850,8 +1868,9 @@ onBeforeUnmount(() => {
   background: rgba(13, 13, 13, 0.0361);
 }
 
-/* 键盘图标：设计稿 20×20 → 40rpx */
-.input-bar:not(.input-bar--text) .input-bar__mode image {
+/* 键盘与声波图标使用同一尺寸：20×20 → 40rpx */
+.input-bar:not(.input-bar--text) .input-bar__mode image,
+.input-bar__duplex image {
   width: 40rpx;
   height: 40rpx;
 }
@@ -1885,12 +1904,17 @@ onBeforeUnmount(() => {
   color: #bababa;
 }
 
-// 胶囊内的两颗圆按钮
+// 胶囊内的圆形按钮
 .input-bar__plus,
 .input-bar__mode {
   width: 76rpx;
   height: 76rpx;
   flex: 0 0 76rpx;
+}
+
+.input-bar__plus,
+.input-bar__mode,
+.input-bar__duplex {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1946,6 +1970,7 @@ onBeforeUnmount(() => {
 }
 
 .input-bar__mode:active,
+.input-bar__duplex:active,
 .input-bar__hold:active,
 .input-bar__plus:active,
 .input-bar__send:active,
@@ -2167,7 +2192,8 @@ onBeforeUnmount(() => {
 
   // 语音态：「按住说话」与右侧键盘（浅色是 #0D0D0D 3.61%）
   .input-bar__hold,
-  .input-bar:not(.input-bar--text) .input-bar__mode {
+  .input-bar:not(.input-bar--text) .input-bar__mode,
+  .input-bar__duplex {
     background: #212121;
   }
 
@@ -2205,9 +2231,28 @@ onBeforeUnmount(() => {
   // 反相后正好是深底要的白线条。语音态发送是品牌红 #C8201E，不能跟着反相。
   .input-bar__plus image,
   .input-bar__mode image,
+  .input-bar__duplex image,
   .input-bar__stop image,
   .input-bar.input-bar--text .input-bar__send image {
     filter: invert(1);
   }
+}
+
+.input-bar__duplex {
+  position: relative;
+}
+
+.input-bar__duplex-dot {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 18rpx;
+  height: 18rpx;
+  border: 2px solid #fafafa;
+  border-radius: 50%;
+  background: #20c56c;
+}
+.input-bar__duplex--starting {
+  opacity: 0.55;
 }
 </style>

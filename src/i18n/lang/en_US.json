@@ -379,5 +379,10 @@
   "task-entry-gantt-title": "Task collaboration - daily task Gantt",
   "task-entry-status": "Status",
   "task-entry-devices": "Devices",
-  "task-entry-task-count": "Tasks"
+  "task-entry-task-count": "Tasks",
+  "duplex-open": "Enable duplex voice",
+  "duplex-close": "Turn off duplex voice",
+  "duplex-starting": "Starting voice conversation…",
+  "duplex-listening": "I’m listening...",
+  "duplex-unavailable": "Continuous audio capture is unavailable on this device"
 }
