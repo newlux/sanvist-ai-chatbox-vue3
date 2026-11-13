@@ -342,16 +342,15 @@ export function useChatSend(scope?: string, handlers?: {
     const activeMessage = index >= 0 ? chatStore.messages[index] : null;
 
     chatStore.invalidateActiveRequest();
+    let taskId = activeMessage?.taskId;
     try {
-      cancel();
+      taskId = cancel() ?? taskId;
     } catch (error) {
       logger.error("failed to cancel stream", error);
     }
 
-    if (activeMessage?.taskId) {
-      interruptChat({
-        taskId: activeMessage.taskId,
-      }).catch(error => logger.error("failed to interrupt chat", error));
+    if (taskId != null && taskId !== "") {
+      interruptChat({ taskId }).catch(error => logger.error("failed to interrupt chat", error));
     }
 
     if (activeMessage?.loading) {
@@ -605,7 +604,7 @@ export function useChatSend(scope?: string, handlers?: {
 
     /** 把答案增量通知给页面（首块即触发，不等 message_end / workflow_finished）。 */
     function notifyAnswerDelta(delta: string, ended: boolean) {
-      if (!handlers?.onAiAnswerDelta) return;
+      if (requestSeq !== chatStore.activeRequestSeq || !handlers?.onAiAnswerDelta) return;
       if (ended) {
         if (answerDeltaEnded) return;
         answerDeltaEnded = true;
@@ -870,7 +869,7 @@ export function useChatSend(scope?: string, handlers?: {
         logger.error("stream consumption failed", error);
       }
     } finally {
-      // 流异常 / 被取消时也补一次 ended 收尾，避免页面的流式听播会话一直挂着 loading 态。
+      // 当前轮次异常时补一次 ended；已被替换的轮次由取消操作收尾。
       if (lastSeenAnswerLength > 0 && !qrcodeHandled) notifyAnswerDelta("", true);
       // 本轮听播问答收尾（含异常 / 取消）：播报页据此关掉「正在理解」或退回异常列表。
       if (usesReportAnswerOutlet && requestSeq === chatStore.activeRequestSeq) {
@@ -925,6 +924,7 @@ export function useChatSend(scope?: string, handlers?: {
     text?: string;
     files?: ChatFile[];
     attachments?: ChatMessageAttachment[];
+    markPreviousStopped?: boolean;
   }) {
     const text = String(payload?.text ?? chatStore.inputText).trim();
     const files = payload?.files ?? [];
@@ -933,10 +933,10 @@ export function useChatSend(scope?: string, handlers?: {
     // 网关要求 query 非空，只发附件时补一句中性提问
     const query = text || t("attachment-only-query");
 
-    cancelActiveStream();
+    cancelActiveStream(payload?.markPreviousStopped);
     const requestSeq = chatStore.nextRequestSeq();
     const hadSessionId = Boolean(chatStore.aiSessionId);
-    const uuid = Date.now();
+    const uuid = `${Date.now()}-${requestSeq}`;
     const conversationId = chatStore.aiSessionId;
 
     chatStore.inputText = "";
