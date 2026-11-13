@@ -1,4 +1,5 @@
 import type { RepairInformationPayload } from "@/api/repair/types";
+import { i18n } from "@/i18n";
 
 const PENDING_REPAIR_CALLBACK_KEY = "pending-repair-callback";
 
@@ -67,23 +68,37 @@ export interface RepairCallbackSummary {
   repairConversationId: string;
 }
 
+/** 词条随当前语言取：卡片文案在生成那一刻定稿，已落到消息里的不再随切语言变 */
+function t(key: string) {
+  return i18n.global.t(key);
+}
+
 /** 卡片标题：不再区分「快问快答 / 机型诊断」，统一只写「维修助理」 */
-const CALLBACK_TITLE = "维修助理";
+function callbackTitle() {
+  return t("repair-callback-title");
+}
 /** 案例报告四项齐全时的副标题 */
-const DIAGNOSIS_STATUS = "案例报告生成已完成";
+function diagnosisStatusText() {
+  return t("repair-callback-done");
+}
 /** 快速问答（回流数据没有 status）的副标题 */
-const QUICK_ANSWER_STATUS = "答案回复已生成";
+function quickAnswerStatusText() {
+  return t("repair-callback-answer-done");
+}
 /** 四项里某一项还没值时，该行显示的占位文案 */
-const PENDING_VALUE = "待识别";
+function pendingValueText() {
+  return t("repair-callback-pending");
+}
 
 /** 从回流数据里取明细：四项固定四行，没值的那行是「待识别」 */
 function pickRepairCallbackDetails(data: Record<string, unknown>) {
+  const pending = pendingValueText();
   return [
-    { label: "设备", value: [data.equipmentCategory, data.model, data.deviceId].filter(Boolean).join(" ") },
-    { label: "问题", value: String(data.problem || "") },
-    { label: "结论", value: String(data.conclusion || "") },
-    { label: "处理", value: String(data.treatment || "") },
-  ].map(item => ({ label: item.label, value: item.value.trim() || PENDING_VALUE }));
+    { label: t("repair-callback-label-device"), value: [data.equipmentCategory, data.model, data.deviceId].filter(Boolean).join(" ") },
+    { label: t("repair-callback-label-problem"), value: String(data.problem || "") },
+    { label: t("repair-callback-label-conclusion"), value: String(data.conclusion || "") },
+    { label: t("repair-callback-label-treatment"), value: String(data.treatment || "") },
+  ].map(item => ({ label: item.label, value: item.value.trim() || pending }));
 }
 
 export interface RepairCaseReport {
@@ -108,6 +123,7 @@ export interface RepairCaseReport {
  */
 export function parseRepairCaseReport(payload?: RepairInformationPayload | null): RepairCaseReport {
   const state = payload?.state;
+  const pending = pendingValueText();
   const device = String(state?.device_model?.model_name || "").trim();
   const problem = String(state?.fault_symptoms?.[0]?.text || "").trim();
   const conclusion = String(state?.troubleshooting_steps?.[0]?.text || "").trim();
@@ -115,10 +131,10 @@ export function parseRepairCaseReport(payload?: RepairInformationPayload | null)
   return {
     ready: Boolean(device && problem && conclusion && treatment),
     details: [
-      { label: "设备", value: device || PENDING_VALUE },
-      { label: "问题", value: problem || PENDING_VALUE },
-      { label: "结论", value: conclusion || PENDING_VALUE },
-      { label: "处理", value: treatment || PENDING_VALUE },
+      { label: t("repair-callback-label-device"), value: device || pending },
+      { label: t("repair-callback-label-problem"), value: problem || pending },
+      { label: t("repair-callback-label-conclusion"), value: conclusion || pending },
+      { label: t("repair-callback-label-treatment"), value: treatment || pending },
     ],
   };
 }
@@ -128,13 +144,13 @@ export function parseRepairCaseReport(payload?: RepairInformationPayload | null)
  * 空串在上层会被当成「这行不渲染」，避免出现「已完成 + 待识别」自相矛盾的卡片。
  */
 export function repairCaseReportStatusText(report: RepairCaseReport) {
-  return report.ready ? DIAGNOSIS_STATUS : "";
+  return report.ready ? diagnosisStatusText() : "";
 }
 
 /** 解析回流数据，得到卡片标题、副标题与明细 */
 export function parseRepairCallbackSummary(query: string): RepairCallbackSummary {
   const fallback: RepairCallbackSummary = {
-    title: CALLBACK_TITLE,
+    title: callbackTitle(),
     // 解析不出数据等于四项全空：不给「已完成」，四行照留
     statusText: "",
     details: parseRepairCaseReport(null).details,
@@ -148,10 +164,10 @@ export function parseRepairCallbackSummary(query: string): RepairCallbackSummary
     const isDiagnosis = Boolean(data.status);
     const details = pickRepairCallbackDetails(data);
     // 四项没齐就不说「已完成」：副标题留空，气泡那边整行不渲染
-    const ready = details.every(item => item.value !== PENDING_VALUE);
+    const ready = details.every(item => item.value !== pendingValueText());
     return {
-      title: CALLBACK_TITLE,
-      statusText: isDiagnosis ? (ready ? DIAGNOSIS_STATUS : "") : QUICK_ANSWER_STATUS,
+      title: callbackTitle(),
+      statusText: isDiagnosis ? (ready ? diagnosisStatusText() : "") : quickAnswerStatusText(),
       details,
       repairConversationId: String(data.repairConversationId || data.repair_conversation_id || "").trim(),
     };
