@@ -38,6 +38,9 @@ import { resolveMotionElement } from "@/utils/voice-message-motion";
 defineOptions({ name: "AiWelcome" });
 
 const props = defineProps({
+  duplexEnabled: { type: Boolean, default: false },
+  duplexActive: { type: Boolean, default: false },
+  duplexStarting: { type: Boolean, default: false },
   /** 起飞态：底色让位给下面的对话页，标题 / 输入条淡出，logo 按 logoStyle 滑向顶部 */
   leaving: { type: Boolean, default: false },
   /** 已到顶：logo 淡出，由对话页自己的灵动岛图标接上，避免最后 1-2px 的跳变被看见 */
@@ -63,6 +66,7 @@ const props = defineProps({
 const emit = defineEmits<{
   (e: "start-chat", mode?: "hold", target?: EventTarget): void;
   (e: "start-text"): void;
+  (e: "duplex-toggle"): void;
   (e: "send-text", text: string): void;
 }>();
 
@@ -166,6 +170,12 @@ function onSpeakPressMove(event: unknown) {
   if (!holdOrigin) return;
   const point = readSpeakPoint(event);
   if (Math.abs(point.x - holdOrigin.x) > 12 || Math.abs(point.y - holdOrigin.y) > 12) clearSpeakHold();
+}
+
+function onDuplexTap() {
+  if (props.leaving || startFired || listenMounted.value) return;
+  clearSpeakHold();
+  emit('duplex-toggle');
 }
 
 /**
@@ -350,6 +360,18 @@ onBeforeUnmount(() => {
         <text class="welcome__composer-voice-label">
           {{ t("welcome-tap-to-speak") }}
         </text>
+      </view>
+      <view
+        v-if="duplexEnabled"
+        class="welcome__composer-kb welcome__composer-duplex"
+        :class="{ 'welcome__composer-duplex--starting': duplexStarting }"
+        role="button"
+        :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
+        :aria-pressed="duplexActive"
+        @tap.stop="onDuplexTap"
+      >
+        <image class="welcome__composer-kb-icon" :src="voiceWaveIcon" mode="aspectFit" aria-hidden="true" />
+        <view v-if="duplexActive" class="welcome__composer-duplex-dot" />
       </view>
       <view
         class="welcome__composer-kb"
@@ -633,6 +655,29 @@ onBeforeUnmount(() => {
 .welcome__composer-kb-icon {
   width: 40rpx; // 20px，与问答页 .input-bar__mode image 同尺寸
   height: 40rpx;
+}
+
+.welcome__composer-duplex {
+  position: relative;
+}
+
+.welcome__composer-duplex:active {
+  opacity: 0.7;
+}
+
+.welcome__composer-duplex--starting {
+  opacity: 0.55;
+}
+
+.welcome__composer-duplex-dot {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 18rpx;
+  height: 18rpx;
+  border: 2px solid #fafafa;
+  border-radius: 50%;
+  background: #20c56c;
 }
 
 /* 文本态：中间换成可输入的胶囊，材质 / 高度 / 圆角与「点击说话」完全一致 */

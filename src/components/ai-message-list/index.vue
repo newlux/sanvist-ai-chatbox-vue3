@@ -989,6 +989,16 @@ function onGuideSuggestionOpen(payload, auto = false) {
  */
 function onGuideCheckStepSelect(messageIndex: number, message: UiChatMessage, payload: GuideStepSelectEvent) {
   stepCardActiveKey.value = stepCardMessageKey(message, messageIndex);
+  // 直接定位目标步，不依赖页面回传 step-card-step-id 的 watch：
+  // 页面 guideStepCardStepId 跨轮不重置，多轮分步骤 step_id 重叠时，算出的目标步
+  // 恰好等于残留值 → watch 值不变不触发 → selectStepCard 不被调用 → 卡不切换（A 点击无响应）。
+  // 这里自己按 payload.index（目标步序 1 起）解析目标 step_id 并直接切，保证值不变也能切换。
+  // selectStepCard 幂等（同 key 同 stepId 早退），页面回传的 watch 再切一次也无害。
+  const guideStepBlock = (message?.blocks || []).find(block => block?.type === "guide-step");
+  const steps = (guideStepBlock?.payload?.steps as Array<{ id?: string }> | undefined) || [];
+  const targetIndex = Math.max(1, Math.round(Number(payload?.index) || 1)) - 1;
+  const targetStepId = String(steps[targetIndex]?.id || payload?.stepId || "");
+  if (targetStepId) selectStepCard(targetStepId);
   emit("guide-check-step-select", payload);
 }
 

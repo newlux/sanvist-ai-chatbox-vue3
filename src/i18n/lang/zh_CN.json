@@ -380,5 +380,10 @@
   "task-entry-gantt-title": "任务协同-当天任务甘特图",
   "task-entry-status": "状态",
   "task-entry-devices": "设备数",
-  "task-entry-task-count": "任务数"
+  "task-entry-task-count": "任务数",
+  "duplex-open": "开启双工语音",
+  "duplex-close": "关闭双工语音",
+  "duplex-starting": "正在开启双工语音…",
+  "duplex-listening": "我在听...",
+  "duplex-unavailable": "当前设备暂不支持持续语音采集"
 }

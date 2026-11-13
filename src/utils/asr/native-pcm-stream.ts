@@ -36,7 +36,7 @@ export interface NativePcmHandlers {
 }
 
 export interface NativePcmCapture {
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 /** 容器是否可能支持（有 bridge 才谈得上 pcmStreamStart；真不支持会在 start 时抛错） */
@@ -109,6 +109,7 @@ export async function startNativePcmCapture(handlers: NativePcmHandlers): Promis
   let peakLevel = 0;
   const startedAt = Date.now();
   let watchdog: ReturnType<typeof setTimeout> | null = null;
+  let stopPromise: Promise<void> | null = null;
 
   const unsubscribers = [
     onNativeEvent("pcmStreamData", (payload) => {
@@ -154,12 +155,14 @@ export async function startNativePcmCapture(handlers: NativePcmHandlers): Promis
     onNativeEvent("pcmStreamEnd", (payload) => {
       if (closed) return;
       logger.info("[pcm-native] 推流结束", payload);
+      void stopCapture();
+      handlers.onError?.("原生语音采集已中断");
     }),
     onNativeEvent("pcmStreamError", (payload) => {
       if (closed) return;
       const message = failMessage(payload);
       logger.warn("[pcm-native] 原生推流报错", { message, payload });
-      teardown();
+      void stopCapture();
       handlers.onError?.(message);
     }),
   ];
@@ -194,7 +197,7 @@ export async function startNativePcmCapture(handlers: NativePcmHandlers): Promis
     watchdog = null;
     if (closed || chunkCount > 0) return;
     logger.warn("[pcm-native] 1.5s 内没有收到任何 PCM 分片，换通道");
-    teardown();
+    void stopCapture();
     handlers.onError?.("no-pcm-data");
   }, DATA_WATCHDOG_MS);
 
