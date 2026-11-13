@@ -201,29 +201,29 @@ export async function startNativePcmCapture(handlers: NativePcmHandlers): Promis
     handlers.onError?.("no-pcm-data");
   }, DATA_WATCHDOG_MS);
 
-  return {
-    stop() {
-      if (closed) {
-        return;
-      }
-      // 尾巴补零凑满一帧再发，最后一两个字不至于丢
-      if (carry.byteLength) {
-        const padded = new Uint8Array(FRAME_BYTES);
-        padded.set(carry);
-        handlers.onFrame(padded.buffer);
-        frameCount += 1;
-        sentBytes += FRAME_BYTES;
-      }
-      logger.info("[pcm-native] 采集已停止", {
-        ms: Date.now() - startedAt,
-        chunks: chunkCount,
-        frames: frameCount,
-        bytes: sentBytes,
-        peak: Number(peakLevel.toFixed(3)),
-      });
-      teardown();
-      void callNative("pcmStreamStop", {}, { timeoutMs: STOP_TIMEOUT_MS, silentTimeout: true })
-        .catch(error => logger.warn("[pcm-native] pcmStreamStop 失败", error));
-    },
-  };
+  async function stopCapture() {
+    if (closed) return stopPromise ?? undefined;
+    // 尾巴补零凑满一帧再发，最后一两个字不至于丢。
+    if (carry.byteLength) {
+      const padded = new Uint8Array(FRAME_BYTES);
+      padded.set(carry);
+      handlers.onFrame(padded.buffer);
+      frameCount += 1;
+      sentBytes += FRAME_BYTES;
+    }
+    logger.info("[pcm-native] 采集已停止", {
+      ms: Date.now() - startedAt,
+      chunks: chunkCount,
+      frames: frameCount,
+      bytes: sentBytes,
+      peak: Number(peakLevel.toFixed(3)),
+    });
+    teardown();
+    stopPromise = callNative("pcmStreamStop", {}, { timeoutMs: STOP_TIMEOUT_MS, silentTimeout: true })
+      .then(() => {})
+      .catch(error => logger.warn("[pcm-native] pcmStreamStop 失败", error));
+    await stopPromise;
+  }
+
+  return { stop: stopCapture };
 }

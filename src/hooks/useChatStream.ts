@@ -1,4 +1,4 @@
-import type { ChatStreamEvent, SendChatMessageParams } from "@/api/chat/types";
+import type { ChatStreamEvent, Identifier, SendChatMessageParams } from "@/api/chat/types";
 import { createDifyEventNormalizer, toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
 import { createSseSession } from "@/utils/ai-stream/sseSession";
 import { readSseResponse, useXhrForSse } from "@/utils/ai-stream/sseTransport";
@@ -55,7 +55,7 @@ function toError(error: unknown) {
 }
 
 export function useChatStream(options: { onError?: (error: Error) => void } = {}) {
-  let abortActiveRequest: (() => void) | undefined;
+  let activeRequest: { abort: () => void; taskId?: Identifier } | undefined;
 
   async function* stream(params: SendChatMessageParams, streamOptions: StreamOptions = {}) {
     const queue = createAsyncQueue<StreamChunk<ChatStreamEvent>>();
@@ -107,6 +107,13 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
 
     function pushEvent(payload: unknown) {
       if (finished) return;
+      // 首包可能只带 task_id。收到就保存，服务端停止无需等消息快照刷新。
+      if (payload && typeof payload === "object" && "task_id" in payload) {
+        const taskId = payload.task_id;
+        if ((typeof taskId === "string" && taskId) || typeof taskId === "number") {
+          request.taskId = taskId;
+        }
+      }
       logger.info("[chat] 对话接口出参", payload);
       const event = normalizeEvent(payload);
       if (!event) return;
@@ -122,7 +129,8 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
     // iOS 容器用 XHR 增量读取，避免包装后的 fetch 把过程事件缓冲到回答结束。
     const controller = new AbortController();
     const abortRequest = () => controller.abort();
-    abortActiveRequest = abortRequest;
+    const request: { abort: () => void; taskId?: Identifier } = { abort: abortRequest };
+    activeRequest = request;
     const session = createSseSession({
       onEvent: pushEvent,
       isAborted: () => finished,
@@ -168,13 +176,15 @@ export function useChatStream(options: { onError?: (error: Error) => void } = {}
       clearIdleTimer();
       finished = true;
       abortRequest();
-      if (abortActiveRequest === abortRequest) abortActiveRequest = undefined;
+      if (activeRequest === request) activeRequest = undefined;
     }
   }
 
   function cancel() {
-    abortActiveRequest?.();
-    abortActiveRequest = undefined;
+    const request = activeRequest;
+    activeRequest = undefined;
+    request?.abort();
+    return request?.taskId;
   }
 
   return { stream, cancel };

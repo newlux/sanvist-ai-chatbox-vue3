@@ -424,7 +424,9 @@ function extractStepSummary(item: Record<string, unknown>): string {
 }
 
 /** 正文协议标签；历史解析与 SSE 流式解析共用同一份标记表。 */
-const PROTOCOL_MARKERS = ["<SANVIST>", "<ASK>", "<GUIDE>", "<COMPONENT>"];
+const TIPS_OPEN = "<TIPS>";
+const TIPS_TAG_PATTERN = /<TIPS>[\s\S]*?(?:<\/TIPS>|$)/g;
+const PROTOCOL_MARKERS = ["<SANVIST>", "<ASK>", "<GUIDE>", "<COMPONENT>", TIPS_OPEN];
 
 /** ASK 交互组件：表格 / 图表 / 追问槽位；历史与流式解析共用同一份判定。 */
 function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockData | null {
@@ -574,7 +576,7 @@ function unwrapComponent(value: Record<string, unknown>) {
 /** 将完整历史 answer 中的 SANVIST/ASK/GUIDE/COMPONENT 协议按原顺序还原为 UI blocks。 */
 export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[] {
   const source = String(value || "");
-  const pattern = /<(SANVIST|ASK|GUIDE|COMPONENT)>([\s\S]*?)<\/\1>/g;
+  const pattern = /<(SANVIST|ASK|GUIDE|COMPONENT|TIPS)>([\s\S]*?)<\/\1>/g;
   const blocks: DifyHistoryBlockData[] = [];
   let cursor = 0;
   let foundProtocol = false;
@@ -597,6 +599,7 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
     foundProtocol = true;
     appendAnswer(source.slice(cursor, match.index));
     cursor = match.index + match[0].length;
+    if (match[1] === "TIPS") continue;
     try {
       const payload = asRecord(JSON.parse(match[2]));
       if (!payload) continue;
@@ -645,7 +648,7 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
     if (block.type === "answer") {
       // 历史只存原始 answer，没有实时流程追加的入口卡；复用标签解析还原正文和卡片。
       // 历史已是整轮最终结果，未闭合标签也按实时流结束时的规则处理。
-      const content = String(block.payload.content || "");
+      const content = String(block.payload.content || "").replace(TIPS_TAG_PATTERN, "");
       const parsed = parseWorkReportTag(content);
       if (parsed.matched) report = parsed;
       const text = parsed.matched ? parsed.text : content;
@@ -659,7 +662,7 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
   }
   if (result.length) return result;
   // 命中过协议但没产出 block（例如整条 answer 只有播报层）时不能回落成原文，否则会把 JSON 泄漏到气泡。
-  return foundProtocol ? [] : [{ type: "answer", payload: { content: source } }];
+  return foundProtocol || source.includes(TIPS_OPEN) ? [] : [{ type: "answer", payload: { content: source } }];
 }
 
 /**
@@ -733,9 +736,11 @@ export function createDifyEventNormalizer() {
   let receivedAgentMessage = false;
   let isWorkflowStream = false;
   let protocolBuffer = "";
+  let wrappedAnswerBuffer = "";
   let receivedSanvistEvent = false;
   /** 正文是否已经从流里拿到过（workflow_finished 的 outputs.answer 通常与流式正文重复） */
   let receivedAnswer = false;
+  let receivedTips = false;
   /** Chatflow 通常先发 message_end，后发 workflow_finished；先暂存，等待后者提供总耗时。 */
   let pendingMessageEnd: {
     conversationId: Identifier;
@@ -758,6 +763,7 @@ export function createDifyEventNormalizer() {
     replaceFirstAnswer: boolean,
     /** 只解析卡片、丢掉正文：workflow_finished 重放 outputs.answer 时用，正文早已流式给过 */
     skipAnswers = false,
+    wrappedAnswer = false,
   ): ChatStreamEvent[] {
     const events: ChatStreamEvent[] = [];
     let shouldReplace = replaceFirstAnswer;
@@ -765,7 +771,7 @@ export function createDifyEventNormalizer() {
       const answer = String(content || "");
       if (!answer) return;
       // 自定义事件包尾通常会带一个协议换行符；它不是回答内容，不能创建空 answer block。
-      if (receivedSanvistEvent && !answer.trim()) return;
+      if ((receivedSanvistEvent || (receivedTips && !receivedAnswer)) && !answer.trim()) return;
       if (skipAnswers) return;
       events.push({
         event: "message",
@@ -774,7 +780,7 @@ export function createDifyEventNormalizer() {
         replace: shouldReplace || replace,
       });
       shouldReplace = false;
-      receivedAnswer = true;
+      receivedAnswer ||= Boolean(answer.trim());
     };
 
     /** GUIDE 卡片入队；步骤卡 / 追问卡都要自动弹起等用户选，其余卡片交给对应 block 渲染。 */
@@ -799,42 +805,49 @@ export function createDifyEventNormalizer() {
       events.push({ event: guideBlock.type, ...references, data: guideBlock.payload });
     };
 
-    protocolBuffer += value;
-    while (protocolBuffer) {
-      const starts = PROTOCOL_MARKERS
-        .map(marker => protocolBuffer.indexOf(marker))
+    const markers = wrappedAnswer ? [TIPS_OPEN] : PROTOCOL_MARKERS;
+    let buffer = (wrappedAnswer ? wrappedAnswerBuffer : protocolBuffer) + value;
+    while (buffer) {
+      const starts = markers
+        .map(marker => buffer.indexOf(marker))
         .filter(index => index >= 0);
       const start = starts.length ? Math.min(...starts) : -1;
       if (start < 0) {
         // 标签可能刚好被 SSE 分片切开，保留与任一起始标签相符的末尾。
         // lib 锁在 es2018，这里不能用 flatMap（ES2019）。
         let suffixLength = 0;
-        for (const marker of PROTOCOL_MARKERS) {
+        for (const marker of markers) {
           for (let length = 1; length < marker.length; length += 1) {
-            if (protocolBuffer.endsWith(marker.slice(0, length))) {
+            if (buffer.endsWith(marker.slice(0, length))) {
               suffixLength = Math.max(suffixLength, length);
             }
           }
         }
-        appendAnswer(protocolBuffer.slice(0, -suffixLength || undefined));
-        protocolBuffer = suffixLength ? protocolBuffer.slice(-suffixLength) : "";
+        appendAnswer(buffer.slice(0, -suffixLength || undefined));
+        buffer = suffixLength ? buffer.slice(-suffixLength) : "";
         break;
       }
 
       if (start > 0) {
-        appendAnswer(protocolBuffer.slice(0, start));
-        protocolBuffer = protocolBuffer.slice(start);
+        appendAnswer(buffer.slice(0, start));
+        buffer = buffer.slice(start);
       }
 
-      const openMarker = PROTOCOL_MARKERS.find(marker => protocolBuffer.startsWith(marker));
+      const openMarker = markers.find(marker => buffer.startsWith(marker));
       if (!openMarker) break;
       const tag = openMarker.slice(1, -1);
       const closeMarker = `</${tag}>`;
-      const end = protocolBuffer.indexOf(closeMarker);
+      const end = buffer.indexOf(closeMarker);
       if (end < 0) break;
 
-      const raw = protocolBuffer.slice(openMarker.length, end);
-      protocolBuffer = protocolBuffer.slice(end + closeMarker.length);
+      const raw = buffer.slice(openMarker.length, end);
+      buffer = buffer.slice(end + closeMarker.length);
+      if (tag === "TIPS") {
+        const text = raw.trim();
+        receivedTips ||= Boolean(text);
+        if (!receivedAnswer && !skipAnswers && text) events.push({ event: "tips", ...references, text });
+        continue;
+      }
       try {
         const parsed = asRecord(JSON.parse(raw));
         let customEvent = parsed;
@@ -900,7 +913,13 @@ export function createDifyEventNormalizer() {
           if (message) events.push({ event: "subtitle", ...references, message });
         } else if (customEvent?.event === "answer") {
           receivedSanvistEvent = true;
-          appendAnswer(customData.content, customData.is_delta === false);
+          const replace = customData.is_delta === false;
+          if (replace) wrappedAnswerBuffer = "";
+          const answerEvents = extractSanvistEvents(
+            String(customData.content || ""), references, shouldReplace || replace, skipAnswers, true,
+          );
+          events.push(...answerEvents);
+          if (answerEvents.some(event => event.event === "message")) shouldReplace = false;
         } else if (customEvent?.event === "done") {
           receivedSanvistEvent = true;
           events.push({ event: "subtitle", ...references, message: "" });
@@ -910,6 +929,8 @@ export function createDifyEventNormalizer() {
         logger.warn("忽略无法解析的协议块", { tag, raw: raw.slice(0, 120), error });
       }
     }
+    if (wrappedAnswer) wrappedAnswerBuffer = buffer;
+    else protocolBuffer = buffer;
     return events;
   }
 
@@ -994,13 +1015,16 @@ export function createDifyEventNormalizer() {
         // outputs.answer 可能带 <COMPONENT> 协议（如 guide-lead 机型选择卡），
         // 需要用 extractSanvistEvents 解析成对应事件，否则协议块不会渲染到气泡。
         //
-        // 只在带协议标记时才解析：纯正文（如二维码占位 / 无备注正文）保持原样
+        // 带协议标记，或已显示 TIPS 但还没收到正式正文时，才补解析输出。
+        // 其他纯正文（如二维码占位 / 无备注正文）保持原样
         // 仅进 metadata.outputs_answer，避免被按 message 事件渲染成 answer 气泡，
         // 改动首页 / 听汇报等其他页面的既有行为。
         //
         // 正文已经在 message 流里给过时，这里只补卡片（ask / guide 等），不再吐 answer：
         // chatflow 的 outputs.answer 就是整段回答的原文，重放一遍会让气泡里同一段话出现两份。
-        const parseOutputsAnswer = Boolean(outputsAnswer) && protocolOpenPattern.test(outputsAnswer);
+        const parseOutputsAnswer = Boolean(outputsAnswer) && (
+          protocolOpenPattern.test(outputsAnswer) || (receivedTips && !receivedAnswer)
+        );
         if (parseOutputsAnswer && receivedAnswer) {
           logger.info("[chat] outputs.answer 与流式正文重复，只补协议卡片", {
             length: outputsAnswer.length,
@@ -1012,11 +1036,18 @@ export function createDifyEventNormalizer() {
          * 命中后在 metadata 上带一个布尔标记，由消费侧触发批量加急；标签源码由消费侧剥离。
          */
         const emergencyTagged = /<EMERGENCY\b/i.test(JSON.stringify(workflow));
+        // outputs.answer 是完整快照，不能接在流中尚未闭合的协议分片后面。
+        if (parseOutputsAnswer) {
+          protocolBuffer = "";
+          wrappedAnswerBuffer = "";
+        }
+        // 收尾快照会重放已显示的提示，只补正式内容。
+        const replayingTips = receivedTips;
         const answerEvents = parseOutputsAnswer
           ? extractSanvistEvents(outputsAnswer, references, false, receivedAnswer)
           : [];
         return [
-          ...answerEvents,
+          ...answerEvents.filter(event => !replayingTips || event.event !== "tips"),
           {
             event: "message_end",
             ...references,
@@ -1026,7 +1057,7 @@ export function createDifyEventNormalizer() {
               reason: status === "failed" ? "exception" : "normal",
               duration_ms: durationMs,
               message,
-              outputs_answer: outputsAnswer || undefined,
+              outputs_answer: outputsAnswer.replace(TIPS_TAG_PATTERN, "") || undefined,
               assistant_target: assistantTarget || undefined,
               emergency: emergencyTagged || undefined,
             },

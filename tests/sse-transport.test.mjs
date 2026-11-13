@@ -9,16 +9,26 @@ import { build } from 'esbuild';
 // 使用项目现有的 Vite/esbuild 编译真实 TypeScript 模块，不复制传输实现。
 const temp = await mkdtemp(path.join(tmpdir(), 'sanvist-sse-'));
 await build({
-  entryPoints: ['src/utils/ai-stream/sseTransport.ts', 'src/utils/ai-stream/sseSession.ts'],
+  entryPoints: ['src/utils/ai-stream/sseTransport.ts', 'src/utils/ai-stream/sseSession.ts', 'src/hooks/useChatStream.ts'],
   outdir: temp,
   bundle: true,
   platform: 'node',
   format: 'esm',
   outExtension: { '.js': '.mjs' },
+  plugins: [{ name: 'mock-chat-transport-dependencies', setup(build) {
+    build.onResolve({ filter: /^@\/utils\/(logger|request)$/ }, args => ({ path: args.path, namespace: 'mock' }));
+    build.onLoad({ filter: /.*/, namespace: 'mock' }, () => ({ contents: `
+      export const createLogger = () => ({ info() {}, warn() {}, error() {} });
+      export const getRequestBaseURL = () => '';
+      export const getRequestHeaders = headers => headers;
+    ` }));
+  } }],
 });
 after(() => rm(temp, { recursive: true, force: true }));
-const { readSseResponse, useXhrForSse } = await import(pathToFileURL(path.join(temp, 'sseTransport.mjs')));
-const { createSseSession } = await import(pathToFileURL(path.join(temp, 'sseSession.mjs')));
+const { readSseResponse, useXhrForSse } = await import(pathToFileURL(path.join(temp, 'utils/ai-stream/sseTransport.mjs')));
+const { createSseSession } = await import(pathToFileURL(path.join(temp, 'utils/ai-stream/sseSession.mjs')));
+
+const { useChatStream } = await import(pathToFileURL(path.join(temp, 'hooks/useChatStream.mjs')));
 
 class FakeXhr {
   static requests = [];
@@ -176,4 +186,29 @@ test('fetch 通道保留字节分片解码，中文跨字节分片不乱码', as
     session: createSseSession({ onEvent: event => events.push(event) }),
   }, 'fetch');
   assert.deepEqual(events, [{ message: '资料查询' }]);
+});
+
+test('首包只有任务 ID 时仍可中止旧流并取得服务端停止所需的 ID', async (t) => {
+  stubGlobal(t, 'XMLHttpRequest', FakeXhr);
+  stubGlobal(t, 'navigator', { userAgent: 'iPhone', maxTouchPoints: 1 });
+  FakeXhr.requests = [];
+  const { stream, cancel } = useChatStream();
+  const params = { content: '测试', user: 'test' };
+  const firstStream = stream(params);
+  const first = firstStream.next();
+  const firstRequest = FakeXhr.requests[0];
+  firstRequest.chunk(frame({ event: 'workflow_started', task_id: 'old-task' }));
+  assert.equal(cancel(), 'old-task');
+  assert.equal(firstRequest.aborted, true);
+
+  const secondStream = stream(params);
+  const second = secondStream.next();
+  const secondRequest = FakeXhr.requests[1];
+  secondRequest.chunk(frame({ event: 'workflow_started', task_id: 'new-task' }));
+  assert.equal((await first).value.error.name, 'AbortError');
+  await firstStream.return();
+  assert.equal(cancel(), 'new-task');
+  assert.equal(secondRequest.aborted, true);
+  assert.equal((await second).value.error.name, 'AbortError');
+  await secondStream.return();
 });

@@ -154,7 +154,7 @@ const duplex = useDuplexVoice({
     stopHistoryTts();
     return released;
   },
-  submit: text => { void sendTaskMessage({ text }); },
+  submit: text => { void sendTaskMessage({ text, markPreviousStopped: true }); },
   setGain: gain => realtimeTts.setPlaybackGain(gain),
   sessionId: () => chatStore.aiSessionId,
 });

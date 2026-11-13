@@ -68,6 +68,11 @@ function stripVoiceFromAnswers(blocks: AiBlock[], voiceTexts: string[]) {
   });
 }
 
+const lastTipId = computed(() => {
+  const tips = props.blocks.filter(block => block.type === "tips");
+  return tips[tips.length - 1]?.id;
+});
+
 const renderItems = computed(() => {
   // voice 导语固定排在内容最顶部（AnswerGroup 无涉及），并先从 answer 剔除重复导语
   const voiceBlocks = normalizedBlocks.value.filter(block => block.type === "voice");
@@ -175,6 +180,11 @@ function onGanttOpen(payload) {
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"
         @gantt-open="onGanttOpen"
+      />
+      <slot
+        v-if="item.type === 'tips' && item.id === lastTipId && item.payload.processSubtitle"
+        name="tip-status"
+        :status="item.payload.processSubtitle"
       />
     </template>
   </view>

@@ -169,7 +169,7 @@ const duplex = useDuplexVoice({
   cancelManual() {
     return resetVoiceQuery();
   },
-  submit: text => { void sendMessage({ text }); },
+  submit: text => { void sendMessage({ text, markPreviousStopped: true }); },
   setGain: gain => realtimeTts.setPlaybackGain(gain),
   sessionId: () => chatStore.aiSessionId,
 });

@@ -4,7 +4,7 @@ import type {
   MessageEndEvent,
 } from "@/api/chat/types";
 
-export type AiBlockType = "answer" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-suggestion"
+export type AiBlockType = "answer" | "tips" | "think" | "suggestion" | "ask-slot" | "guide-step" | "guide-suggestion"
   | "guide-check" | "guide-lead" | "chart" | "table" | "metric" | "image" | "video" | "source" | "status" | "tool_call" | "error"
   // assistant-navigation 解析层一直在产出（历史/流式都走它），之前漏在联合类型里导致两处 TS 报错；
   // gantt 是调度视图入口卡（scene=task / type=gantt）；
@@ -113,7 +113,26 @@ export function buildInitialBlocks(): AiBlock[] {
   return [];
 }
 
-export function applyEventToBlocks(
+const FINAL_REPLY_BLOCK_TYPES = new Set<AiBlockType>([
+  "answer", "guide-lead", "guide-step", "guide-check", "guide-suggestion",
+  "ask-slot", "table", "chart", "gantt", "assistant-navigation", "image", "video", "voice",
+]);
+
+function hasFinalReply(blocks: AiBlock[]) {
+  return blocks.some(block => FINAL_REPLY_BLOCK_TYPES.has(block.type)
+    && (block.type !== "answer" || Boolean(String(block.payload.content || "").trim())));
+}
+
+export function applyEventToBlocks(blocks: AiBlock[], event: ChatStreamEvent): StreamBlockUpdate {
+  const update = reduceEventToBlocks(blocks, event);
+  // 正式回复也可能由引导卡、表格等内容组成，收到可展示的回复后统一移除临时提示。
+  if (update.receivedContent && blocks.some(block => block.type === "tips") && hasFinalReply(update.blocks)) {
+    return { ...update, blocks: update.blocks.filter(block => block.type !== "tips"), processSubtitle: null };
+  }
+  return update;
+}
+
+function reduceEventToBlocks(
   blocks: AiBlock[],
   event: ChatStreamEvent,
 ): StreamBlockUpdate {
@@ -140,8 +159,18 @@ export function applyEventToBlocks(
         },
       };
     }
+    case "tips": {
+      if (!event.text.trim() || hasFinalReply(blocks)) return base;
+      const tipsIndex = blocks.filter(block => block.type === "tips").length;
+      return {
+        ...base,
+        blocks: upsertBlock(blocks, `tips-${tipsIndex}`, "tips", { content: event.text }, true),
+        receivedContent: true,
+      };
+    }
     case "message": {
       if (!event.answer) return base;
+      if (!event.answer.trim() && blocks.some(block => block.type === "tips")) return base;
       const answerBlocks = blocks.filter(block => block.type === "answer");
       // 低端安卓 WebView 不支持 ES2022 的 Array.prototype.at
       const lastBlock = blocks[blocks.length - 1];
