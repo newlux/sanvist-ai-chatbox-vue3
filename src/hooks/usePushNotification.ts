@@ -1,3 +1,4 @@
+import type { PushSoundResult } from "@/utils/push/push-sound";
 import type { PushConnectionState, PushMessageRecord, TaskDispatchPush } from "@/utils/push/types";
 import { computed, getCurrentInstance, onUnmounted, ref } from "vue";
 import {
@@ -15,7 +16,7 @@ import { createLogger } from "@/utils/logger";
 import { MqttPushClient } from "@/utils/push/mqtt-push-client";
 import { ackPushDelivered, fetchPushInbox } from "@/utils/push/push-http";
 import { clearPushInbox, getInbox, getOutboxCursor, hasSeenPush, markPushRead, rememberPush, setOutboxCursor } from "@/utils/push/push-inbox";
-import { isTaskDispatch, parseTaskDispatchPush, pushActionOf } from "@/utils/push/push-payload";
+import { parseTaskDispatchPush, pushActionOf } from "@/utils/push/push-payload";
 import { disposePushNoticeSound, playPushNoticeSound } from "@/utils/push/push-sound";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 
@@ -57,11 +58,20 @@ export function usePushNotification(options: UsePushNotificationOptions = {}) {
   const running = ref(false);
   /** 补漏接口进行中 */
   const syncing = ref(false);
+  const soundIssue = ref<"blocked" | "failed" | null>(null);
 
   const unreadCount = computed(() => notices.value.filter(item => !item.read).length);
   const connected = computed(() => state.value === "connected");
 
   let client: MqttPushClient | null = null;
+
+  async function playNoticeSound(fromGesture = false): Promise<PushSoundResult> {
+    const result = await playPushNoticeSound(fromGesture);
+    if (result !== "superseded") {
+      soundIssue.value = result === "played" ? null : result;
+    }
+    return result;
+  }
 
   /**
    * 收下一条原始报文（MQTT 与补漏接口共用这条路径）。
@@ -98,15 +108,9 @@ export function usePushNotification(options: UsePushNotificationOptions = {}) {
     if (!rememberPush(record)) return;
 
     notices.value = getInbox();
-    // 只展示一期定义的 task_dispatch；其它 kind 先收下不渲染，等服务端扩展（协议 5.5）
-    if (!isTaskDispatch(payload)) {
-      logger.debug("非任务下发通知，仅入库", payload.kind);
-    }
-    else {
-      logger.info("收到任务下发通知", payload.notice?.text);
-      // 新通知（非重投）才响：从 assets/task-notice 里随机挑一段提示音
-      if (soundEnabled) playPushNoticeSound();
-    }
+    logger.info("收到新通知", { msgId: payload.msg_id, kind: payload.kind });
+    // 面板展示所有成功入库的通知，提示音与展示使用同一条件。
+    if (soundEnabled) void playNoticeSound();
 
     // 协议 6.4：交给消息中心后报 delivered（可选通道，失败不影响展示）
     if (httpEnabled) void ackPushDelivered(payload.msg_id);
@@ -117,13 +121,14 @@ export function usePushNotification(options: UsePushNotificationOptions = {}) {
    * 每次连上都会跑一次；结果可能包含已通过 MQTT 收到的消息，交给 receive 判重即可。
    */
   async function syncInbox() {
-    if (!httpEnabled || syncing.value) return;
+    const syncingClient = client;
+    if (!syncingClient || !httpEnabled || syncing.value) return;
     syncing.value = true;
     try {
       let cursor = getOutboxCursor();
       for (let page = 0; page < PUSH_INBOX_MAX_PAGES; page += 1) {
         const data = await fetchPushInbox(cursor, PUSH_INBOX_PAGE_SIZE);
-        if (!data || !Array.isArray(data.items)) return;
+        if (client !== syncingClient || !data || !Array.isArray(data.items)) return;
         data.items.forEach(item => receive(item?.payload ?? item, "http"));
 
         const next = Number(data.next_since_id);
@@ -135,7 +140,7 @@ export function usePushNotification(options: UsePushNotificationOptions = {}) {
       }
     }
     finally {
-      syncing.value = false;
+      if (client === syncingClient) syncing.value = false;
     }
   }
 
@@ -167,6 +172,7 @@ export function usePushNotification(options: UsePushNotificationOptions = {}) {
   function stop() {
     client?.stop();
     client = null;
+    syncing.value = false;
     running.value = false;
     state.value = "idle";
     stateDetail.value = "";
@@ -243,6 +249,8 @@ export function usePushNotification(options: UsePushNotificationOptions = {}) {
     syncing,
     unreadCount,
     connected,
+    soundIssue,
+    playNoticeSound,
     start,
     stop,
     restart,

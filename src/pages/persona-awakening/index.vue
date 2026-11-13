@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import { onHide, onShow } from "@dcloudio/uni-app";
+import { ref } from "vue";
 import headerIslandLogo from "@/assets/img/header-island-logo.png";
 import glowBottom from "@/assets/img/persona-awakening/glow-bottom.png";
 import glowMaskBottom from "@/assets/img/persona-awakening/glow-mask-bottom.png";
 import heySani from "@/assets/img/persona-awakening/hey-sani.png";
+import PushNoticePanel from "@/components/push-notice-panel/index.vue";
+import { pushNoticeSoundPlaying } from "@/utils/push/push-sound";
 
 /**
  * 「老板屏-个性觉醒」大屏页（Ardot 291:7285「老板屏页面」，设计基准 1920 × 1080）。
@@ -35,12 +39,28 @@ import heySani from "@/assets/img/persona-awakening/hey-sani.png";
  * 单位说明：大屏用 px 基准（uni-app 的 rpx 按「750rpx = 视口宽」换算，1920 画布会被放大 5.12 倍）。
  */
 defineOptions({ name: "PersonaAwakening" });
+
+const pageVisible = ref(false);
+const debugPanelOpen = ref(false);
+
+onShow(() => {
+  pageVisible.value = true;
+});
+
+onHide(() => {
+  pageVisible.value = false;
+  debugPanelOpen.value = false;
+});
 </script>
 
 <template>
   <!-- 291:7285「老板屏页面」：铺满视口，clipsContent -->
   <view class="persona-awakening">
-    <view class="persona-awakening__screen">
+    <view
+      class="persona-awakening__screen"
+      :class="{ 'persona-awakening__screen--playing': pageVisible && pushNoticeSoundPlaying }"
+      @click="debugPanelOpen = false"
+    >
       <!-- 291:7291 个性觉醒：黑底 + 标题（底层） -->
       <view class="persona-awakening__backdrop">
         <!-- 291:7292 随时为你而来 -->
@@ -49,7 +69,9 @@ defineOptions({ name: "PersonaAwakening" });
       </view>
 
       <!-- 291:7290 中间图标 254 × 254：素材改用 src/assets/img/header-island-logo.png -->
-      <image class="persona-awakening__logo" :src="headerIslandLogo" />
+      <view class="persona-awakening__logo-frame">
+        <image class="persona-awakening__logo" :src="headerIslandLogo" />
+      </view>
 
       <!-- 291:7298 底部一段话（672 × 41，80% 白色） -->
       <!-- eslint-disable-next-line vue/singleline-html-element-content-newline -->
@@ -62,7 +84,24 @@ defineOptions({ name: "PersonaAwakening" });
       <image class="persona-awakening__glow-mask" :src="glowMaskBottom" />
 
       <!-- 291:18735 顶部「Hey，SANI」176.962 × 47 -->
-      <image class="persona-awakening__hey" :src="heySani" />
+      <button
+        type="button"
+        class="persona-awakening__hey-trigger"
+        aria-label="打开通知调试面板"
+        :aria-expanded="debugPanelOpen"
+        @click.stop="debugPanelOpen = true"
+      >
+        <image class="persona-awakening__hey" :src="heySani" />
+      </button>
+
+      <view
+        v-if="pageVisible"
+        v-show="debugPanelOpen"
+        class="persona-awakening__push"
+        @click.stop
+      >
+        <PushNoticePanel dark />
+      </view>
     </view>
   </view>
 </template>
@@ -147,15 +186,22 @@ defineOptions({ name: "PersonaAwakening" });
  * 宽高同用 --u 保证正方形；水平居中，距顶 359 用纵向基准
  * 设计稿 DROP_SHADOW 为 visible: false，故不写 box-shadow；无边框
  */
-.persona-awakening__logo {
+.persona-awakening__logo-frame {
   position: absolute;
+  z-index: 1;
   top: calc(359 * var(--uh));
   left: 50%;
   display: block;
   width: calc(254 * var(--u));
   height: calc(254 * var(--u));
-  border: 0;
   transform: translateX(-50%);
+}
+
+.persona-awakening__logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 /**
@@ -214,15 +260,104 @@ defineOptions({ name: "PersonaAwakening" });
   transform: translateX(-50%);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .persona-awakening__screen--playing {
+    .persona-awakening__logo {
+      animation: persona-logo-breathe 2s ease-in-out infinite;
+    }
+
+    .persona-awakening__glow {
+      transform-origin: center bottom;
+      animation: persona-glow-pulse 2s ease-in-out infinite;
+    }
+
+    .persona-awakening__glow-mask {
+      animation: persona-glow-ripple 2s ease-in-out infinite;
+    }
+  }
+}
+
+@keyframes persona-logo-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes persona-glow-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+
+  50% {
+    opacity: 0.86;
+    transform: scaleY(1.22);
+  }
+}
+
+@keyframes persona-glow-ripple {
+  0%,
+  100% {
+    opacity: 0.1;
+    transform: translateX(-50%) scale(1);
+  }
+
+  65% {
+    opacity: 0.27;
+    transform: translate(-50%, calc(-42 * var(--uh))) scale(1.13);
+  }
+}
+
 /** 291:18735 顶部「Hey，SANI」：设计 176.962 × 47 @ (871, 312)，水平居中、距顶用纵向基准 */
-.persona-awakening__hey {
+.persona-awakening__hey-trigger {
   position: absolute;
+  z-index: 1;
   top: calc(312 * var(--uh));
   left: 50%;
   display: block;
   width: calc(176.962 * var(--u));
   height: calc(47 * var(--u));
+  margin: 0;
+  padding: 0;
   border: 0;
+  background: transparent;
+  cursor: pointer;
   transform: translateX(-50%);
+  touch-action: manipulation;
+}
+
+.persona-awakening__hey-trigger::after {
+  border: 0;
+}
+
+.persona-awakening__hey {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.persona-awakening__push {
+  position: absolute;
+  z-index: 2;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  width: min(29vw, 420px);
+  max-height: 75%;
+  overflow-y: auto;
+}
+
+@media (max-width: 760px) {
+  .persona-awakening__push {
+    left: max(16px, env(safe-area-inset-left));
+    width: auto;
+    max-height: calc(31% - 16px);
+  }
 }
 </style>
