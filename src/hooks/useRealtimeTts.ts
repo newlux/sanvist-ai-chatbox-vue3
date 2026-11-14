@@ -468,14 +468,16 @@ export function useRealtimeTts(scope?: string) {
   }
 
   /**
-   * 播报中把总开关关掉：正在自动播的这条立刻停，不等它念完。
-   * 只停自动会话（activeSession 非空）；手动点的播报（togglePlay）不归这个开关管。
+   * 播报中把总开关关掉：立刻静音，不等它念完。
+   * 自动流式会话（activeSession 非空）与气泡里手动点的播报（togglePlay，activeSession 为空）
+   * 都要停 —— 总开关是「声音总开关」，关掉就必须没声音，否则表现为「点了关闭还在念」。
+   * 开关只决定「要不要自动播」，手动播报按钮本身仍不受它限制（见 feedAnswerDelta）。
    */
   watch(
     () => settingsStore.autoTtsEnabled,
     (enabled) => {
       if (enabled) return;
-      if (activeSession) stop();
+      if (activeSession || playingMessageId.value != null || playing.value) stop();
     },
   );
 

@@ -6,17 +6,17 @@ import AiReportEntryCard from "@/components/ai-report-entry-card/index.vue";
 /**
  * 听汇报入口卡（block type=report-card）—— Ardot 479:384，父画板 479:152。
  *
- * 由 useChatSend 在命中 `<WORK_REPORT date language>` 标签后追加：
+ * 由 useChatSend 在命中 `<WORK_REPORT date language>` / `<REPORT_STYLE style>` 标签后追加：
  * 以前这里直接跳播报页，现在改成在气泡里补一张卡，用户点卡片才跳
  * （跳转逻辑在卡片内，见 utils/listen-report 的 openListenReportPage）。
  *
- * payload：{ date: 播报业务日期, language: 播报语言 }
+ * payload：{ date: 播报业务日期, language: 播报语言, style: 播报风格码（<REPORT_STYLE> 才有） }
  */
 defineOptions({ name: "ReportCardBlock" });
 
 const props = defineProps({
   payload: {
-    type: Object as () => { date?: string; language?: string } | null,
+    type: Object as () => { date?: string; language?: string; style?: string } | null,
     default: () => ({}),
   },
   /** 深色：独立于气泡渲染时由外部显式传，气泡内跟随 ai-bubble-dark */
@@ -29,13 +29,15 @@ const isDark = computed(() => props.dark || Boolean(bubbleDark ? unref(bubbleDar
 
 const date = computed(() => String(props.payload?.date || ""));
 const language = computed(() => String(props.payload?.language || ""));
+/** 播报风格码（`<REPORT_STYLE style="…">` 下发）：点卡进播报页时作为 styleCode 传给 play */
+const styleCode = computed(() => String(props.payload?.style || ""));
 </script>
 
 <template>
   <!-- 设计稿 479:160 正文底(254) → 479:384 卡片顶(269) 15px；
        气泡 __body 的行间距是 10rpx(5px)，这里补 20rpx(10px) 补足 15px -->
   <view class="report-card-block">
-    <AiReportEntryCard :date="date" :language="language" :dark="isDark" />
+    <AiReportEntryCard :date="date" :language="language" :style-code="styleCode" :dark="isDark" />
   </view>
 </template>
 

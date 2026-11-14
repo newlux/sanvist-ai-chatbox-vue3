@@ -1,5 +1,6 @@
 import type { AskSlotOption, AskSlotPayload, ChatResponseMode, ChatStreamEvent, Identifier, SendChatMessageParams } from "@/api/chat/types";
 import { createLogger } from "@/utils/logger";
+import { parseReportStyleTag } from "./report-style-tag";
 import { parseWorkReportTag } from "./work-report-tag";
 
 const logger = createLogger("ai-stream-protocol");
@@ -644,6 +645,8 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
   appendAnswer(source.slice(cursor));
   const result: DifyHistoryBlockData[] = [];
   let report: ReturnType<typeof parseWorkReportTag> | undefined;
+  /** 历史里的 `<REPORT_STYLE style="…">`：同样还原成听汇报入口卡（卡上带风格码） */
+  let reportStyle = "";
   for (const block of blocks) {
     if (block.type === "answer") {
       // 历史只存原始 answer，没有实时流程追加的入口卡；复用标签解析还原正文和卡片。
@@ -651,14 +654,24 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
       const content = String(block.payload.content || "").replace(TIPS_TAG_PATTERN, "");
       const parsed = parseWorkReportTag(content);
       if (parsed.matched) report = parsed;
-      const text = parsed.matched ? parsed.text : content;
+      const body = parsed.matched ? parsed.text : content;
+      const styleParsed = parseReportStyleTag(body);
+      if (styleParsed.matched && styleParsed.style) reportStyle = styleParsed.style;
+      const text = styleParsed.matched ? styleParsed.text : body;
       if (text.trim()) result.push(...splitMarkdownTables(text));
     } else {
       result.push(block);
     }
   }
+  // 有 <WORK_REPORT> 就按它建卡（带日期）；只有 <REPORT_STYLE> 时同样补卡，风格码随卡带给播报页
   if (report) {
-    result.push({ type: "report-card", payload: { date: report.date, language: report.language } });
+    result.push({
+      type: "report-card",
+      payload: { date: report.date, language: report.language, ...(reportStyle ? { style: reportStyle } : {}) },
+    });
+  }
+  else if (reportStyle) {
+    result.push({ type: "report-card", payload: { date: "", language: "", style: reportStyle } });
   }
   if (result.length) return result;
   // 命中过协议但没产出 block（例如整条 answer 只有播报层）时不能回落成原文，否则会把 JSON 泄漏到气泡。

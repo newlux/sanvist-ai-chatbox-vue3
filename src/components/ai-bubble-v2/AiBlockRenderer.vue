@@ -250,7 +250,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     @share-click="onGuideCheckShare"
   />
   <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
-  <!-- 听汇报入口卡（<WORK_REPORT> 命中后追加）：不再自动跳播报页，点卡片才跳 -->
+  <!-- 听汇报入口卡（<WORK_REPORT> / <REPORT_STYLE> 命中后追加）：不再自动跳播报页，点卡片才跳 -->
   <ReportCardBlock v-else-if="block.type === 'report-card'" :payload="block.payload" :dark="dark" />
   <!-- 调度视图入口卡（COMPONENT scene=task / type=gantt）：点它跳横屏调度视图并带上整包数据 -->
   <GanttBlock v-else-if="block.type === 'gantt'" :payload="block.payload" :dark="dark" @open="onGanttOpen" />

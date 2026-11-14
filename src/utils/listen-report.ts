@@ -1,4 +1,5 @@
 import { LISTEN_REPORT_CURRENT_DATE_KEY, LISTEN_REPORT_DATE_KEY, LISTEN_REPORT_LANGUAGE_KEY } from "@/config";
+import { saveReportStyleCode } from "@/hooks/useReportStyle";
 import { createLogger } from "@/utils/logger";
 import { navigateToScene } from "@/utils/scene-navigation";
 
@@ -74,11 +75,14 @@ export function markListenReportListened(bizDate = getCurrentListenReportDate())
  *
  * 播报页 onLoad 从 storage 读「当前播报日期」与「播报语言」，所以先把 date / language 写进去再跳；
  * `direct=1` 让播报页跳过「选助手 → 选汇报内容」，直接起播。
+ * styleCode（`<REPORT_STYLE style="…">` 下发的风格码）同样先落进「听播风格」存储 ——
+ * 播报页拉流时现取，作为 /listen-broadcast/play 的 styleCode 传值。
  * 已经停在播报页时不重复跳自己（日期照写）。
  */
-export function openListenReportPage(options: { date?: string; language?: string } = {}): void {
+export function openListenReportPage(options: { date?: string; language?: string; styleCode?: string } = {}): void {
   saveCurrentListenReportDate(options.date);
   saveCurrentListenReportLanguage(options.language);
+  if (options.styleCode) saveReportStyleCode(options.styleCode);
   const pages = typeof getCurrentPages === "function" ? getCurrentPages() : [];
   const current = pages[pages.length - 1];
   if (current && `/${String(current.route || "")}` === PODCAST_PAGE_ROUTE) return;
