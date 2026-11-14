@@ -34,12 +34,13 @@ import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
+import { usePlainTts } from "@/hooks/usePlainTts";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useVoiceQuery } from "@/hooks/useVoiceQuery";
 import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
 import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
-import { getInitIntroBlocks } from "@/mock/init-intro";
+import { getInitIntroBlocks, getInitIntroSpeech } from "@/mock/init-intro";
 import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -262,10 +263,50 @@ const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beg
   alignSentMessageToTop: true,
 });
 
+/**
+ * 初始化介绍的口播：走 usePlainTts（按句切分 → /speech/tts/v2/stream）。
+ * mock 消息没有服务端 messageId，走不了 useChatTts / 实时听播那两套，所以这里单独一套。
+ */
+const introTts = usePlainTts(String(systemStore.header?.Lang || "").toLowerCase().startsWith("en") ? "en" : "zh");
+
+/** 补播监听的事件：个别 WebView 会拦掉无用户手势的自动播放，等第一次触摸再补一次 */
+const INTRO_GESTURE_EVENTS = ["touchstart", "pointerdown"] as const;
+let introGestureRetry: (() => void) | null = null;
+
+function disarmIntroVoiceRetry() {
+  const handler = introGestureRetry;
+  if (!handler) return;
+  introGestureRetry = null;
+  INTRO_GESTURE_EVENTS.forEach(name => document.removeEventListener(name, handler));
+}
+
+/** 给刚发起的一段口播挂上「首触补播」：已经出声就什么都不做 */
+function armIntroVoiceRetry(replay: () => void) {
+  disarmIntroVoiceRetry();
+  const handler = () => {
+    disarmIntroVoiceRetry();
+    if (introTts.started.value) return;
+    replay();
+  };
+  introGestureRetry = handler;
+  INTRO_GESTURE_EVENTS.forEach(name => document.addEventListener(name, handler, { once: true, passive: true }));
+}
+
+/** 播报初始化介绍的正文（从 mock blocks 里取） */
+function speakInitIntro(speech: string) {
+  const text = String(speech || "").trim();
+  if (!text) return;
+  introTts.speak(text);
+  armIntroVoiceRetry(() => introTts.speak(text));
+}
+
 /** 停掉本页两套听播引擎（实时流式 + 历史整段）：换交互 / 离开页面时统一走这里。 */
 function stopSceneTts() {
   realtimeTts.stop();
   stopHistoryTts();
+  // 初始化介绍的口播也一起停：用户开口 / 发送时不该还念着开场白
+  introTts.stop();
+  disarmIntroVoiceRetry();
 }
 
 /**
@@ -1202,6 +1243,8 @@ function showInitIntro() {
       }
       // 不走欢迎层的起飞动画，停够时间直接切到对话页
       enterChatNow();
+      // 开场白跟着念出来：正文取自 mock（guide 是引导卡正文，task 是自我介绍正文）
+      speakInitIntro(getInitIntroSpeech(blocks));
     }, INTRO_WELCOME_DELAY_MS);
   };
   // 设置由 App.vue 异步拉取（不 await 首屏），进页面时纯净模式可能还没落地；
@@ -1265,6 +1308,7 @@ onUnload(() => {
     clearTimeout(introTimer);
     introTimer = null;
   }
+  disarmIntroVoiceRetry();
 });
 const voiceHoldActive = ref(false);
 const voiceHoldCancelPending = ref(false);

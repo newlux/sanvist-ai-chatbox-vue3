@@ -103,3 +103,20 @@ export function getInitIntroBlocks(scene: InitIntroScene, language?: string): Ai
   const isEnglish = String(language || "").trim().toLowerCase().startsWith("en");
   return BLOCKS[isEnglish ? "en_US" : "zh_CN"][scene] || [];
 }
+
+/**
+ * 取初始化内容的「口播文本」，给 usePlainTts 播报用：
+ * - task：自我介绍正文（`answer` 块）
+ * - guide：开场引导卡正文（`guide-lead` 块）
+ *
+ * 追问卡、图表这类块不念；返回空串表示这份数据没有可播报的正文。
+ */
+export function getInitIntroSpeech(blocks: AiBlock[]): string {
+  const answer = blocks.find(block => block.type === "answer");
+  if (answer) return String(answer.payload.content || "").trim();
+
+  const lead = blocks.find(block => block.type === "guide-lead");
+  if (lead) return String(lead.payload.text || "").trim();
+
+  return "";
+}
