@@ -7,12 +7,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import arrowNextIcon from "@/assets/img/schedule-arrow-next.svg";
 import arrowPrevIcon from "@/assets/img/schedule-arrow-prev.svg";
 import { useLandscape } from "@/hooks/useLandscape";
+import { LARGE_SCREEN_FONT_SCALE, useLargeScreenFont } from "@/hooks/useLargeScreenFont";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
-import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
 import { useSystemStore } from "@/stores";
-import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
 import { backFromScene } from "@/utils/scene-navigation";
 
@@ -20,26 +19,32 @@ import { backFromScene } from "@/utils/scene-navigation";
  * 横屏调度视图·重排草案（稿子 7229:254）——每个资源的「旧 / 新」两排计划对照。
  * 预排是另一个页面：pages/schedule-pre（稿子 6464:150）。
  *
- * 版面：横屏 812×375（每小时 56px，时间轴以 08:00–21:00 为基准、按数据向外扩到整点）
+ * 版面：横屏 812×375（1x 每小时 56px，时间轴以 08:00–21:00 为基准、按数据向外扩到整点）
  * - 顶部栏：标题「调度视图·重排草案」+ 日期 + 图例（原计划 / 新计划 / 已取消）
  *   +「查看全部任务」+ 返回对话按钮；
- *   勾选 = 显示全部任务；不勾 = 只显示**有变动**的任务（新增 / 取消 / 时段调整），
- *   旧新时段一致（未变动）的任务与没有对照的单条任务都收起；
+ *   **默认不勾** = 只显示**有变动**的任务（新增 / 取消 / 时段调整），
+ *   旧新时段一致（未变动）的任务与没有对照的单条任务都收起；勾上才给全量；
  * - 左侧资源列（140px）：每行「旧 / 新」标签 + 类别 + 资源名 + 车号|班次；
- *   单条任务（没有旧 / 新对照）不打标签、只渲染一条；
+ *   标签只给「有新旧对照、且这一排确实有变动」的行：单泳道（没有对照）整列都不渲染，
+ *   整排都没变动（只是被「查看全部任务」放出来）那一排也不写字；
  * - 右侧排程区：时间轴 + 竖向网格 + 任务条（按起止时间定位），可横向滚动；
  * - 底部「任务置换」提示条（7229:449）：点任务条后按该趟的「旧 / 新」两条生成文案，可关闭。
  *
  * 双指缩放：与甘特页同一套（useScheduleGestures 接管两指手势），按两指间距比例改「每小时像素宽」
- * （28–168px，基准 56px），捏合中心的时刻保持不动；刻度、任务条、新旧连线、箭头跟着实时重排。
+ * （28–168px），捏合中心的时刻保持不动；刻度、任务条、新旧连线、箭头跟着实时重排。
+ * **进页面落在最小尺度**（28px/小时 → 刻度 2 小时一格）：先看整天排布，再按需放大。
  *
  * 横屏方式与 pages/schedule-gantt 一致：宿主用 openH5Container 打开甘特图应用时本身就是全屏横屏，
  * 前端不再申请转屏（不再调 landscapeFullscreen）；只有宿主没给横屏可视区时，
  * `useLandscape()` 才把页面整体旋转 90° 模拟横屏（设备竖屏持握、不申请全屏权限），离开页面自动还原。
  *
- * 任务条样式（稿子 7229:254）：26 高、单行——原计划 #F4F4F4 + 虚线 #D9D9D9、
- * 新计划 白底 + 虚线 #9DB3CC、已取消同原计划但文案转灰、强调条为深色实线 #1A1A1A。
- * 任务条可点：点任意一条即选中它那一趟（linkKey 相同的旧 / 新两条），底部提示条随之更新。
+ * 任务条样式（ardot 134:992 / 207:2606）：26 高、单行——原计划 灰底 #F3F3F3 + **虚线** #E8E8E8、
+ * 新计划 白底 #FFFFFF + **虚线** #9DB3CC、已取消 灰底 #F3F3F3 + **实线** #E8E8E8 且文案转灰。
+ * 三态的底色 / 描边与右上角图例**共用同一组 CSS 变量**，条与图例不会再出现色差；
+ * 线型按状态写死（原计划 / 新计划虚线、已取消实线），接口的 highlight 标志不参与描边，
+ * 否则大量「强调条」会把三种状态的线型盖成全实线。
+ * 任务条可点：点任意一条即选中它那一趟（linkKey 相同的旧 / 新两条一起描实线框，点空白 / 再点一次还原），
+ * 底部提示条随之更新；新旧关联线也**只在选中时**才画出来，未选中画面只有两排任务条。
  */
 
 defineOptions({ name: "SchedulePage" });
@@ -72,6 +77,13 @@ const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
 
 /**
+ * 大屏电脑（≥ 19 寸）：字号 + 行高 / 任务条 / 左列整体等比放大。
+ * 样式侧用 --sch-fs，脚本侧（行高、连接线坐标）用 fontScale，两边同一口径。
+ */
+const { isLargeScreen } = useLargeScreenFont();
+const fontScale = computed(() => (isLargeScreen.value ? LARGE_SCREEN_FONT_SCALE : 1));
+
+/**
  * 原生手势在真机不生效（旋转页面里浏览器不接管）：自己接管触摸，见 hooks/useScheduleGestures。
  * isRotated 决定屏幕方向映射哪一路：CSS 旋转模拟横屏与宿主原生转屏全屏的轴向相反。
  */
@@ -91,12 +103,15 @@ useScheduleGestures({
   onRowsOffset: () => measureRowTops(),
 });
 
-/** 时间轴：每小时像素宽基准 56px（稿子 1x，双指捏合在 28–168 之间缩放）；基准范围 08:00–21:00 */
-const DEFAULT_HOUR_WIDTH = 56;
+/** 时间轴：每小时像素宽（双指捏合在 28–168 之间缩放，1x 基准 56px）；基准范围 08:00–21:00 */
 const HOUR_WIDTH_MIN = 28;
 const HOUR_WIDTH_MAX = 168;
-/** 当前每小时像素宽（双指缩放会改它，刻度 / 任务条 / 连线 / 网格线都跟着走） */
-const hourWidth = ref(DEFAULT_HOUR_WIDTH);
+/**
+ * 当前每小时像素宽（双指缩放会改它，刻度 / 任务条 / 连线 / 网格线都跟着走）。
+ * 进页面直接落在最小尺度（28px/小时 → 刻度 2 小时一格）：先看整天的排布轮廓，
+ * 需要细节再用双指放大。
+ */
+const hourWidth = ref(HOUR_WIDTH_MIN);
 const DESIGN_DAY_START_MIN = 8 * 60;
 const DESIGN_DAY_END_MIN = 21 * 60;
 /** 时间轴实际范围（分钟）：以稿子基准为底线，数据越界时由下面的 expandDayRange() 向外扩到整点 */
@@ -151,7 +166,11 @@ interface ScheduleBar {
   /** 终点（当天分钟数） */
   endMin: number;
   state: BarState;
-  /** 强调条：预排用红描边（6464:358），重排用深色实线描边（7229:339/302/350） */
+  /**
+   * 强调条标志：预排页用红描边（6464:358）。
+   * 重排页**不参与描边**——接口里大量 highlight=true，若照旧画成实线会把三种状态的线型盖掉，
+   * 这里只保留数据字段，渲染一律以 state 为准。
+   */
   highlight?: boolean;
   /**
    * 新旧关联键：同一个 linkKey 只在「旧行 ↔ 新行」之间连虚线（同属一趟任务）。
@@ -202,9 +221,16 @@ function stateFromState(state: unknown): BarState {
 /** 接口还没排时间的条：每条按 2 小时一节依次排开（避免 null 参与定位算出 NaN，任务条甩出画面） */
 const UNSCHEDULED_SLOT_MIN = 2 * 60;
 
-/** 分钟数 →「HH:MM」（条内时间文案的兜底） */
+/**
+ * 分钟数 →「HH:MM」（条内时间文案的兜底）。
+ * 接口下发的 startMin / endMin 是**带小数的分钟**（1388.6666666666667 = 23:08:40），
+ * 直接取模会打印出「23:8.666666666666742」：这里先四舍五入到整分钟，
+ * 再按 24 小时回绕（跨天任务 endMin 是 +1440 后的值，1496.33 → 00:56）。
+ */
 function hhmm(minutes: number) {
-  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  const total = Math.round(Number(minutes) || 0);
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  return `${String(Math.floor(wrapped / 60)).padStart(2, "0")}:${String(wrapped % 60).padStart(2, "0")}`;
 }
 
 /**
@@ -289,8 +315,8 @@ function expandDayRange(list: ScheduleRow[]) {
 
 expandDayRange(repRows.value);
 
-/** 「查看全部任务」勾选态：true = 全部任务，false = 只看有变动的任务 */
-const showAllTasks = ref(true);
+/** 「查看全部任务」勾选态：true = 全部任务，false = 只看有变动的任务；默认只看变动，进页面就是重点 */
+const showAllTasks = ref(false);
 
 /**
  * 「有变动」的任务条 id。按同一趟任务（linkKey）的旧 / 新对照**逐条**判定：
@@ -332,19 +358,81 @@ const changedBarIds = computed(() => {
   return ids;
 });
 
+/** 两行任务条是否「本来就是同一条」：条数相同且每条标题 + 起止一致（不看 state，planned / new 也算同一条） */
+function sameTaskBars(a: ScheduleBar[], b: ScheduleBar[]) {
+  if (a.length !== b.length) return false;
+  const fingerprint = (bars: ScheduleBar[]) =>
+    bars.map(bar => `${bar.title}|${Math.round(bar.startMin)}|${Math.round(bar.endMin)}`).sort().join("~");
+  return fingerprint(a) === fingerprint(b);
+}
+
 /**
- * 当前渲染的行：勾选「查看全部任务」给全部；
+ * 「查看全部任务」时把重复的泳道折成一条。
+ * 有些资源本来就没有新旧两版，接口仍给了两行（甚至其中一行是空的），全量展示时就会并排
+ * 出现两条一模一样的任务条，看起来像新旧对照。这里按「相邻 + 同一资源」两两检查：
+ * - 两行都空 → 整组丢掉（不占行高）；
+ * - 只有一行空 → 只留非空那行；
+ * - 两行任务条一一对应 → 只留一条（优先留「新」，那是最终排班），并清掉 tag，
+ *   合并后没有新旧之分，左侧「旧 / 新」标签列也不会再出现。
+ */
+const displayRows = computed<ScheduleRow[]>(() => {
+  const source = repRows.value;
+  const out: ScheduleRow[] = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const row = source[index];
+    const next = source[index + 1];
+    const sameResource = Boolean(next) && (next.names[0] || next.id) === (row.names[0] || row.id);
+
+    if (!sameResource) {
+      if (row.bars.length > 0) out.push(row);
+      continue;
+    }
+
+    if (row.bars.length === 0 && next.bars.length === 0) {
+      index += 1;
+      continue;
+    }
+    if (row.bars.length === 0) {
+      out.push(next);
+      index += 1;
+      continue;
+    }
+    if (next.bars.length === 0) {
+      out.push(row);
+      index += 1;
+      continue;
+    }
+    if (sameTaskBars(row.bars, next.bars)) {
+      // 优先留「新」那条（最终排班），分组分隔线两行任一有就保留
+      out.push({
+        ...(row.tag === "新" ? row : next),
+        tag: undefined,
+        separator: row.separator || next.separator,
+      });
+      index += 1;
+      continue;
+    }
+    out.push(row);
+  }
+  return out;
+});
+
+/**
+ * 当前渲染的行：勾选「查看全部任务」给（去过重的）全部；
  * 未勾选只留有变动的任务条，行里一条不剩就整行收起（行位置 / 箭头 / 连线都跟着这份数据算）。
  */
 const rows = computed(() => {
-  if (showAllTasks.value) return repRows.value;
+  if (showAllTasks.value) return displayRows.value;
   return repRows.value
     .map(row => ({ ...row, bars: row.bars.filter(bar => changedBarIds.value.has(bar.id)) }))
     .filter(row => row.bars.length > 0);
 });
 
-/** 每行高 40px（与右侧 track 一致） */
+/** 每行高 40px（与右侧 track 一致），大屏电脑按 fontScale 等比放大 */
 const ROW_HEIGHT = 40;
+
+/** 当前行高：模板里分组格高度、连接线坐标都用它（样式侧同一份倍率见 --sch-fs） */
+const rowHeight = computed(() => ROW_HEIGHT * fontScale.value);
 
 /**
  * 把「旧 / 新」两行合成一组：同一辆车的车辆信息在左列**只显示一次**、跨两行上下居中，
@@ -373,19 +461,32 @@ const rowGroups = computed(() => {
   return groups;
 });
 
+/**
+ * 某一排要不要打「旧 / 新」标签：**有对照 + 这一排确实有变动**才打。
+ * - 单泳道（这一组只有一行，没有新旧对照）不打，标签列整列都不渲染；
+ * - 整排任务都没变动（新旧时段一致，只是被「查看全部任务」放出来）也不打，
+ *   否则满屏都是没有信息量的「旧 / 新」。
+ * 一排里混合（部分变动）时整排仍打：这一排确实有需要对照的任务。
+ */
+function rowTagVisible(groupRows: ScheduleRow[], row: ScheduleRow) {
+  if (groupRows.length < 2 || !row.tag) return false;
+  return row.bars.some(bar => changedBarIds.value.has(bar.id));
+}
+
 /** 连接线坐标系：与 .schedule__grid-inner 一致（表头 45 高、重排每行 40 高、条 26 高） */
 const LINK_RULER_HEIGHT = 0;
 const LINK_ROW_HEIGHT = 40;
 const LINK_BAR_TOP = 6;
 const LINK_BAR_HEIGHT = 26;
 
-/** 任务条中心点（x 由起止时间算，y 由所在行算） */
+/** 任务条中心点（x 由起止时间算，y 由所在行算；行高 / 条高随大屏倍率走，与 CSS 保持一致） */
 function barCenter(rowIndex: number, bar: ScheduleBar) {
   const left = ((bar.startMin - DAY_START_MIN) / 60) * hourWidth.value;
   const width = Math.max(((bar.endMin - bar.startMin) / 60) * hourWidth.value, hourWidth.value / 2);
+  const scale = fontScale.value;
   return {
     x: left + width / 2,
-    y: LINK_RULER_HEIGHT + rowIndex * LINK_ROW_HEIGHT + LINK_BAR_TOP + LINK_BAR_HEIGHT / 2,
+    y: (LINK_RULER_HEIGHT + rowIndex * LINK_ROW_HEIGHT + LINK_BAR_TOP + LINK_BAR_HEIGHT / 2) * scale,
   };
 }
 
@@ -413,6 +514,7 @@ function isNewPlanBar(row: ScheduleRow, bar: ScheduleBar) {
  * - 同一条泳道内的条（同一行）一律不连；
  * - 支持多对一 / 一对多：旧侧 N 条、新侧 M 条就画 N×M 条（拆趟、并趟都能表达）；
  * - 只有一侧有该 linkKey 时不画线，那就是「新增 / 取消」。
+ * 这里先算全量并带上 linkKey，交给下面的 activeLinkLines 按选中项过滤。
  */
 const linkLines = computed(() => {
   const groups = new Map<string, { old: Array<{ rowIndex: number; bar: ScheduleBar }>; fresh: Array<{ rowIndex: number; bar: ScheduleBar }> }>();
@@ -428,12 +530,13 @@ const linkLines = computed(() => {
     });
   });
 
-  const lines: Array<{ key: string; style: Record<string, string> }> = [];
+  const lines: Array<{ key: string; linkKey: string; style: Record<string, string> }> = [];
   groups.forEach((group, linkKey) => {
     group.old.forEach((from, oldIndex) => {
       group.fresh.forEach((to, newIndex) => {
         lines.push({
           key: `${linkKey}-${oldIndex}-${newIndex}`,
+          linkKey,
           style: linkLineStyle(barCenter(from.rowIndex, from.bar), barCenter(to.rowIndex, to.bar)),
         });
       });
@@ -449,9 +552,12 @@ const legend = [
   { key: "canceled", label: "已取消" },
 ] as const;
 
-/** 分钟数 →「HH:MM」（提示文案用真实排班时间，不用条里可能被截断的 timeText） */
+/** 分钟数 →「HH:MM」（提示文案用真实排班时间，不用条里可能被截断的 timeText；取整 / 回绕见 hhmm） */
 function formatMinute(min: number) {
-  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+  const total = Math.round(Number(min) || 0);
+  const clock = hhmm(total);
+  // 跨过 24 点的时段标「次日」，与接口 timeText 的写法（「次日00:21—次日01:04」）保持一致
+  return total >= 1440 ? `次日${clock}` : clock;
 }
 
 function formatRange(bar: ScheduleBar) {
@@ -483,8 +589,18 @@ const linkPairs = computed(() => {
   return map;
 });
 
-/** 当前选中的那一趟任务（同一 linkKey 的旧 / 新两条一起高亮） */
+/** 当前选中的那一趟任务（同一 linkKey 的旧 / 新两条一起描实线框） */
 const activeLinkKey = ref("");
+
+/**
+ * 关联线只在选中时出现：点中某一趟任务后，才把它的「旧 ↔ 新」虚线画出来
+ * （旧侧 N 条 × 新侧 M 条，拆趟 / 并趟都能连）；没选中时整层不渲染，画面只有两排任务条。
+ */
+const activeLinkLines = computed(() => {
+  const key = activeLinkKey.value;
+  if (!key) return [];
+  return linkLines.value.filter(line => line.linkKey === key);
+});
 
 /** 资源名取被点任务所在行（新排行优先，和左列显示的车号一致） */
 function resourceName(pair: { old?: BarHit; new?: BarHit }) {
@@ -532,9 +648,14 @@ function onBarTap(bar: ScheduleBar) {
   activeLinkKey.value = activeLinkKey.value === bar.linkKey ? "" : bar.linkKey;
 }
 
-/** 关闭提示条：文案清空，同时取消选中 */
+/** 关闭提示条：文案清空，同时取消选中（任务条边框随之还原成各自的计划态） */
 function closeNotice() {
   activeLinkKey.value = "";
+}
+
+/** 点排程区空白处取消选中（设计稿 interaction.blankClick = clear）；任务条自身已 .stop，不会走到这里 */
+function onBlankTap() {
+  if (activeLinkKey.value) closeNotice();
 }
 
 /* ---------- 滚动 ----------
@@ -665,34 +786,23 @@ watch(() => rows.value.length, () => {
 });
 
 /**
- * 退出到对话页（返回按钮 / 输入条发问共用）。
+ * 退出到对话页（左上角返回按钮，唯一入口）。
  *
  * 顺序：撤掉 CSS 旋转兜底（`exitLandscape()`；方向由宿主容器自己管，
- * 不再调 landscapeFullscreen） → 写入待发送问题 → 跳回对话页。
- *
- * `ask` 有值才走「发送问答」那一步，返回按钮不传，因此只收横屏不提问。
+ * 不再调 landscapeFullscreen） → 跳回对话页。
  *
  * 兜底路由给作业协同对话页：本页都是从作业协同对话里进来的，没有上一页可退时
- * 也要回那个会话（而不是首页），提问才落在原来的对话里。
+ * 也要回那个会话（而不是首页）。
  */
-async function leaveToChat(ask?: string) {
-  // 先撤掉 CSS 旋转兜底，再跳页 / 发问
+async function leaveToChat() {
+  // 先撤掉 CSS 旋转兜底，再跳页
   await exitLandscape();
-  if (ask) stashPendingScheduleAsk(ask);
   backFromScene("/pages/task/index");
 }
 
 /** 左上角返回按钮（模板直接绑这个，忽略事件参数） */
 function backToChat() {
   void leaveToChat();
-}
-
-/**
- * 右下角输入条发送（键盘 / 语音问完自动返回）：
- * 问题带着一起走，但仍然等竖屏恢复后才写入（对话页 onShow 取走并发送）。
- */
-function onAskSend(text: string) {
-  void leaveToChat(text);
 }
 
 /** 切换「查看全部任务」：勾上给全部，取消只看有变动的 */
@@ -705,7 +815,7 @@ function toggleShowAll() {
 <template>
   <view
     class="schedule"
-    :class="['schedule--rep', { 'schedule--rotated': rotated, 'schedule--dark': isDark }]"
+    :class="['schedule--rep', { 'schedule--rotated': rotated, 'schedule--dark': isDark, 'schedule--large-screen': isLargeScreen }]"
   >
     <!-- 顶部栏（7229:254：图例、查看全部任务、返回对话）：按产品要求去掉左侧标题与日期 -->
     <view class="schedule__header" :style="headerTopStyle">
@@ -753,7 +863,7 @@ function toggleShowAll() {
           :key="group.id"
           class="schedule__side-group"
           :class="{ 'schedule__side-group--separator': group.separator }"
-          :style="{ height: `${group.rows.length * ROW_HEIGHT}px` }"
+          :style="{ height: `${group.rows.length * rowHeight}px` }"
         >
           <!-- 左列两行：第一行「类别 + 名称」，第二行车号|班次 -->
           <view class="schedule__side-lines">
@@ -770,10 +880,10 @@ function toggleShowAll() {
             </text>
           </view>
           <!-- 旧 / 新 标签：每行一个（30×40 的白底格子），与右侧任务行一一对齐；
-               单条任务没有旧 / 新对照，不打标签（格子也不渲染） -->
-          <view class="schedule__side-tags">
+               单泳道（没有新旧对照）整列不渲染；有对照时只有「确实有变动」的那一排写字 -->
+          <view v-if="group.rows.length > 1" class="schedule__side-tags">
             <view v-for="row in group.rows" :key="row.id" class="schedule__side-tag">
-              <text v-if="row.tag">
+              <text v-if="rowTagVisible(group.rows, row)">
                 {{ row.tag }}
               </text>
             </view>
@@ -805,6 +915,7 @@ function toggleShowAll() {
           :scroll-left="scrollLeftProp"
           :scroll-with-animation="smoothScroll"
           @scroll="onTimelineScroll"
+          @tap="onBlankTap"
         >
           <!-- --hour-width：竖网格线间距跟着双指缩放走 -->
           <view
@@ -814,9 +925,9 @@ function toggleShowAll() {
           <!-- 内容区：纵向滚动（时间轴刻度固定在上面） -->
           <view class="schedule__rows">
             <view class="schedule__rows-inner">
-          <!-- 新旧关联：同一趟任务在「旧 / 新」两排之间连一条虚线（数据 linkKey 相同） -->
+          <!-- 新旧关联线：只在选中某一趟任务时画（activeLinkLines），未选中时整层不渲染 -->
           <view
-            v-for="line in linkLines"
+            v-for="line in activeLinkLines"
             :key="line.key"
             class="schedule__link"
             :style="line.style"
@@ -834,10 +945,10 @@ function toggleShowAll() {
               class="schedule__bar"
               :class="[
                 `schedule__bar--${bar.state}`,
-                { 'schedule__bar--mark': bar.highlight, 'schedule__bar--active': bar.linkKey && bar.linkKey === activeLinkKey },
+                { 'schedule__bar--active': bar.linkKey && bar.linkKey === activeLinkKey },
               ]"
               :style="barStyle(bar)"
-              @tap="onBarTap(bar)"
+              @tap.stop="onBarTap(bar)"
             >
               <text class="schedule__bar-title">
                 {{ bar.title }}
@@ -890,9 +1001,7 @@ function toggleShowAll() {
       <view class="schedule__notice-close" @tap="closeNotice" />
     </view>
 
-    <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态）
-         rotated：CSS 旋转模拟横屏时键盘从本地右侧升起，抬升方向与竖屏不同（见组件内注释） -->
-    <ScheduleAskBar :dark="isDark" :rotated="rotated" @send="onAskSend" />
+    <!-- 右下角输入条（键盘图标 + 输入 / 语音 / 发送）按需求取消，本页只保留浏览与详情 -->
   </view>
 </template>
 
@@ -900,6 +1009,9 @@ function toggleShowAll() {
 /* 横屏稿件 6464:150：812 × 375，元素尺寸直接按稿件 px（横屏可视区宽约 812 时与稿一致，窄则横向滚动兜住）
    版式要点：左列 140（底 #FBFBFB / 描边 #F2F2F2）、每小时 56px、行高 45、任务条 40 高白底 + #F2F2F2 描边 */
 .schedule {
+  /* 字号 / 行高 / 任务条 / 左列的等比缩放倍率：1 = 设计稿（11px = 22rpx）。
+     19 寸以上电脑屏幕由 .schedule--large-screen 改成 1.5455（11px → 17px = 34rpx） */
+  --sch-fs: 1;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -909,6 +1021,13 @@ function toggleShowAll() {
   background: #ffffff;
   color: #1a1a1e;
   font-family: "PingFang SC", "Inter", sans-serif;
+}
+
+/* 大屏电脑（≥ 19 寸，判定见 hooks/useLargeScreenFont）：
+   基准字号 11px(22rpx) 等比放大到 17px(34rpx)，行高 / 任务条 / 左列宽度一并乘 --sch-fs，
+   否则字号变大后会被固定的行高、条高裁掉（脚本侧 ROW_HEIGHT 用同一倍率，见 fontScale） */
+.schedule--large-screen {
+  --sch-fs: 1.5455;
 }
 
 /* 旋转模拟横屏时（useLandscape）：body 已旋转 90°，页面按横屏尺寸铺开 */
@@ -941,12 +1060,12 @@ function toggleShowAll() {
   gap: 16px;
 }
 
-/* 图例（7229:440 原计划 / 7229:437 新计划 / 7229:444 已取消），色块 10×10 圆角 3 */
+/* 图例（ardot 134:999 / 207:2804）：三组「色块 + 文字」，色块 10×10 圆角 3、项内 gap 5、项间 gap 12 */
 .schedule__legend {
   display: flex;
   align-items: center;
   flex: none;
-  gap: 16px;
+  gap: 12px;
 }
 
 .schedule__legend-item {
@@ -956,34 +1075,39 @@ function toggleShowAll() {
   gap: 5px;
 }
 
+/* 色块取任务条的同一组变量（见「任务条状态色」）：图例与条永远是同一份颜色 / 线型。
+   设计稿：原计划 灰底 #F3F3F3 + 虚线、新计划 白底 + 虚线 #9DB3CC、已取消 灰底 + 实线 */
 .schedule__legend-chip {
   box-sizing: border-box;
   width: 10px;
   height: 10px;
+  border-width: 1px;
+  border-style: dashed;
+  border-color: var(--bar-planned-border, #e8e8e8);
   border-radius: 3px;
-  border: 1px solid #d9d9d9;
-  background: #f4f4f4;
+  background: var(--bar-planned-bg, #f3f3f3);
 }
 
-/* 新计划：白底 + 虚线 #9DB3CC（7229:438） */
+/* 新计划：白底 + 虚线 #9DB3CC */
 .schedule__legend-chip--new {
   border-style: dashed;
-  border-color: #9db3cc;
-  background: #ffffff;
+  border-color: var(--bar-new-border, #9db3cc);
+  background: var(--bar-new-bg, #ffffff);
 }
 
-/* 已取消：#F4F4F4 + 虚线 #D9D9D9（7229:441） */
+/* 已取消：灰底 + 实线 #E8E8E8 */
 .schedule__legend-chip--canceled {
-  border-style: dashed;
-  background: #f4f4f4;
+  border-style: solid;
+  border-color: var(--bar-canceled-border, #e8e8e8);
+  background: var(--bar-canceled-bg, #f3f3f3);
 }
 
-/* 宽度按文案自适应：不压缩、不折行（网页窄屏时靠整块换行保版面，而不是拆字） */
+/* 宽度按文案自适应：不压缩、不折行（网页窄屏时靠整块换行保版面，而不是拆字）；12/Regular #0D0D0D */
 .schedule__legend-text {
   flex: none;
-  font-size: 11px;
+  font-size: calc(12px * var(--sch-fs));
   white-space: nowrap;
-  color: #000000;
+  color: var(--legend-text, #0d0d0d);
 }
 
 /* 「查看全部任务」：勾选框 + 文案（7229:416 / 7229:417） */
@@ -1113,15 +1237,17 @@ function toggleShowAll() {
   background: #fbfbfb;
 }
 
-/* 左侧资源列：宽 140（稿子 6464:279）、底 #FBFBFB、右描边 #F2F2F2 */
+/* 左侧资源列：宽 140（稿子 6464:279）、底 #FBFBFB、右描边 #F2F2F2。
+   顶部线用 inset 阴影画、不用 border-top：border 会把整列内容顶下去 1px，
+   左列行就比右侧 track 低 1px，分组线和任务行的分隔线会错开不在同一水平线上 */
 .schedule__side {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   box-sizing: border-box;
-  border-top: 1px solid #f2f2f2;
   border-right: 1px solid #f2f2f2;
   background: #fbfbfb;
+  box-shadow: inset 0 1px 0 0 #f2f2f2;
 }
 
 /* 左列头部「资源与车辆人员」：高度 45 必须与右侧刻度条（.schedule__ruler）一致，
@@ -1131,12 +1257,12 @@ function toggleShowAll() {
   align-items: center;
   flex-shrink: 0;
   box-sizing: border-box;
-  height: 45px;
+  height: calc(45px * var(--sch-fs));
   padding: 0 0 0 10px;
 }
 
 .schedule__side-head-text {
-  font-size: 11px;
+  font-size: calc(11px * var(--sch-fs));
   color: #000000;
 }
 
@@ -1190,16 +1316,16 @@ function toggleShowAll() {
 
 .schedule__side-category {
   flex-shrink: 0;
-  font-size: 11px;
-  line-height: 13px;
+  font-size: calc(11px * var(--sch-fs));
+  line-height: calc(13px * var(--sch-fs));
   font-weight: 500;
   color: #666666;
 }
 
 /* 副行（车号|班次）：11px 常规 #999（稿子 6464:296） */
 .schedule__side-name {
-  font-size: 11px;
-  line-height: 13px;
+  font-size: calc(11px * var(--sch-fs));
+  line-height: calc(13px * var(--sch-fs));
   font-weight: 400;
   color: #999999;
   white-space: nowrap;
@@ -1224,11 +1350,11 @@ function toggleShowAll() {
   justify-content: center;
   flex-shrink: 0;
   box-sizing: border-box;
-  width: 30px;
-  height: 40px;
+  width: calc(30px * var(--sch-fs));
+  height: calc(40px * var(--sch-fs));
   border: 1px solid #f2f2f2;
   background: #ffffff;
-  font-size: 11px;
+  font-size: calc(11px * var(--sch-fs));
   color: #000000;
 }
 
@@ -1284,7 +1410,7 @@ function toggleShowAll() {
   z-index: 6;
   flex-shrink: 0;
   box-sizing: border-box;
-  height: 45px;
+  height: calc(45px * var(--sch-fs));
   overflow: hidden;
   background: #fbfbfb;
 }
@@ -1294,7 +1420,7 @@ function toggleShowAll() {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 12px;
+  font-size: calc(12px * var(--sch-fs));
   // font-style: italic;
   color: #1a1a1e;
 }
@@ -1303,7 +1429,7 @@ function toggleShowAll() {
 .schedule__track {
   position: relative;
   box-sizing: border-box;
-  height: 45px;
+  height: calc(45px * var(--sch-fs));
 }
 
 .schedule__track--separator {
@@ -1315,9 +1441,9 @@ function toggleShowAll() {
   position: absolute;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--sch-fs));
   box-sizing: border-box;
-  padding: 0 8px;
+  padding: 0 calc(8px * var(--sch-fs));
   border-radius: 6px;
   overflow: hidden;
 }
@@ -1325,18 +1451,18 @@ function toggleShowAll() {
 /* 条内文字按设计稿弱化：标题 11/500 #0D0D0D、时段 11/400 #8F8F8F，行高 16（1522:524 / 1522:525） */
 .schedule__bar-title {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--sch-fs));
   font-weight: 500;
-  line-height: 16px;
+  line-height: calc(16px * var(--sch-fs));
   color: #0d0d0d;
   white-space: nowrap;
 }
 
 .schedule__bar-time {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--sch-fs));
   font-weight: 400;
-  line-height: 16px;
+  line-height: calc(16px * var(--sch-fs));
   color: #8f8f8f;
   white-space: nowrap;
 }
@@ -1345,17 +1471,18 @@ function toggleShowAll() {
 .schedule__notice {
   position: absolute;
   left: 50%;
-  /* 让开右下角输入条（catalouge 高度 38 + 12 间距 + 余量） */
-  bottom: 64px;
+  /* 右下角输入条已取消，提示条不再需要给它让位，贴到距底 12px */
+  bottom: 12px;
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--sch-fs));
   box-sizing: border-box;
-  width: 476px;
+  /* 宽高跟着字号一起放大，否则 34rpx 的字一行放不下 */
+  width: calc(476px * var(--sch-fs));
   max-width: calc(100% - 32px);
-  min-height: 42px;
-  padding: 0 12px;
+  min-height: calc(42px * var(--sch-fs));
+  padding: 0 calc(12px * var(--sch-fs));
   border: 1px solid #f2f2f2;
   border-radius: 6px;
   background: #ffffff;
@@ -1369,20 +1496,20 @@ function toggleShowAll() {
   justify-content: center;
   flex-shrink: 0;
   box-sizing: border-box;
-  min-width: 32px;
-  height: 14px;
-  padding: 0 4px;
+  min-width: calc(32px * var(--sch-fs));
+  height: calc(14px * var(--sch-fs));
+  padding: 0 calc(4px * var(--sch-fs));
   border-radius: 7px;
   background: #1a1a1a;
-  font-size: 11px;
+  font-size: calc(11px * var(--sch-fs));
   color: #ffffff;
 }
 
 .schedule__notice-text {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 11px;
-  line-height: 14px;
+  font-size: calc(11px * var(--sch-fs));
+  line-height: calc(14px * var(--sch-fs));
   color: #1a1a1a;
 }
 
@@ -1412,48 +1539,143 @@ function toggleShowAll() {
   transform: rotate(-45deg);
 }
 
+/* ---------- 竖屏：提示条改成贴底弹层 ----------
+   横屏（原生横屏 / CSS 旋转模拟横屏）维持稿子 7229:449 的 476×42 单行条：深色胶囊 + 一行文案。
+   可视区是竖的、且没走旋转模拟（.schedule--rotated）时，按需求换成底部卡片：
+   标题一行（左「任务置换」、右关闭）、正文整行折行，左右贴边、上方圆角、让开底部安全区。
+   `:not(.schedule--rotated)` 是关键：设备竖着拿但页面旋转成横屏时，media 仍是 portrait，
+   不加这条会把横屏版面也变成弹层。 */
+@media (orientation: portrait) {
+  .schedule:not(.schedule--rotated) .schedule__notice {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    box-sizing: border-box;
+    width: auto;
+    max-width: none;
+    min-height: 0;
+    padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+    border: 0;
+    border-radius: 16px 16px 0 0;
+    background: #ffffff;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.08);
+    transform: none;
+  }
+
+  /* 标题：原来的深色胶囊在弹层里只留文字（深色胶囊是横屏的视觉语言） */
+  .schedule:not(.schedule--rotated) .schedule__notice-chip {
+    grid-row: 1;
+    grid-column: 1;
+    justify-self: start;
+    min-width: 0;
+    height: auto;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 24px;
+    color: #1a1a1a;
+  }
+
+  .schedule:not(.schedule--rotated) .schedule__notice-close {
+    grid-row: 1;
+    grid-column: 2;
+    justify-self: end;
+    width: 16px;
+    height: 16px;
+  }
+
+  .schedule:not(.schedule--rotated) .schedule__notice-close::before,
+  .schedule:not(.schedule--rotated) .schedule__notice-close::after {
+    top: 7px;
+    width: 16px;
+    height: 1.5px;
+    background: #b3b3b3;
+  }
+
+  .schedule:not(.schedule--rotated) .schedule__notice-text {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    font-size: 14px;
+    line-height: 22px;
+    color: #666666;
+  }
+}
+
 /* ---------- 任务条 / 行高：按模式区分 ---------- */
 
-/* 重排（稿子 7229:254）：26 高、单行（标题 + 时段并排）、#F4F4F4 底 + 虚线 #D9D9D9（7229:278/317/298） */
+/* 任务三态的底色 / 描边 / 线型：右上角图例色块与任务条共用同一组变量。
+   任何一处改色另一处自动跟上，不会再出现「条是白底、图例说该是灰底」的错位。
+   规格取自 ardot 134:992（浅色）/ 207:2606（深色）：
+   - 原计划：灰底 #F3F3F3 + 虚线 #E8E8E8（深色 #303030 + 虚线 #5D5D5D）
+   - 新计划：白底 #FFFFFF + 虚线 #9DB3CC（深色 #303030 + 虚线 #9DB3CC，与图例同底）
+   - 已取消：灰底 #F3F3F3 + **实线** #E8E8E8（深色 #303030 + 实线 #E8E8E8）
+   深色主题在同一组变量上覆盖（见文件末尾 .schedule--dark） */
+.schedule--rep {
+  --legend-text: #0d0d0d;
+  --bar-planned-bg: #f3f3f3;
+  --bar-planned-border: #e8e8e8;
+  --bar-new-bg: #ffffff;
+  --bar-new-border: #9db3cc;
+  --bar-canceled-bg: #f3f3f3;
+  --bar-canceled-border: #e8e8e8;
+}
+
+/* 重排（ardot 134:992）：25/26 高、单行（标题 + 时段并排）、圆角 6、1px 虚线。
+   原计划 = 灰条 #F3F3F3 + 虚线 #E8E8E8。
+   线型直接写死（不用变量）：三态线型是固定的，少一层变量就少一处「变量没继承到 → 全变成实线」的坑 */
 .schedule--rep .schedule__bar {
-  top: 6px;
-  height: 26px;
-  border: 1px dashed #d9d9d9;
-  background: #f4f4f4;
+  top: calc(6px * var(--sch-fs));
+  height: calc(26px * var(--sch-fs));
+  border-width: 1px;
+  border-style: dashed;
+  border-color: var(--bar-planned-border, #e8e8e8);
+  background: var(--bar-planned-bg, #f3f3f3);
 }
 
-/* 重排·新计划：白底 + 虚线 #9DB3CC（7229:328/265/322） */
+/* 重排·新计划：白条 + 虚线 #9DB3CC */
 .schedule--rep .schedule__bar--new {
-  border-color: #9db3cc;
-  background: #ffffff;
+  border-style: dashed;
+  border-color: var(--bar-new-border, #9db3cc);
+  background: var(--bar-new-bg, #ffffff);
 }
 
-/* 重排·已取消：样式同原计划，文案转灰（7229:303） */
+/* 重排·已取消：灰底 + 实线，整条文案转灰 #8F8F8F（134:1077） */
+.schedule--rep .schedule__bar--canceled {
+  border-style: solid;
+  border-color: var(--bar-canceled-border, #e8e8e8);
+  background: var(--bar-canceled-bg, #f3f3f3);
+}
+
 .schedule--rep .schedule__bar--canceled .schedule__bar-title,
 .schedule--rep .schedule__bar--canceled .schedule__bar-time {
-  color: #999999;
+  color: #8f8f8f;
 }
 
-/* 重排的强调条：深色实线描边（7229:339/302/350） */
-.schedule--rep .schedule__bar--mark {
-  border-style: solid;
-  border-color: #1a1a1a;
-}
+/* 强调条不再改描边：接口里大量 highlight=true 的条会被强行画成实线，
+   把「原计划虚线 / 新计划虚线 / 已取消实线」这套状态语言盖掉。
+   重排页统一以状态样式为准，只有选中态（--active）才切成实线。 */
 
-/* 选中态：被点的那一趟任务（旧 / 新两条同时描深），底部提示文案就是它俩生成的 */
+/* 选中态：被点的那一趟任务（旧 / 新两条同时描 #5D5D5D 实线），底部提示文案就是它俩生成的 */
 .schedule--rep .schedule__bar {
   cursor: pointer;
 }
 
 .schedule--rep .schedule__bar--active {
   border-style: solid;
-  border-color: #1a1a1a;
-  box-shadow: 0 0 0 1px #1a1a1a inset;
+  border-color: #5d5d5d;
 }
 
-/* 行高：40（条 26 + 上下留白）；左侧分组格的高度由模板按行数算 */
+/* 行高：40（条 26 + 上下留白）；左侧分组格的高度由模板按行数算（脚本侧 rowHeight 同一倍率） */
 .schedule--rep .schedule__track {
-  height: 40px;
+  height: calc(40px * var(--sch-fs));
 }
 
 /* 分组分隔线：重排稿是 #DADADA（7229:276/337） */
@@ -1493,7 +1715,7 @@ function toggleShowAll() {
 }
 
 .schedule__scroll-btn--prev {
-  left: 148px;
+  left: calc(148px * var(--sch-fs));
 }
 
 .schedule__scroll-btn--next {
@@ -1516,7 +1738,8 @@ function toggleShowAll() {
 .schedule__link {
   position: absolute;
   height: 0;
-  border-top: 1px dashed #9db3cc;
+  /* 跟新计划的描边同色（深浅色都跟着变量走） */
+  border-top: 1px dashed var(--bar-new-border, #9db3cc);
   transform-origin: 0 0;
   pointer-events: none;
 }
@@ -1561,37 +1784,29 @@ function toggleShowAll() {
   will-change: transform;
 }
 
-/* ===== 深色主题：调度视图·重排草案 =====
+/* ===== 深色主题：调度视图·重排草案（ardot 207:2606）=====
    只换材质与字色，版式 / 行高 / 手势 / 缩放与滚动一行不动：
-   - 页面与排程区底：#0D0D0D；竖网格线 #262626；行分隔线 #303030（分组线 #3A3A3A）
-   - 左列：类别 #8E8E8E、资源名 #E5E5E5、车号|班次 #6B6B6B；旧 / 新 标签格透明底 + #303030 描边
-   - 任务条：底 #1A1A1A；原计划虚线 #3A3A3A、新计划虚线 #4C7396、已取消文案 #5D5D5D、
-     强调 / 选中为 #E5E5E5 实线；条内标题 80% 白、时段 #6B6B6B
+   - 页面底 #1A1A1A；左列与排程区 #212121；竖网格线 #303030；行分隔线 #5D5D5D
+   - 左列：表头 / 资源名 #FFFFFF、类别 #8E8E8E、车号|班次 #6B6B6B
+   - 任务条：底色 / 描边 / 线型取三态变量，与顶部图例同源（原计划 #303030/#5D5D5D 虚线、
+     新计划 #303030/#9DB3CC 虚线、已取消 #303030/#E8E8E8 实线）；已取消文案 #8F8F8F、
+     强调 / 选中为 #FFFFFF 实线；条内标题 #FFFFFF、时段 #8F8F8F
    - 顶部图例 / 勾选 / 返回、底部提示条、左右箭头同步换材质；箭头图标是深色线条，反相成白 */
 .schedule--dark {
-  background: #0d0d0d;
+  /* 任务三态色的深色版本（ardot 207:2606）：原计划 #303030 + 虚线 #5D5D5D、
+     新计划 #303030 + 虚线 #9DB3CC、已取消 #303030 + 实线 #E8E8E8（三态同底，靠描边区分，与图例一致） */
+  --legend-text: #5d5d5d;
+  --bar-planned-bg: #303030;
+  --bar-planned-border: #5d5d5d;
+  --bar-new-bg: #303030;
+  --bar-new-border: #9db3cc;
+  --bar-canceled-bg: #303030;
+  --bar-canceled-border: #e8e8e8;
+
+  background: #1a1a1a;
   color: #e5e5e5;
 
-  /* ---- 顶部栏：图例 / 查看全部 / 返回 ---- */
-  .schedule__legend-text {
-    color: #b3b3b3;
-  }
-
-  .schedule__legend-chip {
-    border-color: #3a3a3a;
-    background: #1a1a1a;
-  }
-
-  .schedule__legend-chip--new {
-    border-color: #4c7396;
-    background: #1a1a1a;
-  }
-
-  .schedule__legend-chip--canceled {
-    border-color: #3a3a3a;
-    background: #141414;
-  }
-
+  /* ---- 顶部栏：图例 / 查看全部 / 返回（图例文字色由 --legend-text 给） ---- */
   .schedule__checkbox {
     border-color: #4a4a4a;
     background: transparent;
@@ -1603,8 +1818,8 @@ function toggleShowAll() {
   }
 
   .schedule__exit {
-    border-color: #303030;
-    background: #1a1a1a;
+    border-color: #5d5d5d;
+    background: #303030;
   }
 
   .schedule__exit-icon::before,
@@ -1622,28 +1837,35 @@ function toggleShowAll() {
   .schedule__grid-wrap,
   .schedule__grid,
   .schedule__ruler {
-    background: #0d0d0d;
+    background: #212121;
   }
 
   .schedule__side {
-    border-top-color: #303030;
     border-right-color: #303030;
+    /* 顶部线同样是 inset 阴影（见 .schedule__side 注释），别改回 border-top */
+    box-shadow: inset 0 1px 0 0 #303030;
   }
 
   .schedule__side-head-text {
-    color: #b3b3b3;
+    color: #ffffff;
   }
 
+  /* 左侧资源块（ardot 207:2793 等，138×80）：每块 1px #303030 描边的独立卡片，
+     块与块共用一条线 —— 只画上边框 + 左边框，右边缘由 .schedule__side 的 border-right 提供，
+     最后一块补下边框，避免相邻块叠成 2px */
   .schedule__side-group {
-    border-top-color: #303030;
+    border-top: 1px solid #303030;
+    border-left: 1px solid #303030;
+    border-bottom: 0;
   }
 
   .schedule__side-group:last-child {
-    border-bottom-color: #303030;
+    border-bottom: 1px solid #303030;
   }
 
+  /* 分组间隔沿用改动前的样式：块脚下一条 1px #5D5D5D 投影 */
   .schedule__side-group--separator {
-    box-shadow: 0 1px 0 0 #303030;
+    box-shadow: 0 1px 0 0 #5d5d5d;
   }
 
   .schedule__side-category {
@@ -1655,58 +1877,52 @@ function toggleShowAll() {
   }
 
   .schedule__side-name--main {
-    color: #e5e5e5;
+    color: #ffffff;
   }
 
+  /* 旧 / 新 标签格（ardot 207:2796 / 207:2799，30×40）：#1A1A1A 底（比资源块 #212121 暗一档）
+     + 1px #303030 描边，文字纯白；格与格之间的线就是这两条描边，不再整行画横线。
+     右边缘交给 .schedule__side 的 border-right，避免和标签格右边框叠成 2px */
   .schedule__side-tag {
-    border-color: #303030;
-    background: transparent;
-    color: #8e8e8e;
+    border: 1px solid #303030;
+    border-right: 0;
+    background: #1a1a1a;
+    color: #ffffff;
   }
 
   /* ---- 排程区：竖网格线 / 刻度 / 行分隔 ---- */
   .schedule__grid-inner {
-    background-color: #0d0d0d;
+    background-color: #212121;
     background-image: repeating-linear-gradient(
       to right,
-      #262626 0,
-      #262626 1px,
+      #303030 0,
+      #303030 1px,
       transparent 1px,
       transparent var(--hour-width, 56px)
     );
   }
 
   .schedule__ruler-label {
-    color: #8e8e8e;
+    color: #ffffff;
   }
 
   .schedule__track--separator {
-    box-shadow: 0 1px 0 0 #303030;
+    box-shadow: 0 1px 0 0 #5d5d5d;
   }
 
-  /* ---- 任务条通用 ---- */
-  .schedule__bar {
-    border-color: #303030;
-    background: #1a1a1a;
-  }
-
+  /* ---- 任务条：底色 / 描边由上面的三态变量统一给，这里只管文案（标题纯白、时段 #8F8F8F） ---- */
   .schedule__bar-title {
-    color: rgb(255 255 255 / 80%);
+    color: #ffffff;
   }
 
   .schedule__bar-time {
-    color: #6b6b6b;
-  }
-
-  /* 新旧关联虚线：跟新计划描边同色 */
-  .schedule__link {
-    border-top-color: #4c7396;
+    color: #8f8f8f;
   }
 
   /* ---- 底部提示条 / 左右隐藏任务箭头 ---- */
   .schedule__notice {
-    border-color: #303030;
-    background: #1a1a1a;
+    border-color: #5d5d5d;
+    background: #303030;
   }
 
   .schedule__notice-chip {
@@ -1732,40 +1948,52 @@ function toggleShowAll() {
     filter: invert(1);
   }
 
-  /* ---- 重排专用：原计划 / 新计划 / 已取消 / 强调 ---- */
+  /* ---- 重排专用：已取消文案 / 选中（ardot 207:2606）---- */
   &.schedule--rep {
-    .schedule__bar {
-      border-color: #3a3a3a;
-      background: #1a1a1a;
-    }
-
-    .schedule__bar--new {
-      border-color: #4c7396;
-      background: #141414;
-    }
-
     .schedule__bar--canceled .schedule__bar-title,
     .schedule__bar--canceled .schedule__bar-time {
-      color: #5d5d5d;
+      color: #8f8f8f;
     }
 
-    .schedule__bar--mark {
-      border-color: #e5e5e5;
-    }
-
+    /* 选中：白色实线框；未选中的条一律按三态（原计划 / 新计划虚线、已取消实线） */
     .schedule__bar--active {
-      border-color: #e5e5e5;
-      box-shadow: 0 0 0 1px #e5e5e5 inset;
+      border-color: #ffffff;
     }
 
-    /* 分组分隔线在重排稿里比普通行线深一档 */
-    .schedule__track--separator,
-    .schedule__side-group--separator {
-      box-shadow: 0 1px 0 0 #3a3a3a;
+    /* 右区：每个资源组之间一条 1px #5D5D5D（ardot 207:2686 等），组内旧 / 新两行之间不画线 */
+    .schedule__track--separator {
+      box-shadow: 0 1px 0 0 #5d5d5d;
     }
 
+    /* 左区：分组间隔与改动前一致（1px #5D5D5D 投影 + #5D5D5D 上边框） */
     .schedule__side-group--separator {
-      border-top-color: #3a3a3a;
+      box-shadow: 0 1px 0 0 #5d5d5d;
+      border-top-color: #5d5d5d;
+    }
+  }
+
+  /* ---- 竖屏弹层（深色）：卡片底 #303030（比页面 #1A1A1A 亮一档）---- */
+  @media (orientation: portrait) {
+    &:not(.schedule--rotated) {
+      .schedule__notice {
+        border: 0;
+        background: #303030;
+        box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.45);
+      }
+
+      .schedule__notice-chip {
+        background: transparent;
+        color: #e5e5e5;
+      }
+
+      .schedule__notice-text {
+        color: #8e8e8e;
+      }
+
+      .schedule__notice-close::before,
+      .schedule__notice-close::after {
+        background: #b3b3b3;
+      }
     }
   }
 }

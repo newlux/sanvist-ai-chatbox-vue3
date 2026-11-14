@@ -39,6 +39,7 @@ import { useSafeArea } from "@/hooks/useSafeArea";
 import { useVoiceQuery } from "@/hooks/useVoiceQuery";
 import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
 import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
+import { getInitIntroBlocks } from "@/mock/init-intro";
 import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -1157,6 +1158,61 @@ async function loadGuideRecommend() {
   }
 }
 
+/** 欢迎页「Hey,SANI」停留时长（ms）：正常露出来停一下，再进对话页 */
+const INTRO_WELCOME_DELAY_MS = 1000;
+/** 延时进对话页的定时器：页面卸载时要清掉 */
+let introTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * 初始化自我介绍：只在「新开一轮会话」时触发（打开历史会话不走）。
+ *
+ * 现在**不走介绍接口**：直接取 log 里真实回包提取出来的 mock blocks（见 `mock/init-intro`），
+ * 落成一条 AI 消息。时序是「欢迎层正常铺满 → 停留一秒 → 进对话页并显示 mock」，
+ * 用户提问气泡不显示。
+ *
+ * - 纯净模式保留原逻辑：什么都不出，停在欢迎层等用户开口；
+ * - 用户在一秒内已经自己开口（消息列表里有内容）：mock 不插队，只把页面切到对话态；
+ * - mock 里原本就没有 tips（「正在思考」这类过程提示），这里再兜一道，别的对话的 tips 照常显示；
+ * - 语种按 `header.Lang` 取，英文那份从 log/guide-en.js 提取，task 的英文日志还没补。
+ */
+function showInitIntro() {
+  const start = () => {
+    if (pureMode.value) return;
+    const blocks = getInitIntroBlocks("guide", String(systemStore.header?.Lang || ""));
+    if (!blocks.length) return;
+    introTimer = setTimeout(() => {
+      introTimer = null;
+      // 用户已经自己开口：不再插这条 mock（否则会插到他的提问之后）
+      if (!chatStore.messages.length) {
+        chatStore.messages.push({
+          id: `ai-intro-${Date.now()}`,
+          role: "ai",
+          content: "",
+          // 初始化这轮没有流式过程，tips 一律不落
+          blocks: blocks.filter(block => block.type !== "tips"),
+          loading: false,
+          interrupted: false,
+          sessionId: null,
+          // 纯前端 mock：没有服务端消息 id，点赞 / 分享 / 播报都做不了，按初始化卡片口径挂空操作栏
+          messageId: null,
+          hideActions: true,
+          ttsEnabled: false,
+          processStatus: { phase: "succeeded" },
+        });
+      }
+      // 不走欢迎层的起飞动画，停够时间直接切到对话页
+      enterChatNow();
+    }, INTRO_WELCOME_DELAY_MS);
+  };
+  // 设置由 App.vue 异步拉取（不 await 首屏），进页面时纯净模式可能还没落地；
+  // 没落地就等它回来再判断，否则纯净模式会被当成关闭。欢迎层不受影响，首帧就正常铺。
+  if (settingsStore.loaded) {
+    start();
+    return;
+  }
+  void settingsStore.load().then(start);
+}
+
 /** 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 GUIDE。 */
 onLoad((options) => {
   syncWindowHeight();
@@ -1172,6 +1228,8 @@ onLoad((options) => {
   // 每次进入保留欢迎首页；纯净模式只在开始对话后显示顶部菜单。
   guideRecommendContext.value = readGuideRecommendContext(options);
   void loadGuideRecommend();
+  // 新会话先让 AI 自我介绍（历史会话上面已经 return，不会重复出内容）。
+  showInitIntro();
 });
 
 onMounted(() => {
@@ -1202,6 +1260,11 @@ onUnload(() => {
   stopSceneTts();
   clearAutoOpenTimer();
   resetVoiceQuery();
+  // 欢迎层停留的那一秒还没走完就离开页面：别让定时器再往已卸载的页面里塞消息
+  if (introTimer) {
+    clearTimeout(introTimer);
+    introTimer = null;
+  }
 });
 const voiceHoldActive = ref(false);
 const voiceHoldCancelPending = ref(false);

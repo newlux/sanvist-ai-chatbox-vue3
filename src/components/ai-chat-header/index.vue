@@ -6,10 +6,14 @@ import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import autoTtsOffIcon from "@/assets/img/icon-tts-auto-off.png";
 import autoTtsOffSvgIcon from "@/assets/img/icon-tts-auto-off.svg";
 import autoTtsOnIcon from "@/assets/img/icon-tts-auto-on.png";
+import listenLogoDark from "@/assets/img/listen-dark.webp";
 import listenLogoGif from "@/assets/img/listen.gif";
+import listenLogoLight from "@/assets/img/listen-light.webp";
 import minimizeIcon from "@/assets/img/min_icon.png";
 import saniLogoSmGif from "@/assets/img/sani-logo-sm.gif";
+import tellLogoDark from "@/assets/img/tell-dark.webp";
 import tellLogoGif from "@/assets/img/tell.gif";
+import tellLogoLight from "@/assets/img/tell-light.webp";
 import thinkLogoGif from "@/assets/img/think.gif";
 import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
@@ -127,6 +131,38 @@ function onToggleAutoTts() {
  * 分享选择态是白底文字条，同理先不跟深色走。
  */
 const darkPlain = computed(() => props.plainBg && !props.shareMode && systemStore.isDark);
+
+/**
+ * 灵动岛状态图按深浅色分两套 webp：
+ * - 浅色：listen-light.webp / tell-light.webp；
+ * - 深色：listen-dark.webp / tell-dark.webp。
+ * 原来的 listen.gif / tell.gif 只留作加载失败时的兜底（个别老内核不认 webp）。
+ * 注意两张 listen 的图案占画布比例不同（light 60.5% / dark 40.5%），
+ * 所以 scale 补偿也不同，见样式里 .chat-header__island-logo--listen-light。
+ */
+const listenLogoFailed = ref(false);
+const tellLogoFailed = ref(false);
+
+const listenLogoSrc = computed(() => {
+  if (listenLogoFailed.value) return listenLogoGif;
+  return systemStore.isDark ? listenLogoDark : listenLogoLight;
+});
+
+const tellLogoSrc = computed(() => {
+  if (tellLogoFailed.value) return tellLogoGif;
+  return systemStore.isDark ? tellLogoDark : tellLogoLight;
+});
+
+/** 个别老内核（智慧屏 / 大屏一体机）不认 webp：加载失败退回 gif，避免岛内空一块 */
+function onListenLogoError() {
+  listenLogoFailed.value = true;
+  stateGifLoaded.value.listen = false;
+}
+
+function onTellLogoError() {
+  tellLogoFailed.value = true;
+  stateGifLoaded.value.tell = false;
+}
 /**
  * 自动播报开关图标：关闭态在深色下换 icon-tts-auto-off.svg（#6B6B6B 线稿 + 斜杠缺口）。
  * 走这张图时不能套头部的统一反相，否则线稿会被整片染白、缺口糊掉，见样式里 tts-switch--off 的 filter: none。
@@ -710,25 +746,27 @@ onBeforeUnmount(() => {
                 @mouseup="clearIslandPressTimer"
                 @mouseleave="clearIslandPressTimer"
               />
-              <!-- 语音输入整段（点击说话起飞 → 录音中 → 松手结束）：listen.gif，
-                   3840×3840 透明画布（三角约占中间 40%），深浅色共用一套，直接叠在头部上；
-                   纯展示层，不吃触摸，避免抢走长按回首页的手势 -->
+              <!-- 语音输入整段（点击说话起飞 → 录音中 → 松手结束）：浅色 listen-light.webp / 深色 listen-dark.webp，
+                   透明画布（三角居中），直接叠在头部上；纯展示层，不吃触摸，避免抢走长按回首页的手势 -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--listen-say"
-                :class="{ 'chat-header__island-logo--listen-say-on': listenSayGifOn }"
-                :src="listenLogoGif"
+                :class="{
+                  'chat-header__island-logo--listen-say-on': listenSayGifOn,
+                  'chat-header__island-logo--listen-light': !systemStore.isDark,
+                }"
+                :src="listenLogoSrc"
                 mode="aspectFit"
                 @load="stateGifLoaded.listen = true"
-                @error="stateGifLoaded.listen = false"
+                @error="onListenLogoError"
               />
-              <!-- 回答中 / 语音播报：tell.gif（同规格透明画布，图形居中，深浅色共用） -->
+              <!-- 回答中 / 语音播报：浅色 tell-light.webp / 深色 tell-dark.webp（图形居中，两张图案占比一致） -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--tell-play"
                 :class="{ 'chat-header__island-logo--tell-play-on': answeringGifOn }"
-                :src="tellLogoGif"
+                :src="tellLogoSrc"
                 mode="aspectFit"
                 @load="stateGifLoaded.tell = true"
-                @error="stateGifLoaded.tell = false"
+                @error="onTellLogoError"
               />
               <!-- think.gif：正在思考（768×384 画布，留白用 aspectFill 裁掉，换算见 --think 注释） -->
               <image
@@ -1425,9 +1463,10 @@ onBeforeUnmount(() => {
 }
 
 /* 语音输入整段（点击说话起飞 → 录音中 → 松手结束）与回答中 / 自动播报：
-   listen.gif / tell.gif 一套素材、不分深浅色。画布 3840×3840 且透明，三角约占中间 40%
-   （与 sani-logo-sm 已裁到图案边界的 96×85 不同，同一尺寸的盒子里图案会小一半多），按图案宽度对齐：
-   1) 124rpx 的盒子 aspectFit 后图案宽 = 124 × 0.4 ≈ 49.6rpx，要撑满 124rpx → 放大 2.49 倍；
+   浅色 listen-light.webp / tell-light.webp，深色 listen-dark.webp / tell-dark.webp，都是透明画布。
+   下面按「图案占画布 40.5%」的深色版换算（与旧 gif 同规格），与 sani-logo-sm 已裁到图案边界的 96×85 不同，
+   同一尺寸的盒子里图案会小一半多，按图案宽度对齐：
+   1) 124rpx 的盒子 aspectFit 后图案宽 = 124 × 0.41 ≈ 50.8rpx，要撑满 124rpx → 放大 2.49 倍；
    2) 图案中心在画布中心，放大后右移 / 下移各约 2rpx 复位；
    3) drop-shadow 会被 transform 一起放大，这里按 1/2.49 折回去，保持 0 3px 9px rgba(0,0,0,.14)。
    过渡：与常态图交叉溶解 —— 起始 2.36 倍 / 全透明，命中后淡入并缓升到 2.49 倍。 */
@@ -1450,6 +1489,18 @@ onBeforeUnmount(() => {
   transition:
     opacity 0.34s cubic-bezier(0.22, 0.61, 0.36, 1),
     transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* 浅色 listen 用 listen-light.webp（480×480）：图案占画布 60.5%，是 gif 41% 的 1.48 倍，
+   同一个 124rpx 盒子只需放大 2.49 / 1.48 ≈ 1.69 倍。图案中心比画布中心偏右 2.2%，
+   按 1.69 倍折算左移约 4.6rpx，这里取 -3rpx（与深色 +2rpx 的视觉微调同一口径）。
+   tell-light.webp / tell-dark.webp 图案占比与旧 gif 一致，不需要单独换算 */
+.chat-header__island-logo--listen-light {
+  transform: translate(-3rpx, 2rpx) scale(1.6);
+}
+
+.chat-header__island-logo--listen-light.chat-header__island-logo--listen-say-on {
+  transform: translate(-3rpx, 2rpx) scale(1.69);
 }
 
 /* think.gif（正在思考）：画布由 3840×1920 等比优化为 768×384，图案只占中间（宽约 40%、高约 68%），两侧是透明留白。

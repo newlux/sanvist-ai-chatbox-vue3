@@ -8,6 +8,8 @@ import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
 import microphoneIcon from "@/assets/img/icon-mic-red.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
 import voiceWaveIcon from "@/assets/img/icon-voice-wave-dark.svg";
+import listenLogoDark from "@/assets/img/listen-dark.webp";
+import listenLogoLight from "@/assets/img/listen-light.webp";
 import listenLogo from "@/assets/img/listen.gif";
 // 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 2.5MB 的 gif 慢网下先空白）
 import saniLogoStatic from "@/assets/img/header-island-logo.png";
@@ -30,7 +32,7 @@ import { resolveMotionElement } from "@/utils/voice-message-motion";
  * - `inline-input`（首页初始页）：原地把「点击说话」换成文本输入框、不跳页面，
  *   用户填完点发送才抛 send-text，父页面据此发起提问并进入对话页。
  *
- * 语音 / 文字两条起飞路径的区别只在 logo 的状态图：语音会先挂上 listen.gif
+ * 语音 / 文字两条起飞路径的区别只在 logo 的状态图：语音会先挂上 listen 动图
  * （从第 0 帧起播，父页面据此对齐扩散峰值），文字不换图，直接让常态图飞上去。
  *
  * `nav` 具名插槽：底部输入条上方的一行（首页在纯净模式关闭时塞快捷入口胶囊），
@@ -80,6 +82,24 @@ const { safeAreaStyle } = useSafeArea();
  * - 深色：hey-sani-dark.svg（102.69×29，白色字标）
  */
 const titleImage = computed(() => (props.dark ? heySaniDark : heySaniLight));
+
+/**
+ * 收听态动图按深浅色分两套 webp：
+ * - 浅色：listen-light.webp（图案占画布 60.5%）；
+ * - 深色：listen-dark.webp（图案占 40.5%，与旧 gif 同规格）。
+ * 原来的 listen.gif 只留作加载失败时的兜底（个别老内核不认 webp）。
+ * 两张图案占比不同，样式里的放大倍数分两套（见 .welcome__logo-listen--light）。
+ */
+const listenLogoFailed = ref(false);
+const listenLogoSrc = computed(() => {
+  if (listenLogoFailed.value) return listenLogo;
+  return props.dark ? listenLogoDark : listenLogoLight;
+});
+
+/** 个别老内核（智慧屏 / 大屏一体机）不认 webp：加载失败退回 gif，避免中间空一块 */
+function onListenLogoError() {
+  listenLogoFailed.value = true;
+}
 
 /**
  * 中心图标「静态图 → 动图」的无感知切换。
@@ -297,9 +317,11 @@ onBeforeUnmount(() => {
           <image
             v-if="listenMounted"
             class="welcome__logo-listen"
-            :src="listenLogo"
+            :class="{ 'welcome__logo-listen--light': !dark }"
+            :src="listenLogoSrc"
             mode="aspectFit"
             @load="onListenLoad"
+            @error="onListenLogoError"
           />
         </view>
       </view>
@@ -522,7 +544,7 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-/* listen.gif 是 500×500 画布、图案只占中间 201×172，aspectFit 后图案会小一半多；
+/* 深色 listen-dark.webp 图案占画布 40.5%（与旧 gif 同规格），aspectFit 后图案会小一半多；
    按「图案宽度对齐 sani-logo」放大 2.49 倍，并把图案中心偏左上补回来（与灵动岛同一套换算） */
 .welcome__logo-listen {
   opacity: 0;
@@ -542,6 +564,18 @@ onBeforeUnmount(() => {
   transition:
     opacity 400ms cubic-bezier(0.22, 0.61, 0.36, 1),
     transform 400ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* 浅色 listen-light.webp（480×480）：图案占画布 60.5%，是 gif 41% 的 1.48 倍，
+   同一个盒子里只需放大 2.49 / 1.48 ≈ 1.69 倍；图案中心偏右 2.2%，
+   按 1.69 倍折算左移，welcome 的盒子比灵动岛大约 1.75 倍，取 -5rpx */
+.welcome__logo-listen--light {
+  transform: translate(-5rpx, 3.5rpx) scale(1.6);
+}
+
+.welcome--leaving .welcome__logo-listen--light {
+  opacity: 1;
+  transform: translate(-5rpx, 3.5rpx) scale(1.69);
 }
 
 /* 到顶后整组淡出：对话页自己的灵动岛图标在同一位置、同一尺寸接上，

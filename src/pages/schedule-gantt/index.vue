@@ -8,15 +8,14 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import arrowNextIcon from "@/assets/img/schedule-arrow-next.svg";
 import arrowPrevIcon from "@/assets/img/schedule-arrow-prev.svg";
 import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
-import ScheduleAskBar from "@/components/schedule-ask-bar/index.vue";
 import { useLandscape } from "@/hooks/useLandscape";
+import { useLargeScreenFont } from "@/hooks/useLargeScreenFont";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useScheduleGestures } from "@/hooks/useScheduleGestures";
 import { useTimelineEdgeHint } from "@/hooks/useTimelineEdgeHint";
 import { useSystemStore } from "@/stores";
 import { isWebEnvironment, warmPhoneInfo } from "@/utils/landscape-device";
 import { backFromScene } from "@/utils/scene-navigation";
-import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/schedule-view";
 
 /**
@@ -28,7 +27,8 @@ import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/sched
  *   与返回对话页按钮（10474:18，与预排 / 重排调度视图同款 28×28 纯图标）；
  * - 左侧资源列（140px）：第一行「类别 + 名称」，第二行车号|班次；
  * - 右侧排程区：时间轴刻度 + 竖向网格（#F3F3F3）+ 任务条（按起止时间定位）+ 时间线，可横向滚动；
- * - 右下角输入条（components/schedule-ask-bar）：问的问题带回作业协同对话页再发送；
+ * - 没有右下角输入条（原 components/schedule-ask-bar 已按需求取消）：本页只做浏览与看详情，
+ *   要提问回作业协同对话页再问；
  * - 点击任务条：右侧滑出任务详情面板（6832:292）。
  *
  * 横屏方式与其它调度视图一致：宿主用 openH5Container 打开甘特图应用时本身就是全屏横屏，
@@ -75,6 +75,12 @@ const headerTopStyle = computed(() => ({ paddingTop: rotated.value ? "" : `${saf
 /** 深浅色：与对话页同一套口径（唯一数据源 systemStore.isDark），页面只负责把 --dark 类挂到根节点 */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
+
+/**
+ * 大屏电脑（≥ 19 寸）：字号 + 行高 / 任务条 / 左列整体等比放大（见样式里的 --sch-fs），
+ * 手机横屏与 APP 容器内保持设计稿尺寸。
+ */
+const { isLargeScreen } = useLargeScreenFont();
 
 /** 手势接管在 measureRowTops / syncRowTops 之后接线（要读旋转状态与行偏移量） */
 
@@ -539,24 +545,20 @@ function resolveLeaveOrigin() {
 }
 
 /**
- * 退出到对话页（返回按钮 / 输入条发问 / 语音发问共用）。
+ * 退出到对话页（左上角返回按钮，唯一入口）。
  *
  * 顺序：退场动画 → 撤掉 CSS 旋转兜底（`exitLandscape()`；方向由宿主容器自己管，
- * 不再调 landscapeFullscreen） → 写入待发送问题 → 跳回对话页。
- *
- * `ask` 有值才走「发送问答」那一步，返回按钮不传，因此只收横屏不提问。
+ * 不再调 landscapeFullscreen） → 跳回对话页。
  *
  * 兜底路由给作业协同对话页：本页都是从作业协同对话里进来的，没有上一页可退时
- * 也要回那个会话（而不是首页），提问才落在原来的对话里。
+ * 也要回那个会话（而不是首页）。
  */
-async function leaveToChat(ask?: string) {
+async function leaveToChat() {
   if (leaving.value) return;
   leaving.value = true;
 
-  // 安卓 WebView：与系统左滑返回一致 —— 先把问题落盘，再立即回上级页面，不播退场动画。
-  // 对话页（pages/task）onShow 时读取并发送（见 utils/schedule-ask）。
+  // 安卓 WebView：与系统左滑返回一致 —— 立即回上级页面，不播退场动画
   if (isAndroidNativeWebview()) {
-    if (ask) stashPendingScheduleAsk(ask);
     await exitLandscape();
     backFromScene("/pages/task/index");
     return;
@@ -565,9 +567,8 @@ async function leaveToChat(ask?: string) {
   // 缩小的落点 = 返回按钮中心（动画开始前量一次，过渡期间布局不变）
   leaveOrigin.value = resolveLeaveOrigin();
   await new Promise<void>(resolve => setTimeout(resolve, LEAVE_ANIM_MS));
-  // 先撤掉 CSS 旋转兜底，再跳页 / 发问
+  // 先撤掉 CSS 旋转兜底，再跳页
   await exitLandscape();
-  if (ask) stashPendingScheduleAsk(ask);
   backFromScene("/pages/task/index");
 }
 
@@ -577,23 +578,22 @@ function backToChat() {
 }
 
 /**
- * 右下角输入条发送（键盘 / 语音问完自动返回）：
- * 问题带着一起走，但仍然等竖屏恢复后才写入（对话页 onShow 取走并发送）。
+ * 分钟数 → HH:MM。
+ * 接口下发的 startMin / endMin 是**带小数的分钟**（1388.6666666666667 = 23:08:40），
+ * 直接取模会打印出「23:8.666666666666742」：这里先四舍五入到整分钟，
+ * 再按 24 小时回绕（跨天任务 endMin 是 +1440 后的值，1496.33 → 00:56）。
  */
-function onAskSend(text: string) {
-  void leaveToChat(text);
-}
-
-/** 分钟数 → HH:MM */
 function minutesToTime(minutes: number) {
-  const hour = Math.floor(minutes / 60);
-  const minute = minutes % 60;
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  const total = Math.round(Number(minutes) || 0);
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  const clock = `${String(Math.floor(wrapped / 60)).padStart(2, "0")}:${String(wrapped % 60).padStart(2, "0")}`;
+  // 跨过 24 点的时段标「次日」，与接口 timeText 的写法（「次日00:21—次日01:04」）保持一致
+  return total >= 1440 ? `次日${clock}` : clock;
 }
 
-/** 时长（分钟）→「89分钟」/「3小时15分」（稿子样本的写法：2 小时内按分钟） */
+/** 时长（分钟）→「89分钟」/「3小时15分」（稿子样本的写法：2 小时内按分钟）；小数同样先取整 */
 function lengthText(total: number) {
-  const minutes = Math.max(total, 0);
+  const minutes = Math.max(Math.round(Number(total) || 0), 0);
   if (minutes < 120) return `${minutes}分钟`;
   const hour = Math.floor(minutes / 60);
   const minute = minutes % 60;
@@ -671,8 +671,8 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   const site = String(bar.title || "").split(" ")[0] || "—";
   const spec = (String(bar.title || "").match(/C\d+/) || [""])[0];
   const volume = (String(bar.title || "").match(/[\d.]+立方/) || [""])[0].replace("立方", "方") || "—";
-  // 逾期分钟数（计划开始时间到系统当前时间）
-  const overdueMin = Math.max(nowMinutes.value - bar.startMin, 0);
+  // 逾期分钟数（计划开始时间到系统当前时间）；startMin 带小数，先取整再显示
+  const overdueMin = Math.max(Math.round(nowMinutes.value - bar.startMin), 0);
   detail.value = {
     title: [carNo || vehicle, row.category, driver || plate].filter(Boolean).join("|"),
     status,
@@ -713,6 +713,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
       'schedule--rotated': rotated,
       'schedule--leaving': leaving,
       'schedule--dark': isDark,
+      'schedule--large-screen': isLargeScreen,
     }"
     :style="{ transformOrigin: leaveOrigin }"
   >
@@ -864,10 +865,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
       </view>
     </view>
 
-
-    <!-- 右下角输入条（稿子 6694:82 空态 / 4704:261 语音态 / 4704:235 有内容态）
-         rotated：CSS 旋转模拟横屏时键盘从本地右侧升起，抬升方向与竖屏不同（见组件内注释） -->
-    <ScheduleAskBar :dark="isDark" :rotated="rotated" @send="onAskSend" />
+    <!-- 右下角输入条（键盘图标 + 输入 / 语音 / 发送）按需求取消，本页只保留浏览与详情 -->
 
     <!-- 任务详情面板（横屏右侧，点击任务条滑出，稿子 6832:292） -->
     <AiTaskDetailPanel v-model:visible="detailVisible" :detail="detail" :rotated="rotated" :dark="isDark" />
@@ -879,6 +877,9 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
    版式要点：左列 140（底 #FBFBFB / 描边 #F2F2F2）、每小时 56px、行高 45、
    任务条 41 高（稿子 47，行高 45 装不下）、圆角 6、左右内边距 15，四态按状态配色 */
 .schedule {
+  /* 字号 / 行高 / 任务条 / 左列的等比缩放倍率：1 = 设计稿（11px = 22rpx）。
+     19 寸以上电脑屏幕由 .schedule--large-screen 改成 1.5455（11px → 17px = 34rpx） */
+  --sch-fs: 1;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -894,6 +895,13 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   transform-origin: center center;
   transition: transform 0.52s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.52s ease-out;
   will-change: transform, opacity;
+}
+
+/* 大屏电脑（≥ 19 寸，判定见 hooks/useLargeScreenFont）：
+   基准字号 11px(22rpx) 等比放大到 17px(34rpx)，行高 / 任务条 / 左列宽度一并乘 --sch-fs，
+   否则字号变大后会被固定的 45 行高、41 条高裁掉 */
+.schedule--large-screen {
+  --sch-fs: 1.5455;
 }
 
 /* 旋转模拟横屏时（useLandscape）：body 已旋转 90°，页面按横屏尺寸铺开 */
@@ -968,7 +976,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 /* 宽度按文案自适应：不压缩、不折行（网页窄屏时靠整块换行保版面，而不是拆字） */
 .schedule__legend-text {
   flex: none;
-  font-size: 11px;
+  font-size: calc(11px * var(--sch-fs));
   white-space: nowrap;
   color: #000000;
 }
@@ -1090,7 +1098,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   flex-direction: column;
   flex-shrink: 0;
   box-sizing: border-box;
-  width: 140px;
+  width: calc(140px * var(--sch-fs));
   border-top: 1px solid #f2f2f2;
   border-right: 1px solid #f2f2f2;
   background: #fbfbfb;
@@ -1103,12 +1111,12 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   align-items: center;
   flex-shrink: 0;
   box-sizing: border-box;
-  height: 45px;
+  height: calc(45px * var(--sch-fs));
   padding: 0 0 0 10px;
 }
 
 .schedule__side-head-text {
-  font-size: 11px;
+  font-size: calc(11px * var(--sch-fs));
   color: #000000;
 }
 
@@ -1118,7 +1126,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   align-items: center;
   flex-shrink: 0;
   box-sizing: border-box;
-  height: 45px;
+  height: calc(45px * var(--sch-fs));
   padding: 0 8px 0 10px;
   overflow: hidden;
 }
@@ -1139,16 +1147,16 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 
 .schedule__side-category {
   flex-shrink: 0;
-  font-size: 11px;
-  line-height: 13px;
+  font-size: calc(11px * var(--sch-fs));
+  line-height: calc(13px * var(--sch-fs));
   font-weight: 500;
   color: #666666;
 }
 
 /* 副行（车号|班次）：11px 常规 #999（6464:296） */
 .schedule__side-name {
-  font-size: 11px;
-  line-height: 13px;
+  font-size: calc(11px * var(--sch-fs));
+  line-height: calc(13px * var(--sch-fs));
   font-weight: 400;
   color: #999999;
   white-space: nowrap;
@@ -1212,7 +1220,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   z-index: 6;
   flex-shrink: 0;
   box-sizing: border-box;
-  height: 45px;
+  height: calc(45px * var(--sch-fs));
   overflow: hidden;
   background: #fbfbfb;
 }
@@ -1222,7 +1230,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 12px;
+  font-size: calc(12px * var(--sch-fs));
   // font-style: italic;
   color: #1a1a1e;
 }
@@ -1231,7 +1239,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 .schedule__track {
   position: relative;
   box-sizing: border-box;
-  height: 45px;
+  height: calc(45px * var(--sch-fs));
 }
 
 /* 任务条（稿子 1522:523 Group 13）：圆角 6、条内两行（标题 11/500 + 状态时段 11/400）、
@@ -1239,15 +1247,15 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
    条高受本仓行高 45 限制取 41（稿子行高 67 / 条高 47，若要按稿子改行高需同步左列与刻度条） */
 .schedule__bar {
   position: absolute;
-  top: 2px;
+  top: calc(2px * var(--sch-fs));
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
   box-sizing: border-box;
-  height: 41px;
-  gap: 3px;
-  padding: 0 15px;
+  height: calc(41px * var(--sch-fs));
+  gap: calc(3px * var(--sch-fs));
+  padding: 0 calc(15px * var(--sch-fs));
   /* 未开始的任务条一律是虚线框（1522:477 / 1522:487 / 1522:533） */
   border: 1px dashed #e8e8e8;
   border-radius: 6px;
@@ -1301,17 +1309,17 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 
 /* 条内两行：标题 11/500 #0D0D0D、状态时段 11/400 #8F8F8F，行高 16、行间 3（1522:524 / 1522:525） */
 .schedule__bar-title {
-  font-size: 11px;
+  font-size: calc(11px * var(--sch-fs));
   font-weight: 500;
-  line-height: 16px;
+  line-height: calc(16px * var(--sch-fs));
   color: #0d0d0d;
   white-space: nowrap;
 }
 
 .schedule__bar-time {
-  font-size: 11px;
+  font-size: calc(11px * var(--sch-fs));
   font-weight: 400;
-  line-height: 16px;
+  line-height: calc(16px * var(--sch-fs));
   color: #8f8f8f;
   white-space: nowrap;
 }
@@ -1347,7 +1355,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
 }
 
 .schedule__scroll-btn--prev {
-  left: 148px;
+  left: calc(148px * var(--sch-fs));
 }
 
 .schedule__scroll-btn--next {
@@ -1432,15 +1440,15 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
    底色跟时间线统一 #2F64CF，白字 */
 .schedule__now-capsule {
   position: absolute;
-  top: 2px;
+  top: calc(2px * var(--sch-fs));
   left: 0;
-  padding: 1px 4px;
+  padding: calc(1px * var(--sch-fs)) calc(4px * var(--sch-fs));
   border-radius: 7px;
   background: #2f64cf;
   color: #ffffff;
   font-family: Inter, "PingFang SC", sans-serif;
-  font-size: 10px;
-  line-height: 12px;
+  font-size: calc(10px * var(--sch-fs));
+  line-height: calc(12px * var(--sch-fs));
   white-space: nowrap;
   transform: translateX(-50%);
 }
@@ -1468,13 +1476,13 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
    压在线顶并水平居中（刻度条已移到滚动容器外，文案留在排程区内，避免被裁掉上半截） */
 .schedule__day-end-label {
   position: absolute;
-  top: 4px;
+  top: calc(4px * var(--sch-fs));
   left: 0;
   color: #2f64cf;
   font-family: Inter, "PingFang SC", sans-serif;
-  font-size: 12px;
+  font-size: calc(12px * var(--sch-fs));
   font-style: italic;
-  line-height: 15px;
+  line-height: calc(15px * var(--sch-fs));
   white-space: nowrap;
   transform: translateX(-50%);
 }
