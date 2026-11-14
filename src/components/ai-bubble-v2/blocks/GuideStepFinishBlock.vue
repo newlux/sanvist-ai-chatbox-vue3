@@ -349,12 +349,12 @@ onMounted(() => {
 /* ===== 深色：与步骤卡 / 气泡内其它块同一套材质 ===== */
 .guide-finish--dark {
   .guide-finish__brand-text {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-finish__summary,
   .guide-finish__question {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   /* 深色小结：step_summary 走 MarkdownRenderer，浅色覆盖会压过 tagStyle 的深色，
@@ -362,7 +362,7 @@ onMounted(() => {
   .guide-finish__summary :deep(p),
   .guide-finish__summary :deep(li),
   .guide-finish__summary :deep(strong) {
-    color: #e5e5e5 !important;
+    color: #fff !important;
   }
 
   .guide-finish__option {
@@ -372,7 +372,7 @@ onMounted(() => {
 
   .guide-finish__option-letter,
   .guide-finish__option-label {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-finish__option-divider {

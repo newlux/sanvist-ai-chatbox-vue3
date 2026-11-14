@@ -722,11 +722,11 @@ function resolveRootElement(): HTMLElement | null {
 /* ===== 深色：与气泡内其它块同一套材质（正文 #E5E5E5、次要 45% 白、块底 6% 白） ===== */
 .guide-check-block--dark {
   .guide-check-block__brand-text {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-check-block__title {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-check-block__step {
@@ -745,7 +745,7 @@ function resolveRootElement(): HTMLElement | null {
   .guide-check-block__step-title,
   .guide-check-block__content,
   .guide-check-block__question {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   /* 深色正文：步骤 action 走 MarkdownRenderer，浅色覆盖会压过 tagStyle 的深色，
@@ -753,22 +753,22 @@ function resolveRootElement(): HTMLElement | null {
   .guide-check-block__content :deep(p),
   .guide-check-block__content :deep(li),
   .guide-check-block__content :deep(strong) {
-    color: #e5e5e5 !important;
+    color: #fff !important;
   }
 
   /* 深色小结：与步骤正文同一套材质处理 */
   .guide-check-block__summary {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-check-block__summary-title {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-check-block__summary :deep(p),
   .guide-check-block__summary :deep(li),
   .guide-check-block__summary :deep(strong) {
-    color: #e5e5e5 !important;
+    color: #fff !important;
   }
 
   /* 胶囊描边与追问卡同一套：1px 内描边线性渐变 #5A5A5A → #F7F7F7 → #5A5A5A，
@@ -796,7 +796,7 @@ function resolveRootElement(): HTMLElement | null {
 
   .guide-check-block__option-letter,
   .guide-check-block__option-label {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-check-block__option-divider {

@@ -1862,6 +1862,20 @@ $color-white: #ffffff;
     display: none;
   }
 
+  /* 深色模式：固定问候语 / 问题列表文字反白，保证在暗底上可读 */
+  .guide-welcome__title,
+  .guide-welcome__question {
+    color: #fff;
+  }
+
+  .guide-welcome__greeting {
+    color: #d9d9d9;
+  }
+
+  .guide-welcome__label {
+    color: #a3a3a3;
+  }
+
 
 
   /* 边缘流光在深色下同样保留：色值、厚度、流动都与浅色一致 */
