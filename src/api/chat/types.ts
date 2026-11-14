@@ -500,6 +500,21 @@ export interface ProtocolEvent {
   data: Record<string, unknown>;
 }
 
+/**
+ * `workflow_finished` 重放 `outputs.answer` 的「整体重建」指令：
+ * 流式正文已到过（receivedAnswer=true）时，`<COMPONENT>` 协议可能不在流式 message 通道里，
+ * 流式阶段全部正文已拼进同一个 answer 块、后补的图片块只能追加到末尾——气泡就成了
+ * 「先全部文本、后全部图片」。该事件携带按 `outputs.answer` 权威顺序完整解析的事件序列，
+ * 由 chatStreamParser 从零重建块序列（图文交错）后整体替换现有块。
+ */
+export interface AnswerLayoutEvent {
+  event: "answer_layout";
+  conversationId: Identifier;
+  messageId: Identifier;
+  taskId?: Identifier;
+  data: { events: ChatStreamEvent[] };
+}
+
 export type ChatStreamEvent =
   | MessageStartEvent
   | StatusEvent
@@ -510,6 +525,7 @@ export type ChatStreamEvent =
   | SubtitleEvent
   | RichContentEvent
   | ProtocolEvent
+  | AnswerLayoutEvent
   | MessageEndEvent;
 
 export interface ListConversationsParams {

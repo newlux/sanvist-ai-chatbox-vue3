@@ -1077,17 +1077,9 @@ export function createDifyEventNormalizer() {
         // 其他纯正文（如二维码占位 / 无备注正文）保持原样
         // 仅进 metadata.outputs_answer，避免被按 message 事件渲染成 answer 气泡，
         // 改动首页 / 听汇报等其他页面的既有行为。
-        //
-        // 正文已经在 message 流里给过时，这里只补卡片（ask / guide 等），不再吐 answer：
-        // chatflow 的 outputs.answer 就是整段回答的原文，重放一遍会让气泡里同一段话出现两份。
         const parseOutputsAnswer = Boolean(outputsAnswer) && (
           protocolOpenPattern.test(outputsAnswer) || (receivedTips && !receivedAnswer)
         );
-        if (parseOutputsAnswer && receivedAnswer) {
-          logger.info("[chat] outputs.answer 与流式正文重复，只补协议卡片", {
-            length: outputsAnswer.length,
-          });
-        }
         /**
          * `<EMERGENCY>…</EMERGENCY>`：工作流结束时下发的「异常全部加急」标记。
          * 标签可能只写在 outputs 的其它字段里（不一定是 answer），所以整包扫一遍，
@@ -1101,11 +1093,31 @@ export function createDifyEventNormalizer() {
         }
         // 收尾快照会重放已显示的提示，只补正式内容。
         const replayingTips = receivedTips;
-        const answerEvents = parseOutputsAnswer
-          ? extractSanvistEvents(outputsAnswer, references, false, receivedAnswer)
+        /**
+         * outputs.answer 重放的两种形态：
+         * - 流式正文没到过（receivedAnswer=false）：按完整事件流顺序入队（含正文），顺序天然正确；
+         * - 流式正文已到过（receivedAnswer=true）：不能再「只补卡片」。Dify 的 message 流可能
+         *   只先吐正文、<COMPONENT> 协议在 outputs.answer 里才出现（或晚到），流式阶段全部正文
+         *   已拼进同一个 answer 块，后补的 image 块只能 append 到末尾——气泡就成了「先全部文本、
+         *   后全部图片」。这里改发 answer_layout：携带按 outputs.answer 权威顺序完整解析的事件序列，
+         *   由 chatStreamParser 从零重建块序列（图文交错）后整体替换，正文不会重复两份。
+         */
+        const parsedAnswerEvents = parseOutputsAnswer
+          ? extractSanvistEvents(outputsAnswer, references, false, false)
+          : [];
+        const layoutEvents: ChatStreamEvent[] = parseOutputsAnswer && receivedAnswer && parsedAnswerEvents.length
+          ? [{
+              event: "answer_layout",
+              ...references,
+              data: { events: parsedAnswerEvents },
+            }]
+          : [];
+        const answerEvents = parseOutputsAnswer && !receivedAnswer
+          ? parsedAnswerEvents.filter(item => !replayingTips || item.event !== "tips")
           : [];
         return [
-          ...answerEvents.filter(event => !replayingTips || event.event !== "tips"),
+          ...layoutEvents,
+          ...answerEvents,
           {
             event: "message_end",
             ...references,

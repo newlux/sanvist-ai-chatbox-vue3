@@ -328,6 +328,39 @@ function reduceEventToBlocks(
         receivedContent: true,
       };
     }
+    case "answer_layout": {
+      /**
+       * workflow_finished 重放 outputs.answer 的整体重建（见 dify.ts 的 workflow_finished 分支）：
+       * 流式正文已全部写进同一个 answer 块、协议卡片只能追加到末尾时，气泡会变成
+       * 「先全部文本、后全部图片」。这里用携带的完整事件序列从空 blocks 重折叠一遍，
+       * 产出按 outputs.answer 权威顺序图文交错的块序列后**整体替换**现有块：
+       * - 重折叠走 applyEventToBlocks 的既有去重 / tips 移除逻辑，正文不会出现两份；
+       * - answer-N 编号与流式正常场景一致，image / source / voice 的 id 本身按内容锚定，
+       *   Vue 渲染 key 稳定，替换不会引起整卡重挂；
+       * - 序列内嵌套的 assistant_scene / language_switch 指令原样上抛，由快照消费侧执行。
+       */
+      const sourceEvents = Array.isArray(event.data?.events)
+        ? event.data.events as ChatStreamEvent[]
+        : [];
+      let rebuilt: AiBlock[] = buildInitialBlocks();
+      let assistantScene: string | undefined;
+      let languageSwitch: string | undefined;
+      for (const item of sourceEvents) {
+        const update = applyEventToBlocks(rebuilt, item);
+        if (update.assistantScene) assistantScene = update.assistantScene;
+        if (update.languageSwitch) languageSwitch = update.languageSwitch;
+        rebuilt = update.blocks;
+      }
+      // 重建序列没有任何可展示块（如 outputs.answer 只剩播报层）时保留原块，避免丢内容
+      if (!rebuilt.length) return base;
+      return {
+        ...base,
+        blocks: rebuilt,
+        receivedContent: true,
+        ...(assistantScene ? { assistantScene } : {}),
+        ...(languageSwitch ? { languageSwitch } : {}),
+      };
+    }
     case "message_end":
       return {
         ...base,
