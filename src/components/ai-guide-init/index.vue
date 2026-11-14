@@ -10,7 +10,7 @@ import { getFlowSteps } from "@/api/flow";
 import { getOperatorRoles } from "@/api/user-role";
 import { OPERATOR_ROLE_KEYS, toOperatorRoleOption } from "@/api/user-role/operator-roles";
 import welcomeVoiceSrc from "@/assets/audio/voice/welcome-guide.wav";
-import brandLogo from "@/assets/img/sani-logo.gif";
+import brandLogo from "@/assets/img/sani-logo.webp";
 import SaniLogoStage from "@/components/sani-logo-stage/index.vue";
 import { usePlainTts } from "@/hooks/usePlainTts";
 import { useSafeArea } from "@/hooks/useSafeArea";

@@ -65,6 +65,9 @@ const isMultiple = computed(() => props.payload.selection === "multiple");
 /** 问题行：优先 title，退化成 original_query（服务端两种都会带） */
 const title = computed(() => String(props.payload.title || props.payload.original_query || "").trim());
 
+/** 补充说明：排在问题行下面（可为空；初始化开场白这类文案会带一句身份差异说明） */
+const description = computed(() => String(props.payload.description || "").trim());
+
 function optionKey(option: AskSlotOption) {
   return String(option.value);
 }
@@ -124,6 +127,9 @@ function submitRemark() {
   <view v-if="inline" class="ask-slot" :class="{ 'ask-slot--dark': isDark }">
     <text v-if="title" class="ask-slot__title">
       {{ title }}
+    </text>
+    <text v-if="description" class="ask-slot__description">
+      {{ description }}
     </text>
     <view class="ask-slot__options">
       <view
@@ -192,6 +198,14 @@ function submitRemark() {
   font-weight: 500;
   line-height: 40rpx; /* 20px */
   color: #0d0d0d;
+}
+
+/* 补充说明：紧跟问题行（负外边距抵掉卡片 8px 的列间距），比标题浅一档、字号小一号 */
+.ask-slot__description {
+  margin-top: -8rpx;
+  font-size: 24rpx; /* 12px */
+  line-height: 34rpx; /* 17px */
+  color: #8e8e8e;
 }
 
 .ask-slot__options {
@@ -285,6 +299,10 @@ function submitRemark() {
 .ask-slot--dark {
   .ask-slot__title {
     color: #e5e5e5;
+  }
+
+  .ask-slot__description {
+    color: #9a9a9a;
   }
 
   /* 描边走 1px 内描边线性渐变 #5A5A5A → #F7F7F7 → #5A5A5A：

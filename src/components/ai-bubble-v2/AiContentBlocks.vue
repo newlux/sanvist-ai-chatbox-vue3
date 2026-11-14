@@ -73,6 +73,17 @@ const lastTipId = computed(() => {
   return tips[tips.length - 1]?.id;
 });
 
+/**
+ * 追问卡（ask-slot）固定排在回答最底部。
+ *
+ * 块顺序来自流式事件顺序：后端有时先推 ask_slot、再吐正文，blocks 里就成了
+ * [ask-slot, answer-1] —— 选项被摆在正文中间，后半段正文又掉到选项下面。
+ * 这里先把 ask-slot 从流里摘出来，渲染序列末尾再统一追加，保证「正文 → 选项」的阅读顺序，
+ * 与 AskSlotBlock 的定位说明（内联排在回答正文下方）一致。
+ * 摘出来还有一层好处：被选项隔开的两段 answer 会重新变成相邻块、落进同一个 answer-group，
+ * 不会渲染成两个「输出结果」分组。
+ * 只调整展示顺序，不动 store 里的 blocks，播报 / 分享等按块序取内容的逻辑不受影响。
+ */
 const renderItems = computed(() => {
   // voice 导语固定排在内容最顶部（AnswerGroup 无涉及），并先从 answer 剔除重复导语
   const voiceBlocks = normalizedBlocks.value.filter(block => block.type === "voice");
@@ -81,10 +92,12 @@ const renderItems = computed(() => {
     normalizedBlocks.value.filter(block => block.type !== "voice"),
     voiceTexts,
   );
+  const slotBlocks = rest.filter(block => block.type === "ask-slot");
+  const contentBlocks = rest.filter(block => block.type !== "ask-slot");
 
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
   // 避免展示「输出结果」标题和分隔线；chart 内容本身仍由 AiBlockRenderer 渲染
-  if (props.noAnswerGroup) return [...voiceBlocks, ...rest];
+  if (props.noAnswerGroup) return [...voiceBlocks, ...contentBlocks, ...slotBlocks];
 
   const items: any[] = [...voiceBlocks];
   let group = [];
@@ -99,7 +112,7 @@ const renderItems = computed(() => {
     group = [];
   }
 
-  rest.forEach((block) => {
+  contentBlocks.forEach((block) => {
     if (block.type === "answer" || block.type === "chart") {
       group.push(block);
       return;
@@ -109,7 +122,7 @@ const renderItems = computed(() => {
   });
   appendGroup();
 
-  return items;
+  return [...items, ...slotBlocks];
 });
 
 function onSuggestionTap(suggestion) {
