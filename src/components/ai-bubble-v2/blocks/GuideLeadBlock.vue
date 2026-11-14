@@ -142,7 +142,7 @@ function pick(option: string) {
   }
 
   .guide-lead__label {
-    color: rgba(255, 255, 255, 0.45);
+    color: #e5e5e5;
   }
 
   /* 胶囊：深色下不再用渐变边框（浅色渐变在深底上会发亮），改成 16% 白描边 + 6% 白底 */

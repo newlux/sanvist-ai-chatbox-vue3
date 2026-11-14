@@ -74,6 +74,36 @@ function upsertBlock(
 }
 
 /**
+ * 图片块的 upsert：命中已有块时把本次 items **合并**（去重），而不是像 upsertBlock 那样
+ * 整体替换 payload——重放/合并的 image 事件可能带多张图，直接覆盖会丢掉流式阶段已有的图。
+ * 未命中时按原样新建，位置落在数组末尾（与 upsertBlock 一致）。
+ */
+function upsertImageBlocks(
+  blocks: AiBlock[],
+  id: string,
+  items: unknown[],
+  fallbackIndex: number,
+): AiBlock[] {
+  const index = blocks.findIndex(block => block.id === id);
+  if (index < 0) {
+    return [...blocks, { id, type: "image", payload: { items }, complete: true }];
+  }
+
+  const existing = blocks[index];
+  const existingItems = Array.isArray(existing.payload.items) ? existing.payload.items : [];
+  // 按 chunk_id 去重合并：已存在的 chunk_id 不再重复加入（重放会把图3-24、图3-25 都带来）
+  const merged = [...existingItems];
+  for (const item of items) {
+    const chunkId = String((item as Record<string, unknown> | undefined)?.chunk_id || "").trim();
+    const already = merged.some(it => String((it as Record<string, unknown> | undefined)?.chunk_id || "").trim() === chunkId);
+    if (!already) merged.push(item);
+  }
+  const nextBlocks = [...blocks];
+  nextBlocks[index] = { ...existing, payload: { ...existing.payload, items: merged }, complete: true };
+  return nextBlocks;
+}
+
+/**
  * 合并一段 answer 正文。
  *
  * 增量事件（delta）直接拼接；但同一条回答偶尔会被「整段重放」一次
@@ -419,10 +449,24 @@ function reduceEventToBlocks(
     case "image": {
       const imageIndex = blocks.filter(block => block.type === "image").length;
       const items = Array.isArray(event.data?.items) ? event.data.items : [];
-      const imageId = stablePayloadId("image", items.map(item => (item as Record<string, unknown>)?.chunk_id), imageIndex);
+      /**
+       * 图片块的稳定 id 只按「首张图的 chunk_id」生成，而不是用全部 chunk_id 拼一串。
+       *
+       * 原因：流式阶段每张图是独立 image 事件（id=image-<图A>、image-<图B>）；而
+       * workflow_finished 重放 outputs.answer 时，`extractSanvistEvents` 的相邻图片合并
+       * 逻辑（dify.ts appendGuideEvent）会把相邻图片并成一个 image 事件（items 含多张）。
+       * 若 id 用全部 chunk_id 拼接，合并后的 id（image-<图A>-<图B>）就与流式阶段各自独立的
+       * id（image-<图A>）对不上，upsertBlock 找不到已有块、当成新块 append 到末尾——
+       * 于是「参考来源（source）」之后又冒出一个重复的图片堆叠块。
+       *
+       * 这里只取首项 chunk_id 作 id 锚点，让重放/合并的 image 事件命中流式阶段已有的
+       * 首图块；再在下方把本次 items 合并进去（去重），保持原块位置、不新增到 source 之后。
+       */
+      const firstChunkId = String((items[0] as Record<string, unknown> | undefined)?.chunk_id || "").trim();
+      const imageId = stablePayloadId("image", firstChunkId ? [firstChunkId] : [], imageIndex);
       return {
         ...base,
-        blocks: upsertBlock(blocks, imageId, "image", event.data, true),
+        blocks: upsertImageBlocks(blocks, imageId, items, imageIndex),
         receivedContent: true,
       };
     }

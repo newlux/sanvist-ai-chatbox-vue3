@@ -66,6 +66,7 @@
 
 <script>
 import { uploadFiles } from "@/utils/fetch/upload-file";
+import { openImagePreview } from "@/utils/image-preview";
 import { mapState } from "vuex";
 
 export default {
@@ -281,7 +282,7 @@ export default {
     },
     previewImage(index) {
       const urls = this.imageList.map((item) => item.imgUrl || item);
-      uni.previewImage({ urls, current: index });
+      openImagePreview({ urls, current: index });
     },
     addVideo() {
       AlipayJSBridge.call("videoUpload", { time: 180 }, (result) => {
