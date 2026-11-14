@@ -30,6 +30,8 @@ const props = defineProps({
   date: { type: String, default: "" },
   /** 播报语言（<WORK_REPORT language="…">），点卡片时原样带给播报页 */
   language: { type: String, default: "" },
+  /** 播报风格码（<REPORT_STYLE style="…">），点卡片时落库并作为 play 的 styleCode */
+  styleCode: { type: String, default: "" },
   /** 深色模式：材质 / 文字一起切换 */
   dark: { type: Boolean, default: false },
 });
@@ -72,7 +74,7 @@ const badgeText = computed(() => {
 });
 
 function onTap() {
-  openListenReportPage({ date: props.date, language: props.language });
+  openListenReportPage({ date: props.date, language: props.language, styleCode: props.styleCode });
 }
 </script>
 

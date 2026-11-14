@@ -13,6 +13,7 @@ import { markReportVoiceSyncing, saveReportVoiceByStyle } from "@/hooks/useRepor
 import { useChatStore, useSessionStore, useSettingsStore, useUserStore } from "@/stores";
 import { buildInitialBlocks, consumeChatStream, parseEmergencyTag, parseReportInteraction, parseReportStyleTag, parseRoleTaggedAnswer, parseVoiceStyleTag, parseWorkReportTag } from "@/utils/ai-stream";
 import { buildAskSlotQuery } from "@/utils/ask-slot-query";
+import { getCurrentListenReportDate, getCurrentListenReportLanguage } from "@/utils/listen-report";
 
 import { createLogger } from "@/utils/logger";
 import { urgentAllReportInsightEvents } from "@/utils/report-insight-urgent";
@@ -663,12 +664,12 @@ export function useChatSend(scope?: string, handlers?: {
      * 听汇报标签的收尾：**不再自动跳播报页**，改成在气泡里补一张「听汇报」入口卡
      * （设计稿 479:384），点卡片才跳（跳转逻辑在卡片内，见 utils/listen-report）。
      *
-     * 卡片随标签闭合（或整轮结束）出现，date / language 挂在 payload 上；
+     * 卡片随标签闭合（或整轮结束）出现，date / language / style 挂在 payload 上；
      * 标签会随每一拍快照出现，这里按 type 幂等追加，不会堆出一排卡。
      */
     function withReportCard(
       blocks: ReturnType<typeof buildInitialBlocks>,
-      turn: { date: string; language?: string },
+      turn: { date?: string; language?: string; style?: string },
     ) {
       if (blocks.some(block => block?.type === "report-card")) return blocks;
       return [
@@ -676,7 +677,12 @@ export function useChatSend(scope?: string, handlers?: {
         {
           id: `report-card-${turn.date || "current"}`,
           type: "report-card" as const,
-          payload: { date: turn.date, language: turn.language || "" },
+          payload: {
+            date: turn.date || "",
+            language: turn.language || "",
+            // 风格码（<REPORT_STYLE style="…">）：点卡进播报页时按它起播
+            style: turn.style || "",
+          },
           complete: true,
         },
       ];
@@ -718,9 +724,18 @@ export function useChatSend(scope?: string, handlers?: {
           const emergencyBlocks = emergencyTurn.tagged
             ? withAnswerText(snapshot.blocks, emergencyTurn.text)
             : snapshot.blocks;
-          const turnMetadata = emergencyTurn.outputsAnswer === undefined
+          let turnMetadata = emergencyTurn.outputsAnswer === undefined
             ? snapshot.metadata
             : { ...snapshot.metadata, outputs_answer: emergencyTurn.outputsAnswer };
+          /**
+           * 播报风格标签可能只写在 workflow_finished.outputs.answer 里（正文流不给标签）：
+           * 这里先把标签源码从 outputs_answer 摘掉（二维码判定 / 听播兜底文案都取它），
+           * 风格码记下来，下面照样落库并补听汇报卡。
+           */
+          const outputsStyleParsed = parseReportStyleTag(String(turnMetadata?.outputs_answer || ""));
+          if (outputsStyleParsed.matched && turnMetadata) {
+            turnMetadata = { ...turnMetadata, outputs_answer: outputsStyleParsed.text };
+          }
           // metadata.emergency 来自 workflow_finished（标签可能在 outputs 的非 answer 字段里），
           // 正文 / outputs_answer 命中则作为双保险；两者都只触发一次。
           if ((emergencyTurn.matched || Boolean(snapshot.metadata?.emergency)) && !emergencyUrgentStarted) {
@@ -782,9 +797,12 @@ export function useChatSend(scope?: string, handlers?: {
            */
           const reportStyleTurn = resolveReportStyleTurn(displayBlocks);
           if (reportStyleTurn.tagged) displayBlocks = withAnswerText(displayBlocks, reportStyleTurn.text);
-          if (reportStyleTurn.matched && reportStyleTurn.style) {
-            saveReportStyleCode(reportStyleTurn.style);
-            logger.info("[chat] report style switched by answer tag", { style: reportStyleTurn.style });
+          // 标签可能只在 outputs.answer 里：命中标记与风格码两边合并，落库 / 补卡都不漏
+          const reportStyleMatched = reportStyleTurn.matched || outputsStyleParsed.matched;
+          const reportStyleCode = reportStyleTurn.style || outputsStyleParsed.style;
+          if (reportStyleMatched && reportStyleCode) {
+            saveReportStyleCode(reportStyleCode);
+            logger.info("[chat] report style switched by answer tag", { style: reportStyleCode });
           }
 
           /**
@@ -802,6 +820,19 @@ export function useChatSend(scope?: string, handlers?: {
            */
           if (reportTurn.matched && (reportTurn.closed || snapshot.ended)) {
             displayBlocks = withReportCard(displayBlocks, reportTurn);
+          }
+          /**
+           * 播报风格标签 `<REPORT_STYLE style="…">`：用户刚让它换风格，这一轮同样要给出口 ——
+           * 与 <WORK_REPORT> 一样在气泡下面补一张听汇报卡，卡上带本次风格码，
+           * 点卡进播报页即按该风格（styleCode）起播；没有日期 / 语言就沿用当前播报上下文。
+           * 等整轮结束再补，避免卡插在还在流的正文中间；已有卡时不会重复追加。
+           */
+          else if (reportStyleMatched && snapshot.ended) {
+            displayBlocks = withReportCard(displayBlocks, {
+              date: getCurrentListenReportDate(),
+              language: getCurrentListenReportLanguage(),
+              style: reportStyleCode,
+            });
           }
           // 新手（分步骤）模式：后端可能仍返回老师傅的导语（voice）块，这里直接丢弃，不渲染也不播报
           const isNovice = userStore.operatorRole?.roleKey === "novice_operator";

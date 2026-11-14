@@ -550,16 +550,21 @@ function applyDefaultBroadcastParams() {
   }
   /**
    * 只知道风格码、不知道汇报模块（`<REPORT_STYLE style="…">` 标签只下发风格）：
-   * 按该风格的默认模块补一次，别把标签指定的风格丢掉；风格对不上才退回第一条。
+   * 按该风格的默认模块补一次；标签指定的风格码即使不在 config 列表里也原样保留 ——
+   * /listen-broadcast/play 的 styleCode 以它为准，只是拿不到该风格的默认模块（交给服务端按风格处理）。
+   * 没有风格码（首次进页）才退回配置第一条。
    */
   const savedStyleCode = String(savedStyle?.styleCode || "").trim();
   void getListenBroadcastConfig()
     .then((config) => {
       const styles = Array.isArray(config?.styles) ? config.styles : [];
-      const target = styles.find(item => String(item?.code || "") === savedStyleCode) || styles[0];
-      if (!target) return;
+      const matched = savedStyleCode
+        ? styles.find(item => String(item?.code || "") === savedStyleCode)
+        : styles[0];
+      const styleCode = savedStyleCode || String(matched?.code || "").trim();
+      if (!styleCode) return;
       const nextVoice = loadReportVoice() || REPORT_VOICE_OPTIONS[0];
-      applyReportBroadcastParams(nextVoice, target.code, target.defaultModules || []);
+      applyReportBroadcastParams(nextVoice, styleCode, matched?.defaultModules || []);
     })
     .catch((error) => {
       logger.warn("failed to load listen broadcast config for default style", error);
@@ -606,7 +611,31 @@ function markCurrentReportListened(): boolean {
   return true;
 }
 
+/**
+ * 播报自然播完后的自动回跳：回到发起问答页（首页 / 关闭场景窗口）。
+ * 跳转不要太快 —— 播完先停 500ms，让结束态（声波停、字幕落定）过一拍再走。
+ */
+const BROADCAST_FINISH_REDIRECT_DELAY_MS = 500;
+let broadcastFinishRedirectTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearBroadcastFinishRedirectTimer() {
+  if (broadcastFinishRedirectTimer === null) return;
+  clearTimeout(broadcastFinishRedirectTimer);
+  broadcastFinishRedirectTimer = null;
+}
+
+function onBroadcastFinished() {
+  clearBroadcastFinishRedirectTimer();
+  broadcastFinishRedirectTimer = setTimeout(() => {
+    broadcastFinishRedirectTimer = null;
+    // 等待期间用户已切到异常列表 / 问答覆盖层 / 录音态，就不再自动跳页
+    if (insightVisible.value || qaOverlayVisible.value || voiceQueryActive.value) return;
+    closeReportBroadcast();
+  }, BROADCAST_FINISH_REDIRECT_DELAY_MS);
+}
+
 function closeReportBroadcast() {
+  clearBroadcastFinishRedirectTimer();
   // 退出播报（回问问 / 关场景窗口）前先收尾：页面对应的卸载回调在跳转后才执行，
   // 这里主动停一次，避免过渡期间答案还在念。
   stopPlaybackOnLeave();
@@ -617,8 +646,14 @@ function closeReportBroadcast() {
     backFromScene();
     return;
   }
-  const homeUrl = userStore.isVisitor ? "/pages/index/index?mode=demo" : "/pages/index/index";
-  uni.redirectTo({ url: homeUrl });
+  /**
+   * 回到「发起听汇报」的那个页面实例：栈里有上一页就 navigateBack ——
+   * 那个实例的会话、入口卡（音频卡片「去收听」等）原样保留。
+   * 不能再用 redirectTo 新建首页：那会重造一个 index 实例，
+   * 表现为「回来没有之前的听汇报卡片、直接变成新对话」。
+   * 只有没有上一页（直接用 url 打开）时才 redirectTo 兜底首页。
+   */
+  backFromScene(userStore.isVisitor ? "/pages/index/index?mode=demo" : "/pages/index/index");
 }
 
 function pauseReportBroadcast() {
@@ -1466,6 +1501,7 @@ onUnload(() => {
 
 onBeforeUnmount(() => {
   clearInsightLeaveTimer();
+  clearBroadcastFinishRedirectTimer();
   reportAdjustmentActions.dispose();
   disposeInsights();
   cancelActiveStream();
@@ -1486,12 +1522,9 @@ onBeforeUnmount(() => {
   >
     <!-- 所有页面共用宿主安全区；系统状态栏由手机原生绘制。 -->
     <view class="chat-header__statusbar" :style="statusbarStyle" />
-    <!-- 进页拉取听播偏好的 loading 占位：避免服务端返回前出现空白闪烁 -->
+    <!-- 进页拉取听播偏好的 loading 占位：只留转圈，不再配文字（避免服务端返回前空白闪烁） -->
     <view v-if="preferenceLoading" class="podcast-page__preference-loading">
       <view class="preference-loading__indicator" />
-      <text class="preference-loading__text">
-        {{ t("podcast-loading-preference") }}
-      </text>
     </view>
     <ReportVoiceSelector
       v-else-if="showReportVoiceSelector"
@@ -1526,6 +1559,7 @@ onBeforeUnmount(() => {
         @dismiss-qa="dismissReportQa"
         @minimize="onMinimize"
         @exit-report="closeReportBroadcast"
+        @broadcast-finished="onBroadcastFinished"
         @playback-change="onBroadcastPlaybackChange"
       />
       <!-- 播报结束后页内原地形变出的洞察层：透明容器，不做整层位移 -->
@@ -1666,23 +1700,16 @@ onBeforeUnmount(() => {
   .podcast-page__preference-loading {
     background: #0d0d0d;
   }
-
-  // 浅色稿的字色与转圈渐变同色（#3D21CD），深底上会糊掉，提亮到深色稿的次级文字色
-  .preference-loading__text {
-    color: #8f8f8f;
-  }
 }
 
-/* —— 进页拉取偏好的 loading 占位 —— */
+/* —— 进页拉取偏好的 loading 占位（只有转圈） —— */
 .podcast-page__preference-loading {
   position: relative;
   z-index: 1;
   display: flex;
   flex: 1 1 auto;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 24rpx;
   background: #ffffff;
 }
 
@@ -1701,14 +1728,6 @@ onBeforeUnmount(() => {
   mask-composite: exclude;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
-}
-
-/* 文字色与转圈渐变的起始色保持一致，避免红棕字配紫蓝环 */
-.preference-loading__text {
-  color: #3d21cd;
-  font-size: 26rpx;
-  font-weight: 500;
-  line-height: 36rpx;
 }
 
 @keyframes podcast-preference-loading-spin {

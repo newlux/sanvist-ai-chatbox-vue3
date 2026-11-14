@@ -1704,9 +1704,32 @@ function onRestartToStart() {
   pageStage.value = "welcome";
 }
 
+/**
+ * 不走起飞动画直接进对话态：打开历史会话等「不该播动画」的场景。
+ *
+ * 新建对话（onRestartToStart）会把 stage 打回 welcome，这时再点任意历史会话，
+ * 历史消息虽然已经载入，欢迎层却还盖在上面 —— 表现为「点了历史对话仍是 logo 居中的初始页」。
+ * 起飞途中调用直接忽略：动画跑完本来就是对话态，别把它掐断。
+ */
+function enterChatNow() {
+  if (welcomeLeaving.value || pageStage.value === "chat") return;
+  stopWelcomeFly();
+  if (welcomeFlyTimer) {
+    clearTimeout(welcomeFlyTimer);
+    welcomeFlyTimer = null;
+  }
+  welcomeLanded.value = false;
+  welcomeLogoStyle.value = {};
+  chatEnterDelayMs.value = 0;
+  asrTipReady.value = true;
+  pageStage.value = "chat";
+}
+
 async function openLocalHistory(id: string | number, force = false) {
   if (!force && String(chatStore.aiSessionId) === String(id) && chatStore.messages.length) return;
   cancelActiveStream();
+  // 打开历史会话是「直接进对话」：新建对话后 stage 已在 welcome，必须就地收起欢迎层
+  enterChatNow();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
   chatStore.messages = [];
