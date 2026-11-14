@@ -301,7 +301,7 @@ function reduceEventToBlocks(
     case "message_end":
       return {
         ...base,
-        blocks: completeBlocks(blocks),
+        blocks: completeBlocks(blocks.filter(block => block.type !== "tips")),
         metadata: event.metadata,
         processSubtitle: null,
         processStatus: {

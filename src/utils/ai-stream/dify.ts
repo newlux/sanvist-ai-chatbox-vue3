@@ -4,6 +4,11 @@ import { parseWorkReportTag } from "./work-report-tag";
 
 const logger = createLogger("ai-stream-protocol");
 
+/** 正文协议标签；历史解析与 SSE 流式解析共用同一份标记表。 */
+const TIPS_OPEN = "<TIPS>";
+const TIPS_TAG_PATTERN = /<TIPS>[\s\S]*?(?:<\/TIPS>|$)/gi;
+const PROTOCOL_MARKERS = ["<SANVIST>", "<ASK>", "<GUIDE>", "<COMPONENT>", TIPS_OPEN];
+
 /**
  * 需要「直接切页」的助手跳转目标，两个来源都按这套口径判定：
  * - Dify `workflow_finished` 的 `target`（outputs.target / 顶层 target）
@@ -205,14 +210,14 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
    * 开场引导（scene=guide / type=lead）：一段开场白 + 一轮单选（如「选择哪个设备」）。
    *
    * 协议：`{ text, lead_text, options: [{ option }] }`。这里只做归一化：
-   * - `text` 原样保留（含 \n，由块组件按 pre-line 渲染）；
+   * - `text` 去掉临时提示后保留换行，由块组件按 pre-line 渲染；
    * - `lead_text` 是选项上方的引导语（「可以和我说选择哪个设备（单选）」）；
    * - 选项可能是 `{ option }` / `{ label }` / 纯字符串三种写法，统一成文案数组，
    *   点一条就当作用户提问发出去（与 suggestion 的交互一致）。
    */
   if (type === "lead") {
-    const text = String(data.text || "").trim();
-    const leadText = String(data.lead_text || "").trim();
+    const text = String(data.text || "").replace(TIPS_TAG_PATTERN, "").trim();
+    const leadText = String(data.lead_text || "").replace(TIPS_TAG_PATTERN, "").trim();
     const options = (Array.isArray(data.options) ? data.options : [])
       .map((item) => {
         if (typeof item === "string") return item.trim();
@@ -423,11 +428,6 @@ function extractStepSummary(item: Record<string, unknown>): string {
     || String(item.summary || "").trim();
 }
 
-/** 正文协议标签；历史解析与 SSE 流式解析共用同一份标记表。 */
-const TIPS_OPEN = "<TIPS>";
-const TIPS_TAG_PATTERN = /<TIPS>[\s\S]*?(?:<\/TIPS>|$)/g;
-const PROTOCOL_MARKERS = ["<SANVIST>", "<ASK>", "<GUIDE>", "<COMPONENT>", TIPS_OPEN];
-
 /** ASK 交互组件：表格 / 图表 / 追问槽位；历史与流式解析共用同一份判定。 */
 function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockData | null {
   const type = String(value?.type || "").toLowerCase();
@@ -576,7 +576,7 @@ function unwrapComponent(value: Record<string, unknown>) {
 /** 将完整历史 answer 中的 SANVIST/ASK/GUIDE/COMPONENT 协议按原顺序还原为 UI blocks。 */
 export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[] {
   const source = String(value || "");
-  const pattern = /<(SANVIST|ASK|GUIDE|COMPONENT|TIPS)>([\s\S]*?)<\/\1>/g;
+  const pattern = /<(SANVIST|ASK|GUIDE|COMPONENT|TIPS)>([\s\S]*?)<\/\1>/gi;
   const blocks: DifyHistoryBlockData[] = [];
   let cursor = 0;
   let foundProtocol = false;
@@ -599,11 +599,11 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
     foundProtocol = true;
     appendAnswer(source.slice(cursor, match.index));
     cursor = match.index + match[0].length;
-    if (match[1] === "TIPS") continue;
+    const tag = match[1].toUpperCase();
+    if (tag === "TIPS") continue;
     try {
       const payload = asRecord(JSON.parse(match[2]));
       if (!payload) continue;
-      const tag = match[1];
       let eventPayload = payload;
       if (tag === "COMPONENT") {
         // 新版包装层：先按 scene 解包；voice 等播报专用场景不落正文。
@@ -662,7 +662,7 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
   }
   if (result.length) return result;
   // 命中过协议但没产出 block（例如整条 answer 只有播报层）时不能回落成原文，否则会把 JSON 泄漏到气泡。
-  return foundProtocol || source.includes(TIPS_OPEN) ? [] : [{ type: "answer", payload: { content: source } }];
+  return foundProtocol || source.toUpperCase().includes(TIPS_OPEN) ? [] : [{ type: "answer", payload: { content: source } }];
 }
 
 /**
@@ -808,8 +808,10 @@ export function createDifyEventNormalizer() {
     const markers = wrappedAnswer ? [TIPS_OPEN] : PROTOCOL_MARKERS;
     let buffer = (wrappedAnswer ? wrappedAnswerBuffer : protocolBuffer) + value;
     while (buffer) {
+      // 只换 ASCII 大小写，保证匹配位置与原正文一致（如 ß 转大写会多一个字符）。
+      const upperBuffer = buffer.replace(/[a-z]+/g, text => text.toUpperCase());
       const starts = markers
-        .map(marker => buffer.indexOf(marker))
+        .map(marker => upperBuffer.indexOf(marker))
         .filter(index => index >= 0);
       const start = starts.length ? Math.min(...starts) : -1;
       if (start < 0) {
@@ -818,7 +820,7 @@ export function createDifyEventNormalizer() {
         let suffixLength = 0;
         for (const marker of markers) {
           for (let length = 1; length < marker.length; length += 1) {
-            if (buffer.endsWith(marker.slice(0, length))) {
+            if (upperBuffer.endsWith(marker.slice(0, length))) {
               suffixLength = Math.max(suffixLength, length);
             }
           }
@@ -833,11 +835,11 @@ export function createDifyEventNormalizer() {
         buffer = buffer.slice(start);
       }
 
-      const openMarker = markers.find(marker => buffer.startsWith(marker));
+      const openMarker = markers.find(marker => upperBuffer.startsWith(marker, start));
       if (!openMarker) break;
       const tag = openMarker.slice(1, -1);
       const closeMarker = `</${tag}>`;
-      const end = buffer.indexOf(closeMarker);
+      const end = upperBuffer.indexOf(closeMarker, start + openMarker.length) - start;
       if (end < 0) break;
 
       const raw = buffer.slice(openMarker.length, end);

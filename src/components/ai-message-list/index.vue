@@ -169,6 +169,11 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /** 作业指导只在录音或回答生成中补齐提问置顶所需高度。 */
+  releaseSpacerOnReplyEnd: {
+    type: Boolean,
+    default: false,
+  },
   /**
    * 录音中顶部那条实时文字占用的高度（px）。
    * 那段文字浮在提问落点上、不在列表里，列表把被钉住的那条提问（上一轮的提问气泡）
@@ -672,7 +677,9 @@ function alignToReplyEnd(forceUp = false, attempt = 0) {
             nextTick(() => alignToReplyEnd(forceUp, attempt + 1));
             return;
           }
-          target = capTarget;
+          target = props.releaseSpacerOnReplyEnd && isLastAnswerSettled()
+            ? Math.min(capTarget, bottomTarget)
+            : capTarget;
           /**
            * 封顶说明下方还有内容露不出来（回答比可视区高）：收尾后上报「未贴底」，
            * 页面那边才显示「回到底部」。
@@ -733,6 +740,7 @@ watch(
   () => isLastAnswerSettled(),
   (settled) => {
     if (!settled) return;
+    if (props.releaseSpacerOnReplyEnd) releaseShortReplySpacer();
     nextTick(() => alignToReplyEnd());
   },
   { flush: "post" },
@@ -764,6 +772,10 @@ watch(
  * @returns 是否垫了空白（调用方据此重新定位一次）
  */
 function ensureScrollableTo(next: number) {
+  if (props.releaseSpacerOnReplyEnd && isLastAnswerSettled()
+    && !hasAsrPendingMessage() && props.voiceTopPad <= 0) {
+    return false;
+  }
   // #ifdef H5
   const inner = document.querySelector(".msg-list__inner") as HTMLElement | null;
   if (!inner) return false;

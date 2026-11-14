@@ -105,12 +105,41 @@ test('正式引导卡到达时清除临时提示和处理状态，保留设备�
   assert.equal(result.processStatus.title, undefined);
 });
 
-test('工作流收尾重放提示时不重复追加', () => {
+test('工作流收尾重放提示时移除所有临时提示', () => {
   const stream = turn();
   const answer = '<TIPS>正在查询</TIPS><TIPS>正在整理</TIPS>';
   stream.message(answer);
   stream.receive({ event: 'workflow_finished', data: { status: 'succeeded', outputs: { answer } } });
-  assert.deepEqual(stream.displayed, [['tips', '正在查询'], ['tips', '正在整理']]);
+  assert.deepEqual(stream.displayed, []);
+});
+
+test('英文引导卡正文中的双语提示在实时和历史回答中都被剥离', () => {
+  const stream = turn();
+  const answer = `<COMPONENT>${JSON.stringify({
+    scene: 'guide',
+    type: 'lead',
+    data: {
+      text: '<TIPS>我来看看。</TIPS>\n<tips>Checking.</tips>\nI have switched to beginner mode.',
+      options: ['How do I extend the outriggers?'],
+    },
+  })}</COMPONENT>`;
+  stream.message('<TIPS>正在处理</TIPS>');
+  const events = stream.message(answer);
+  assert.equal(events[0].data.text, 'I have switched to beginner mode.');
+  assert.deepEqual(stream.displayed, [['guide-lead', undefined]]);
+  assert.deepEqual(extractDifyHistoryBlocks(answer), [{
+    type: 'guide-lead',
+    payload: { text: 'I have switched to beginner mode.', lead_text: '', options: ['How do I extend the outriggers?'] },
+  }]);
+});
+
+test('小写 TIPS 可跨分片，前面的 Unicode 正文不会切错', () => {
+  const stream = turn();
+  stream.message('<ti');
+  stream.message('ps>Checking</tips>');
+  assert.deepEqual(stream.displayed, [['tips', 'Checking']]);
+  stream.message('Straße <tips>内部状态</tips> open.');
+  assert.equal(stream.answer, 'Straße  open.');
 });
 
 test('SANVIST answer 内的 TIPS 跨事件分片也不进入正文', () => {
