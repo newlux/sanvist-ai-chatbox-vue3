@@ -6,7 +6,7 @@ import { getListenBroadcastConfig, saveListenBroadcastPreference } from "@/api/l
 // 顶部工作胶囊里的三角图标：换成动态 GIF（原 header-status-logo.png 的动画版），
 // 与听播播放页头部用同一张小图（22×22 展示）
 import minimizeIcon from "@/assets/img/min_icon.png";
-import headerStatusLogo from "@/assets/img/sani-logo-sm.gif";
+import headerStatusLogo from "@/assets/img/sani-logo.webp";
 import arrowLeftDarkIcon from "@/assets/img/voice-assistant/voice-arrow-left-dark.svg";
 import arrowLeftIcon from "@/assets/img/voice-assistant/voice-arrow-left.svg";
 import arrowRightDarkIcon from "@/assets/img/voice-assistant/voice-arrow-right-dark.svg";

@@ -11,9 +11,9 @@ import voiceWaveIcon from "@/assets/img/icon-voice-wave-dark.svg";
 import listenLogoDark from "@/assets/img/listen-dark.webp";
 import listenLogoLight from "@/assets/img/listen-light.webp";
 import listenLogo from "@/assets/img/listen.gif";
-// 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 2.5MB 的 gif 慢网下先空白）
-import saniLogoStatic from "@/assets/img/header-island-logo.png";
-import saniLogoGif from "@/assets/img/sani-logo.gif";
+// 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 1MB 的 webp 慢网下先空白）
+import saniLogoStatic from "@/assets/img/sani-logo.webp";
+import saniLogoWebp from "@/assets/img/sani-logo.webp";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
@@ -104,7 +104,7 @@ function onListenLogoError() {
 /**
  * 中心图标「静态图 → 动图」的无感知切换。
  *
- * sani-logo.gif 约 2.5MB，直接当 src 时慢网下会先空一块再突然出现。
+ * sani-logo.webp 约 1MB，直接当 src 时慢网下仍会先空一块再突然出现。
  * 这里两层叠在同一个 220×220 盒子里：
  * - 底层永远是 header-island-logo.png（静态图，几百 KB，先渲染）；
  * - 动图层一开始 opacity:0（但已在下载），@load 到达后淡入、静态层同时淡出，
@@ -113,13 +113,13 @@ function onListenLogoError() {
  * 模块级缓存：组件会随首页 welcome / 对话页来回切反复挂载，已经加载过一次就
  * 直接用动图，不必每次都重播一遍切换。
  */
-let saniGifLoadedOnce = false;
-const saniGifReady = ref(saniGifLoadedOnce);
+let saniLogoLoadedOnce = false;
+const saniLogoReady = ref(saniLogoLoadedOnce);
 
-function onSaniGifLoad() {
-  if (saniGifReady.value) return;
-  saniGifLoadedOnce = true;
-  saniGifReady.value = true;
+function onSaniLogoLoad() {
+  if (saniLogoReady.value) return;
+  saniLogoLoadedOnce = true;
+  saniLogoReady.value = true;
 }
 
 /**
@@ -300,19 +300,19 @@ onBeforeUnmount(() => {
           <image
             class="welcome__logo-img"
             :class="{
-              'welcome__logo-img--covered': saniGifReady && !logoDeparting,
+              'welcome__logo-img--covered': saniLogoReady && !logoDeparting,
               'welcome__logo-img--out': logoDeparting,
             }"
             :src="saniLogoStatic"
             mode="aspectFit"
           />
-          <!-- 动图：加载期间保持透明（已在后台下载），load 后淡入；起飞时一起让位给 listen.gif -->
+          <!-- 动图：加载期间保持透明（已在后台下载），load 后淡入；起飞时一起让位给 listen 动图 -->
           <image
             class="welcome__logo-img welcome__logo-img--gif"
-            :class="{ 'welcome__logo-img--in': saniGifReady && !logoDeparting }"
-            :src="saniLogoGif"
+            :class="{ 'welcome__logo-img--in': saniLogoReady && !logoDeparting }"
+            :src="saniLogoWebp"
             mode="aspectFit"
-            @load="onSaniGifLoad"
+            @load="onSaniLogoLoad"
           />
           <image
             v-if="listenMounted"

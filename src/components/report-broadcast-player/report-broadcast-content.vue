@@ -4,13 +4,13 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
-import thinkGif from "@/assets/img/think.gif";
+import thinkWebp from "@/assets/img/think.webp";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { useSystemStore } from "@/stores";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
 
 const props = defineProps<{
-  /** 所选音色头像：头像位已统一改用 think.gif 动图，仅为父级传参兼容保留 */
+  /** 所选音色头像：头像位已统一改用 think.webp 动图，仅为父级传参兼容保留 */
   portrait?: string;
   playing: boolean;
   loading: boolean;
@@ -203,12 +203,12 @@ onBeforeUnmount(() => {
       <view class="report-broadcast-content__glow report-broadcast-content__glow--blue" />
       <view class="report-broadcast-content__glow report-broadcast-content__glow--red" />
       <!-- 左右声波已去掉（深色稿同步移除，浅色稿本就没有）：头像位只剩图形本体 -->
-      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 think 动图，深浅色共用 think.gif，
-           画布 768×384 透明底，使用 aspectFill 裁掉左右留白，两种主题共用 -->
+      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 think 动图，深浅色共用 think.webp，
+           画布 480×240 透明底，使用 aspectFill 裁掉左右留白，两种主题共用 -->
       <view class="report-broadcast-content__portrait-wrap">
         <image
           class="report-broadcast-content__portrait"
-          :src="thinkGif"
+          :src="thinkWebp"
           mode="aspectFill"
         />
       </view>
@@ -321,7 +321,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   overflow: visible;
 }
-/* 头像位保持 480rpx 正方形；think.gif 为 2:1 画布，aspectFill 等比裁掉两侧透明留白。 */
+/* 头像位保持 480rpx 正方形；think.webp 为 2:1 画布，aspectFill 等比裁掉两侧透明留白。 */
 .report-broadcast-content__portrait-wrap {
   position: relative;
   display: flex;
@@ -594,13 +594,13 @@ onBeforeUnmount(() => {
 
 /* ===== 浅色主题：Ardot 195:1927「日常运营助手-听播-正在播放」=====
    只按浅色稿的坐标与材质实现，深色稿（1193:2708）继续走下面的 --dark 块：
-   - 头像位 195:2031：换成 think.gif 动图，画布 768×384 等比缩到 180px 摆放
+   - 头像位 195:2031：换成 think.webp 动图，画布 480×240 等比缩到 180px 摆放
    - 光晕：浅色稿无此元素，隐藏（声波两个主题都已去掉）
    - 字幕 195:1985：左 44 / 右 48（文本宽 283），头像底 → 文字顶 49px，18/26 Medium #0D0D0D
    - 上下渐隐：底色跟随页面底色 #FAFAFA，文字淡出不出现色块接缝 */
 .report-broadcast-content--light {
   /**
-   * 头像位放 think.gif：画布 768×384、透明底，等比缩到 240px（480rpx），
+   * 头像位放 think.webp：画布 480×240、透明底，等比缩到 240px（480rpx），
    * 图形本体约占画布中间 40%（其余是透明留白），按「画布中心 = 头像位中心」摆放：
    *   - 舞台高度 110px（220rpx）= 设计稿头像位 112px；
    *   - 480rpx 画布相对 220rpx 舞台上下各溢出 130rpx（65px），溢出部分全透明，不遮字幕。
@@ -674,7 +674,7 @@ onBeforeUnmount(() => {
    - 答案卡 1193:3413：底 #1A1A1A + 1px #303030 描边，正文 #FFFFFF；标题 #FFFFFF、过程说明 #8F8F8F
    - 骨架屏：浅色 #F2F3F5→#E5E7EB 的流光换成 #212121→#303030 */
 .report-broadcast-content--dark {
-  /* 头像位同样用 think.gif：透明底素材直接叠在 #0D0D0D 上，
+  /* 头像位同样用 think.webp：透明底素材直接叠在 #0D0D0D 上，
      不再需要 screen 混合或径向遮罩去消方形色差 */
 
   .report-broadcast-content__glow--blue {

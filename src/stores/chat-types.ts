@@ -60,6 +60,12 @@ export interface UiChatMessage {
   hidden?: boolean;
   /** 只展示卡片、不挂回答操作栏（任务协同的初始化卡片消息） */
   hideActions?: boolean;
+  /**
+   * 初始化 mock 消息的口播文本：这类消息没有服务端 messageId，
+   * 点播报走 usePlainTts 而不是 useChatTts，需要把 Voice 文案单独带在消息上
+   * （task 的 Voice 与气泡正文不是同一段话，不能从 blocks 里推）。
+   */
+  mockSpeech?: string;
   /** 语音已松手、ASR 尚未返回：用户气泡展示「识别中...」 */
   asrPending?: boolean;
   /** 维修助理回流产生的 QA 卡片标题。 */
