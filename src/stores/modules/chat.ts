@@ -48,6 +48,15 @@ function defineChatStore(scope: string) {
     const stopAtReplyEnd = ref(false);
     /** 滚动请求令牌：自增一次 = 一次请求，由消息列表量完 DOM 自己按 px 定位 */
     const replyEndToken = ref(0);
+    /**
+     * 「回到底部」请求令牌：自增一次 = 一次请求。
+     *
+     * 交给消息列表做两件事，顺序不能反：先收回封顶时为「可滚性」垫的空白，再按 px 落到真末尾。
+     * 早先这里直接切底部锚点，垫白是下一拍才异步收回的，锚点先把视口滚到「空白最底部」，
+     * 空白收回后内容变短、滚动位置被夹在原来那片白里 —— 用户看到的就是「点了回到底部，
+     * 结果落在一段空白上，回复被顶出屏幕」。
+     */
+    const jumpToBottomToken = ref(0);
     /** 顶到上方的请求令牌 + 目标消息 id：自增一次 = 一次请求，由消息列表按 px 定位 */
     const pinMessageToken = ref(0);
     const pinMessageId = ref("");
@@ -179,16 +188,20 @@ function defineChatStore(scope: string) {
       capRoundAtTop.value = false;
       if (settleTimer) clearTimeout(settleTimer);
       /**
-       * 封顶期间列表末尾垫过白，底部锚点就在那段白之后：
-       * 同一拍滚过去会落在白区（用户看到的就是「点回到底部后整屏白底」）。
-       * 先让消息列表把垫白收回并重排，下一拍再落锚点。
+       * 落点交给消息列表：封顶期间列表末尾垫过白，那块白只有列表自己知道多高。
+       * 用令牌让它「先收白、再按 px 落到真末尾」（见 ai-message-list 的 bottomJumpToken）。
        */
-      if (wasCapped) nextTick(() => jumpToAnchor());
-      else jumpToAnchor();
+      jumpToBottomToken.value += 1;
+      /**
+       * 封顶时底部锚点就在那段垫白之后，这一拍落锚点会先闪进白区 —— 跳过，
+       * 等令牌把白收完再落（下面的 120ms 补量同时也是非 H5 端的锚点兜底）。
+       */
+      if (!wasCapped) jumpToAnchor();
       // 图表 / 表格 / 图片是渲染后才撑开高度的，补一次
       settleTimer = setTimeout(() => {
         settleTimer = null;
         if (!pinnedToBottom.value) return;
+        jumpToBottomToken.value += 1;
         jumpToAnchor();
       }, 120);
     }
@@ -286,6 +299,7 @@ function defineChatStore(scope: string) {
       scrollIntoView,
       pinnedToBottom,
       replyEndToken,
+      jumpToBottomToken,
       requestSeq,
       activeRequestSeq,
       activeMessageId,

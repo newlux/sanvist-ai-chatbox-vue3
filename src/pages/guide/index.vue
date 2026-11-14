@@ -1489,10 +1489,10 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         :show-business-overview="false"
         :scroll-into-view="scrollIntoView"
         :reply-end-token="replyEndToken"
+        :bottom-jump-token="chatStore.jumpToBottomToken"
         :pin-message-token="chatStore.pinMessageToken"
         :pin-message-id="chatStore.pinMessageId"
         :cap-round-at-top="chatStore.capRoundAtTop"
-        release-spacer-on-reply-end
         :show-quick-list="showQuickList"
         :selected-indexes="shareSelectedIndexes"
         :select-mode="shareSheetVisible"

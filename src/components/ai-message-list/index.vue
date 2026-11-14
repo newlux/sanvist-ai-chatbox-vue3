@@ -151,6 +151,14 @@ const props = defineProps({
     type: Number,
     default: 0,
   },
+  /**
+   * 「回到底部」请求令牌：自增一次 = 一次请求，先收回封顶垫的空白，再按 px 落到真末尾。
+   * 页面点「一键回到底部」时由 store 自增（见 chat store 的 jumpToBottom）。
+   */
+  bottomJumpToken: {
+    type: Number,
+    default: 0,
+  },
   /** 顶到上方的请求令牌：自增一次 = 一次请求，把 pinMessageId 那条消息落到悬浮头部下沿 */
   pinMessageToken: {
     type: Number,
@@ -169,7 +177,12 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  /** 作业指导只在录音或回答生成中补齐提问置顶所需高度。 */
+  /**
+   * 收尾（回答生成结束）时收回为「提问顶到头部下沿」垫的空白，让整轮内容装得下一屏后退回贴底。
+   *
+   * 目前首页 / 作业指导 / 任务协同三页统一走「提问固定顶部、回答在下方生长」的口径，
+   * **都不再传这个开关**（收尾后留白保留）；这里保留能力，需要退回「收尾贴底」时再由页面打开。
+   */
   releaseSpacerOnReplyEnd: {
     type: Boolean,
     default: false,
@@ -724,6 +737,31 @@ watch(
       // 照它滚会把已经对齐好的视口来回拉扯（也会顺带把「贴底跟随」误关掉）
       if (props.replyEndToken !== token) return;
       alignToReplyEnd(forceUp);
+    }, delay));
+  },
+  { flush: "post" },
+);
+
+/**
+ * 一键回到底部：先收白、再落到真末尾。
+ *
+ * 封顶期间内容末尾垫过一段空白（让「本轮提问顶到头部下沿」这个落点可达），
+ * 底部锚点就落在那段白之后。反过来先切锚点的话，视口会先滚进白区；
+ * 等空白收回、内容变短，滚动位置被夹在原来那片白里 ——
+ * 用户看到的就是「点了回到底部，结果落在一段空白上，回复被顶出屏幕」。
+ * 所以顺序固定：收回垫白 → 等 DOM 收敛（nextTick + 两帧）→ 按 px 落到真末尾。
+ */
+watch(
+  () => props.bottomJumpToken,
+  async (token) => {
+    if (!token) return;
+    releaseShortReplySpacer();
+    await nextTick();
+    alignToReplyEnd(true);
+    // 收白会让内容瞬间变短，浏览器/scroll-view 各自夹一次滚动位置，补量两次兜底
+    [80, 240].forEach(delay => setTimeout(() => {
+      if (props.bottomJumpToken !== token) return;
+      alignToReplyEnd(true);
     }, delay));
   },
   { flush: "post" },

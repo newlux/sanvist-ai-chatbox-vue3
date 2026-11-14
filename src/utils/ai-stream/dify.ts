@@ -309,6 +309,36 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
       },
     };
   }
+  /**
+   * 场景追问卡（scene=guide / type=ask）：由「回复准备与产品组件」节点下发，
+   * 形如 `{ data: { id, title, description, options: [{ label, value }] } }`。
+   * 字段语义与 scene=ask / type=ask 一致：title 是卡片小标签、description 是问题行。
+   * 它没有 slot_name / selection，走不了追问槽位（ask-slot）那条链路，按追问卡渲染：
+   * 点一条选项就把文案当下一轮提问发出去。
+   * 之前没有这个分支，整张卡会被静默丢弃（既不渲染也不报错）。
+   */
+  if (type === "ask") {
+    const options = (Array.isArray(data.options) ? data.options : [])
+      .map((item) => {
+        if (typeof item === "string") return { id: "", label: item.trim() };
+        const record = asRecord(item);
+        return {
+          id: String(record?.id || "").trim(),
+          label: String(record?.label || record?.value || "").trim(),
+        };
+      })
+      .filter(item => item.label);
+    if (!options.length) return null;
+    return {
+      type: "guide-suggestion",
+      payload: {
+        note: String(data.title || "").trim(),
+        question: String(data.description || "").trim(),
+        other_text: String(data.other_text || "").trim(),
+        options,
+      },
+    };
+  }
   // 多轮追问卡：options 是并行分支（区别于按顺序推进的 step 卡），选一个就发出去。
   if (type === "suggestion") {
     const items = (Array.isArray(data.items) ? data.items : [])

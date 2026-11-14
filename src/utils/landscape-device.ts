@@ -45,6 +45,10 @@ const NO_LANDSCAPE_TOKENS = new Set([
   // 酷开大屏（device ik3576s_u / Android 14）
   "coocaa",
   "ik3576s_u",
+  // 竖屏一体机（model ZC-H358S / device·product rk3588s_t / Android 13）
+  // 只收机型与设备代号，不收 brand rockchip —— 那是芯片厂，会误伤其它 RK3588 板子
+  "zc-h358s",
+  "rk3588s_t",
 ]);
 
 /** 参与比对的字段：品牌 / 厂商 / 机型 / 设备代号 / 产品名 */

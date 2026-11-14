@@ -1,6 +1,6 @@
 import type { Identifier } from "@/api/chat/types";
 
-export type ChatScene = "ASK" | "GUIDE" | "TASK" | "PODCAST";
+export type ChatScene = "ASK" | "GUIDE" | "TASK" | "TEST_TASK" | "PODCAST";
 
 const PENDING_HISTORY_SESSION_KEY = "pending-history-session";
 
@@ -8,6 +8,8 @@ const SCENE_PAGE: Record<ChatScene, string> = {
   ASK: "/pages/index/index",
   GUIDE: "/pages/guide/index",
   TASK: "/pages/task/index",
+  // 任务协同的沙箱场景（dev 环境下发 TEST_TASK）：会话仍归任务协同，原地打开
+  TEST_TASK: "/pages/task/index",
   // 听汇报页没有消息列表，历史问答仍回首页展示
   PODCAST: "/pages/index/index",
 };
@@ -16,17 +18,20 @@ const SCENE_LABEL: Record<ChatScene, string> = {
   ASK: "问答",
   GUIDE: "指导",
   TASK: "任务",
+  TEST_TASK: "任务",
   PODCAST: "问答",
 };
 
 /**
  * 历史会话归属哪个场景。
- * 任务协同页现在下发 TASK；早期下发过 TEST，历史数据里两者都按任务协同（TASK）算，
- * 这样新旧会话在同一张历史列表里都能原地打开、不会互相甩到别的页面。
+ * 任务协同页现在下发 TASK；早期下发过 TEST，dev 沙箱环境还会下发 TEST_TASK，
+ * 历史数据里这几种都按任务协同（TASK）算，这样新旧会话在同一张历史列表里都能原地打开、
+ * 不会互相甩到别的页面。
  */
 export function getSessionScene(session?: { inputs?: Record<string, unknown> } | null): ChatScene {
   const scene = String(session?.inputs?.scene || "").toUpperCase();
-  if (scene === "TEST") return "TASK";
+  // TEST 是早期标识，TEST_TASK 是 dev 沙箱标识：历史会话一律按任务协同归类
+  if (scene === "TEST" || scene === "TEST_TASK") return "TASK";
   if (scene === "GUIDE" || scene === "TASK" || scene === "PODCAST") return scene;
   return "ASK";
 }
