@@ -1129,3 +1129,91 @@ export async function getDemoModeData<T = unknown>(key: string): Promise<T | nul
     return null;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* 遥控器按键（Android TV / 蓝牙遥控器）                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 遥控器按键事件（原生 `remoteKeyEvent`）的归一化负载。
+ *
+ * 宿主约定：
+ * `{ key, keyCode, scanCode, action: "down" | "up", repeatCount, deviceId, deviceName, timestamp }`
+ * - `key` 是宿主给的按键名（ok / back / 左 / 右 …），各设备命名不一定统一；
+ * - `keyCode` / `scanCode` 是 Android 键值，跨设备更可靠，判定时优先；
+ * - 长按不会重复推 `action: "down"`，而是把 `repeatCount` 累加，业务侧要自己丢掉这些重复事件。
+ */
+export interface RemoteKeyEventPayload {
+  key: string;
+  keyCode: number;
+  scanCode: number;
+  action: "down" | "up";
+  repeatCount: number;
+  deviceId?: number;
+  deviceName?: string;
+  timestamp?: number;
+}
+
+function toFiniteNumber(value: unknown) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeRemoteKeyPayload(raw: BridgeResult): RemoteKeyEventPayload {
+  const action = String(raw.action ?? "down").toLowerCase() === "up" ? "up" : "down";
+  return {
+    key: String(raw.key ?? "").toLowerCase(),
+    keyCode: toFiniteNumber(raw.keyCode),
+    scanCode: toFiniteNumber(raw.scanCode),
+    action,
+    repeatCount: toFiniteNumber(raw.repeatCount),
+    deviceId: raw.deviceId == null ? undefined : toFiniteNumber(raw.deviceId),
+    deviceName: raw.deviceName == null ? undefined : String(raw.deviceName),
+    timestamp: raw.timestamp == null ? undefined : toFiniteNumber(raw.timestamp),
+  };
+}
+
+/**
+ * 注册遥控器按键监听。
+ *
+ * 注意：注册成功后原生侧会**拦截**遥控器按键（含返回键），不再走系统默认行为。
+ * 所以页面离开 / 失焦必须注销，并且要自己给返回键安排退路，否则用户会被困在当前页。
+ * 宿主没实现这个 JSAPI 时抛错，调用方 catch 后按「没有遥控器」处理。
+ */
+export async function registerRemoteKeyListener() {
+  const result = await callNative("registerRemoteKeyListener", {}, { timeoutMs: 3000 });
+  logger.info("[mpaas] 遥控器按键监听已注册", result);
+  return result;
+}
+
+/** 注销遥控器按键监听（页面卸载 / 失焦时调用，恢复系统默认按键行为） */
+export async function unregisterRemoteKeyListener() {
+  const result = await callNative("unregisterRemoteKeyListener", {}, { timeoutMs: 3000 });
+  logger.info("[mpaas] 遥控器按键监听已注销", result);
+  return result;
+}
+
+/** 查询按键监听状态（`{ success, listening }`）；宿主不支持时返回 null */
+export async function getRemoteKeyListenerState(): Promise<boolean | null> {
+  try {
+    const result = await callNative<{ listening?: boolean }>("getRemoteKeyListenerState", {}, {
+      timeoutMs: 2000,
+      silentTimeout: true,
+    });
+    return Boolean(result?.listening);
+  }
+  catch (error) {
+    logger.warn("[mpaas] getRemoteKeyListenerState 不可用", error);
+    return null;
+  }
+}
+
+/**
+ * 订阅遥控器按键事件（事件名固定 `remoteKeyEvent`）。
+ *
+ * 原生示例走 `document.addEventListener('remoteKeyEvent')`，payload 在 `event.detail`；
+ * bridge 通道则走 `AlipayJSBridge.on`。两条都挂上（见 onNativeEvent），返回取消订阅的函数。
+ */
+export function onRemoteKeyEvent(handler: (payload: RemoteKeyEventPayload) => void) {
+  return onNativeEvent("remoteKeyEvent", raw => handler(normalizeRemoteKeyPayload(raw || {})));
+}

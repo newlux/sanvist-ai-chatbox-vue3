@@ -42,6 +42,11 @@ export interface StreamBlockUpdate {
    */
   languageSwitch?: string;
   /**
+   * 本轮流中出现的「外观切换」指令（color_switch 事件）：`dark` / `light`，
+   * 同样不落 block、不占位，由 useChatSend 切深浅色并落 `/settings`。
+   */
+  colorSwitch?: "dark" | "light";
+  /**
    * 本轮流中出现的「播报稿」（speech 事件 / COMPONENT type=voice 的 data.text）：
    * 有值时这一轮只播它，标签外的正文不参与播报。
    */
@@ -482,6 +487,19 @@ function reduceEventToBlocks(
       return {
         ...base,
         languageSwitch: language,
+      };
+    }
+    case "color_switch": {
+      /**
+       * 外观切换指令（`{"scene":"ask","type":"color_switch","data":{"mode":"dark"}}`）：
+       * 与 language_switch 同一类「动作」，不落 block、不占位，只把目标外观带进快照。
+       * 只认 dark / light，其它值（含 system）直接忽略，不当成一次切换。
+       */
+      const mode = String(event.data?.mode || "").trim().toLowerCase();
+      if (mode !== "dark" && mode !== "light") return base;
+      return {
+        ...base,
+        colorSwitch: mode,
       };
     }
     case "speech": {

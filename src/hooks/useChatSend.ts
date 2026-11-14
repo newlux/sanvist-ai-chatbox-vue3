@@ -10,7 +10,7 @@ import { interruptChat } from "@/api/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import { saveReportStyleCode } from "@/hooks/useReportStyle";
 import { markReportVoiceSyncing, saveReportVoiceByStyle } from "@/hooks/useReportVoice";
-import { useChatStore, useSessionStore, useSettingsStore, useUserStore } from "@/stores";
+import { useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
 import { buildInitialBlocks, consumeChatStream, parseEmergencyTag, parseReportInteraction, parseReportStyleTag, parseRoleTaggedAnswer, parseVoiceStyleTag, parseWorkReportTag } from "@/utils/ai-stream";
 import { buildAskSlotQuery } from "@/utils/ask-slot-query";
 import { getCurrentListenReportDate, getCurrentListenReportLanguage } from "@/utils/listen-report";
@@ -315,6 +315,7 @@ export function useChatSend(scope?: string, handlers?: {
   const sessionStore = useSessionStore();
   const userStore = useUserStore();
   const settingsStore = useSettingsStore();
+  const systemStore = useSystemStore();
   const { stream, cancel } = useChatStream({
     onError: (error) => {
       if (!isAbortError(error)) logger.error("stream request failed", error);
@@ -426,6 +427,10 @@ export function useChatSend(scope?: string, handlers?: {
       processSubtitle?: string | null;
       /** 本轮播报稿（COMPONENT type=voice 的 data.text），有值时只播它 */
       speechText?: string;
+      /** 本轮语言切换指令（language_switch 的 data.language） */
+      languageSwitch?: string;
+      /** 本轮外观切换指令（color_switch 的 data.mode）：dark / light */
+      colorSwitch?: "dark" | "light";
       ended?: boolean;
     },
     preserveProcessStatus = false,
@@ -567,6 +572,8 @@ export function useChatSend(scope?: string, handlers?: {
     let appliedVoiceStyle = "";
     /** 本轮已经执行过的语言切换指令：同样随快照重复出现，只处理第一次 */
     let appliedLanguageSwitch = "";
+    /** 本轮已经执行过的外观切换指令：同上，只处理第一次 */
+    let appliedColorSwitch = "";
     /** 本轮已经触发过的「异常全部加急」：标签随每一拍快照重复出现，只处理第一次 */
     let emergencyUrgentStarted = false;
 
@@ -612,6 +619,26 @@ export function useChatSend(scope?: string, handlers?: {
       appliedLanguageSwitch = code;
       logger.info("[chat] language switched by component", { language: code });
       void settingsStore.setLanguage(target);
+    }
+
+    /**
+     * 外观切换指令：`<COMPONENT>{"scene":"ask","type":"color_switch","data":{"mode":"dark"}}</COMPONENT>`。
+     *
+     * 与设置弹层「外观」分段同一套写入口径，走 `settingsStore.setAppearance`：
+     * - `systemStore.setAppearance` 立即切深浅色，整页主题跟着变；
+     * - `save({ appearance })` 打 `PUT /settings` 落库，别的端下次进来也是这个外观。
+     *
+     * 同一轮里指令会随每一拍快照重复出现，同一个 mode 只处理一次（dark → light 这种真切换照常生效）；
+     * 当前已经就是目标外观时不再重复请求 `/settings`。
+     */
+    function applyColorSwitch(mode: string) {
+      const value = String(mode || "").trim().toLowerCase();
+      if (value !== "dark" && value !== "light") return;
+      if (value === appliedColorSwitch) return;
+      appliedColorSwitch = value;
+      if (systemStore.appAppearance === value) return;
+      logger.info("[chat] appearance switched by component", { mode: value });
+      void settingsStore.setAppearance(value);
     }
 
     /** 把答案增量通知给页面（首块即触发，不等 message_end / workflow_finished）。 */
@@ -795,6 +822,12 @@ export function useChatSend(scope?: string, handlers?: {
            * 切界面语言 + 落 `/settings`（与设置弹层同一个入口），整段 JSON 不进气泡。
            */
           if (snapshot.languageSwitch) applyLanguageSwitch(snapshot.languageSwitch);
+
+          /**
+           * 外观切换指令 `<COMPONENT type="color_switch" data.mode=dark|light>`：
+           * 切深浅色 + 落 `/settings`（同设置弹层「外观」），整段 JSON 不进气泡。
+           */
+          if (snapshot.colorSwitch) applyColorSwitch(snapshot.colorSwitch);
 
           /**
            * 播报风格标签 `<REPORT_STYLE style="…">正文</REPORT_STYLE>`：

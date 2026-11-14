@@ -56,6 +56,7 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
+import { useRemoteKey } from "@/hooks/useRemoteKey";
 import { DEFAULT_CHAT_SCOPE, provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
 import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
@@ -1489,6 +1490,56 @@ function onWelcomeDuplexToggle() {
   void goToChat({ holdMs: 0 });
 }
 
+/* ---------------- 遥控器（Android TV / 蓝牙遥控器） ---------------- */
+
+/**
+ * 遥控器接管开关：本页可见且没有浮层挡住时才注册。
+ * 注册成功后原生侧会拦截遥控器按键（含返回键），页面失焦 / 卸载必须注销，
+ * 所以初值给 false，跟着下面的 onShow / onHide 走。
+ */
+const remoteKeyActive = ref(false);
+/**
+ * 遥控器连按保护：startVoiceQuery 起手要先 await 双工释放，这段时间 voiceQueryActive
+ * 还没置 true，再按一次会重复起一轮采集。用一个同步标志挡住第二次。
+ */
+let remoteKeyStarting = false;
+
+/**
+ * 遥控器 OK 键 = 输入栏的「点击说话」：
+ * - 初始页：起飞进对话页并同时起一轮录音（与点按钮同一时序，见 onWelcomeStart）；
+ * - 对话页：直接起一轮录音，说完静音 1.5s 自动收尾，不用再按；
+ * - 已在录音：再按一次 = 说完了（等同录音条上的 ↑ 发送）；
+ * - 生成中 / 双工模式：不抢，交给原链路。
+ */
+function onRemoteKeyConfirm() {
+  if (voiceQueryActive.value) {
+    // stopVoiceQuery 自带「正在收尾就不重复发 finish」的保护
+    stopVoiceQuery();
+    return;
+  }
+  if (remoteKeyStarting || isLoading.value || duplexActive.value) return;
+  remoteKeyStarting = true;
+  const starting = pageStage.value === "welcome" ? onWelcomeStart() : startVoiceQuery();
+  void Promise.resolve(starting).finally(() => {
+    remoteKeyStarting = false;
+  });
+}
+
+/** 遥控器返回键：注册后原生不再处理返回键，必须自己给退路（录音中先取消这一轮） */
+function onRemoteKeyBack() {
+  if (voiceQueryActive.value) {
+    cancelVoiceQuery();
+    return;
+  }
+  backToWelcome();
+}
+
+useRemoteKey({
+  enabled: computed(() => remoteKeyActive.value && !shareSheetVisible.value),
+  onConfirm: onRemoteKeyConfirm,
+  onBack: onRemoteKeyBack,
+});
+
 /**
  * 初始页「点击说话」的落地动作：起飞的同时把语音会话跑起来，
  * 用户在飞行动画里开口也不会丢（ready 前的音频由会话自己缓存）。
@@ -1956,6 +2007,8 @@ const stopNativeResume = onNativeEvent("resume", () => {
 
 onShow(() => {
   syncWindowHeight();
+  // 页面可见才接管遥控器：注册后原生会拦截按键（含返回键），压在栈里时必须放回去
+  remoteKeyActive.value = true;
   const sessionId = consumePendingHistorySession("ASK", "PODCAST");
   if (sessionId) {
     // 显式打开某个历史会话：优先级最高，顺手把「回初始页」标记作废
@@ -1983,9 +2036,12 @@ onShow(() => {
 // 离开页面时停止自动听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
 // useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
+  // 遥控器按键还给系统：被压栈后继续拦截，子页面与系统返回键都会失灵
+  remoteKeyActive.value = false;
   realtimeTts.stop();
 });
 onUnload(() => {
+  remoteKeyActive.value = false;
   realtimeTts.stop();
 });
 onBeforeUnmount(() => {

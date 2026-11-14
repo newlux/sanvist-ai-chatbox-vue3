@@ -491,11 +491,12 @@ export interface MessageEndEvent {
  * 不渲染卡片、只带一个目标值给上层执行。
  * - `assistant_scene`：直接切页目标（作业指导 / 任务协同），见 useChatSend 的 openAssistantScene；
  * - `language_switch`：语言切换指令（data.language = zh / en），见 useChatSend 的 applyLanguageSwitch；
+ * - `color_switch`：外观切换指令（data.mode = dark / light），见 useChatSend 的 applyColorSwitch；
  * - `speech`：播报稿（`{"scene":"ask","type":"voice","data":{"text":"…"}}` 的 data.text），
  *   不落卡片也不进正文，只决定这一轮念什么（有播报稿时标签外的正文不参与播报）。
  */
 export interface ProtocolEvent {
-  event: "assistant_scene" | "language_switch" | "speech";
+  event: "assistant_scene" | "language_switch" | "color_switch" | "speech";
   conversationId?: Identifier;
   messageId?: Identifier;
   taskId?: Identifier;

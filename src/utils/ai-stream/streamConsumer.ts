@@ -71,6 +71,7 @@ export async function consumeChatStream(
     if (update.metadata) snapshot.metadata = update.metadata;
     if (update.assistantScene) snapshot.assistantScene = update.assistantScene;
     if (update.languageSwitch) snapshot.languageSwitch = update.languageSwitch;
+    if (update.colorSwitch) snapshot.colorSwitch = update.colorSwitch;
     if (update.speechText) snapshot.speechText = update.speechText;
     if (update.processSubtitle !== undefined) snapshot.processSubtitle = update.processSubtitle;
     if (update.processStatus) snapshot.processStatus = update.processStatus;
