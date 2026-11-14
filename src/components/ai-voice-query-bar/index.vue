@@ -180,7 +180,8 @@ function onSubmit() {
 </script>
 
 <template>
-  <!-- ===== 录音中底部半圆光晕：#0F7EEE 径向渐变，圆心在底部正中，向上收成半圆顶 =====
+  <!-- ===== 录音中底部底色：设计稿给的是 180deg 的透明→半透明过渡
+       （浅色 #87C6FF、深色 #0F7EEE，均为上 0% → 下 50% 不透明度） =====
        单层纯渐变就够：靠 alpha 收边，不会像「模糊层 + overflow 裁」那样切出硬线 -->
   <view v-if="!useHoldBackdrop" class="voice-query__glow" :class="{ 'voice-query__glow--dark': dark }" aria-hidden="true" />
 
@@ -246,15 +247,12 @@ function onSubmit() {
 </template>
 
 <style scoped lang="scss">
-/* ===================== 录音中底部光晕 =====================
-   色值用 #0F7EEE（rgb(15,126,238)），径向渐变：圆心在底部正中，
-   从胶囊底下向四周衰减，抬头是一条大半径的圆弧 —— 不是线性渐变那样整条横平。
+/* ===================== 录音中底部底色 =====================
+   设计稿给的是 180deg 的纵向过渡（上 → 下）：
+   浅色 rgb(135,198,255) / 深色 rgb(15,126,238)，都是 0% 全透明 → 100% 50% 不透明度，
+   越靠底部越实，往上自然淡出到页面底色，不留硬边。
 
-   形状要「很扁的弧」：水平半径给到 120%（比屏宽还宽），垂直半径 = 层高 230px，
-   宽高比接近 2:1。屏幕可见的只是这个超大椭圆的顶部一小段，
-   所以中间几乎是平的、两侧缓缓落到屏幕边上（不是小半圆那种碗形）。
-
-   bottom: 0 而不是 safe-area：光晕要贴到屏幕最下沿，
+   bottom: 0 而不是 safe-area：底色要贴到屏幕最下沿，
    胶囊与提示语各自带 safe-area 上移，不受影响。 */
 .voice-query__glow {
   position: fixed;
@@ -262,29 +260,16 @@ function onSubmit() {
   bottom: 0;
   left: 0;
   z-index: 1000; // 压在胶囊（1001）之下、内容之上
-  height: 460rpx; // 230px，与椭圆的垂直半径一致
-  background: radial-gradient(
-    ellipse 75% 78% at 50% 100%,
-    rgba(15, 126, 238, 0.4) 0%,
-    rgba(15, 126, 238, 0.26) 30%,
-    rgba(15, 126, 238, 0.12) 58%,
-    rgba(15, 126, 238, 0.04) 82%,
-    rgba(15, 126, 238, 0) 100%
-  );
+  // 高度对齐「录音视觉态」：和胶囊垫底层同高（安全区 + 胶囊带），不往正文区多铺
+  height: calc(env(safe-area-inset-bottom) + 230rpx);
+  background: linear-gradient(180deg, rgb(135 198 255 / 0%) 0%, rgb(135 198 255 / 50%) 100%);
   pointer-events: none;
   animation: voice-query-glow-in 260ms ease-out both;
 }
 
-/* 深色外观：深底上要更亮一点才看得出，色值不变 */
+/* 深色外观：设计稿深色态给的是 #0F7EEE 的透明到半透明过渡（180deg：上透明 → 下 50%） */
 .voice-query__glow--dark {
-  background: radial-gradient(
-    ellipse 120% 100% at 50% 100%,
-    rgba(15, 126, 238, 0.56) 0%,
-    rgba(15, 126, 238, 0.37) 30%,
-    rgba(15, 126, 238, 0.17) 58%,
-    rgba(15, 126, 238, 0.06) 82%,
-    rgba(15, 126, 238, 0) 100%
-  );
+  background: linear-gradient(180deg, rgb(15 126 238 / 0%) 0%, rgb(15 126 238 / 50%) 100%);
 }
 
 /* 与胶囊的散开动画同步浮现；静态终态与设计稿完全一致 */
