@@ -67,6 +67,47 @@ test('连续收音，两句分别定稿发送；识别连接轮换不重开麦�
   assert.deepEqual(f.submissions, ['第一句。', '第二句。']);
   assert.equal(f.starts, 1);
 });
+test('iOS 播报期间原生采集结束，播报后重开一次且双工保持开启', async t => {
+  const f = fixture(t, { recoverCapture: true });
+  await f.runtime.start();
+  f.runtime.setPlaybackActive(true);
+  const interrupted = f.capture;
+  interrupted.onError('原生语音采集已中断');
+  f.advance(2500);
+  assert.equal(f.states.at(-1).active, true);
+  assert.equal(f.starts, 1);
+  f.runtime.setPlaybackActive(false);
+  f.advance(349);
+  assert.equal(f.starts, 1);
+  f.advance(1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.starts, 2);
+  assert.equal(f.stops, 1);
+  assert.equal(f.sessions[0].closed, true);
+  interrupted.onError('旧采集错误');
+  f.capture.onFrame(new ArrayBuffer(32));
+  assert.equal(f.sessions[1].frames.length, 1);
+  assert.deepEqual(f.errors, []);
+});
+
+test('iOS 采集无声断流后只尝试一次，主动关闭可取消等待中的恢复', async t => {
+  const f = fixture(t, { recoverCapture: true });
+  await f.runtime.start();
+  f.runtime.setPlaybackActive(true);
+  f.advance(2000);
+  assert.equal(f.starts, 1);
+  await f.runtime.stop();
+  f.runtime.setPlaybackActive(false);
+  f.advance(2000);
+  assert.equal(f.starts, 1);
+  await f.runtime.start();
+  f.advance(2000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.starts, 3);
+  f.advance(2000);
+  assert.equal(f.states.at(-1).active, false);
+  assert.equal(f.errors.length, 1);
+});
 test('播报原文和少量错字的回读被过滤，麦克风仍可提交用户的插话', async t => {
   const f = fixture(t);
   await f.runtime.start();

@@ -13,11 +13,14 @@ interface Dependencies {
   submit: (text: string) => void;
   setGain: (gain: number) => void;
   onState: (state: DuplexState) => void;
-  onError: (message: string) => void;
+  onError: (message: string, released: Promise<unknown>) => void;
+  recoverCapture?: boolean;
   now?: () => number;
 }
 const PLAYBACK_TAIL_MS = 1800;
 const MAX_PLAYBACK_REFERENCES = 8;
+const CAPTURE_STALL_MS = 1800;
+const CAPTURE_RECOVERY_DELAY_MS = 350;
 
 function normalizeSpeech(text: string) {
   // 旧版 WebView 不支持 Unicode 属性转义。
@@ -82,6 +85,12 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
   let speechAt = -Infinity;
   let speechStart = 0;
   let playbackText = "";
+  let playbackActive = false;
+  let playbackEndedAt = -Infinity;
+  let lastFrameAt = 0;
+  let captureInterrupted = false;
+  let recoveryAttempted = false;
+  let captureVersion = 0;
   const recentPlayback: Array<{ text: string; endedAt: number }> = [];
 
   function rememberPlayback(item: Segment) {
@@ -112,6 +121,10 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
     playbackText = normalized;
     if (current) rememberPlayback(current);
   }
+  function setPlaybackActive(active: boolean) {
+    if (playbackActive && !active) playbackEndedAt = now();
+    playbackActive = active;
+  }
   const emit = (patch: Partial<DuplexState>) => { state = { ...state, ...patch }; deps.onState({ ...state }); };
 
   function stop() {
@@ -122,6 +135,8 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
     retry = null;
     const oldCapture = capture;
     capture = null;
+    captureInterrupted = false;
+    recoveryAttempted = false;
     for (const item of segments) item.session?.close();
     segments = [];
     current = null;
@@ -132,7 +147,7 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
     emit({ active: false, starting: false, listening: false, transcript: '' });
     return released;
   }
-  function fail(message: string) { stop(); deps.onError(message); }
+  function fail(message: string) { deps.onError(message, stop()); }
   function drain() {
     // 回包可能乱序，始终按说话顺序交付；关闭后未发送的定稿全部丢弃。
     while (state.active && segments[0]?.done) {
@@ -183,6 +198,13 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
   function advance() {
     if (!state.active) return;
     const time = now();
+    if (deps.recoverCapture && capture
+      && (captureInterrupted || time - lastFrameAt >= CAPTURE_STALL_MS)) {
+      if (!playbackActive && time - playbackEndedAt >= CAPTURE_RECOVERY_DELAY_MS) {
+        void recoverCapture();
+      }
+      return;
+    }
     if (state.listening && time - speechAt >= 700) {
       emit({ listening: false });
       deps.setGain(1);
@@ -199,25 +221,24 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
       if (state.active && !current) open(generation);
     }
   }
-  async function start() {
-    if (state.active || state.starting) return;
-    const seq = ++generation;
-    failures = 0;
-    speechAt = -Infinity;
-    speechStart = 0;
-    emit({ starting: true });
+  async function acquireCapture(seq: number) {
     try {
       await released;
       if (seq !== generation) return;
+      const version = ++captureVersion;
+      const isCurrent = () => seq === generation && version === captureVersion && !captureInterrupted;
       const pending = deps.startCapture({
-        isCurrent: () => seq === generation,
+        isCurrent,
         onFrame(frame) {
-          if (seq !== generation || !current) return;
+          if (!isCurrent()) return;
+          lastFrameAt = now();
+          recoveryAttempted = false;
+          if (!current) return;
           rememberPlayback(current);
           current.session?.pushFrame(frame);
         },
         onLevel(level) {
-          if (seq !== generation || !state.active) return;
+          if (!isCurrent() || !state.active) return;
           const time = now();
           // 连续 120ms 达到人声电平再压低播报，避免单帧噪声闪动。
           if (level >= 0.015) {
@@ -228,7 +249,16 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
             }
           } else speechStart = 0;
         },
-        onError(message) { if (seq === generation) fail(message); },
+        onError(message) {
+          if (!isCurrent()) return;
+          if (!deps.recoverCapture || !state.active) {
+            fail(message);
+            return;
+          }
+          captureInterrupted = true;
+          emit({ listening: false, transcript: '' });
+          deps.setGain(1);
+        },
       });
       pendingCapture = pending;
       const next = await pending;
@@ -236,12 +266,49 @@ export function createDuplexVoiceRuntime(deps: Dependencies) {
       if (ownsCapture) pendingCapture = null;
       if (seq !== generation) { if (ownsCapture) await next.stop(); return; }
       capture = next;
+      lastFrameAt = now();
       emit({ active: true, starting: false });
       open(seq);
-      if (seq === generation) tick = setInterval(advance, 100);
+      if (seq === generation && !tick) tick = setInterval(advance, 100);
     } catch (error) {
       if (seq === generation) fail(error instanceof Error ? error.message : '无法开启双工语音');
     }
   }
-  return { start, stop, advance, setPlaybackText };
+  async function recoverCapture() {
+    if (recoveryAttempted) {
+      fail('语音采集未能恢复，请重新开启双工');
+      return;
+    }
+    recoveryAttempted = true;
+    captureInterrupted = false;
+    captureVersion += 1;
+    const seq = generation;
+    const previous = capture;
+    capture = null;
+    if (retry) clearTimeout(retry);
+    retry = null;
+    for (const item of segments) {
+      item.done = true;
+      item.session?.close();
+    }
+    segments = [];
+    current = null;
+    failures = 0;
+    speechAt = -Infinity;
+    speechStart = 0;
+    emit({ listening: false, transcript: '' });
+    deps.setGain(1);
+    released = Promise.resolve().then(() => previous?.stop()).catch(() => {});
+    await acquireCapture(seq);
+  }
+  async function start() {
+    if (state.active || state.starting) return;
+    const seq = ++generation;
+    failures = 0;
+    speechAt = -Infinity;
+    speechStart = 0;
+    emit({ starting: true });
+    await acquireCapture(seq);
+  }
+  return { start, stop, advance, setPlaybackText, setPlaybackActive };
 }
