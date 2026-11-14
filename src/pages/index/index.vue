@@ -321,7 +321,11 @@ const askSlotQueue = ref<AskSlotPayload[]>([]);
 const askSlotDrawerVisible = ref(false);
 /** 追问卡实时高度（px）：卡片弹出时给消息列表加底部间距，最后一条内容不会被盖住 */
 const askSlotDrawerHeight = ref(0);
-const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(sendUserPrompt);
+const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(sendUserPrompt, {
+  // 进维修助理 / 配件助手是 pushWindow 开新 webview，本页不会 onHide：
+  // 不在这里掐掉，这一轮的语音会挂到回来之后才念出来（「正在进入维修助理」）。
+  onLeavePage: () => realtimeTts.stopForSceneLeave(),
+});
 /** 底部「配件助手」点击后的地址输入弹层 */
 const partsJumpVisible = ref(false);
 let repairSummaryPollingTimer: ReturnType<typeof setTimeout> | null = null;
@@ -335,6 +339,8 @@ function onAssistantCallbackOpen(conversationId: string) {
   if (!id) return;
   logger.info("维修助理回流卡点「看详情」", { conversationId: id });
   clearPendingRepairCallback();
+  // 同一类场景窗口跳转：离开前先掐掉自动听播，回来不再接着念
+  realtimeTts.stopForSceneLeave();
   void openRepairAssistant({
     chatConversationId: id,
     // 降级回本地壳页时要把会话 id 带上，壳页据此拼 `/repair/{id}`
@@ -2937,24 +2943,24 @@ $color-white: #ffffff;
 
 /* ===== 深色主题：首页问答态（Ardot 1193:2097「日常运营助手-老板-个性觉醒」） =====
    只替换底色与材质，间距 / 圆角 / 字号两稿一致，不做改动：
-   - 页面底 1193:2122：#1A1A1A（不是纯黑，浅色稿的 #FAFAFA 一一对应）
-   - 顶部渐隐 1193:2129;722:341 Rectangle 152：#1A1A1A 100% → 0% 竖向渐变
+   - 页面底：#0D0D0D（对应浅色稿的 #FAFAFA）
+   - 顶部渐隐 1193:2129;722:341 Rectangle 152：#0D0D0D 100% → 0% 竖向渐变
    - 角落光晕 1193:2123 Blue Glow TL / 1193:2124 Red Glow TR：深色稿 visible = false
    - 设备线稿 1193:2125 Frame 85：深色稿 visible = false */
 .ai-page--dark {
-  background: #1a1a1a;
+  background: #0d0d0d;
 
   .ai-page__chat {
-    background: #1a1a1a;
+    background: #0d0d0d;
   }
 
   // 渐隐材质换成深色页面底：上沿完全盖住滚上来的内容，往下渐透
   .ai-page__top-fade {
     background: linear-gradient(
       180deg,
-      #1a1a1a 0%,
-      rgba(26, 26, 26, 0.7) 45%,
-      rgba(26, 26, 26, 0) 100%
+      #0d0d0d 0%,
+      rgba(13, 13, 13, 0.7) 45%,
+      rgba(13, 13, 13, 0) 100%
     );
   }
 

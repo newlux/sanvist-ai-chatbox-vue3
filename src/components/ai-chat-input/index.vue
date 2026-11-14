@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import iconWaveActive from "@/assets/img/icon-voice-wave-blue.svg";
+import iconWaveDark from "@/assets/img/icon-voice-wave-dark.svg";
+import iconWaveLight from "@/assets/img/icon-waveform.svg";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
@@ -74,6 +77,13 @@ const emit = defineEmits([
 ]);
 
 const { t } = useI18n();
+
+/**
+ * 声波图标：**未触发**（没开实时语音）时直接落在灰胶囊上，用深色 6 段声波；
+ * **触发后**换成蓝色声波 + 白色胶囊（截图两态）。
+ * 深色主题下深色图标等于看不见，这里直接换一张白色声波（同一套 6 段几何）。
+ */
+const waveIconIdle = computed(() => (props.dark ? iconWaveLight : iconWaveDark));
 
 /**
  * 输入框的本地副本。父组件清空 v-model 是异步的（发送链路里还要过一次 store），
@@ -1049,7 +1059,7 @@ onBeforeUnmount(() => {
         <view
           v-if="inputMode === 'voice' && tapToTalk"
           ref="voiceQueryButtonRef"
-          class="input-bar__hold"
+          class="input-bar__hold input-bar__hold--tap"
           :class="{ 'input-bar__hold--disabled': isLoading }"
           @touchstart="onVoiceQueryPressStart"
           @touchmove="onVoiceQueryPressMove"
@@ -1060,6 +1070,25 @@ onBeforeUnmount(() => {
           @tap="onVoiceQueryStartTap"
         >
           <text class="input-bar__hold-label">{{ t("welcome-tap-to-speak") }}</text>
+          <!-- 声波芯片（实时语音）：截图里嵌在灰胶囊右端内部，不另占一列（x450..526 / y352..409）；
+               未触发点击 = 深色声波（不铺白底），触发后 = 白胶囊 + 蓝色声波 -->
+          <view
+            v-if="duplexEnabled"
+            class="input-bar__wave-chip"
+            :class="{
+              'input-bar__wave-chip--active': duplexActive,
+              'input-bar__duplex--starting': duplexStarting,
+            }"
+            role="button"
+            :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
+            :aria-pressed="duplexActive"
+            @touchstart.stop="onVoiceQueryPressEnd"
+            @mousedown.stop="onVoiceQueryPressEnd"
+            @tap.stop="emit('duplex-toggle')"
+          >
+            <image :src="duplexActive ? iconWaveActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
+            <view v-if="duplexActive" class="input-bar__duplex-dot" />
+          </view>
         </view>
         <view
           v-else-if="inputMode === 'voice'"
@@ -1107,8 +1136,9 @@ onBeforeUnmount(() => {
           />
         </view>
 
+        <!-- 文本态没有胶囊可内嵌，声波仍旧单独占一列（语音态见 .input-bar__wave-chip） -->
         <view
-          v-if="duplexEnabled"
+          v-if="duplexEnabled && inputMode === 'text'"
           class="input-bar__duplex"
           :class="{ 'input-bar__duplex--starting': duplexStarting }"
           role="button"
@@ -1116,7 +1146,8 @@ onBeforeUnmount(() => {
           :aria-pressed="duplexActive"
           @tap.stop="emit('duplex-toggle')"
         >
-          <image src="@/assets/img/icon-voice-wave-dark.svg" mode="aspectFit" aria-hidden="true" />
+          <!-- 声波：未触发是深色 6 段声波，触发后才是纯蓝（#1166D6），不渐变 -->
+          <image :src="duplexActive ? iconWaveActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
           <view v-if="duplexActive" class="input-bar__duplex-dot" />
         </view>
 
@@ -1777,7 +1808,7 @@ onBeforeUnmount(() => {
   gap: 20rpx;
   min-height: 128rpx;
   margin: 0;
-  padding: 16rpx 40rpx;
+  padding: 16rpx 48rpx; // 上下 8px / 左右 24px（截图加号左边距 ≈24px）
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -1804,11 +1835,12 @@ onBeforeUnmount(() => {
 
 /* ==========================================================================
    「按住说话」框：设计稿 1204:337 Toolbar
-   375×44 → 750×88rpx；圆角 45 → 90rpx；底 rgba(13,13,13,0.0361)；
-   文案 14px / 行高 20px / #5E5E5E / Regular；
+   375×44 → 750×88rpx；圆角 45 → 90rpx；底 #F3F3F3（与加号 / 键盘圆钮同档）；
+   文案 14px / 行高 20px / #8E8E8E / Regular；
    整块就是录音手势区（按下即录、上滑取消、松手识别）
    ========================================================================== */
 .input-bar__hold {
+  position: relative;
   display: flex;
   flex: 1;
   min-width: 0;
@@ -1817,28 +1849,61 @@ onBeforeUnmount(() => {
   justify-content: center;
   box-sizing: border-box;
   border-radius: 90rpx; // 45px
-  background: rgba(13, 13, 13, 0.0361);
+  background: rgba(13, 13, 13, 0.0361); // 3.61% 黑：叠在 #FAFAFA 上即截图实测的 #F1F1F1
   touch-action: none; /* 长按时禁用滚动/缩放，pointer 事件不被默认手势劫持 */
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* 「点击说话」那颗（tapToTalk）：文案左对齐起排，右侧留出声波芯片的位置 */
+.input-bar__hold--tap {
+  justify-content: flex-start;
+  padding: 0 120rpx 0 36rpx; // 左 18px（截图文字起于 x213）；右留出芯片 96rpx + 16rpx
 }
 
 .input-bar__hold-label {
   font-size: 28rpx; // 14px
   font-weight: 400;
   line-height: 40rpx; // 20px
-  color: #0d0d0d;
+  color: #5e5e5e; // 截图最深像素 #5E5E5E
   text-align: center;
 }
 
-/* 生成中（思考中）：整块「按住说话」暂时禁用 —— 不吃手势、文案转 #5E5E5E，
+/* 声波芯片（实时语音）：截图 x450..526 / y352..409 → 48×36px 胶囊（圆角 18px），
+   右内边距 8px、垂直居中；图标 20px 6 段声波。
+   未触发点击时**不铺白底**（直接落在灰胶囊上、图标走深色），触发后才出现白胶囊 + 蓝色声波 */
+.input-bar__wave-chip {
+  position: absolute;
+  top: 50%;
+  right: 16rpx; // 8px
+  display: flex;
+  width: 96rpx; // 48px
+  height: 72rpx; // 36px
+  align-items: center;
+  justify-content: center;
+  border-radius: 36rpx; // 18px，两端半圆
+  background: transparent;
+  transform: translateY(-50%);
+}
+
+/* 已触发（实时语音进行中）：白色胶囊 */
+.input-bar__wave-chip--active {
+  background: #ffffff;
+}
+
+.input-bar__wave-chip image {
+  width: 40rpx; // 20px
+  height: 40rpx;
+}
+
+/* 生成中（思考中）：整块「按住说话」暂时禁用 —— 不吃手势、文案再淡一档到 #BABABA，
    与参考图里思考中的置灰态一致；生成结束（isLoading 变 false）即恢复 */
 .input-bar__hold--disabled {
   pointer-events: none;
 }
 
 .input-bar__hold--disabled .input-bar__hold-label {
-  color: #5e5e5e;
+  color: #bababa;
 }
 
 /* 识别中：同一块框内换文案，沿用原来的提示色 */
@@ -1859,10 +1924,15 @@ onBeforeUnmount(() => {
   flex: 0 0 88rpx;
   padding: 0;
   border-radius: 50%;
-  background: rgba(13, 13, 13, 0.0361);
+  background: rgba(13, 13, 13, 0.0361); // 3.61% 黑，叠在 #FAFAFA 上即截图实测的 #F1F1F1
 }
 
-/* 键盘与声波图标使用同一尺寸：20×20 → 40rpx */
+/* 声波（实时语音）钮：白底 + 蓝色声波，和左右两颗灰底圆钮区分开（截图为白色圆钮） */
+.input-bar__duplex {
+  background: #ffffff;
+}
+
+/* 键盘 / 声波图标同为 20×20 → 40rpx（截图声波竖条间距 3.33px × 6 段 + 最短 4.17px 高） */
 .input-bar__mode image,
 .input-bar__duplex image {
   width: 40rpx;
@@ -1929,10 +1999,10 @@ onBeforeUnmount(() => {
   height: 88rpx;
 }
 
-// 语音/键盘是纯图标，底色由 CSS 给，留出内边距
+// 语音/键盘是纯图标，底色由 CSS 给，留出内边距（与语音态胶囊 / 加号同档：3.61% 黑）
 .input-bar__mode {
   padding: 18rpx;
-  background: #f1f2f4;
+  background: rgba(13, 13, 13, 0.0361);
 }
 
 // 发送与停止本身就是实心图标，不再加底色
@@ -2176,9 +2246,9 @@ onBeforeUnmount(() => {
    - 加号 1193:2099;85:187：圆底 #212121，十字描边白（85:189 / 85:190）
    - 按住说话 85:191 Voice Pill：r45 / 底 #212121；其中键盘块 85:200 底 #303030
    - 底部提示 1204:292：#BABABA，两稿同值
-   页面底由 .ai-page--dark 给 #1A1A1A，这里只处理输入栏自己的块 */
+   页面底由 .ai-page--dark 给 #0D0D0D，输入栏底与页面同色（不能比页面浅，否则底部切一刀） */
 .chat-input--dark {
-  background: #1a1a1a;
+  background: #0d0d0d;
 
   // 录音态面板要透出页面底：容器一旦有实色会切掉波浪下半截（同浅色稿的处理）
   &.chat-input--voice-panel-open {
@@ -2223,6 +2293,11 @@ onBeforeUnmount(() => {
     color: #8f8f8f;
   }
 
+  // 声波芯片：触发后浅色稿是纯白底，深底上换成 14% 白；未触发态透明（图标本身按主题换白波）
+  .input-bar__wave-chip--active {
+    background: rgba(255, 255, 255, 0.14);
+  }
+
   // 输入文字 / 占位
   .input-bar__textarea,
   .input-bar.input-bar--plain .input-bar__textarea {
@@ -2234,11 +2309,11 @@ onBeforeUnmount(() => {
     color: #6b6b6b;
   }
 
-  // 图标反相：加号十字 / 键盘 / 声波 / 发送 / 停止都是「深色线条 + 白/透明底」，
-  // 反相后正好是深底要的白线条。语音态发送是品牌红 #C8201E，不能跟着反相。
+  // 图标反相：加号十字 / 键盘 / 发送 / 停止都是「深色线条 + 白/透明底」，
+  // 反相后正好是深底要的白线条。语音态发送是品牌红 #C8201E，不能跟着反相；
+  // 声波钮用的是彩色渐变图标，深底下保持原色（反相会变成橙粉色）
   .input-bar__plus image,
   .input-bar__mode image,
-  .input-bar__duplex image,
   .input-bar__stop image,
   .input-bar.input-bar--text .input-bar__send image {
     filter: invert(1);

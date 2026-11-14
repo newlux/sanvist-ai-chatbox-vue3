@@ -423,7 +423,10 @@ function focusGuideStepCardAtTop() {
   if (stepId) chatStore.focusStepBlock(stepId);
 }
 
-const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(text => sendTaskMessage({ text }));
+const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(text => sendTaskMessage({ text }), {
+  // 进维修助理 / 配件助手是 pushWindow 开新 webview，本页不会 onHide：离开前先掐掉自动听播
+  onLeavePage: () => realtimeTts.stopForSceneLeave(),
+});
 
 /**
  * 追问卡片（COMPONENT scene=task / type=ask，与 scene=ask / type=slot 同一套数据）：
@@ -1886,22 +1889,22 @@ $color-white: #ffffff;
 
 /* ===== 深色主题（与首页问答态同一口径）=====
    只替换底色与材质，间距 / 圆角 / 字号两稿一致：
-   - 页面底 #1A1A1A（对应浅色 #FAFAFA）
+   - 页面底 #0D0D0D（对应浅色 #FAFAFA）
    - 顶部渐隐换成深色页面底
    - 角落光晕与设备线稿在深色稿里是关掉的 */
 .ai-page--dark {
-  background: #1a1a1a;
+  background: #0d0d0d;
 
   .ai-page__chat {
-    background: #1a1a1a;
+    background: #0d0d0d;
   }
 
   .ai-page__top-fade {
     background: linear-gradient(
       180deg,
-      rgba(26, 26, 26, 0.34) 0%,
-      rgba(26, 26, 26, 0.18) 48%,
-      rgba(26, 26, 26, 0) 100%
+      rgba(13, 13, 13, 0.34) 0%,
+      rgba(13, 13, 13, 0.18) 48%,
+      rgba(13, 13, 13, 0) 100%
     );
   }
 

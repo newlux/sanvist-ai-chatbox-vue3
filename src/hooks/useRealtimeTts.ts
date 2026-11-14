@@ -26,6 +26,12 @@ function guessAudioMime(base64: string) {
 }
 
 function extractAnswerText(message: UiChatMessage, stepId = ""): string {
+  /**
+   * 本轮下发了播报稿（`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>`）：
+   * 只念它，标签外的正文不参与播报 —— 与流式听播（useChatSend 的 answer delta）同一口径。
+   */
+  const speech = String(message.speechText || "").trim();
+  if (speech) return speech;
   const blocks = message.blocks || [];
   /**
    * 多步骤卡（guide-step）的回答：正文既不渲染也不播报（见 ai-bubble-v2 的 hideBody），
@@ -468,6 +474,19 @@ export function useRealtimeTts(scope?: string) {
   }
 
   /**
+   * 跳转场景窗口（维修助理 / 配件助手，pushWindow 新开 webview）前调一次。
+   *
+   * 这类跳转原 webview 不会 onHide，音频队列 / 在途 TTS 会一直挂着，
+   * 等用户从那边回来才接着把这一轮的话念出来 —— 回来后再听「正在进入维修助理」既多余又像故障。
+   * 所以离开前当场停掉；正文万一还在流，这一轮也已记进 manualStopKeys，不会再自己开口。
+   */
+  function stopForSceneLeave() {
+    // 这一轮记进 manualStopKeys：万一正文还在流，回包到达时也不会自己再开口
+    if (playingMessageKey.value) manualStopKeys.add(playingMessageKey.value);
+    stop();
+  }
+
+  /**
    * 播报中把总开关关掉：立刻静音，不等它念完。
    * 自动流式会话（activeSession 非空）与气泡里手动点的播报（togglePlay，activeSession 为空）
    * 都要停 —— 总开关是「声音总开关」，关掉就必须没声音，否则表现为「点了关闭还在念」。
@@ -489,6 +508,7 @@ export function useRealtimeTts(scope?: string) {
     togglePlay,
     feedAnswerDelta,
     stop,
+    stopForSceneLeave,
     playing,
     playingMessageId,
     playingMessageKey,

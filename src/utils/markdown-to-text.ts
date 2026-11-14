@@ -12,7 +12,11 @@
  * 只保留标点里的 `-`（日期 2026-10-21 这类不能拆），其余 Markdown 专用符号一律去掉。
  */
 
-/** 正文里残留的协议块：只用于渲染（卡片 / 追问 / 步骤），不参与口播 */
+/**
+ * 正文里残留的协议块：只用于渲染（卡片 / 追问 / 步骤），不参与口播。
+ * COMPONENT 里的播报稿（type=voice 的 data.text）由解析层抽成 message.speechText，
+ * 走的是另一条路，不依赖这里的正文清洗。
+ */
 const PROTOCOL_BLOCK_RE = /<(SANVIST|ASK|GUIDE|COMPONENT|PODCAST)>[\s\S]*?<\/\1>/g;
 
 /** HTML 标签（<br> / <span ...> 之类）：换成空格，避免把单词黏在一起 */

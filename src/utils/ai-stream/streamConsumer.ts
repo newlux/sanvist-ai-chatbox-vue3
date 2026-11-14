@@ -24,6 +24,8 @@ export interface ChatStreamSnapshot {
   assistantScene?: string;
   /** 本轮出现的「语言切换」指令（language_switch 事件）：zh / en，为空表示不切换 */
   languageSwitch?: string;
+  /** 本轮出现的「播报稿」（speech 事件 / COMPONENT type=voice 的 data.text）：有值时只播它 */
+  speechText?: string;
   processSubtitle?: string | null;
   processStatus?: {
     phase: "thinking" | "succeeded" | "failed" | "stopped";
@@ -69,6 +71,7 @@ export async function consumeChatStream(
     if (update.metadata) snapshot.metadata = update.metadata;
     if (update.assistantScene) snapshot.assistantScene = update.assistantScene;
     if (update.languageSwitch) snapshot.languageSwitch = update.languageSwitch;
+    if (update.speechText) snapshot.speechText = update.speechText;
     if (update.processSubtitle !== undefined) snapshot.processSubtitle = update.processSubtitle;
     if (update.processStatus) snapshot.processStatus = update.processStatus;
     if (replacedTips && snapshot.processStatus) {

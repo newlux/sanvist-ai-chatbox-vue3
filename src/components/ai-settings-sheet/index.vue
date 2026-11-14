@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { SettingsDialogueMode } from "@/api/settings/types";
+// 「对话」入口暂时隐藏，恢复时放开（dialogOptions / selectDialogMode 用得到）
+// import type { SettingsDialogueMode } from "@/api/settings/types";
 import type { AppearanceMode } from "@/stores";
 import type { PropType } from "vue";
 import { storeToRefs } from "pinia";
@@ -7,7 +8,8 @@ import { watch } from "vue";
 import { useI18n } from "vue-i18n";
 import iconAppearance from "@/assets/img/icon-settings-appearance.svg";
 import iconChevron from "@/assets/img/icon-settings-chevron.svg";
-import iconDialog from "@/assets/img/icon-settings-dialog.svg";
+// 「对话」入口暂时隐藏，恢复时连同下面 dialogOptions / selectDialogMode / 模板那一行一起放开
+// import iconDialog from "@/assets/img/icon-settings-dialog.svg";
 import iconLanguage from "@/assets/img/icon-settings-language.svg";
 import iconMemory from "@/assets/img/icon-settings-memory.svg";
 import iconPureMode from "@/assets/img/icon-settings-pure-mode.svg";
@@ -21,7 +23,8 @@ import { toApiLanguage, useSettingsStore, useSystemStore } from "@/stores";
  * - 54:952 全屏遮罩 `#0D0D0D` 40% 不透明度；
  * - 54:955 底部面板 375×433、顶角 20px 圆角、底色 `#FAFAFA`、无投影；
  * - 180:70 卡片一 331×102：记忆 / 纯净模式（白底、圆角 16、内边距 18、行距 18）；
- * - 54:956 卡片二 331×216：外观 / 声音 / 语言 / 对话（白底、圆角 12、同为 18 内边距与行距）；
+ * - 54:956 卡片二 331×216：外观 / 声音 / 语言（白底、圆角 12、同为 18 内边距与行距）；
+ *   其中「对话」一行（180:199）暂时隐藏，见模板里的注释；
  * - 54:954 底部《个人信息清单》《三方信息共享清单》链接 14px Medium `#1166D6`（暂按要求隐藏）。
  *
  * 数据：接口文档 4.5。进应用时 `App.vue` 已用 settings store 拉过一次全量；本组件每次打开再拉一次，
@@ -56,7 +59,8 @@ const systemStore = useSystemStore();
  * 打开弹层再 load 一次拿最新值；组件只负责展示与触发，不再自己持有开关状态。
  */
 const settingsStore = useSettingsStore();
-const { memoryEnabled, pureMode, dialogueMode: dialogMode } = storeToRefs(settingsStore);
+// 「对话」入口暂时隐藏：dialogueMode 仍由 settings store 维护，只是这里不再展示 / 切换
+const { memoryEnabled, pureMode } = storeToRefs(settingsStore);
 
 const appearanceOptions: Array<{ value: AppearanceMode; label: string }> = [
   { value: "system", label: "settings-appearance-system" },
@@ -64,11 +68,11 @@ const appearanceOptions: Array<{ value: AppearanceMode; label: string }> = [
   { value: "dark", label: "settings-appearance-dark" },
 ];
 
-/** 界面上「实时语音」= 接口 realtime，「语音输入」= 接口 push */
-const dialogOptions: Array<{ value: SettingsDialogueMode; label: string }> = [
-  { value: "realtime", label: "settings-dialog-realtime" },
-  { value: "push", label: "settings-dialog-voice-input" },
-];
+/**
+ * 界面上「实时语音」= 接口 realtime，「语音输入」= 接口 push。
+ * 「对话」一行暂时去掉，恢复时按这两个 i18n key（settings-dialog-realtime /
+ * settings-dialog-voice-input）重建分段控件。
+ */
 
 /** 每次打开弹层再拉一次全量，回显以服务端为准（接口文档 4.5 GET /settings） */
 watch(
@@ -115,10 +119,8 @@ function selectLanguage(value: AppLanguage) {
   notifyIfFailed(settingsStore.save({ language: toApiLanguage(value) }));
 }
 
-function selectDialogMode(value: SettingsDialogueMode) {
-  if (dialogMode.value === value) return;
-  notifyIfFailed(settingsStore.setDialogueMode(value));
-}
+// 「对话」一行暂时隐藏：切回入口时恢复 selectDialogMode，
+// 实现见 settingsStore.setDialogueMode(settingsStore.dialogueMode)。
 </script>
 
 <template>
@@ -202,22 +204,9 @@ function selectDialogMode(value: SettingsDialogueMode) {
           </view>
         </view>
 
-        <!-- 设计稿 180:199：对话 + 180:205 实时语音 / 语音输入分段（文字型分段，宽度随文案） -->
-        <view class="settings-sheet__row settings-sheet__row--segment">
-          <image class="settings-sheet__icon" :src="iconDialog" mode="aspectFit" />
-          <text class="settings-sheet__label">{{ t("settings-dialog") }}</text>
-          <view class="settings-sheet__segment">
-            <view
-              v-for="option in dialogOptions"
-              :key="option.value"
-              class="settings-sheet__segment-item settings-sheet__segment-item--text"
-              :class="{ 'settings-sheet__segment-item--active': dialogMode === option.value }"
-              @tap.stop="selectDialogMode(option.value)"
-            >
-              {{ t(option.label) }}
-            </view>
-          </view>
-        </view>
+        <!-- 设计稿 180:199「对话」（实时语音 / 语音输入）一行暂时去掉：
+             需要恢复时按 settings 稿重新加回这一行，取值走 settingsStore.dialogueMode，
+             写回走 settingsStore.setDialogueMode，分段样式复用 .settings-sheet__segment-item--text -->
       </view>
 
       <!-- 设计稿 54:954：《个人信息清单》《三方信息共享清单》14px Medium #1166D6

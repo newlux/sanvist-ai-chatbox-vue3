@@ -424,6 +424,8 @@ export function useChatSend(scope?: string, handlers?: {
       metadata?: { duration_ms?: number | null; status?: string };
       processStatus?: { phase: "thinking" | "succeeded" | "failed" | "stopped"; title?: string; elapsedSeconds?: number };
       processSubtitle?: string | null;
+      /** 本轮播报稿（COMPONENT type=voice 的 data.text），有值时只播它 */
+      speechText?: string;
       ended?: boolean;
     },
     preserveProcessStatus = false,
@@ -447,6 +449,8 @@ export function useChatSend(scope?: string, handlers?: {
       durationMs: snapshot.metadata?.duration_ms ?? aiMessage.durationMs,
       processStatus: preserveProcessStatus ? aiMessage.processStatus : snapshot.processStatus ?? aiMessage.processStatus,
       processSubtitle: preserveProcessStatus ? aiMessage.processSubtitle : processSubtitle,
+      // 播报稿挂在消息上：气泡里的手动播报按钮（useRealtimeTts.togglePlay）也按它念
+      speechText: snapshot.speechText ?? aiMessage.speechText,
       loading: !snapshot.ended,
       interrupted: snapshot.metadata?.status === "stopped",
       ttsEnabled: Boolean(
@@ -549,6 +553,8 @@ export function useChatSend(scope?: string, handlers?: {
     let receivedContent = false;
     /** 当前请求里已通知过 onAiAnswerDelta 的答案文本长度，用于计算增量。 */
     let lastSeenAnswerLength = 0;
+    /** 当前增量的取样来源：正文（answer 块）还是播报稿（COMPONENT type=voice）。 */
+    let answerDeltaSource: "body" | "speech" = "body";
     /** 是否已发过 ended: true 的收尾通知，避免重入。 */
     let answerDeltaEnded = false;
     /** PODCAST：聚合流式答案正文，流结束后按汇报交互协议派发。 */
@@ -873,7 +879,18 @@ export function useChatSend(scope?: string, handlers?: {
           // 聚合全部 answer 块（而非只取第一块）：answer 中途穿插了别的块时，
           // 只取第一块会让后半段文字永远收不到增量、听播漏播。
           else if (handlers?.onAiAnswerDelta) {
-            const answerContent = collectAnswerText(displaySnapshot.blocks);
+            /**
+             * 播报稿优先：`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>`
+             * 一旦本轮下发了语音稿，整轮只念它，标签外的正文一律不再喂给 TTS。
+             * 协议块通常先于正文到达；万一正文先念了个开头才出语音稿，这里把已读长度归零，
+             * 保证语音稿能完整播一遍（已播出去的正文收不回来，但不会接着念正文）。
+             */
+            const speechContent = String(displaySnapshot.speechText || "").trim();
+            if (speechContent && answerDeltaSource !== "speech") {
+              answerDeltaSource = "speech";
+              lastSeenAnswerLength = 0;
+            }
+            const answerContent = speechContent || collectAnswerText(displaySnapshot.blocks);
             // "QRCODE" 是给前端看的占位，不是给人听的：文本还是占位前缀时按住不播，
             // 一旦长成正常答案（含已压住的开头）再一次性补播，避免把字母一个个念出来。
             // <QRCODE>…</QRCODE> 这一轮同样不进听播（要跳二维码页），整段按住。

@@ -301,7 +301,7 @@ function onSubmit() {
 }
 
 .voice-query__mask--dark {
-  background: linear-gradient(180deg, rgb(26 26 26 / 0%) 0%, #1a1a1a 40%);
+  background: linear-gradient(180deg, rgb(13 13 13 / 0%) 0%, #0d0d0d 40%);
 }
 
 /* 设计稿 70:1651 Voice Pill

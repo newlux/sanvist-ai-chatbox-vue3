@@ -41,6 +41,11 @@ export interface StreamBlockUpdate {
    * 不落 block、不占位，由 useChatSend 切界面语言并落 `/settings`。
    */
   languageSwitch?: string;
+  /**
+   * 本轮流中出现的「播报稿」（speech 事件 / COMPONENT type=voice 的 data.text）：
+   * 有值时这一轮只播它，标签外的正文不参与播报。
+   */
+  speechText?: string;
   processSubtitle?: string | null;
   processStatus?: {
     phase: "thinking" | "succeeded" | "failed" | "stopped";
@@ -414,6 +419,20 @@ function reduceEventToBlocks(
       return {
         ...base,
         languageSwitch: language,
+      };
+    }
+    case "speech": {
+      /**
+       * 播报稿（`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>`）：
+       * 与 language_switch 一样不落 block、不进正文，只把文本带进快照 ——
+       * 这一轮的语音只念它，标签外的正文不参与播报（见 useChatSend 的 answer delta）。
+       */
+      const speechText = String(event.data?.text || "").trim();
+      if (!speechText) return base;
+      return {
+        ...base,
+        speechText,
+        receivedContent: true,
       };
     }
     case "image": {

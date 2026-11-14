@@ -437,7 +437,10 @@ const {
 } = useChatShare(sharePosterWrap, chatScope);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback(chatScope);
 
-const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(text => sendMessage({ text }));
+const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(text => sendMessage({ text }), {
+  // 进维修助理 / 配件助手是 pushWindow 开新 webview，本页不会 onHide：离开前先掐掉自动听播
+  onLeavePage: () => realtimeTts.stopForSceneLeave(),
+});
 
 /**
  * 追问卡（COMPONENT scene=ask / type=slot）：与首页同一套口径。
@@ -1677,21 +1680,21 @@ $color-white: #ffffff;
 }
 
 /* ===== 深色主题（与首页问答态同一口径）=====
-   只替换底色与材质：页面底 #1A1A1A（对应浅色 #FAFAFA），顶部渐隐换成深色底，
+   只替换底色与材质：页面底 #0D0D0D（对应浅色 #FAFAFA），顶部渐隐换成深色底，
    角落光晕在深色稿里是关掉的。组件内部样式各自通过 :dark 切换。 */
 .ai-page--dark {
-  background: #1a1a1a;
+  background: #0d0d0d;
 
   .ai-page__chat {
-    background: #1a1a1a;
+    background: #0d0d0d;
   }
 
   .ai-page__top-fade {
     background: linear-gradient(
       180deg,
-      rgba(26, 26, 26, 0.34) 0%,
-      rgba(26, 26, 26, 0.18) 48%,
-      rgba(26, 26, 26, 0) 100%
+      rgba(13, 13, 13, 0.34) 0%,
+      rgba(13, 13, 13, 0.18) 48%,
+      rgba(13, 13, 13, 0) 100%
     );
   }
 

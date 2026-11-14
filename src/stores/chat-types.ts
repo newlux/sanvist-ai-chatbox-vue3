@@ -48,6 +48,11 @@ export interface UiChatMessage {
   feedbackValue?: string;
   feedbackRemark?: string;
   ttsEnabled?: boolean;
+  /**
+   * 本轮播报稿（`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>` 的 data.text）。
+   * 有值时整轮只念它，标签外的正文不参与播报（流式听播与手动播报同一口径）。
+   */
+  speechText?: string;
   /** 新生成消息实时播放，历史加载消息播放整段语音。 */
   ttsPlaybackMode?: "realtime" | "history";
   ttsLoading?: boolean;

@@ -535,6 +535,17 @@ function parseAskStreamEvent(value: Record<string, unknown> | null) {
     if (!language) return null;
     return { event: "language_switch" as const, data: { language } };
   }
+  /**
+   * 播报稿（`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>`）：
+   * 这一轮的语音只念 `data.text`，标签外的正文不参与播报。
+   * 不落卡片、不进正文 —— 与 language_switch 同一类「动作」事件，先于 parseAskBlock 判定，
+   * 否则会被当未知类型丢掉，整轮就没有可播报的文本了。
+   */
+  if (String(value?.type || "").toLowerCase() === "voice") {
+    const text = String(directData.text || "").trim();
+    if (!text) return null;
+    return { event: "speech" as const, data: { text } };
+  }
   const directTarget = String(directData.target || "").trim();
   if (String(value?.type || "").toLowerCase() === "navigation" && ASSISTANT_SCENE_TARGETS.has(directTarget)) {
     return { event: "assistant_scene" as const, data: { target: directTarget } };
@@ -557,7 +568,8 @@ function parseAskStreamEvent(value: Record<string, unknown> | null) {
  * - task（作业协同）→ 与 ask 同一套交互组件，复用同一条解析/渲染链路；
  * - guide → 走 GUIDE 卡片；
  * - 带 dify_event/event 的 → 仍按节点状态事件处理；
- * - voice 等只服务语音播报的场景 → 返回 null，正文直接丢弃，避免 JSON 泄漏到气泡与 TTS。
+ * - voice（播报稿）由 parseAskStreamEvent 单独接住，不落卡片、不进正文；
+ * - 其余认不出的组件 → 返回 null，正文直接丢弃，避免 JSON 泄漏到气泡与 TTS。
  */
 function unwrapComponent(value: Record<string, unknown>) {
   const scene = String(value.scene || "").toLowerCase();

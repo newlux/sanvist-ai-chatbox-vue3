@@ -4,7 +4,6 @@ import { useI18n } from "vue-i18n";
 import iconForm from "@/assets/img/icon-form.svg";
 import iconHelp from "@/assets/img/icon-help.svg";
 import iconRepair from "@/assets/img/icon-repair.svg";
-import { usePcMode } from "@/hooks/usePcMode";
 
 /** 快捷入口。mode=page 另开专属页面（url 指向对应场景页） */
 export interface NavItem {
@@ -39,7 +38,7 @@ const props = defineProps({
     default: "",
   },
   /**
-   * 深色主题（首页问答态 Ardot 1193:2097）：容器 722:341 用页面底 #1A1A1A，
+   * 深色主题（首页问答态 Ardot 1193:2097）：容器 722:341 用页面底 #0D0D0D，
    * 入口胶囊换 #212121 + 1px #303030（与早报卡 1193:2101 同一套材质）。
    * 默认关 —— 任务协同页也复用这条导航，那边还是浅色稿。
    */
@@ -62,10 +61,9 @@ const emit = defineEmits(["item-click"]);
 
 const { t } = useI18n();
 
-const { isPc } = usePcMode();
-
 // 入口：作业指导 / 任务协同 / 维修助理，全部另开专属场景页
 // 听汇报只在概览卡 / 对话里的入口卡出现，不再占底部胶囊位
+// 三项在任何端都展示（PC 内嵌 / 桌面浏览器与 APP 一致，不再按端裁剪）
 const DEFAULT_NAV_ITEMS: NavItem[] = [
   {
     key: "fix-master-ai",
@@ -95,18 +93,12 @@ const DEFAULT_NAV_ITEMS: NavItem[] = [
   },
 ];
 
-/** PC 端不展示的底部入口：作业指导只在 APP 端保留。 */
-const PC_HIDDEN_NAV_KEYS = new Set(["fix-master-ai"]);
-
 const navItems = computed(() => {
   const configuredItems = Array.isArray(props.items) && props.items.length
     ? props.items
     : DEFAULT_NAV_ITEMS;
-  const items = configuredItems.filter(item => item.key !== "parts-master-ai" && item.subagent !== "parts");
-
-  // 仅 PC 端收起「作业指导」；APP 容器与手机浏览器 isPc=false，菜单保持原样
-  if (!isPc.value) return items;
-  return items.filter(item => !PC_HIDDEN_NAV_KEYS.has(item.key));
+  // 只剔掉「配件助手」这一类入口（改由底部独立入口/弹层承接），其余全部展示
+  return configuredItems.filter(item => item.key !== "parts-master-ai" && item.subagent !== "parts");
 });
 
 function onItemTap(item: NavItem) {
@@ -120,23 +112,21 @@ function onItemTap(item: NavItem) {
     class="ai-chat-nav"
     :class="{ 'ai-chat-nav--dark': dark, 'ai-chat-nav--flow': flow }"
   >
-    <!-- 横向滚动而不是等分 swiper：胶囊宽度跟文案走，英文（Guidance 等）不会被截断 -->
-    <scroll-view class="ai-chat-nav__scroll" scroll-x :show-scrollbar="false">
-      <view class="ai-chat-nav__list">
-        <view
-          v-for="item in navItems"
-          :key="item.key"
-          class="ai-chat-nav__chip"
-          :class="{ 'ai-chat-nav__chip--active': item.key === activeKey }"
-          @tap="onItemTap(item)"
-        >
-          <image class="ai-chat-nav__icon" :src="item.icon" mode="aspectFit" />
-          <text class="ai-chat-nav__title">
-            {{ item.titleKey ? t(item.titleKey) : item.title }}
-          </text>
-        </view>
+    <!-- 三项等分整行（作业指导 / 任务协同 / 维修助理）：宽度由容器均分，不再横向滚动 -->
+    <view class="ai-chat-nav__list">
+      <view
+        v-for="item in navItems"
+        :key="item.key"
+        class="ai-chat-nav__chip"
+        :class="{ 'ai-chat-nav__chip--active': item.key === activeKey }"
+        @tap="onItemTap(item)"
+      >
+        <image class="ai-chat-nav__icon" :src="item.icon" mode="aspectFit" />
+        <text class="ai-chat-nav__title">
+          {{ item.titleKey ? t(item.titleKey) : item.title }}
+        </text>
       </view>
-    </scroll-view>
+    </view>
   </view>
 </template>
 
@@ -157,40 +147,32 @@ function onItemTap(item: NavItem) {
   position: static;
 }
 
-// 滑动轨道：横向滚动，内容宽度由胶囊自己决定（不再等分屏宽）
-.ai-chat-nav__scroll {
-  width: 100%;
-  height: 72rpx;
-  white-space: nowrap;
-}
-
+/* 整行等分：三个入口（PC 端两个）把可用宽度平均分掉，
+   左右各留 20rpx、胶囊之间 16rpx，剩下的宽度由 flex 均分，不再跟着文案宽度走 */
 .ai-chat-nav__list {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   height: 72rpx;
   box-sizing: border-box;
   align-items: center;
+  gap: 16rpx;
   padding: 0 20rpx;
 }
 
 .ai-chat-nav__chip {
-  display: inline-flex;
-  flex: 0 0 auto;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
   box-sizing: border-box;
   align-items: center;
   justify-content: center;
   gap: 12rpx;
   height: 72rpx;
-  margin-right: 16rpx;
-  padding: 0 24rpx;
+  padding: 0 12rpx;
   border: 1px solid #efefef;
   border-radius: 32rpx;
   background: #fff;
   white-space: nowrap;
-}
-
-// 末项右侧不留多余间距，滑到底就是最后一个胶囊
-.ai-chat-nav__chip:last-child {
-  margin-right: 0;
 }
 
 // 高亮的智能体入口：当前页对应的场景项（如作业指导页）
@@ -214,22 +196,26 @@ function onItemTap(item: NavItem) {
   flex-shrink: 0;
 }
 
-// 文案不做省略号：胶囊宽度跟着文字走，长词（Guidance / Reports 等）也能整词显示
+// 等分后宽度固定：正常文案（含 Guidance / Tasks 这类英文短词）都放得下，
+// 极端长词才退化成省略号，不会把胶囊撑破
 .ai-chat-nav__title {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   color: #1a1a1a;
   font-size: 24rpx;
   font-weight: 500;
   line-height: 32rpx;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 /* ===== 深色主题：底部入口菜单（Ardot 1193:2097） =====
    深色稿没有单独画这条导航，按同一套暗色梯度推：
-   容器跟页面底 #1A1A1A，入口胶囊与早报卡 1193:2101 同材质（#212121 + 1px #303030），
+   容器跟页面底 #0D0D0D，入口胶囊与早报卡 1193:2101 同材质（#212121 + 1px #303030），
    高亮态沿用品牌红（描边红 + 8% 红底）。尺寸 / 间距不动 */
 .ai-chat-nav--dark {
-  background: #1a1a1a;
+  background: #0d0d0d;
 
   .ai-chat-nav__chip {
     border-color: #303030;

@@ -84,7 +84,7 @@ onBeforeUnmount(() => {
 .voice-live__dot:nth-child(2) { animation-delay: 0.2s; }
 .voice-live__dot:nth-child(3) { animation-delay: 0.4s; }
 .voice-live--dark {
-  background: linear-gradient(180deg, #1a1a1a 0%, #1a1a1a 80%, rgba(26, 26, 26, 0) 100%);
+  background: linear-gradient(180deg, #0d0d0d 0%, #0d0d0d 80%, rgba(13, 13, 13, 0) 100%);
   .voice-live__text { color: #f2f3f5; }
 }
 @keyframes voice-live-dot-blink {

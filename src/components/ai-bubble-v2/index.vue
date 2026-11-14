@@ -1479,9 +1479,11 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     background: #3a3a3a;
   }
 
+  // 发问正文与实时提词（ai-voice-transcript 的 .voice-live__text）同色 #f2f3f5：
+  // 点录音图标说完后文字从顶部提词收进气泡，颜色不跟着跳一下
   &.ai-bubble-v2--user .ai-bubble-v2__user-content,
   &.ai-bubble-v2--user .ai-bubble-v2__asr {
-    color: #ffffff;
+    color: #f2f3f5;
   }
 
   // 分享选中的高亮：深底上 6% 红几乎看不见，抬到 16%（设计稿无选中态，按同一红加不透明度）

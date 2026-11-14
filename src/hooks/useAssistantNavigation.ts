@@ -8,7 +8,17 @@ import { stashPendingRepairCallback } from "@/utils/repair-callback";
 import { stashPendingRepairNavigationContext } from "@/utils/repair-navigation";
 
 /** 三个助手共用指令卡的执行出口，保留各自发送函数与会话域。 */
-export function useAssistantNavigation(sendPrompt: (query: string) => unknown) {
+export function useAssistantNavigation(
+  sendPrompt: (query: string) => unknown,
+  options: {
+    /**
+     * 真正离开本页（pushWindow 场景窗口）之前的收尾钩子。
+     * 页面用来掐掉自动听播：这类跳转不触发 onHide，音频会挂到用户从场景窗口回来才播，
+     * 回来后再念「正在进入维修助理」是多余的（见 useRealtimeTts 的 stopForSceneLeave）。
+     */
+    onLeavePage?: () => void;
+  } = {},
+) {
   const userStore = useUserStore();
   const assistantNavigationPayload = ref<AssistantNavigationPayload | null>(null);
   const assistantNavigationVisible = ref(false);
@@ -21,6 +31,7 @@ export function useAssistantNavigation(sendPrompt: (query: string) => unknown) {
 
   function onAssistantNavigationConfirm(payload: AssistantNavigationPayload, _action?: AssistantNavigationAction) {
     if (payload.target === "parts_assistant") {
+      options.onLeavePage?.();
       void openPartsAssistant();
       return;
     }
@@ -37,6 +48,7 @@ export function useAssistantNavigation(sendPrompt: (query: string) => unknown) {
     if (aiAskConversationId && aiAskSessionId) {
       stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
     }
+    options.onLeavePage?.();
     void openRepairAssistant({
       sessionId: aiAskSessionId,
       conversationId: aiAskConversationId,

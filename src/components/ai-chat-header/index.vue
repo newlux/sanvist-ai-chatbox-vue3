@@ -1115,16 +1115,16 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 深色主题：首页问答态头部（Ardot 1193:2097 → 1193:2129 Component 2） =====
-   渐隐底色 722:341 换成页面底 #1A1A1A；左右图标 722:342 / 722:345 在深色稿里是白线，
+   渐隐底色 722:341 换成页面底 #0D0D0D；左右图标 722:342 / 722:345 在深色稿里是白线，
    svg / 位图统一 filter 反白：不新增资源，也不影响浅色稿（浅色下不加这个类） */
 .ai-chat-header--plain.ai-chat-header--dark {
   // background: linear-gradient(
   //   180deg,
-  //   #1a1a1a 0%,
-  //   rgba(26, 26, 26, 0.92) 10%,
-  //   rgba(26, 26, 26, 0) 100%
+  //   #0d0d0d 0%,
+  //   rgba(13, 13, 13, 0.92) 10%,
+  //   rgba(13, 13, 13, 0) 100%
   // );
-  background: #1a1a1a;
+  background: #0d0d0d;
 
   .chat-header__icon-history-img,
   .chat-header__icon-atlas-img,
@@ -1265,6 +1265,9 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+/* 双工模式状态条（开启中 / 聆听中 / 实时转写）：
+   文字与录音时的实时提词同色（ai-voice-transcript 的 .voice-live__text 浅色 #0d0d0d），
+   不再用原来的蓝灰 #526a80 */
 .chat-header__duplex-status {
   display: flex;
   align-items: center;
@@ -1272,7 +1275,7 @@ onBeforeUnmount(() => {
   width: min(76vw, 640rpx);
   height: 76rpx;
   margin-top: 8rpx;
-  color: #526a80;
+  color: #0d0d0d;
   font-size: 26rpx;
   line-height: 38rpx;
   text-align: center;
@@ -1296,8 +1299,9 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
+/* 深色：与实时提词 .voice-live--dark .voice-live__text 同色 #f2f3f5 */
 .ai-chat-header--dark .chat-header__duplex-status {
-  color: #bdcddd;
+  color: #f2f3f5;
 }
 
 .chat-header__island {

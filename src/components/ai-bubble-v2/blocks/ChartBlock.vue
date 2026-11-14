@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { EChartsType } from "echarts/core";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from "vue";
+import type { Ref } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, toRaw, unref, watch } from "vue";
+import { useVerticalScrollGesture } from "@/hooks/useVerticalScrollGesture";
 import { clone, init } from "@/utils/echarts";
 import { createLogger } from "@/utils/logger";
-import { useVerticalScrollGesture } from "@/hooks/useVerticalScrollGesture";
 
 defineOptions({ name: "ChartBlock" });
 
@@ -13,6 +14,17 @@ const props = defineProps({
   layout: { type: Object, default: null },
   embedded: { type: Boolean, default: false },
 });
+
+/**
+ * 深色：跟随 AI 气泡主题（与 TableBlock / SuggestionBlock 同一套取法）。
+ * 图表文字（标题 / 图例 / 坐标轴刻度与轴名 / 柱顶数值）统一按主题取色：
+ * 浅色 #0d0d0d，深色 #ffffff；
+ * 网格横线与轴线：浅色 #0d0d0d33，深色 #ffffff33。
+ */
+const bubbleDark = inject<Ref<boolean> | null>("ai-bubble-dark", null);
+const isDark = computed(() => Boolean(bubbleDark ? unref(bubbleDark) : false));
+const textColor = computed(() => (isDark.value ? "#ffffff" : "#0d0d0d"));
+const lineColor = computed(() => (isDark.value ? "#ffffff33" : "#0d0d0d33"));
 
 const logger = createLogger("chart");
 const chartRoot = ref<unknown>(null);
@@ -91,13 +103,19 @@ function longestLineWidth(text: unknown, textStyle: Record<string, any> = {}) {
   );
 }
 
-function normalizeSeries(series: any[]) {
+function normalizeSeries(series: any[], textColor: string) {
   return series.map((item) => {
     if (!item || typeof item !== "object") return item;
     const isBar = item.type === "bar";
-    const label = isBar
+    const baseLabel = isBar
       ? { show: true, position: "top", formatter: "{c}", ...item.label }
       : item.label;
+    // 数值标签（柱顶数字等）颜色跟主题，不跟随系列配色，避免深底上看不见；
+    // 落在柱体内部的标签保留原色（通常白字压在色块上）。
+    const isInsideLabel = String(baseLabel?.position || "").startsWith("inside");
+    const label = baseLabel && typeof baseLabel === "object" && !isInsideLabel
+      ? { ...baseLabel, color: textColor }
+      : baseLabel;
     const colors = Array.isArray(item.itemStyle?.color) ? [...item.itemStyle.color] : null;
     if (!colors?.length) return { ...item, label };
 
@@ -146,7 +164,7 @@ function legendHeight(legend: any, series: any[], chartWidth: number) {
   }, 0);
 }
 
-function normalizeTitle(title: any) {
+function normalizeTitle(title: any, textColor: string) {
   return toArray(title).map(item => ({
     ...item,
     left: item?.left ?? "center",
@@ -156,16 +174,18 @@ function normalizeTitle(title: any) {
       fontWeight: 600,
       overflow: "break",
       ...item?.textStyle,
+      color: textColor,
     },
     subtextStyle: {
       fontSize: DEFAULT_FONT_SIZE,
       overflow: "break",
       ...item?.subtextStyle,
+      color: textColor,
     },
   }));
 }
 
-function normalizeLegend(legend: any, top: number) {
+function normalizeLegend(legend: any, top: number, textColor: string) {
   return toArray(legend).map(item => ({
     ...item,
     left: item?.left ?? "center",
@@ -178,6 +198,7 @@ function normalizeLegend(legend: any, top: number) {
       fontSize: DEFAULT_FONT_SIZE,
       overflow: "break",
       ...item?.textStyle,
+      color: textColor,
     },
   }));
 }
@@ -209,6 +230,38 @@ function normalizeCategoryAxis(axis: any, categoryWidth?: number) {
 
 function isCategoryAxis(axis: any) {
   return axis?.type === "category" || Array.isArray(axis?.data);
+}
+
+/**
+ * 富文本标签（axisLabel.rich / label.rich）里写死的 color 会盖掉外层 color，
+ * 这里把每个片段一并刷成主题色，否则深色底上仍是后端给的深灰字。
+ */
+function themedRich(rich: any, textColor: string) {
+  if (!rich || typeof rich !== "object") return rich;
+  const next: Record<string, any> = {};
+  Object.keys(rich).forEach((key) => {
+    const style = rich[key];
+    next[key] = style && typeof style === "object" ? { ...style, color: textColor } : style;
+  });
+  return next;
+}
+
+/**
+ * 坐标轴文字（刻度标签 / 轴名）与线条（网格横线 / 轴线）统一跟主题取色。
+ * 轴线的颜色改变后，未单独配置颜色的 axisTick 会一并跟随。
+ * 底部（x 轴）刻度标签同样走 axisLabel.color：深色 #ffffff，浅色 #0d0d0d。
+ */
+function applyAxisTheme(axis: any, textColor: string, lineColor: string) {
+  if (!axis || typeof axis !== "object") return axis;
+  const axisLabel = { ...axis.axisLabel, color: textColor };
+  if (axisLabel.rich) axisLabel.rich = themedRich(axisLabel.rich, textColor);
+  return {
+    ...axis,
+    axisLabel,
+    nameTextStyle: { ...axis.nameTextStyle, color: textColor },
+    splitLine: { ...axis.splitLine, lineStyle: { ...axis.splitLine?.lineStyle, color: lineColor } },
+    axisLine: { ...axis.axisLine, lineStyle: { ...axis.axisLine?.lineStyle, color: lineColor } },
+  };
 }
 
 function axisLabelExtent(axis: any) {
@@ -286,27 +339,39 @@ function centerPolarSeries(series: any[]) {
 /**
  * 将后端 option 转为稳定的展示配置：业务样式原样保留，仅补齐缺失的布局规则。
  * 默认内容以画布中线为基准；分类标签保持横向，通过画布宽度和动态边距完整展示。
+ * 文字与线条颜色统一由主题决定（textColor / lineColor），不沿用后端配置里的固定色。
  */
-function normalizeOption(raw: Record<string, any> | null, layout?: ChartLayout | null, width = 320) {
+function normalizeOption(
+  raw: Record<string, any> | null,
+  layout?: ChartLayout | null,
+  width = 320,
+  textColor = "#0d0d0d",
+  lineColor = "#0d0d0d33",
+) {
   if (!raw) return raw;
   const option = clone(toRaw(raw));
   const sourceSeries = Array.isArray(option.series) ? option.series : [];
   const sourceXAxes = toArray(option.xAxis);
   const sourceYAxes = toArray(option.yAxis);
   const categoryWidth = resolveCategoryWidth(layout);
-  const xAxes = sourceXAxes.map(axis => normalizeCategoryAxis(axis, categoryWidth));
-  const yAxes = sourceYAxes.map(normalizeCategoryAxis);
-  const series = centerPolarSeries(normalizeSeries(sourceSeries));
+  const xAxes = sourceXAxes.map(axis =>
+    applyAxisTheme(normalizeCategoryAxis(axis, categoryWidth), textColor, lineColor));
+  const yAxes = sourceYAxes.map(axis => applyAxisTheme(normalizeCategoryAxis(axis), textColor, lineColor));
+  const series = centerPolarSeries(normalizeSeries(sourceSeries, textColor));
 
-  const next: Record<string, any> = { ...option, series };
+  const next: Record<string, any> = {
+    ...option,
+    series,
+    textStyle: { ...option.textStyle, color: textColor },
+  };
 
   if (option.title) {
-    const title = normalizeTitle(option.title);
+    const title = normalizeTitle(option.title, textColor);
     next.title = Array.isArray(option.title) ? title : title[0];
   }
   const titleSpace = titleHeight(option.title);
   if (option.legend) {
-    const legend = normalizeLegend(option.legend, titleSpace);
+    const legend = normalizeLegend(option.legend, titleSpace, textColor);
     next.legend = Array.isArray(option.legend) ? legend : legend[0];
   }
   if (option.xAxis) next.xAxis = Array.isArray(option.xAxis) ? xAxes : xAxes[0];
@@ -334,6 +399,7 @@ function normalizeOption(raw: Record<string, any> | null, layout?: ChartLayout |
       axisName: {
         overflow: "break",
         ...item?.axisName,
+        color: textColor,
       },
     }));
     next.radar = Array.isArray(option.radar) ? radar : radar[0];
@@ -343,7 +409,9 @@ function normalizeOption(raw: Record<string, any> | null, layout?: ChartLayout |
 }
 
 const chartLayout = computed(() => props.layout as ChartLayout | null);
-const chartOption = computed(() => normalizeOption(props.option, chartLayout.value, chartWidth.value));
+const chartOption = computed(
+  () => normalizeOption(props.option, chartLayout.value, chartWidth.value, textColor.value, lineColor.value),
+);
 const chartMinHeight = computed(
   () => chartLayout.value?.minHeight || (props.embedded ? EMBEDDED_MIN_HEIGHT : undefined),
 );
@@ -528,7 +596,11 @@ onBeforeUnmount(disposeChart);
 </script>
 
 <template>
-  <view ref="chartRoot" class="chart-block" :class="[{ 'chart-block--embedded': embedded }]">
+  <view
+    ref="chartRoot"
+    class="chart-block"
+    :class="[{ 'chart-block--embedded': embedded, 'chart-block--dark': isDark }]"
+  >
     <scroll-view
       v-show="!failed"
       class="chart-block__scroll"
@@ -579,6 +651,24 @@ onBeforeUnmount(disposeChart);
   padding: 0;
   border-radius: 0;
   background: transparent;
+}
+/* 深色：图表文字已改为 #ffffff，白底卡片会让文字看不见，跟随气泡走透明底 */
+.chart-block--dark {
+  background: transparent;
+}
+.chart-block--dark .chart-block__fallback,
+.chart-block--dark .chart-block__data-series-name {
+  color: rgba(255, 255, 255, 0.45);
+}
+.chart-block--dark .chart-block__data-title,
+.chart-block--dark .chart-block__data-value {
+  color: #ffffff;
+}
+.chart-block--dark .chart-block__data-label {
+  color: rgba(255, 255, 255, 0.65);
+}
+.chart-block--dark .chart-block__data-row {
+  border-bottom-color: rgba(255, 255, 255, 0.12);
 }
 .chart-block__scroll {
   width: 100%;
