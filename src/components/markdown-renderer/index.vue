@@ -76,7 +76,7 @@ const rawTagStyle = {
   ul: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 34rpx; list-style: disc;",
   // iOS WebKit 的列表序号绘制在 li 外侧，给多位数字留下按字号缩放的空间。
   ol: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 2.5em; list-style: decimal outside;",
-  li: "margin: 4rpx 0; color: #2f323c; font-size: 28rpx; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
+  li: "margin: 4rpx 0; padding-left: 34rpx; text-indent: -34rpx; list-style-position: inside; color: #2f323c; font-size: 28rpx; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
   blockquote: "margin: 12rpx 0; padding: 12rpx 20rpx; border-left: 6rpx solid #e4e9f0; color: #5f6775; background: #f6f7f9; border-radius: 8rpx;",
   hr: "margin: 16rpx 0; height: 1px; border: 0; background: #e4e9f0;",
   a: "color: #f12832; text-decoration: underline; word-break: break-all;",
