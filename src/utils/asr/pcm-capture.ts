@@ -21,6 +21,8 @@ const GESTURE_RESUME_TIMEOUT_MS = 1500;
 export type PcmUnavailableReason = "no-context" | "no-callback" | "silent";
 
 export interface PcmCaptureHandlers {
+  /** 双工允许用户保持静默，只有麦克风轨道结束或没有回调才视为采集故障。 */
+  continuous?: boolean;
   /** 每攒满一帧（3200 字节 / 100ms）回调一次，直接把 ArrayBuffer 丢给 WebSocket 即可 */
   onFrame: (frame: ArrayBuffer) => void;
   /** 每帧的音量强度（0~1，RMS）：用来判静音，说完自动收尾 */
@@ -240,9 +242,15 @@ export async function startPcmCapture(handlers: PcmCaptureHandlers): Promise<Pcm
   /** 自检用：出过多少帧、最大音量（判断「回调没来」还是「来的全是 0」） */
   let frameCount = 0;
   let peakLevel = 0;
+  const tracks = stream.getAudioTracks();
 
   processor.onaudioprocess = (event) => {
     if (stopped) return;
+    if (handlers.continuous && tracks.length && tracks.every(track => track.muted)) {
+      pendingCount = 0;
+      frameSquares = 0;
+      return;
+    }
     const input = event.inputBuffer.getChannelData(0);
     for (let i = 0; i < input.length; i++) {
       last += alpha * (input[i] - last);
@@ -295,7 +303,7 @@ export async function startPcmCapture(handlers: PcmCaptureHandlers): Promise<Pcm
       handlers.onUnavailable?.(reason);
       return;
     }
-    if (peakLevel < SILENT_RMS) {
+    if (!handlers.continuous && peakLevel < SILENT_RMS) {
       logger.warn("[pcm] 采到的是静音", {
         frames: frameCount,
         peak: peakLevel,
@@ -309,6 +317,11 @@ export async function startPcmCapture(handlers: PcmCaptureHandlers): Promise<Pcm
     logger.debug("[pcm] 采集正常", { frames: frameCount, peak: peakLevel, sampleRate: context.sampleRate });
   }, DIAG_DELAY_MS);
 
+  const onTrackEnded = () => {
+    if (!stopped) handlers.onUnavailable?.("no-callback");
+  };
+  if (handlers.continuous) tracks.forEach(track => track.addEventListener("ended", onTrackEnded));
+
   const stop = () => {
     if (stopped) return;
     stopped = true;
@@ -321,6 +334,7 @@ export async function startPcmCapture(handlers: PcmCaptureHandlers): Promise<Pcm
       firstFrameMs: firstFrameAt ? firstFrameAt - startedAt : null,
     });
     processor.onaudioprocess = null;
+    if (handlers.continuous) tracks.forEach(track => track.removeEventListener("ended", onTrackEnded));
     try {
       source.disconnect();
       processor.disconnect();

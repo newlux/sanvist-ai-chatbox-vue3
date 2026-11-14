@@ -181,7 +181,7 @@ function onPick(label: string) {
   }
 
   .guide-suggestion__question {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   /* 胶囊描边走 1px 内描边线性渐变 #5A5A5A → #F7F7F7 → #5A5A5A：
@@ -209,7 +209,7 @@ function onPick(label: string) {
 
   .guide-suggestion__option-letter,
   .guide-suggestion__option-label {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-suggestion__option-divider {

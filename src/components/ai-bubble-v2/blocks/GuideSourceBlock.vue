@@ -48,9 +48,13 @@ function isPdfSource(item: { fileType: string; url: string }) {
 
 function onSourceTap(item: { fileType: string; url: string }) {
   if (item.fileType === "IMAGE") {
+    // 所有 IMAGE 来源一起进预览，可左右切换；captions 用各来源的 file_name，
+    // 让预览层在图片下方显示名称（与正文 GuideImageBlock 传 caption 的做法一致）
+    const imageSources = evidence.value.filter(source => source.fileType === "IMAGE");
     previewGuideImages(
       item.url,
-      evidence.value.filter(source => source.fileType === "IMAGE").map(source => source.url),
+      imageSources.map(source => source.url),
+      imageSources.map(source => source.fileName),
     );
     return;
   }

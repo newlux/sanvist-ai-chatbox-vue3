@@ -8,9 +8,10 @@ import iconShare from "@/assets/img/icon-action-share.svg";
 import saniIcon from "@/assets/img/icon-sani.png";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { useSettingsStore } from "@/stores";
-import { normalizeGuideUrl, previewGuideImages } from "@/utils/guide-content";
+import { normalizeGuideUrl } from "@/utils/guide-content";
 import { consumeStepTtsSwitch, consumeSummaryTts, requestStepTtsSwitch } from "@/utils/guide-step-tts";
 import { stripOptionPrefix } from "@/utils/option-label";
+import GuideImageBlock from "./GuideImageBlock.vue";
 import GuideSourceBlock from "./GuideSourceBlock.vue";
 
 /**
@@ -96,7 +97,7 @@ const question = computed(() => String(props.payload?.confirmation_question || "
 const options = computed(() => (Array.isArray(props.payload?.options) ? props.payload.options : [])
   .map(item => stripOptionPrefix(item))
   .filter(Boolean));
-/** 这一步的参考图（steps[].images）：渲染在「参考来源」上方，宽高自适应 */
+/** 这一步的参考图（steps[].images）：渲染在「参考来源」上方，交由 GuideImageBlock 展示（多图堆叠滑动 / 单图自适应） */
 const images = computed(() => (Array.isArray(props.payload?.images) ? props.payload.images : [])
   .map(item => ({
     url: normalizeGuideUrl(String(item?.url || "")),
@@ -106,9 +107,6 @@ const images = computed(() => (Array.isArray(props.payload?.images) ? props.payl
 /** 参考来源：由消息列表从同一条回答的 source 组件注入，卡片内沿用「参考来源」样式展示 */
 const sources = computed(() => (Array.isArray(props.payload?.sources) ? props.payload.sources : []));
 
-function previewImage(current: string) {
-  previewGuideImages(current, images.value.map(item => item.url));
-}
 const status = computed(() => String(props.payload?.status || "").trim());
 /**
  * 全部步骤确认完后的步骤小结（payload.summary，由消息列表从 guide-step 的 step_summary 注入）。
@@ -304,20 +302,14 @@ function resolveRootElement(): HTMLElement | null {
       <MarkdownRenderer :content="content" />
     </view>
 
-    <!-- 这一步的参考图：渲染在「参考来源」上方 -->
-    <view v-if="images.length" class="guide-check-block__images">
-      <view v-for="item in images" :key="item.url" class="guide-check-block__image-item">
-        <image
-          class="guide-check-block__image"
-          :src="item.url"
-          mode="widthFix"
-          @tap.stop="previewImage(item.url)"
-        />
-        <text v-if="item.caption" class="guide-check-block__image-caption">
-          {{ item.caption }}
-        </text>
-      </view>
-    </view>
+    <!-- 这一步的参考图：渲染在「参考来源」上方。
+         复用 GuideImageBlock：多张图片用 swiper 左右滑动切换（堆叠显示），单图保持简单样式，
+         图片名称 / 圆点指示 / 深色主题都由它自己接管 -->
+    <GuideImageBlock
+      v-if="images.length"
+      class="guide-check-block__images"
+      :payload="{ items: images }"
+    />
 
     <!-- 确认问题 + 选项：作业指导一步做完之后的三个出口（下一步 / 换个方式 / 其他问题）。
          最后一步确认完会 emit finish，消息列表把步骤小结注入 payload.summary，
@@ -383,32 +375,9 @@ function resolveRootElement(): HTMLElement | null {
 
 <style lang="scss" scoped>
 /* 这一步的参考图：宽高自适应（widthFix），与对话框里的参考图同一套观感 */
+/* 这一步的参考图区：复用 GuideImageBlock（自带上边距由自身管理），这里只留上方间距 */
 .guide-check-block__images {
-  display: flex;
-  flex-direction: column;
-  gap: 16rpx;
   margin-top: 24rpx;
-}
-
-.guide-check-block__image-item {
-  overflow: hidden;
-  border-radius: 16rpx;
-  background: #f6f6f6;
-}
-
-.guide-check-block__image {
-  display: block;
-  width: 100%;
-  min-height: 240rpx;
-  background: #eeeeee;
-}
-
-.guide-check-block__image-caption {
-  display: block;
-  padding: 12rpx 16rpx 16rpx;
-  color: #666666;
-  font-size: 24rpx;
-  line-height: 34rpx;
 }
 
 .guide-check-block__sources {
@@ -753,11 +722,11 @@ function resolveRootElement(): HTMLElement | null {
 /* ===== 深色：与气泡内其它块同一套材质（正文 #E5E5E5、次要 45% 白、块底 6% 白） ===== */
 .guide-check-block--dark {
   .guide-check-block__brand-text {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-check-block__title {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-check-block__step {
@@ -776,7 +745,7 @@ function resolveRootElement(): HTMLElement | null {
   .guide-check-block__step-title,
   .guide-check-block__content,
   .guide-check-block__question {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   /* 深色正文：步骤 action 走 MarkdownRenderer，浅色覆盖会压过 tagStyle 的深色，
@@ -784,22 +753,22 @@ function resolveRootElement(): HTMLElement | null {
   .guide-check-block__content :deep(p),
   .guide-check-block__content :deep(li),
   .guide-check-block__content :deep(strong) {
-    color: #e5e5e5 !important;
+    color: #fff !important;
   }
 
   /* 深色小结：与步骤正文同一套材质处理 */
   .guide-check-block__summary {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-check-block__summary-title {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-check-block__summary :deep(p),
   .guide-check-block__summary :deep(li),
   .guide-check-block__summary :deep(strong) {
-    color: #e5e5e5 !important;
+    color: #fff !important;
   }
 
   /* 胶囊描边与追问卡同一套：1px 内描边线性渐变 #5A5A5A → #F7F7F7 → #5A5A5A，
@@ -827,7 +796,7 @@ function resolveRootElement(): HTMLElement | null {
 
   .guide-check-block__option-letter,
   .guide-check-block__option-label {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-check-block__option-divider {
@@ -845,18 +814,6 @@ function resolveRootElement(): HTMLElement | null {
   /* 复制的 svg 在深底上接近隐形，整体提亮一档（与 GuideSourceBlock 同做法） */
   .guide-check-block__action-icon {
     filter: brightness(1.7);
-  }
-
-  .guide-check-block__image-item {
-    background: rgba(255, 255, 255, 0.06);
-  }
-
-  .guide-check-block__image {
-    background: rgba(255, 255, 255, 0.08);
-  }
-
-  .guide-check-block__image-caption {
-    color: rgba(255, 255, 255, 0.55);
   }
 
   .guide-check-block__tts-spinner {

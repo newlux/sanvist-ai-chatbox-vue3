@@ -115,7 +115,7 @@ function open() {
   background: rgba(255, 255, 255, 0.06);
 
   .guide-step-block__title {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-step-block__subtitle {

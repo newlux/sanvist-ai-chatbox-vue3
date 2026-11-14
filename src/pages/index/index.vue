@@ -181,6 +181,7 @@ const duplex = useDuplexVoice({
   submit: text => { void sendMessage({ text, markPreviousStopped: true }); },
   setGain: gain => realtimeTts.setPlaybackGain(gain),
   playbackText: () => realtimeTts.playbackText.value,
+  playbackActive: () => realtimeTts.playing.value,
   sessionId: () => chatStore.aiSessionId,
 });
 const { active: duplexActive, starting: duplexStarting, listening: duplexListening, transcript: duplexTranscript } = duplex;
@@ -313,7 +314,7 @@ const messageBottomInset = computed(() => {
   return composerBottomInset.value;
 });
 /**
- * 「按住说话」录音中：输入栏把录音态透出来，顶部灵动岛据此把常态动图换成 sani-logo-sm.gif。
+ * 「按住说话」录音中：输入栏把录音态透出来，顶部灵动岛据此把常态动图换成 sani-logo.webp。
  * 只在录音期间为 true（松手进识别 / 取消 / 发送都会回落），思考 / 回答的状态图逻辑不受影响。
  */
 const voiceListening = ref(false);
@@ -919,14 +920,14 @@ const WELCOME_FLY_PEAK_SCALE = 1.16;
 /** 放大达到峰值的进度点（0~1）：前半程膨胀，后半程收小并加速冲刺 */
 const WELCOME_FLY_PEAK_AT = 0.45;
 
-/** 落位后 listen.gif 在岛内再呼吸多久，然后交回空闲态 sani-logo-sm.gif */
+/** 落位后 listen.gif 在岛内再呼吸多久，然后交回空闲态 sani-logo.webp */
 const WELCOME_LISTEN_IDLE_MS = 900;
 
 /**
  * 岛内是否处在「从初始页飞进来」的 listen 态。
  *
  * 落位后切上去，让飞过来的 listen 图有一段延续；播完（WELCOME_LISTEN_IDLE_MS）
- * 就交回空闲态 sani-logo-sm.gif —— listen.gif 现在是「回答中 / 播报中」的状态图，
+ * 就交回空闲态 sani-logo.webp —— listen.gif 现在是「回答中 / 播报中」的状态图，
  * 空闲时留在上面会让人以为还在播报。
  */
 const islandListenFromWelcome = ref(false);
@@ -1629,7 +1630,7 @@ async function goToChat(options?: { holdMs?: number }) {
       islandListenFromWelcome.value = true;
       // 同一时刻放行「识别中...」文字：图标已经落位，文字再出现不会跟动效打架
       asrTipReady.value = true;
-      // 只延续一小段，随后交回空闲态 sani-logo-sm.gif
+      // 只延续一小段，随后交回空闲态 sani-logo.webp
       if (islandListenIdleTimer) clearTimeout(islandListenIdleTimer);
       islandListenIdleTimer = setTimeout(() => {
         islandListenIdleTimer = null;

@@ -11,9 +11,9 @@ import voiceWaveActive from "@/assets/img/icon-voice-wave-blue.svg";
 import voiceWaveDark from "@/assets/img/icon-voice-wave-dark.svg";
 import voiceWaveLight from "@/assets/img/icon-waveform.svg";
 import listenLogo from "@/assets/img/listen.gif";
-// 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 2.5MB 的 gif 慢网下先空白）
-import saniLogoStatic from "@/assets/img/header-island-logo.png";
-import saniLogoGif from "@/assets/img/sani-logo.gif";
+// 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 1MB 的 webp 慢网下先空白）
+import saniLogoStatic from "@/assets/img/sani-logo.webp";
+import saniLogoWebp from "@/assets/img/sani-logo.webp";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
@@ -32,7 +32,7 @@ import { resolveMotionElement } from "@/utils/voice-message-motion";
  * - `inline-input`（首页初始页）：原地把「点击说话」换成文本输入框、不跳页面，
  *   用户填完点发送才抛 send-text，父页面据此发起提问并进入对话页。
  *
- * 语音 / 文字两条起飞路径的区别只在 logo 的状态图：语音会先挂上 listen.gif
+ * 语音 / 文字两条起飞路径的区别只在 logo 的状态图：语音会先挂上 listen 动图
  * （从第 0 帧起播，父页面据此对齐扩散峰值），文字不换图，直接让常态图飞上去。
  *
  * `nav` 具名插槽：底部输入条上方的一行（首页在纯净模式关闭时塞快捷入口胶囊），
@@ -93,7 +93,7 @@ const waveIconIdle = computed(() => (props.dark ? voiceWaveLight : voiceWaveDark
 /**
  * 中心图标「静态图 → 动图」的无感知切换。
  *
- * sani-logo.gif 约 2.5MB，直接当 src 时慢网下会先空一块再突然出现。
+ * sani-logo.webp 约 1MB，直接当 src 时慢网下仍会先空一块再突然出现。
  * 这里两层叠在同一个 220×220 盒子里：
  * - 底层永远是 header-island-logo.png（静态图，几百 KB，先渲染）；
  * - 动图层一开始 opacity:0（但已在下载），@load 到达后淡入、静态层同时淡出，
@@ -102,13 +102,13 @@ const waveIconIdle = computed(() => (props.dark ? voiceWaveLight : voiceWaveDark
  * 模块级缓存：组件会随首页 welcome / 对话页来回切反复挂载，已经加载过一次就
  * 直接用动图，不必每次都重播一遍切换。
  */
-let saniGifLoadedOnce = false;
-const saniGifReady = ref(saniGifLoadedOnce);
+let saniLogoLoadedOnce = false;
+const saniLogoReady = ref(saniLogoLoadedOnce);
 
-function onSaniGifLoad() {
-  if (saniGifReady.value) return;
-  saniGifLoadedOnce = true;
-  saniGifReady.value = true;
+function onSaniLogoLoad() {
+  if (saniLogoReady.value) return;
+  saniLogoLoadedOnce = true;
+  saniLogoReady.value = true;
 }
 
 /**
@@ -289,26 +289,28 @@ onBeforeUnmount(() => {
           <image
             class="welcome__logo-img"
             :class="{
-              'welcome__logo-img--covered': saniGifReady && !logoDeparting,
+              'welcome__logo-img--covered': saniLogoReady && !logoDeparting,
               'welcome__logo-img--out': logoDeparting,
             }"
             :src="saniLogoStatic"
             mode="aspectFit"
           />
-          <!-- 动图：加载期间保持透明（已在后台下载），load 后淡入；起飞时一起让位给 listen.gif -->
+          <!-- 动图：加载期间保持透明（已在后台下载），load 后淡入；起飞时一起让位给 listen 动图 -->
           <image
             class="welcome__logo-img welcome__logo-img--gif"
-            :class="{ 'welcome__logo-img--in': saniGifReady && !logoDeparting }"
-            :src="saniLogoGif"
+            :class="{ 'welcome__logo-img--in': saniLogoReady && !logoDeparting }"
+            :src="saniLogoWebp"
             mode="aspectFit"
-            @load="onSaniGifLoad"
+            @load="onSaniLogoLoad"
           />
           <image
             v-if="listenMounted"
             class="welcome__logo-listen"
-            :src="listenLogo"
+            :class="{ 'welcome__logo-listen--light': !dark }"
+            :src="listenLogoSrc"
             mode="aspectFit"
             @load="onListenLoad"
+            @error="onListenLogoError"
           />
         </view>
       </view>
@@ -562,7 +564,7 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-/* listen.gif 是 500×500 画布、图案只占中间 201×172，aspectFit 后图案会小一半多；
+/* 深色 listen-dark.webp 图案占画布 40.5%（与旧 gif 同规格），aspectFit 后图案会小一半多；
    按「图案宽度对齐 sani-logo」放大 2.49 倍，并把图案中心偏左上补回来（与灵动岛同一套换算） */
 .welcome__logo-listen {
   opacity: 0;
@@ -582,6 +584,18 @@ onBeforeUnmount(() => {
   transition:
     opacity 400ms cubic-bezier(0.22, 0.61, 0.36, 1),
     transform 400ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* 浅色 listen-light.webp（480×480）：图案占画布 60.5%，是 gif 41% 的 1.48 倍，
+   同一个盒子里只需放大 2.49 / 1.48 ≈ 1.69 倍；图案中心偏右 2.2%，
+   按 1.69 倍折算左移，welcome 的盒子比灵动岛大约 1.75 倍，取 -5rpx */
+.welcome__logo-listen--light {
+  transform: translate(-5rpx, 3.5rpx) scale(1.6);
+}
+
+.welcome--leaving .welcome__logo-listen--light {
+  opacity: 1;
+  transform: translate(-5rpx, 3.5rpx) scale(1.69);
 }
 
 /* 到顶后整组淡出：对话页自己的灵动岛图标在同一位置、同一尺寸接上，

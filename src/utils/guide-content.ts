@@ -1,3 +1,5 @@
+import { openImagePreview } from "@/utils/image-preview";
+
 /** DOM id 里只留 [A-Za-z0-9_-]：id 会被拼进 `#id` 选择器，点号、冒号等字符会破坏选择器 */
 function sanitizeDomId(value: unknown): string {
   return String(value ?? "").trim().replace(/[^\w-]/g, "_");
@@ -30,11 +32,15 @@ export function normalizeGuideUrl(value: unknown): string {
 }
 
 /** GUIDE 正文图片和来源图片共用同一套预览、切换及关闭交互。 */
-export function previewGuideImages(current: unknown, values: unknown[]) {
+export function previewGuideImages(
+  current: unknown,
+  values: unknown[],
+  captions?: Array<string | null | undefined>,
+) {
   const urls = values.map(normalizeGuideUrl).filter(Boolean);
   const currentUrl = normalizeGuideUrl(current);
   if (!currentUrl || !urls.length) return;
-  uni.previewImage({ current: currentUrl, urls });
+  openImagePreview({ urls, current: currentUrl, captions });
 }
 
 /** 点击来源卡时打开原件；非 H5 环境无法直接开外链时复制地址。 */

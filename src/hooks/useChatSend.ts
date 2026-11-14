@@ -1,5 +1,5 @@
 import type { AskSlotSubmitPayload, ChatFile, Identifier } from "@/api/chat/types";
-import type { ChatMessageAttachment } from "@/stores/chat-types";
+import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
 import type {
   ReportAdjustmentAction,
   ReportNavigationAction,
@@ -1051,6 +1051,14 @@ export function useChatSend(scope?: string, handlers?: {
    * 后续用户提问要续在同一个会话里，避免多出一个空会话）。
    * keepSession=true 时不写回：初始化取卡片时用，页面停在原地等卡片，
    * 会话 id 通过 onSessionId 交给页面暂存，等用户真正提问时再续上。
+   *
+   * asMessage=true 时反而不那么「静默」：只省掉那条用户提问气泡，
+   * AI 的回答照样作为一条正式消息写进列表（作业指导 / 任务协同进页面时的自我介绍）。
+   * 这条消息走动普通回答同一套字段映射（blocks / messageId / processStatus），
+   * 但**不触发** onAiAnswerDelta / onAiMessageComplete —— 初始化不该自动开口播报。
+   *
+   * 注意：目前这两个页面的初始化内容直接取 `mock/init-intro`（不走接口），
+   * 这里是留给「接口回来后再切回去」的能力，别误以为现在还在发请求。
    */
   async function sendSilentMessage(options: {
     text: string;
@@ -1065,12 +1073,49 @@ export function useChatSend(scope?: string, handlers?: {
     keepSession?: boolean;
     /** keepSession=true 时把本轮会话 id 抛给页面暂存（每次快照都会回调，覆盖即可） */
     onSessionId?: (conversationId: Identifier | null) => void;
+    /**
+     * true：把这一轮的回答作为一条正式 AI 消息写进列表，流式渲染。
+     * 不写用户提问气泡，所以要配 keepSession=false（会话 id 写回 store，后续提问才续得上）。
+     */
+    asMessage?: boolean;
+    /** asMessage=true 时这条消息的附加字段（如 hideActions / ttsEnabled 的初值） */
+    messageProps?: Partial<UiChatMessage>;
   }) {
     const query = String(options.text || "").trim();
     if (!query) return;
 
     const requestSeq = chatStore.nextRequestSeq();
     const hadSessionId = Boolean(chatStore.aiSessionId);
+    const asMessage = Boolean(options.asMessage);
+    const aiMsgId = `ai-init-${Date.now()}-${requestSeq}`;
+    /** 消息已落列：首拍快照建消息，之后每拍就地更新 */
+    let placed = false;
+
+    /**
+     * 首拍才建消息（让正文 / 卡片随流长出来），建好后按普通回答的字段映射逐拍更新。
+     * 不在发起时就 push：接口第一拍可能什么都没有，先挂一条空气泡反而闪一下。
+     */
+    const commitSnapshot = (snapshot: Parameters<typeof applySnapshot>[2]) => {
+      if (!placed) {
+        placed = true;
+        chatStore.messages.push({
+          id: aiMsgId,
+          role: "ai",
+          content: "",
+          blocks: buildInitialBlocks(),
+          loading: true,
+          interrupted: false,
+          sessionId: chatStore.aiSessionId,
+          messageId: null,
+          processStatus: { phase: "thinking" },
+          ...options.messageProps,
+        });
+      }
+      // skipComplete=true：不派发 onAiMessageComplete，避免初始化这一轮被页面当成
+      // 普通问答去自动听播（自我介绍不该一进页面就开口）。
+      applySnapshot(aiMsgId, "", snapshot, false, true);
+    };
+
     try {
       await consumeChatStream({
         source: stream(createChatRequest(query, [], options.extraInputs ?? {}), { idleTimeoutMs: 60_000 }),
@@ -1080,12 +1125,21 @@ export function useChatSend(scope?: string, handlers?: {
             if (options.keepSession) options.onSessionId?.(snapshot.conversationId);
             else chatStore.aiSessionId = snapshot.conversationId;
           }
+          if (asMessage) commitSnapshot(snapshot);
           options.onBlocks?.(snapshot.blocks, Boolean(snapshot.ended));
         },
       });
     } catch (error) {
       if (!isAbortError(error)) logger.error("silent chat request failed", error);
     } finally {
+      // 落过消息但没走到 message_end（被用户新提问顶掉 / 流异常）：别让气泡一直转圈
+      if (asMessage && placed) {
+        const index = chatStore.findMessageIndex(aiMsgId);
+        const message = index >= 0 ? chatStore.messages[index] : null;
+        if (message?.loading) {
+          chatStore.patchMessageById(aiMsgId, { loading: false, interrupted: true });
+        }
+      }
       // 新会话（会话列表里原本没有这条）拿回来后才需要刷新，和普通发送一致。
       // keepSession 不改 store，这一轮对会话列表不可见，也就不刷新。
       if (!options.keepSession && !hadSessionId && chatStore.aiSessionId) {

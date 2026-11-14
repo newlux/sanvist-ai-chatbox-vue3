@@ -12,7 +12,7 @@ import saniIcon from "@/assets/img/icon-sani.png";
 import iconRightArrow from "@/assets/img/iocn-right-arrow.png";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
-import { toInlineImageUrl } from "@/utils/image-preview";
+import { openImagePreview, toInlineImageUrl } from "@/utils/image-preview";
 import { animateVoiceMessageArrival, readVoiceMessageOrigin, resolveMotionElement } from "@/utils/voice-message-motion";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
@@ -158,7 +158,7 @@ function onPreviewImage(url) {
       : "")
     .filter(Boolean);
   if (!urls.length) return;
-  uni.previewImage({ current: url, urls });
+  openImagePreview({ urls, current: url });
 }
 
 /**

@@ -79,6 +79,36 @@ function upsertBlock(
 }
 
 /**
+ * 图片块的 upsert：命中已有块时把本次 items **合并**（去重），而不是像 upsertBlock 那样
+ * 整体替换 payload——重放/合并的 image 事件可能带多张图，直接覆盖会丢掉流式阶段已有的图。
+ * 未命中时按原样新建，位置落在数组末尾（与 upsertBlock 一致）。
+ */
+function upsertImageBlocks(
+  blocks: AiBlock[],
+  id: string,
+  items: unknown[],
+  fallbackIndex: number,
+): AiBlock[] {
+  const index = blocks.findIndex(block => block.id === id);
+  if (index < 0) {
+    return [...blocks, { id, type: "image", payload: { items }, complete: true }];
+  }
+
+  const existing = blocks[index];
+  const existingItems = Array.isArray(existing.payload.items) ? existing.payload.items : [];
+  // 按 chunk_id 去重合并：已存在的 chunk_id 不再重复加入（重放会把图3-24、图3-25 都带来）
+  const merged = [...existingItems];
+  for (const item of items) {
+    const chunkId = String((item as Record<string, unknown> | undefined)?.chunk_id || "").trim();
+    const already = merged.some(it => String((it as Record<string, unknown> | undefined)?.chunk_id || "").trim() === chunkId);
+    if (!already) merged.push(item);
+  }
+  const nextBlocks = [...blocks];
+  nextBlocks[index] = { ...existing, payload: { ...existing.payload, items: merged }, complete: true };
+  return nextBlocks;
+}
+
+/**
  * 合并一段 answer 正文。
  *
  * 增量事件（delta）直接拼接；但同一条回答偶尔会被「整段重放」一次
@@ -303,6 +333,39 @@ function reduceEventToBlocks(
         receivedContent: true,
       };
     }
+    case "answer_layout": {
+      /**
+       * workflow_finished 重放 outputs.answer 的整体重建（见 dify.ts 的 workflow_finished 分支）：
+       * 流式正文已全部写进同一个 answer 块、协议卡片只能追加到末尾时，气泡会变成
+       * 「先全部文本、后全部图片」。这里用携带的完整事件序列从空 blocks 重折叠一遍，
+       * 产出按 outputs.answer 权威顺序图文交错的块序列后**整体替换**现有块：
+       * - 重折叠走 applyEventToBlocks 的既有去重 / tips 移除逻辑，正文不会出现两份；
+       * - answer-N 编号与流式正常场景一致，image / source / voice 的 id 本身按内容锚定，
+       *   Vue 渲染 key 稳定，替换不会引起整卡重挂；
+       * - 序列内嵌套的 assistant_scene / language_switch 指令原样上抛，由快照消费侧执行。
+       */
+      const sourceEvents = Array.isArray(event.data?.events)
+        ? event.data.events as ChatStreamEvent[]
+        : [];
+      let rebuilt: AiBlock[] = buildInitialBlocks();
+      let assistantScene: string | undefined;
+      let languageSwitch: string | undefined;
+      for (const item of sourceEvents) {
+        const update = applyEventToBlocks(rebuilt, item);
+        if (update.assistantScene) assistantScene = update.assistantScene;
+        if (update.languageSwitch) languageSwitch = update.languageSwitch;
+        rebuilt = update.blocks;
+      }
+      // 重建序列没有任何可展示块（如 outputs.answer 只剩播报层）时保留原块，避免丢内容
+      if (!rebuilt.length) return base;
+      return {
+        ...base,
+        blocks: rebuilt,
+        receivedContent: true,
+        ...(assistantScene ? { assistantScene } : {}),
+        ...(languageSwitch ? { languageSwitch } : {}),
+      };
+    }
     case "message_end":
       return {
         ...base,
@@ -438,10 +501,24 @@ function reduceEventToBlocks(
     case "image": {
       const imageIndex = blocks.filter(block => block.type === "image").length;
       const items = Array.isArray(event.data?.items) ? event.data.items : [];
-      const imageId = stablePayloadId("image", items.map(item => (item as Record<string, unknown>)?.chunk_id), imageIndex);
+      /**
+       * 图片块的稳定 id 只按「首张图的 chunk_id」生成，而不是用全部 chunk_id 拼一串。
+       *
+       * 原因：流式阶段每张图是独立 image 事件（id=image-<图A>、image-<图B>）；而
+       * workflow_finished 重放 outputs.answer 时，`extractSanvistEvents` 的相邻图片合并
+       * 逻辑（dify.ts appendGuideEvent）会把相邻图片并成一个 image 事件（items 含多张）。
+       * 若 id 用全部 chunk_id 拼接，合并后的 id（image-<图A>-<图B>）就与流式阶段各自独立的
+       * id（image-<图A>）对不上，upsertBlock 找不到已有块、当成新块 append 到末尾——
+       * 于是「参考来源（source）」之后又冒出一个重复的图片堆叠块。
+       *
+       * 这里只取首项 chunk_id 作 id 锚点，让重放/合并的 image 事件命中流式阶段已有的
+       * 首图块；再在下方把本次 items 合并进去（去重），保持原块位置、不新增到 source 之后。
+       */
+      const firstChunkId = String((items[0] as Record<string, unknown> | undefined)?.chunk_id || "").trim();
+      const imageId = stablePayloadId("image", firstChunkId ? [firstChunkId] : [], imageIndex);
       return {
         ...base,
-        blocks: upsertBlock(blocks, imageId, "image", event.data, true),
+        blocks: upsertImageBlocks(blocks, imageId, items, imageIndex),
         receivedContent: true,
       };
     }

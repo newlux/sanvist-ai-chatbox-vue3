@@ -135,14 +135,14 @@ function pick(option: string) {
   word-break: break-word;
 }
 
-/* ===== 深色：与其它块同一套材质（正文 #E5E5E5、次要 45% 白、块底 6% 白） ===== */
+/* ===== 深色：与其它块同一套材质（正文 #FFF、次要 45% 白、块底 6% 白） ===== */
 .guide-lead--dark {
   .guide-lead__text {
-    color: #e5e5e5;
+    color: #fff;
   }
 
   .guide-lead__label {
-    color: rgba(255, 255, 255, 0.45);
+    color: #fff;
   }
 
   /* 胶囊：深色下不再用渐变边框（浅色渐变在深底上会发亮），改成 16% 白描边 + 6% 白底 */
@@ -153,7 +153,7 @@ function pick(option: string) {
   }
 
   .guide-lead__option-text {
-    color: #e5e5e5;
+    color: #fff;
   }
 }
 </style>

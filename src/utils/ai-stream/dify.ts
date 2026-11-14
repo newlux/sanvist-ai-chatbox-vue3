@@ -191,7 +191,9 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
   const type = String(value?.type || "").toLowerCase();
   const data = asRecord(value?.data) || {};
   if (type === "image") {
-    const items = Array.isArray(data.items) ? data.items.filter(item => asRecord(item)?.url).slice(0, 2) : [];
+    // 不再 slice(0, 2)：图片块内的多张图由 GuideImageBlock 轮播卡片完整展示
+    // （单图走简单样式，多图走 swiper 圆点轮播），截断会导致 >2 张的块显示不全
+    const items = Array.isArray(data.items) ? data.items.filter(item => asRecord(item)?.url) : [];
     return items.length ? { type: "image", payload: { items } } : null;
   }
   if (type === "video") {
@@ -624,7 +626,18 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
         if (!component) continue;
         if (component.kind === "guide") {
           const guideBlock = parseGuideBlock(component.payload);
-          if (guideBlock) blocks.push(...expandStepBlocks(guideBlock));
+          if (guideBlock) {
+            // 合并相邻图片块（历史）：相邻 image COMPONENT 之间无正文时合并成一个连续轮播，
+            // 避免「7.关重结构件」下相邻的图4-80/81 与 图4-82/83 渲染成两个独立轮播。
+            if (guideBlock.type === "image") {
+              const prev = blocks[blocks.length - 1];
+              if (prev?.type === "image" && Array.isArray(prev.payload?.items)) {
+                prev.payload.items.push(...(guideBlock.payload.items as unknown[]));
+                continue;
+              }
+            }
+            blocks.push(...expandStepBlocks(guideBlock));
+          }
           continue;
         }
         if (component.kind === "ask") {
@@ -792,11 +805,17 @@ export function createDifyEventNormalizer() {
   ): ChatStreamEvent[] {
     const events: ChatStreamEvent[] = [];
     let shouldReplace = replaceFirstAnswer;
+    /**
+     * 相邻 image 块之间是否夹了正文。正文即使被 skipAnswers 跳过（workflow_finished 重放时
+     * 正文早已流式给过），也仍算「两个图片块之间隔了文字」——不能据此把它们并成一个轮播。
+     */
+    let answerBetweenImages = false;
     const appendAnswer = (content: unknown, replace = false) => {
       const answer = String(content || "");
       if (!answer) return;
       // 自定义事件包尾通常会带一个协议换行符；它不是回答内容，不能创建空 answer block。
       if ((receivedSanvistEvent || (receivedTips && !receivedAnswer)) && !answer.trim()) return;
+      if (answer.trim()) answerBetweenImages = true;
       if (skipAnswers) return;
       events.push({
         event: "message",
@@ -826,6 +845,30 @@ export function createDifyEventNormalizer() {
       if (guideBlock.type === "guide-check") {
         events.push({ event: "guide_check", ...references, data: guideBlock.payload });
         return;
+      }
+      // 合并相邻图片块：连续两个 image COMPONENT 之间**无正文**时，合并成一个连续轮播
+      // （items 追加）。数据里「7.关重结构件」下的图4-80/81 与 图4-82/83 就是这种相邻块，
+      // 若不合并会渲染成两个独立的 2 张轮播卡片。
+      //
+      // 关键：不能只看「上一个事件是不是 image」——workflow_finished 重放时正文被 skipAnswers
+      // 跳过（不产生 message 事件），两个 image 在事件流里看似相邻，但最终答案里其实隔了正文
+      // （如「第3点后一张图」「第5点后一张图」，中间夹着第4、5点文字），把它们并成一个轮播
+      // 会让页面出现「切一下看到后一页的图」的错误。所以必须同时确认两个 image 之间没有正文。
+      if (guideBlock.type === "image") {
+        const prev = events[events.length - 1];
+        const prevItems = Array.isArray((prev?.data as Record<string, unknown> | undefined)?.items)
+          ? (prev?.data as Record<string, unknown>).items as unknown[]
+          : [];
+        const canMerge = !answerBetweenImages
+          && prev?.event === "image"
+          && prevItems.length > 0
+          && Array.isArray(guideBlock.payload.items);
+        if (canMerge) {
+          prevItems.push(...guideBlock.payload.items as unknown[]);
+          receivedSanvistEvent = true;
+          return;
+        }
+        answerBetweenImages = false; // 新起一段图片区间，后续正文会重新标记
       }
       events.push({ event: guideBlock.type, ...references, data: guideBlock.payload });
     };
@@ -1046,17 +1089,9 @@ export function createDifyEventNormalizer() {
         // 其他纯正文（如二维码占位 / 无备注正文）保持原样
         // 仅进 metadata.outputs_answer，避免被按 message 事件渲染成 answer 气泡，
         // 改动首页 / 听汇报等其他页面的既有行为。
-        //
-        // 正文已经在 message 流里给过时，这里只补卡片（ask / guide 等），不再吐 answer：
-        // chatflow 的 outputs.answer 就是整段回答的原文，重放一遍会让气泡里同一段话出现两份。
         const parseOutputsAnswer = Boolean(outputsAnswer) && (
           protocolOpenPattern.test(outputsAnswer) || (receivedTips && !receivedAnswer)
         );
-        if (parseOutputsAnswer && receivedAnswer) {
-          logger.info("[chat] outputs.answer 与流式正文重复，只补协议卡片", {
-            length: outputsAnswer.length,
-          });
-        }
         /**
          * `<EMERGENCY>…</EMERGENCY>`：工作流结束时下发的「异常全部加急」标记。
          * 标签可能只写在 outputs 的其它字段里（不一定是 answer），所以整包扫一遍，
@@ -1070,11 +1105,31 @@ export function createDifyEventNormalizer() {
         }
         // 收尾快照会重放已显示的提示，只补正式内容。
         const replayingTips = receivedTips;
-        const answerEvents = parseOutputsAnswer
-          ? extractSanvistEvents(outputsAnswer, references, false, receivedAnswer)
+        /**
+         * outputs.answer 重放的两种形态：
+         * - 流式正文没到过（receivedAnswer=false）：按完整事件流顺序入队（含正文），顺序天然正确；
+         * - 流式正文已到过（receivedAnswer=true）：不能再「只补卡片」。Dify 的 message 流可能
+         *   只先吐正文、<COMPONENT> 协议在 outputs.answer 里才出现（或晚到），流式阶段全部正文
+         *   已拼进同一个 answer 块，后补的 image 块只能 append 到末尾——气泡就成了「先全部文本、
+         *   后全部图片」。这里改发 answer_layout：携带按 outputs.answer 权威顺序完整解析的事件序列，
+         *   由 chatStreamParser 从零重建块序列（图文交错）后整体替换，正文不会重复两份。
+         */
+        const parsedAnswerEvents = parseOutputsAnswer
+          ? extractSanvistEvents(outputsAnswer, references, false, false)
+          : [];
+        const layoutEvents: ChatStreamEvent[] = parseOutputsAnswer && receivedAnswer && parsedAnswerEvents.length
+          ? [{
+              event: "answer_layout",
+              ...references,
+              data: { events: parsedAnswerEvents },
+            }]
+          : [];
+        const answerEvents = parseOutputsAnswer && !receivedAnswer
+          ? parsedAnswerEvents.filter(item => !replayingTips || item.event !== "tips")
           : [];
         return [
-          ...answerEvents.filter(event => !replayingTips || event.event !== "tips"),
+          ...layoutEvents,
+          ...answerEvents,
           {
             event: "message_end",
             ...references,

@@ -34,11 +34,13 @@ import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
+import { usePlainTts } from "@/hooks/usePlainTts";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useVoiceQuery } from "@/hooks/useVoiceQuery";
 import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
 import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
+import { getInitIntroContent, getInitIntroSpeech } from "@/mock/init-intro";
 import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { createLogger } from "@/utils/logger";
 import { backFromScene } from "@/utils/scene-navigation";
@@ -194,6 +196,7 @@ const duplex = useDuplexVoice({
   submit: text => { void sendMessage({ text, markPreviousStopped: true }); },
   setGain: gain => realtimeTts.setPlaybackGain(gain),
   playbackText: () => realtimeTts.playbackText.value,
+  playbackActive: () => realtimeTts.playing.value,
   sessionId: () => chatStore.aiSessionId,
 });
 const { active: duplexActive, starting: duplexStarting, listening: duplexListening, transcript: duplexTranscript } = duplex;
@@ -261,10 +264,81 @@ const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beg
   alignSentMessageToTop: true,
 });
 
+/**
+ * 初始化介绍的口播：走 usePlainTts（按句切分 → /speech/tts/v2/stream）。
+ * mock 消息没有服务端 messageId，走不了 useChatTts / 实时听播那两套，所以这里单独一套。
+ */
+const introTts = usePlainTts(String(systemStore.header?.Lang || "").toLowerCase().startsWith("en") ? "en" : "zh");
+
+/** 补播监听的事件：个别 WebView 会拦掉无用户手势的自动播放，等第一次触摸再补一次 */
+const INTRO_GESTURE_EVENTS = ["touchstart", "pointerdown"] as const;
+let introGestureRetry: (() => void) | null = null;
+
+function disarmIntroVoiceRetry() {
+  const handler = introGestureRetry;
+  if (!handler) return;
+  introGestureRetry = null;
+  INTRO_GESTURE_EVENTS.forEach(name => document.removeEventListener(name, handler));
+}
+
+/** 给刚发起的一段口播挂上「首触补播」：已经出声就什么都不做 */
+function armIntroVoiceRetry(replay: () => void) {
+  disarmIntroVoiceRetry();
+  const handler = () => {
+    disarmIntroVoiceRetry();
+    if (introTts.started.value) return;
+    replay();
+  };
+  introGestureRetry = handler;
+  INTRO_GESTURE_EVENTS.forEach(name => document.addEventListener(name, handler, { once: true, passive: true }));
+}
+
+/** 播报初始化介绍的正文（从 mock 内容里取）；带 messageId 时把气泡上的播报态也点起来 */
+function speakInitIntro(speech: string, messageId?: string) {
+  const text = String(speech || "").trim();
+  if (!text) return;
+  if (messageId) chatStore.patchMessageById(messageId, { ttsLoading: true });
+  introTts.speak(text);
+  armIntroVoiceRetry(() => introTts.speak(text));
+}
+
+/**
+ * 初始化 mock 消息的播报开关：这类消息没有服务端 messageId，走不了 useChatTts，
+ * 复用开场白这套 plain tts；再点一次就是停。
+ */
+function toggleMockIntroTts(message: UiChatMessage) {
+  const speech = String(message.mockSpeech || getInitIntroSpeech(message.blocks || [])).trim();
+  if (!speech) return;
+  if (introTts.playing.value) {
+    introTts.stop();
+    chatStore.patchMessageById(message.id, { ttsPlaying: false, ttsLoading: false });
+    return;
+  }
+  speakInitIntro(speech, message.id);
+}
+
+/**
+ * plain tts 不维护消息上的播报态：按引擎的 playing 回填到气泡，
+ * 自动开场白与手动点播报都能看到 spinner / 声波，播完自动回落。
+ */
+watch(
+  () => introTts.playing.value,
+  (playing) => {
+    const target = chatStore.messages.find(item => item.role === "ai" && item.mockSpeech && (item.ttsPlaying || item.ttsLoading));
+    if (!target) return;
+    chatStore.patchMessageById(target.id, playing
+      ? { ttsPlaying: true, ttsLoading: false }
+      : { ttsPlaying: false, ttsLoading: false });
+  },
+);
+
 /** 停掉本页两套听播引擎（实时流式 + 历史整段）：换交互 / 离开页面时统一走这里。 */
 function stopSceneTts() {
   realtimeTts.stop();
   stopHistoryTts();
+  // 初始化介绍的口播也一起停：用户开口 / 发送时不该还念着开场白
+  introTts.stop();
+  disarmIntroVoiceRetry();
 }
 
 /**
@@ -778,6 +852,11 @@ function resolveActiveStepId(msg: UiChatMessage | undefined) {
 /** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
 function onTtsClick(index: number, textOverride = "") {
   const msg = chatStore.messages[index];
+  // 初始化 mock 消息：没有服务端 id，走开场白那套 plain tts
+  if (msg?.mockSpeech) {
+    toggleMockIntroTts(msg);
+    return;
+  }
   const messageId = msg?.messageId;
   if (messageId == null || msg?.sessionId == null) return;
   // 小结这类「要念的文本不在消息正文里」的播报用独立判重键，免得和步骤播报互相停
@@ -1160,11 +1239,91 @@ async function loadGuideRecommend() {
   }
 }
 
+/** 等 `/settings` 决定纯净模式的上限（ms）：超时先放行欢迎层，避免整页一直空着 */
+const WELCOME_DECISION_TIMEOUT_MS = 800;
+
+/**
+ * 欢迎层的渲染闸门：设置（纯净模式）没拉回来之前先不铺整屏欢迎层。
+ *
+ * 非纯净模式要直接进自我介绍（mock 内容直接落消息），先铺一层「Hey,SANI」再跳会明显闪一下；
+ * 而纯净模式到底开没开取决于 `/settings`，不能凭首帧的默认值拍板，所以整层等这个标记落地再渲染。
+ */
+const welcomeDecisionReady = ref(false);
+
+/**
+ * 初始化自我介绍：只在「新开一轮会话」时触发（打开历史会话不走）。
+ *
+ * 现在**不走介绍接口**：直接取 `mock/init-intro` 里的内容，落成一条 AI 消息。
+ * 非纯净模式下**不停留欢迎层**：进来就直接是对话页 + 自我介绍（走助手胶囊、语音输入这些入口跳过来时，
+ * 先铺一帧「Hey,SANI」再切走会明显闪一下）。用户提问气泡不显示。
+ *
+ * - 纯净模式保留原逻辑：什么都不出，停在欢迎层等用户开口；
+ * - 消息列表里已经有内容（用户已经自己开口）：mock 不插队，只把页面切到对话态；
+ * - mock 里原本就没有 tips（「正在思考」这类过程提示），这里再兜一道，别的对话的 tips 照常显示；
+ * - 语种按 `header.Lang` 取；guide 只有一套文案（中英文各一份），task 是三套随机挑一套。
+ */
+function showInitIntro() {
+  const start = () => {
+    welcomeDecisionReady.value = true;
+    if (pureMode.value) return;
+    // 一次取齐「渲染用 blocks + 口播文本」，task 的随机套数在这里定下来，后面不再换
+    const intro = getInitIntroContent("guide", String(systemStore.header?.Lang || ""));
+    const blocks = intro.blocks;
+    if (!blocks.length) return;
+    const messageId = `ai-intro-${Date.now()}`;
+    // 用户已经自己开口：不再插这条 mock（否则会插到他的提问之后）
+    if (!chatStore.messages.length) {
+      chatStore.messages.push({
+        id: messageId,
+        role: "ai",
+        content: "",
+        // 初始化这轮没有流式过程，tips 一律不落
+        blocks: blocks.filter(block => block.type !== "tips"),
+        loading: false,
+        interrupted: false,
+        sessionId: null,
+        // 纯前端 mock：没有服务端消息 id，点播报走 plain tts（见 toggleMockIntroTts）
+        messageId: null,
+        ttsEnabled: true,
+        // Voice 文案单独带在消息上：task 的口播与气泡正文不是同一段话
+        mockSpeech: intro.speech,
+        processStatus: { phase: "succeeded" },
+      });
+    }
+    // 不走欢迎层的起飞动画，直接切到对话页（onLoad 里同步执行，首帧就是自我介绍）
+    enterChatNow();
+    /**
+     * 开场白跟着念出来：guide 念引导卡正文，task 念这套文案的 Voice 文本。
+     * 必须等这一拍落定再开口：onLoad 里的 resetConversation() 会改一次 activeRequestSeq，
+     * 它对应的 watch（stopSceneTts → introTts.stop）是在下一个微任务里跑的 ——
+     * 口播若在这里同步发起，刚发出的 speech/tts/v2/stream 会被那一拍立刻 abort，
+     * Network 里就是一串「已取消」的 stream，口播一声不出。
+     */
+    void nextTick(() => speakInitIntro(intro.speech, messageId));
+  };
+  // 设置由 App.vue 异步拉取（不 await 首屏），进页面时纯净模式可能还没落地；
+  // 没落地就等它回来再判断，否则纯净模式会被当成关闭。闸门挡住欢迎层，避免先闪一下。
+  if (settingsStore.loaded) {
+    start();
+    return;
+  }
+  // 等 `/settings` 不能无限等：超时先把欢迎层放出来，别让整页一直空着。
+  const timer = setTimeout(() => {
+    welcomeDecisionReady.value = true;
+  }, WELCOME_DECISION_TIMEOUT_MS);
+  void settingsStore.load().then(() => {
+    clearTimeout(timer);
+    start();
+  });
+}
+
 /** 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 GUIDE。 */
 onLoad((options) => {
   syncWindowHeight();
   const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("GUIDE");
   if (sessionId) {
+    // 历史会话不走初始化内容：欢迎层的闸门直接放开（这里本来就 enterChatNow，不会铺欢迎层）
+    welcomeDecisionReady.value = true;
     void openLocalHistory(consumePendingHistorySession("GUIDE") || sessionId, true);
     return;
   }
@@ -1175,6 +1334,8 @@ onLoad((options) => {
   // 每次进入保留欢迎首页；纯净模式只在开始对话后显示顶部菜单。
   guideRecommendContext.value = readGuideRecommendContext(options);
   void loadGuideRecommend();
+  // 新会话先让 AI 自我介绍（历史会话上面已经 return，不会重复出内容）。
+  showInitIntro();
 });
 
 onMounted(() => {
@@ -1205,6 +1366,7 @@ onUnload(() => {
   stopSceneTts();
   clearAutoOpenTimer();
   resetVoiceQuery();
+  disarmIntroVoiceRetry();
 });
 const voiceHoldActive = ref(false);
 const voiceHoldCancelPending = ref(false);
@@ -1251,7 +1413,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       :share-selected-round-count="shareSelectedRoundCount"
       :voice-listening="voiceQueryActive || duplexListening"
       restartable
-      back-on-left
+      :back-on-left="!pureMode"
       close-on-right
       round-buttons
       @back="onBack"
@@ -1268,7 +1430,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
     <!-- 欢迎层：与首页初始页同款（Hey,SANI + logo + 点击说话 / 键盘）；
          起飞动画期间继续挂载，logo 滑到顶部灵动岛再收起 -->
     <AiWelcome
-      v-if="showWelcome || voiceHoldActive"
+      v-if="(showWelcome && welcomeDecisionReady) || voiceHoldActive"
       :leaving="welcomeLeaving || !showWelcome"
       :landed="welcomeLanded || !showWelcome"
       :logo-style="welcomeLogoStyle"
@@ -1616,8 +1778,9 @@ $color-white: #ffffff;
   overflow: hidden;
   position: relative;
   // 顶部毛玻璃层的高度 = 悬浮头部在内容里的占位（与首页对话页同一个值）
-  --chat-top-inset: calc(constant(safe-area-inset-top) + 300rpx);
-  --chat-top-inset: calc(env(safe-area-inset-top) + 300rpx);
+  // 210rpx 略高于 200rpx 的实色头部：首条消息贴着头部下沿起步，上一轮的尾巴不会在灵动岛下面露一截
+  --chat-top-inset: calc(constant(safe-area-inset-top) + 210rpx);
+  --chat-top-inset: calc(env(safe-area-inset-top) + 210rpx);
   // 悬浮头部不占布局，需要给「欢迎区」补回来的实际头部高度：状态栏占位 + 栏高 50px
   --chat-header-height: calc(max(var(--safe-top-px, 0px), env(safe-area-inset-top)) + 100rpx);
 }
@@ -1700,6 +1863,20 @@ $color-white: #ffffff;
 
   .ai-chat-glow {
     display: none;
+  }
+
+  /* 深色模式：固定问候语 / 问题列表文字反白，保证在暗底上可读 */
+  .guide-welcome__title,
+  .guide-welcome__question {
+    color: #fff;
+  }
+
+  .guide-welcome__greeting {
+    color: #d9d9d9;
+  }
+
+  .guide-welcome__label {
+    color: #a3a3a3;
   }
 
 

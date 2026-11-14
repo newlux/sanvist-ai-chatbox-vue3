@@ -8,7 +8,7 @@ import { useI18n } from "vue-i18n";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl, validateWakeWord } from "@/api/chat";
 import { getFlowSteps } from "@/api/flow";
 import welcomeVoiceSrc from "@/assets/audio/voice/welcome-task.wav";
-import brandLogo from "@/assets/img/sani-logo.gif";
+import brandLogo from "@/assets/img/sani-logo.webp";
 import SaniLogoStage from "@/components/sani-logo-stage/index.vue";
 import { usePlainTts } from "@/hooks/usePlainTts";
 import { useSafeArea } from "@/hooks/useSafeArea";

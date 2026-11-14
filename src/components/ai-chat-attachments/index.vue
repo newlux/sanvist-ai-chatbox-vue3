@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ComposerAttachment } from "@/hooks/useComposerAttachments";
 import { formatAttachmentStatus } from "@/hooks/useComposerAttachments";
+import { openImagePreview } from "@/utils/image-preview";
 
 defineProps<{ attachments: ComposerAttachment[] }>();
 
@@ -25,7 +26,7 @@ function onItemTap(attachment: ComposerAttachment) {
   if (attachment.type === "image") {
     const localPath = thumbSrc(attachment);
     if (!localPath) return;
-    uni.previewImage({
+    openImagePreview({
       urls: [localPath],
       current: 0,
     });

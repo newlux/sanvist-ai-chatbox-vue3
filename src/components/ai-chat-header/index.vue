@@ -6,11 +6,15 @@ import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import autoTtsOffIcon from "@/assets/img/icon-tts-auto-off.png";
 import autoTtsOffSvgIcon from "@/assets/img/icon-tts-auto-off.svg";
 import autoTtsOnIcon from "@/assets/img/icon-tts-auto-on.png";
+import listenLogoDark from "@/assets/img/listen-dark.webp";
 import listenLogoGif from "@/assets/img/listen.gif";
+import listenLogoLight from "@/assets/img/listen-light.webp";
 import minimizeIcon from "@/assets/img/min_icon.png";
-import saniLogoSmGif from "@/assets/img/sani-logo-sm.gif";
+import saniLogoWebp from "@/assets/img/sani-logo.webp";
+import tellLogoDark from "@/assets/img/tell-dark.webp";
 import tellLogoGif from "@/assets/img/tell.gif";
-import thinkLogoGif from "@/assets/img/think.gif";
+import tellLogoLight from "@/assets/img/tell-light.webp";
+import thinkLogoWebp from "@/assets/img/think.webp";
 import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useSafeArea } from "@/hooks/useSafeArea";
@@ -44,7 +48,8 @@ const props = defineProps({
   backOnly: { type: Boolean, default: false },
   /**
    * 左侧按钮显示「返回」箭头（emit back），替掉默认的历史对话抽屉按钮。
-   * 作业指导、任务协同两种纯净模式下都传 true：左侧返回上一页，右侧仍返回宿主首页。
+   * 作业指导 / 任务协同按纯净模式传：纯净模式**关闭**时传 true（左侧返回上级页面），
+   * 纯净模式**开启**时传 false（左侧回到默认的历史对话抽屉）。右侧始终返回宿主首页。
    * （与 backOnly 的区别：backOnly 连右侧按钮和语音播报开关一起收掉，这里只换左侧。）
    */
   backOnLeft: { type: Boolean, default: false },
@@ -72,7 +77,7 @@ const props = defineProps({
   restartable: { type: Boolean, default: false },
   /**
    * 录音中（按住说话，或初始页「点击说话」那条语音提问链路）。
-   * 只有首页对话页绑定：录音时岛内叠上 sani-logo-sm.gif，其余页面不受影响。
+   * 只有首页对话页绑定：录音时岛内叠上 listen 动图，其余页面不受影响。
    */
   voiceListening: { type: Boolean, default: false },
   /**
@@ -83,7 +88,7 @@ const props = defineProps({
   listenIdle: { type: Boolean, default: false },
   /**
    * 自动听播（TTS）播放中：首页把 useRealtimeTts 的 playing 透进来。
-   * 回答中 → 播报结束这一整段岛内都走 sani-logo-sm.gif，生成结束后由它续上。
+   * 回答中 → 播报结束这一整段岛内都走 tell 动图，生成结束后由它续上。
    */
   realtimeTtsPlaying: { type: Boolean, default: false },
 });
@@ -127,6 +132,38 @@ function onToggleAutoTts() {
  * 分享选择态是白底文字条，同理先不跟深色走。
  */
 const darkPlain = computed(() => props.plainBg && !props.shareMode && systemStore.isDark);
+
+/**
+ * 灵动岛状态图按深浅色分两套 webp：
+ * - 浅色：listen-light.webp / tell-light.webp；
+ * - 深色：listen-dark.webp / tell-dark.webp。
+ * 原来的 listen.gif / tell.gif 只留作加载失败时的兜底（个别老内核不认 webp）。
+ * 注意两张 listen 的图案占画布比例不同（light 60.5% / dark 40.5%），
+ * 所以 scale 补偿也不同，见样式里 .chat-header__island-logo--listen-light。
+ */
+const listenLogoFailed = ref(false);
+const tellLogoFailed = ref(false);
+
+const listenLogoSrc = computed(() => {
+  if (listenLogoFailed.value) return listenLogoGif;
+  return systemStore.isDark ? listenLogoDark : listenLogoLight;
+});
+
+const tellLogoSrc = computed(() => {
+  if (tellLogoFailed.value) return tellLogoGif;
+  return systemStore.isDark ? tellLogoDark : tellLogoLight;
+});
+
+/** 个别老内核（智慧屏 / 大屏一体机）不认 webp：加载失败退回 gif，避免岛内空一块 */
+function onListenLogoError() {
+  listenLogoFailed.value = true;
+  stateGifLoaded.value.listen = false;
+}
+
+function onTellLogoError() {
+  tellLogoFailed.value = true;
+  stateGifLoaded.value.tell = false;
+}
 /**
  * 自动播报开关图标：关闭态在深色下换 icon-tts-auto-off.svg（#6B6B6B 线稿 + 斜杠缺口）。
  * 走这张图时不能套头部的统一反相，否则线稿会被整片染白、缺口糊掉，见样式里 tts-switch--off 的 filter: none。
@@ -149,20 +186,29 @@ const answering = computed(() => {
  */
 const thinking = computed(() => props.generating && !answering.value);
 /**
- * 播报中 = 已出字进入「回答中」，一直到自动听播（TTS）放完为止。
- * 生成结束后 answering 会落回 false，由 realtimeTtsPlaying 续上，两段相接就是完整的播报期。
+ * 消息上的播报态：气泡里的声波 / 播放图标就是按它亮的（见 ai-message-list）。
+ * 除了首页的实时听播（useRealtimeTts，有对应 prop），其余两条播报链路只写消息、不看 prop：
+ * - 开场白自我介绍（usePlainTts，没有服务端 messageId）；
+ * - 历史消息整段播报（useChatTts → GET /chat/tts）。
+ * 只看 prop 的话这两种播报岛内不会切到 tell，和气泡状态对不上，所以这里一起兜住。
  */
-const telling = computed(() => answering.value || props.realtimeTtsPlaying);
+const anyMessageTtsPlaying = computed(() => chatStore.messages.some(message => Boolean(message?.ttsPlaying)));
+/**
+ * 播报中 = 已出字进入「回答中」，一直到自动听播（TTS）放完为止。
+ * 生成结束后 answering 会落回 false，由 realtimeTtsPlaying（以及消息上的播报态）续上，
+ * 两段相接就是完整的播报期。
+ */
+const telling = computed(() => answering.value || props.realtimeTtsPlaying || anyMessageTtsPlaying.value);
 /** 录音中（按住说话 / 初始页「点击说话」那条语音链路） */
 const recording = computed(() => props.voiceListening);
 /**
  * 岛内动图按状态分四层，各自作为叠图靠 opacity 交叉溶解（绝不切常态图的 src，换源是硬切）：
- *   空闲            → sani-logo-sm.gif（常驻底层；96×85，与旧常态图 300×267 同比例同裁切）
- *   正在思考        → think.gif
- *   正在回答 / 自动播报 → tell.gif
- *   语音输入（点击说话 → 录音中）→ listen.gif
+ *   空闲            → sani-logo.webp（常驻底层；240×214，已裁到图案边界）
+ *   正在思考        → think.webp（480×240，2:1 透明画布，aspectFill 裁掉两侧留白）
+ *   正在回答 / 自动播报 → tell-light / tell-dark.webp（加载失败退 tell.gif）
+ *   语音输入（点击说话 → 录音中）→ listen-light / listen-dark.webp（加载失败退 listen.gif）
  * 优先级：语音输入 > 回答/播报 > 思考 > 从初始页飞入那一段，同一时刻只亮一层。
- * 动图不分深浅色：listen.gif / tell.gif 只此一套，透明底，深浅两种头部都直接叠。
+ * 全部透明底，深浅两种头部都直接叠。
  */
 // 替代图加载成功后才隐藏常态图；资源缺失或尚未解码时仍保留可见的三角图。
 const stateGifLoaded = ref({ listen: false, tell: false, think: false });
@@ -685,13 +731,13 @@ onBeforeUnmount(() => {
                   <circle class="chat-header__press-ring-arc" cx="36" cy="36" r="34" />
                 </svg>
               </view>
-              <!-- 岛内三角图标：动态 GIF（原 header-island-logo.png 的动画版），空闲 sani-logo-sm.gif；
-                   空闲 sm / 思考 think / 回答·播报 tell 主题图 / 录音 tell 四层同位置叠图 淡入，
+              <!-- 岛内三角图标：动态 webp（原 header-island-logo.png 的动画版），空闲 sani-logo.webp；
+                   空闲 logo / 思考 think / 回答·播报 tell 主题图 / 录音 listen 四层同位置叠图 淡入，
                    不做 src / mode 切换，位置一律不动 -->
               <!-- 长按 5 秒回到初始页：只有 restartable（首页对话页）碰触摸事件，
                    其它页面的岛保持纯展示、不抢触摸；热区就是三角图本身（62×62） -->
               <!-- 空闲态动图：有状态图亮起时只淡出、不卸载，长按热区与定位基准始终挂在它身上。
-                   这是 sani-logo-sm.gif，绝不在这里换 src —— 换源是硬切，没有过渡；
+                   这是 sani-logo.webp，绝不在这里换 src —— 换源是硬切，没有过渡；
                    状态图各自作为上层叠图淡入淡出，切换才是柔和交叉溶解 -->
               <image
                 class="chat-header__island-logo"
@@ -699,7 +745,7 @@ onBeforeUnmount(() => {
                   'chat-header__island-logo--restartable': props.restartable,
                   'chat-header__island-logo--faded': islandAnyGifOn,
                 }"
-                :src="saniLogoSmGif"
+                :src="saniLogoWebp"
                 mode="aspectFit"
                 @touchstart="onIslandPressStart"
                 @touchmove="onIslandPressMove"
@@ -710,31 +756,33 @@ onBeforeUnmount(() => {
                 @mouseup="clearIslandPressTimer"
                 @mouseleave="clearIslandPressTimer"
               />
-              <!-- 语音输入整段（点击说话起飞 → 录音中 → 松手结束）：listen.gif，
-                   3840×3840 透明画布（三角约占中间 40%），深浅色共用一套，直接叠在头部上；
-                   纯展示层，不吃触摸，避免抢走长按回首页的手势 -->
+              <!-- 语音输入整段（点击说话起飞 → 录音中 → 松手结束）：浅色 listen-light.webp / 深色 listen-dark.webp，
+                   透明画布（三角居中），直接叠在头部上；纯展示层，不吃触摸，避免抢走长按回首页的手势 -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--listen-say"
-                :class="{ 'chat-header__island-logo--listen-say-on': listenSayGifOn }"
-                :src="listenLogoGif"
+                :class="{
+                  'chat-header__island-logo--listen-say-on': listenSayGifOn,
+                  'chat-header__island-logo--listen-light': !systemStore.isDark,
+                }"
+                :src="listenLogoSrc"
                 mode="aspectFit"
                 @load="stateGifLoaded.listen = true"
-                @error="stateGifLoaded.listen = false"
+                @error="onListenLogoError"
               />
-              <!-- 回答中 / 语音播报：tell.gif（同规格透明画布，图形居中，深浅色共用） -->
+              <!-- 回答中 / 语音播报：浅色 tell-light.webp / 深色 tell-dark.webp（图形居中，两张图案占比一致） -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--tell-play"
                 :class="{ 'chat-header__island-logo--tell-play-on': answeringGifOn }"
-                :src="tellLogoGif"
+                :src="tellLogoSrc"
                 mode="aspectFit"
                 @load="stateGifLoaded.tell = true"
-                @error="stateGifLoaded.tell = false"
+                @error="onTellLogoError"
               />
-              <!-- think.gif：正在思考（768×384 画布，留白用 aspectFill 裁掉，换算见 --think 注释） -->
+              <!-- think.webp：正在思考（480×240 画布，留白用 aspectFill 裁掉，换算见 --think 注释） -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--think"
                 :class="{ 'chat-header__island-logo--think-on': thinkingGifOn }"
-                :src="thinkLogoGif"
+                :src="thinkLogoWebp"
                 mode="aspectFill"
                 @load="stateGifLoaded.think = true"
                 @error="stateGifLoaded.think = false"
@@ -1429,9 +1477,10 @@ onBeforeUnmount(() => {
 }
 
 /* 语音输入整段（点击说话起飞 → 录音中 → 松手结束）与回答中 / 自动播报：
-   listen.gif / tell.gif 一套素材、不分深浅色。画布 3840×3840 且透明，三角约占中间 40%
-   （与 sani-logo-sm 已裁到图案边界的 96×85 不同，同一尺寸的盒子里图案会小一半多），按图案宽度对齐：
-   1) 124rpx 的盒子 aspectFit 后图案宽 = 124 × 0.4 ≈ 49.6rpx，要撑满 124rpx → 放大 2.49 倍；
+   浅色 listen-light.webp / tell-light.webp，深色 listen-dark.webp / tell-dark.webp，都是透明画布。
+   下面按「图案占画布 40.5%」的深色版换算（与旧 gif 同规格），与 sani-logo.webp 已裁到图案边界的 240×214 不同，
+   同一尺寸的盒子里图案会小一半多，按图案宽度对齐：
+   1) 124rpx 的盒子 aspectFit 后图案宽 = 124 × 0.41 ≈ 50.8rpx，要撑满 124rpx → 放大 2.49 倍；
    2) 图案中心在画布中心，放大后右移 / 下移各约 2rpx 复位；
    3) drop-shadow 会被 transform 一起放大，这里按 1/2.49 折回去，保持 0 3px 9px rgba(0,0,0,.14)。
    过渡：与常态图交叉溶解 —— 起始 2.36 倍 / 全透明，命中后淡入并缓升到 2.49 倍。 */
@@ -1456,7 +1505,19 @@ onBeforeUnmount(() => {
     transform 0.34s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* think.gif（正在思考）：画布由 3840×1920 等比优化为 768×384，图案只占中间（宽约 40%、高约 68%），两侧是透明留白。
+/* 浅色 listen 用 listen-light.webp（480×480）：图案占画布 60.5%，是 gif 41% 的 1.48 倍，
+   同一个 124rpx 盒子只需放大 2.49 / 1.48 ≈ 1.69 倍。图案中心比画布中心偏右 2.2%，
+   按 1.69 倍折算左移约 4.6rpx，这里取 -3rpx（与深色 +2rpx 的视觉微调同一口径）。
+   tell-light.webp / tell-dark.webp 图案占比与旧 gif 一致，不需要单独换算 */
+.chat-header__island-logo--listen-light {
+  transform: translate(-3rpx, 2rpx) scale(1.6);
+}
+
+.chat-header__island-logo--listen-light.chat-header__island-logo--listen-say-on {
+  transform: translate(-3rpx, 2rpx) scale(1.69);
+}
+
+/* think.webp（正在思考）：画布沿用旧 gif 的 2:1 构图（源 1920×960 缩到 480×240），图案只占中间（宽约 33%、高约 58%），两侧是透明留白。
    1) 留白用 aspectFill 裁掉，图案正好撑满 62×62 的位；
    2) 换算下来图案仍比原图小约 15%（340/400 的缩放差），要放大到 1.18 才与原图视觉等大；
    3) 图案中心在画布上偏下约 2.5%（y 210 / 400），上移 3rpx 让中心仍落在原位置。 */
