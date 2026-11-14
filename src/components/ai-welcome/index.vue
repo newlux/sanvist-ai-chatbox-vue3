@@ -12,7 +12,7 @@ import voiceWaveDark from "@/assets/img/icon-voice-wave-dark.svg";
 import voiceWaveLight from "@/assets/img/icon-waveform.svg";
 import listenLogo from "@/assets/img/listen.gif";
 // 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 1MB 的 webp 慢网下先空白）
-import saniLogoStatic from "@/assets/img/sani-logo.webp";
+import saniLogoStatic from "@/assets/img/header-island-logo.png";
 import saniLogoWebp from "@/assets/img/sani-logo.webp";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";

@@ -51,6 +51,7 @@ import { createLogger } from "@/utils/logger";
 import { onNativeEvent } from "@/utils/platform/mpaas";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingScheduleAsk } from "@/utils/schedule-ask";
+import type { ChatScene } from "@/utils/session-scene";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 import { markWelcomeDone } from "@/utils/welcome-done";
 
@@ -168,9 +169,21 @@ const duplexStatus = computed(() => {
   return duplexActive.value ? duplexTranscript.value || t('duplex-listening') : '';
 });
 
+/**
+ * 任务协同的「沙箱」临时配置：两个值都来自环境变量，只在 .env.development 里配了才生效。
+ * - `VITE_TASK_SCENE=TEST_TASK`：场景改走后端沙箱分支；没配时回退到正常 TASK；
+ * - `VITE_TASK_SANDBOX_CODE=sb0010`：请求体 inputs.code 下发沙箱代码；没配时不下发。
+ * 生产环境（.env.production）不配这两项，行为与原来完全一致。
+ */
+const TASK_SCENE: ChatScene = (String(import.meta.env.VITE_TASK_SCENE || "").trim() || "TASK") as ChatScene;
+const TASK_SANDBOX_CODE = String(import.meta.env.VITE_TASK_SANDBOX_CODE || "").trim();
+
 const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   // 任务协同下发的场景标识：TASK（早期下发过 TEST，两者在历史会话里都按任务协同归类，见 utils/session-scene）
-  scene: "TASK",
+  // dev 环境可以临时改走沙箱场景，见上面的 TASK_SCENE
+  scene: TASK_SCENE,
+  // 沙箱代码只在配了环境变量时下发（dev：sb0010），生产不配 → 不入参
+  getExtraInputs: () => (TASK_SANDBOX_CODE ? { code: TASK_SANDBOX_CODE } : {}),
   // 同首页 / 作业指导：问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
   // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
   // 多步骤卡（guide-step）的回答与作业指导页同一套处理：正文不渲染也不播报（见 ai-bubble-v2 的 contentBlocks）。
@@ -1342,6 +1355,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         :show-business-overview="false"
         :scroll-into-view="scrollIntoView"
         :reply-end-token="replyEndToken"
+        :bottom-jump-token="chatStore.jumpToBottomToken"
         :pin-message-token="chatStore.pinMessageToken"
         :pin-message-id="chatStore.pinMessageId"
         :cap-round-at-top="chatStore.capRoundAtTop"

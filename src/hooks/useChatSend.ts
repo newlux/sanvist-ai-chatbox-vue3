@@ -22,7 +22,7 @@ import { navigateToScene } from "@/utils/scene-navigation";
 const logger = createLogger("chat");
 
 /** TEST 是任务协同当前下发的场景标识（TASK 是早期标识，历史会话仍按任务协同归类，见 utils/session-scene） */
-type ChatScene = "ASK" | "GUIDE" | "TASK" | "TEST" | "PODCAST";
+type ChatScene = "ASK" | "GUIDE" | "TASK" | "TEST" | "TEST_TASK" | "PODCAST";
 
 function isAbortError(error: unknown) {
   if (!error) return false;

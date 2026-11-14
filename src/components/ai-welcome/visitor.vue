@@ -10,7 +10,7 @@ import { getRoleOptions, getTodayAwakeningPrompt } from "@/api/user-role";
 // 自我介绍口播用打包进来的固定音频，不走 TTS 接口（文案见 INTRO_LINES）
 import welcomeAskVoice from "@/assets/audio/voice/welcome-ask.wav";
 // 中心 SANI 图标换成动态 webp（原 header-island-logo.png 的动画版）：
-// 源片 1920×960 / 30fps / 6s，已裁掉透明留白、缩到 240×214、15fps / 66ms，约 1MB
+// 源片 1920×960 / 30fps / 6s，裁到图案外沿并留 ~5% 透明边，缩到 280×260、15fps / 66ms，约 1.1MB
 import saniLogo from "@/assets/img/sani-logo.webp";
 // 深色主题的 SANI 字标：Ardot 1193:4262 按 CROP 原样导出（231×104 @4x，显示 57.69×26）
 import saniWordmarkDark from "@/assets/img/sani-wordmark-dark.png";

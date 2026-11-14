@@ -4,13 +4,14 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import feedbackGoodFilledIcon from "@/assets/img/report-broadcast/feedback-good-filled.svg";
 import feedbackGoodIcon from "@/assets/img/report-broadcast/feedback-good.svg";
-import thinkWebp from "@/assets/img/think.webp";
+import tellLogoDark from "@/assets/img/tell-dark.webp";
+import tellLogoLight from "@/assets/img/tell-light.webp";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { useSystemStore } from "@/stores";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
 
 const props = defineProps<{
-  /** 所选音色头像：头像位已统一改用 think.webp 动图，仅为父级传参兼容保留 */
+  /** 所选音色头像：头像位已统一改用 tell 动图（深浅两套），仅为父级传参兼容保留 */
   portrait?: string;
   playing: boolean;
   loading: boolean;
@@ -39,6 +40,11 @@ const { t } = useI18n();
  */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
+/**
+ * 头像位动图：深浅各一套 tell（light 480×480 / dark 600×600 画布，图案约占画布 40.5%、居中），
+ * 与对话页灵动岛「回答 / 播报」用的是同一组素材。
+ */
+const portraitLogoSrc = computed(() => (isDark.value ? tellLogoDark : tellLogoLight));
 const transcriptViewportRef = ref<unknown>(null);
 const transcriptTrackRef = ref<unknown>(null);
 const transcriptHasScrolled = ref(false);
@@ -203,12 +209,12 @@ onBeforeUnmount(() => {
       <view class="report-broadcast-content__glow report-broadcast-content__glow--blue" />
       <view class="report-broadcast-content__glow report-broadcast-content__glow--red" />
       <!-- 左右声波已去掉（深色稿同步移除，浅色稿本就没有）：头像位只剩图形本体 -->
-      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 think 动图，深浅色共用 think.webp，
-           画布 480×240 透明底，使用 aspectFill 裁掉左右留白，两种主题共用 -->
+      <!-- 头像位（浅色设计稿 195:2031）：112×112 换成 tell 动图，深浅各一套（tell-light / tell-dark），
+           画布为正方形透明底，图案居中占 40.5%，缩放比例见下方 __portrait 注释 -->
       <view class="report-broadcast-content__portrait-wrap">
         <image
           class="report-broadcast-content__portrait"
-          :src="thinkWebp"
+          :src="portraitLogoSrc"
           mode="aspectFill"
         />
       </view>
@@ -321,7 +327,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   overflow: visible;
 }
-/* 头像位保持 480rpx 正方形；think.webp 为 2:1 画布，aspectFill 等比裁掉两侧透明留白。 */
+/* 头像位保持 480rpx 正方形；tell 是正方形画布（light 480×480 / dark 600×600），
+   图案居中、约占画布 40.5%，四周是透明留白，不需要 aspectFill 裁切。 */
 .report-broadcast-content__portrait-wrap {
   position: relative;
   display: flex;
@@ -336,8 +343,10 @@ onBeforeUnmount(() => {
   z-index: 1;
   width: 480rpx;
   height: 480rpx;
-  /* 仅缩小动画本体，保留原占位，避免字幕位置随之跳动。 */
-  transform: scale(0.5);
+  /* 只缩小动画本体、保留原占位，字幕位置不跟着跳。
+     tell 图案占画布 40.5% → 480rpx 盒子里图案约 194rpx；缩到 0.81 后约 157rpx，
+     与原来 think（aspectFill 裁成 1:1 后 158rpx）视觉等大。 */
+  transform: scale(0.81);
   transform-origin: center;
 }
 .report-broadcast-content__glow {
@@ -594,14 +603,14 @@ onBeforeUnmount(() => {
 
 /* ===== 浅色主题：Ardot 195:1927「日常运营助手-听播-正在播放」=====
    只按浅色稿的坐标与材质实现，深色稿（1193:2708）继续走下面的 --dark 块：
-   - 头像位 195:2031：换成 think.webp 动图，画布 480×240 等比缩到 180px 摆放
+   - 头像位 195:2031：换成 tell-light.webp 动图，正方形画布、图案居中占 40.5%，整体缩到 0.81 摆放
    - 光晕：浅色稿无此元素，隐藏（声波两个主题都已去掉）
    - 字幕 195:1985：左 44 / 右 48（文本宽 283），头像底 → 文字顶 49px，18/26 Medium #0D0D0D
    - 上下渐隐：底色跟随页面底色 #FAFAFA，文字淡出不出现色块接缝 */
 .report-broadcast-content--light {
   /**
-   * 头像位放 think.webp：画布 480×240、透明底，等比缩到 240px（480rpx），
-   * 图形本体约占画布中间 40%（其余是透明留白），按「画布中心 = 头像位中心」摆放：
+   * 头像位放 tell-light.webp：正方形画布、透明底，缩放后图案约 157rpx，
+   * 按「画布中心 = 头像位中心」摆放：
    *   - 舞台高度 110px（220rpx）= 设计稿头像位 112px；
    *   - 480rpx 画布相对 220rpx 舞台上下各溢出 130rpx（65px），溢出部分全透明，不遮字幕。
    */
@@ -674,7 +683,7 @@ onBeforeUnmount(() => {
    - 答案卡 1193:3413：底 #1A1A1A + 1px #303030 描边，正文 #FFFFFF；标题 #FFFFFF、过程说明 #8F8F8F
    - 骨架屏：浅色 #F2F3F5→#E5E7EB 的流光换成 #212121→#303030 */
 .report-broadcast-content--dark {
-  /* 头像位同样用 think.webp：透明底素材直接叠在 #0D0D0D 上，
+  /* 头像位同样用 tell-dark.webp：透明底素材直接叠在 #0D0D0D 上，
      不再需要 screen 混合或径向遮罩去消方形色差 */
 
   .report-broadcast-content__glow--blue {

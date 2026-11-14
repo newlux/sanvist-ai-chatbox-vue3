@@ -203,7 +203,7 @@ const telling = computed(() => answering.value || props.realtimeTtsPlaying || an
 const recording = computed(() => props.voiceListening);
 /**
  * 岛内动图按状态分四层，各自作为叠图靠 opacity 交叉溶解（绝不切常态图的 src，换源是硬切）：
- *   空闲            → sani-logo.webp（常驻底层；240×214，已裁到图案边界）
+ *   空闲            → sani-logo.webp（常驻底层；280×260，图案占画布 89.3%，四周留透明边）
  *   正在思考        → think.webp（480×240，2:1 透明画布，aspectFill 裁掉两侧留白）
  *   正在回答 / 自动播报 → tell-light / tell-dark.webp（加载失败退 tell.gif）
  *   语音输入（点击说话 → 录音中）→ listen-light / listen-dark.webp（加载失败退 listen.gif）
@@ -740,7 +740,7 @@ onBeforeUnmount(() => {
                    这是 sani-logo.webp，绝不在这里换 src —— 换源是硬切，没有过渡；
                    状态图各自作为上层叠图淡入淡出，切换才是柔和交叉溶解 -->
               <image
-                class="chat-header__island-logo"
+                class="chat-header__island-logo chat-header__island-logo--idle"
                 :class="{
                   'chat-header__island-logo--restartable': props.restartable,
                   'chat-header__island-logo--faded': islandAnyGifOn,
@@ -1459,7 +1459,7 @@ onBeforeUnmount(() => {
   left: 18rpx; // 9px
   width: 124rpx; // 62px（722:340 实测 62×62）
   height: 124rpx;
-  // 图片本身是透明背景 GIF（96×85，内容已裁到图案边界），这里再显式声明一次透明底，
+  // 图片本身是透明背景 webp（280×260，图案四周留了透明边），这里再显式声明一次透明底，
   // 防止 image 组件/内核给它补上默认白底而露出方形
   background-color: transparent;
   border: 0;
@@ -1471,6 +1471,18 @@ onBeforeUnmount(() => {
     transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
+/* 空闲 logo 的盒子比其余三层（124rpx）大一圈：sani-logo.webp 画布四周留了约 5% 透明边，
+   图案只占画布 89.3%，用 124rpx 盒子显示图案只剩 ~111rpx，比设计的 62px 小一圈。
+   这里把盒子放大到 138rpx，图案仍是 124rpx，同时四角都留出余量 ——
+   循环动画放到最大那一帧也不会顶到盒子边被切掉三个角。
+   盒子以原 124rpx 盒子的中心对齐：left 18 − 7 = 11、top 10.4 − 7 = 3.4。 */
+.chat-header__island-logo--idle {
+  top: 3.4rpx;
+  left: 11rpx;
+  width: 138rpx;
+  height: 138rpx;
+}
+
 /* 常态图在思考中淡出，但保留在原位：长按热区不动，位置不抖 */
 .chat-header__island-logo--faded {
   opacity: 0;
@@ -1478,7 +1490,7 @@ onBeforeUnmount(() => {
 
 /* 语音输入整段（点击说话起飞 → 录音中 → 松手结束）与回答中 / 自动播报：
    浅色 listen-light.webp / tell-light.webp，深色 listen-dark.webp / tell-dark.webp，都是透明画布。
-   下面按「图案占画布 40.5%」的深色版换算（与旧 gif 同规格），与 sani-logo.webp 已裁到图案边界的 240×214 不同，
+   下面按「图案占画布 40.5%」的深色版换算（与旧 gif 同规格），与 sani-logo.webp 图案占 89.3% 不同，
    同一尺寸的盒子里图案会小一半多，按图案宽度对齐：
    1) 124rpx 的盒子 aspectFit 后图案宽 = 124 × 0.41 ≈ 50.8rpx，要撑满 124rpx → 放大 2.49 倍；
    2) 图案中心在画布中心，放大后右移 / 下移各约 2rpx 复位；

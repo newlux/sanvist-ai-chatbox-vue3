@@ -2173,6 +2173,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         :top-aligned="true"
         :scroll-into-view="scrollIntoView"
         :reply-end-token="replyEndToken"
+        :bottom-jump-token="chatStore.jumpToBottomToken"
         :pin-message-token="chatStore.pinMessageToken"
         :pin-message-id="chatStore.pinMessageId"
         :cap-round-at-top="chatStore.capRoundAtTop"
