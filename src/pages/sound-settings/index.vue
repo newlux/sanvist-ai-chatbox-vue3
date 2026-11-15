@@ -97,7 +97,7 @@ const rate = ref(normalizeRate(settingsStore.speechRate));
 const dragging = ref(false);
 /** 正在试听的音色 code（空串 = 没在播） */
 const playingCode = ref("");
-/** 保存结果提示文案（空串 = 不显示），白底蓝边胶囊，页面正中 */
+/** 保存结果提示文案（空串 = 不显示），#303030FF 实心底 + 蓝边胶囊，页面正中 */
 const toastText = ref("");
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -509,19 +509,7 @@ onMounted(async () => {
       </view>
     </scroll-view>
 
-    <!-- 屏幕底部渐变：贴着下边缘的一层蓝色辉光，纺锤体 + 波纹两种动效叠加。
-         纯装饰层（pointer-events: none），压在内容之上但不会挡住任何点击 -->
-    <view class="sound-settings__glow" aria-hidden="true">
-      <view class="sound-settings__glow-spindle sound-settings__glow-spindle--1" />
-      <view class="sound-settings__glow-spindle sound-settings__glow-spindle--2" />
-      <view class="sound-settings__glow-spindle sound-settings__glow-spindle--3" />
-      <view class="sound-settings__glow-ring sound-settings__glow-ring--1" />
-      <view class="sound-settings__glow-ring sound-settings__glow-ring--2" />
-      <view class="sound-settings__glow-wave" />
-      <view class="sound-settings__glow-edge" />
-    </view>
-
-    <!-- 保存结果提示：白底 + 1px #1166D6 描边 + 圆角胶囊，页面正中（对齐设计截图） -->
+    <!-- 保存结果提示：#303030FF 实心底 + 1px #1166D6 描边 + 圆角胶囊，页面正中（对齐设计截图） -->
     <view v-if="toastText" class="sound-settings__toast">
       {{ toastText }}
     </view>
@@ -531,14 +519,6 @@ onMounted(async () => {
 <style lang="scss" scoped>
 /* 设计稿 180:143 页面：375×831，底色 #FAFAFA */
 .sound-settings {
-  /* 底部辉光的配色变量：浅色稿用品牌蓝，深色稿在 .sound-settings--dark 里整体调亮 */
-  --glow-core-1: rgba(17, 102, 214, 0.55);
-  --glow-core-2: rgba(76, 150, 255, 0.4);
-  --glow-core-3: rgba(0, 180, 255, 0.36);
-  --glow-wave: rgba(17, 102, 214, 0.32);
-  --glow-edge: rgba(17, 102, 214, 0.45);
-  --glow-edge-strong: rgba(76, 150, 255, 0.8);
-
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -547,9 +527,9 @@ onMounted(async () => {
   background: #fafafa;
 }
 
-/* 保存结果提示：白底 + 1px（2rpx）#1166D6 描边 + 圆角 12px（24rpx），文字 15px（30rpx）#0D0D0D，
-   水平居中、垂直落在列表面板下段（「专业播报」与「灵动可爱」两张卡之间）；
-   深色底是近透明的 #0000000A，压到文字上会透出字影，位置往下调时要避开卡片文案 */
+/* 保存结果提示：实心 #303030FF 底 + 1px（2rpx）#1166D6 描边 + 圆角 12px（24rpx），
+   文字 15px（30rpx）#FFFFFF，水平居中、垂直落在列表面板下段（「专业播报」与「灵动可爱」两张卡之间）；
+   底色不透明（FF），深浅两个主题都用同一块深灰浮标，压在页面文字上不会透出字影 */
 .sound-settings__toast {
   position: fixed;
   z-index: 1200;
@@ -561,8 +541,8 @@ onMounted(async () => {
   padding: 16rpx 36rpx;
   border: 2rpx solid #1166d6;
   border-radius: 24rpx; /* 12px：比 8px 圆一点，但仍不是胶囊 */
-  background: #ffffff;
-  color: #0d0d0d;
+  background: #303030ff;
+  color: #ffffff;
   font-size: 30rpx;
   line-height: 42rpx;
   text-align: center;
@@ -869,222 +849,12 @@ onMounted(async () => {
 }
 
 /* ==========================================================================
-   屏幕底部辉光：隔着内容浮在屏幕下边缘的一层蓝色渐变，由「纺锤体 + 波纹 + 边缘亮线」三层叠成。
-   设计意图：渐变不是铺满底部的色块，而是压在下边缘的纺锤形光斑，随时间向上扩散、淡出，
-   像水波一圈圈荡开；三个纺锤体错峰呼吸，避免同步显得机械。
-
-   实现取舍：
-   - 只动 transform / opacity，让老 WebView 也走合成层，不触发重排；
-   - 用 radial-gradient 自身淡出，不依赖 mask-image（低端内核支持不全会出现硬边）；
-   - 容器 pointer-events: none，压住内容但不影响任何点击。
-   ========================================================================== */
-.sound-settings__glow {
-  position: fixed;
-  z-index: 900;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 300rpx;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-/* 纺锤体：宽扁椭圆，圆心压在下边缘上下 20~50rpx，只露上半个弧，看起来是贴着边缘长出来的光斑 */
-.sound-settings__glow-spindle {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(14rpx);
-  opacity: 0;
-  transform-origin: 50% 100%;
-  will-change: transform, opacity;
-}
-
-/* 三个纺锤体都用负延迟：进页面时各自停在不同相位，不会先空等几秒才亮 */
-.sound-settings__glow-spindle--1 {
-  bottom: -100rpx;
-  left: 50%;
-  width: 620rpx;
-  height: 300rpx;
-  margin-left: -310rpx;
-  background: radial-gradient(closest-side, var(--glow-core-1) 0%, var(--glow-core-1) 26%, transparent 70%);
-  animation: sound-settings-glow-spindle 7.2s ease-in-out -1s infinite;
-}
-
-.sound-settings__glow-spindle--2 {
-  bottom: -120rpx;
-  left: -18%;
-  width: 480rpx;
-  height: 280rpx;
-  background: radial-gradient(closest-side, var(--glow-core-2) 0%, var(--glow-core-2) 22%, transparent 72%);
-  animation: sound-settings-glow-spindle 5.8s ease-in-out -3.4s infinite;
-}
-
-.sound-settings__glow-spindle--3 {
-  right: -16%;
-  bottom: -110rpx;
-  width: 540rpx;
-  height: 320rpx;
-  background: radial-gradient(closest-side, var(--glow-core-3) 0%, var(--glow-core-3) 24%, transparent 74%);
-  animation: sound-settings-glow-spindle 6.6s ease-in-out -5.2s infinite;
-}
-
-/* 波纹圈：贴着下边缘扩出去的椭圆环，是「水波荡开」的那道亮边 */
-.sound-settings__glow-ring {
-  position: absolute;
-  bottom: -180rpx;
-  left: 50%;
-  width: 560rpx;
-  height: 360rpx;
-  margin-left: -280rpx;
-  border: 2px solid var(--glow-edge);
-  border-radius: 50%;
-  filter: blur(1px);
-  opacity: 0;
-  transform-origin: 50% 100%;
-  animation: sound-settings-glow-ring 6s ease-out infinite;
-  will-change: transform, opacity;
-}
-
-.sound-settings__glow-ring--2 {
-  width: 620rpx;
-  height: 400rpx;
-  margin-left: -310rpx;
-  animation-delay: -3s;
-  animation-duration: 7.4s;
-}
-
-/* 横向波纹：整层左右缓慢漂移，把三个纺锤体连成一片流动的光 */
-.sound-settings__glow-wave {
-  position: absolute;
-  right: -20%;
-  bottom: -80rpx;
-  left: -20%;
-  height: 220rpx;
-  background: radial-gradient(50% 100% at 50% 100%, var(--glow-wave) 0%, transparent 72%);
-  filter: blur(16rpx);
-  animation: sound-settings-glow-wave 11s ease-in-out infinite;
-  will-change: transform, opacity;
-}
-
-/* 屏幕最下沿的一条亮线：波纹荡到边缘时的高光（1px 用 px，其余用 rpx） */
-.sound-settings__glow-edge {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent 0%, var(--glow-edge) 22%, var(--glow-edge-strong) 50%, var(--glow-edge) 78%, transparent 100%);
-  filter: blur(1px);
-  transform-origin: 50% 100%;
-  animation: sound-settings-glow-edge 5.4s ease-in-out infinite;
-  will-change: transform, opacity;
-}
-
-/* 纺锤体：从扁、暗 → 胀开变亮 → 继续上浮并淡出，一圈波纹的完整生命周期 */
-@keyframes sound-settings-glow-spindle {
-  0% {
-    opacity: 0;
-    transform: scale3d(0.66, 0.8, 1) translate3d(0, 12rpx, 0);
-  }
-
-  30% {
-    opacity: 0.85;
-    transform: scale3d(0.96, 0.98, 1) translate3d(0, 0, 0);
-  }
-
-  70% {
-    opacity: 0.34;
-    transform: scale3d(1.18, 1.06, 1) translate3d(0, -12rpx, 0);
-  }
-
-  100% {
-    opacity: 0;
-    transform: scale3d(1.36, 1.14, 1) translate3d(0, -26rpx, 0);
-  }
-}
-
-/* 波纹圈：从底部很小的一圈迅速撑开、变淡，下一圈接上，形成一圈圈荡开的波纹 */
-@keyframes sound-settings-glow-ring {
-  0% {
-    opacity: 0;
-    transform: scale3d(0.45, 0.45, 1);
-  }
-
-  22% {
-    opacity: 0.55;
-  }
-
-  100% {
-    opacity: 0;
-    transform: scale3d(1.5, 1.4, 1) translate3d(0, -18rpx, 0);
-  }
-}
-
-/* 横向波纹：左右漂移 + 明暗呼吸，速度比纺锤体慢一档 */
-@keyframes sound-settings-glow-wave {
-  0%,
-  100% {
-    opacity: 0.5;
-    transform: translate3d(-10%, 0, 0);
-  }
-
-  50% {
-    opacity: 0.9;
-    transform: translate3d(10%, 0, 0);
-  }
-}
-
-/* 边缘亮线：横向轻微伸缩 + 亮度呼吸 */
-@keyframes sound-settings-glow-edge {
-  0%,
-  100% {
-    opacity: 0.45;
-    transform: scaleX(0.94);
-  }
-
-  50% {
-    opacity: 0.95;
-    transform: scaleX(1);
-  }
-}
-
-/* 系统开了「减弱动态效果」时只留静态辉光，不做扩散动画 */
-@media (prefers-reduced-motion: reduce) {
-  .sound-settings__glow-spindle,
-  .sound-settings__glow-ring,
-  .sound-settings__glow-wave,
-  .sound-settings__glow-edge {
-    animation: none;
-  }
-
-  .sound-settings__glow-spindle--1 {
-    opacity: 0.6;
-  }
-
-  .sound-settings__glow-ring {
-    opacity: 0.3;
-  }
-
-  .sound-settings__glow-wave {
-    opacity: 0.7;
-  }
-}
-
-/* ==========================================================================
    深色模式：Ardot 203:1093「声音设置」深色稿（375×831）
    配色链路：#0D0D0D 页面 → #303030 卡片 → 主要文字 #FFFFFF / 次要 #8E8E8E /
    数值 #5D5D5D / 强调 #1166D6 / 轨道 #F3F3F3 / 图标描边 #9E9E9E。
    这里只覆盖颜色与深色才有的圆角（203:1111 列表面板），所有尺寸、间距沿用浅色稿。
    ========================================================================== */
 .sound-settings--dark {
-  /* 深底上蓝色会被吃掉，底部辉光整体提亮一档，浓度略降以免糊住卡片 */
-  --glow-core-1: rgba(94, 160, 255, 0.42);
-  --glow-core-2: rgba(56, 140, 255, 0.36);
-  --glow-core-3: rgba(0, 200, 255, 0.28);
-  --glow-wave: rgba(56, 140, 255, 0.26);
-  --glow-edge: rgba(140, 190, 255, 0.36);
-  --glow-edge-strong: rgba(180, 214, 255, 0.7);
-
   /* 页面底色（深色模式下统一 #0D0D0D） */
   background: #0d0d0d;
 
@@ -1173,11 +943,11 @@ onMounted(async () => {
 
   /* 203:1129 等 Frame 117：波形图标描边 #9E9E9E，与现有 SVG 色值一致，无需覆盖 */
 
-  /* 保存提示：深色下不再用白底胶囊，换成「近透明黑底 + #1166D6 描边 + 白字」，
-     贴在 #1A1A1A 页面上是一层更暗的浮标，不再是一块刺眼的白 */
+  /* 保存提示：深色下同样用实心 #303030FF（与浅色一致），比 #1A1A1A 页面底亮一档，
+     压住卡片文案也不透字影 */
   .sound-settings__toast {
     border-color: #1166d6;
-    background: #0000000a; /* rgba(0, 0, 0, 0.04)：比页面底再暗一点点 */
+    background: #303030ff;
     color: #ffffff;
   }
 }

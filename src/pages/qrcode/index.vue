@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { onLoad } from "@dcloudio/uni-app";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import backIcon from "@/assets/img/nav-arrow-left.svg";
 import backIconDark from "@/assets/img/nav-arrow-left-dark.svg";
+import backIcon from "@/assets/img/nav-arrow-left.svg";
+import qrcodeDark from "@/assets/img/qrcode-dark.png";
+import qrcodeLight from "@/assets/img/qrcode-light.png";
 import stepIcon from "@/assets/img/qrcode-step-form.svg";
-import introVideo from "@/assets/video/qrcode-intro.mp4";
 import introVideoDark from "@/assets/video/qrcode-intro-dark.mp4";
+import introVideo from "@/assets/video/qrcode-intro.mp4";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useSystemStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
-import { encodeQrCode } from "@/utils/qrcode";
 import { backFromScene } from "@/utils/scene-navigation";
 
 /**
@@ -24,10 +24,10 @@ import { backFromScene } from "@/utils/scene-navigation";
  *   观感是「视频里的二维码变成了页面上的二维码」，不跳不硬切。视频兜底见 INTRO_* 常量。
  *
  * 入口：工作流把 `outputs.answer` 置成 `<QRCODE>文案</QRCODE>`（老写法是纯占位文本 "QRCODE"）时，
- * useChatSend 会跳到本页；文案留在聊天气泡里展示，二维码内容取自路由参数 `content`
- * （来自 message_end.metadata.qrcode / qrcode_content）。
- * 没带参数（例如直接打开本页）时扫码指向 App 下载页，与本项目分享面板复用同一地址。
- * 渲染：本地把文本编码成二维码矩阵再拼成 SVG，不依赖第三方库和网络图片。
+ * useChatSend 会跳到本页；文案留在聊天气泡里展示。
+ *
+ * 二维码：改用设计给的静态素材 —— 浅色 `qrcode-light.png` / 深色 `qrcode-dark.png`，
+ *   按当前外观切换（不再按路由内容本地编码）。素材加载失败时退回 `qrcode-failed` 文案。
  */
 
 defineOptions({ name: "QrCodePage" });
@@ -44,32 +44,13 @@ const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
 const introVideoSrc = computed(() => (isDark.value ? introVideoDark : introVideo));
 
-/** 二维码四周的静默区（模块数），少于 4 个很多扫码器识别不到 */
-const QUIET_ZONE = 4;
-/** 默认扫码内容：三一 App 下载页（与 useChatShare 的「复制链接」同一地址） */
-const DEFAULT_QR_CONTENT = "https://portal.sanygroup.com/appDownload/";
-/** 码点渐变（浅色稿 865:1772）：从左上到右下，0% → 48.72% → 76% → 100% */
-const QR_GRADIENT_STOPS = [
-  { offset: "0", color: "#3D21CD" },
-  { offset: "0.4872", color: "#1999FE" },
-  { offset: "0.76", color: "#C067FA" },
-  { offset: "1", color: "#FD90C4" },
-];
-/** 码点渐变（暗色稿 430:4 的渐变矩形，码点由它裁切上色）：同样左上 → 右下 */
-const QR_GRADIENT_STOPS_DARK = [
-  { offset: "0", color: "#5133E8" },
-  { offset: "0.4872", color: "#4BAFFF" },
-  { offset: "0.76", color: "#D491FF" },
-  { offset: "1", color: "#FFB3D7" },
-];
-
-const content = ref(DEFAULT_QR_CONTENT);
-
-onLoad((options) => {
-  // uni 已经把路由 query 解码过一次，这里不再 decodeURIComponent（内容本身可能带 %）
-  const next = String(options?.content ?? "").trim();
-  if (next) content.value = next;
-});
+/**
+ * 二维码素材：设计给了深浅两套 PNG（qrcode-light / qrcode-dark），按当前外观切换。
+ * 码位尺寸由样式里的 `--qrcode-code-size` 统一控制，深浅两端同值。
+ */
+const qrcodeSrc = computed(() => (isDark.value ? qrcodeDark : qrcodeLight));
+/** 素材加载失败时退回文案，避免卡片里空一块 */
+const qrcodeFailed = ref(false);
 
 /** 视频淡完后再等一点才卸载视频层，避免末尾黑帧闪一下（交叉淡入本身是 720ms，写在样式里） */
 const INTRO_UNMOUNT_DELAY_MS = 900;
@@ -158,38 +139,6 @@ onBeforeUnmount(() => {
   if (introUnmountTimer) clearTimeout(introUnmountTimer);
 });
 
-/**
- * 把二维码矩阵拼成单条 SVG path，再套一层渐变填充（设计稿的二维码是彩色码点，不是黑码）。
- * failed 表示内容超出编码容量。
- */
-const qrCode = computed(() => {
-  if (!content.value) return { svg: "", failed: false };
-  try {
-    const { size, modules } = encodeQrCode(content.value);
-    const total = size + QUIET_ZONE * 2;
-    let path = "";
-    for (let row = 0; row < size; row += 1) {
-      for (let col = 0; col < size; col += 1) {
-        if (modules[row][col]) path += `M${col + QUIET_ZONE} ${row + QUIET_ZONE}h1v1h-1z`;
-      }
-    }
-    // 深色稿用的是另一套色标（430:4），按当前外观切换
-    const stops = (isDark.value ? QR_GRADIENT_STOPS_DARK : QR_GRADIENT_STOPS)
-      .map(stop => `<stop offset="${stop.offset}" stop-color="${stop.color}"/>`)
-      .join("");
-    // 渐变用 userSpaceOnUse 铺满整个码区（含静默区），方向与设计稿一致：左上 → 右下
-    // 不铺白色底：设计稿的码点下面透出的是卡片自身的渐变
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges"><defs><linearGradient id="qrcode-color" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${total}" y2="${total}">${stops}</linearGradient></defs><path d="${path}" fill="url(#qrcode-color)"/></svg>`;
-    return { svg, failed: false };
-  }
-  catch (error) {
-    logger.error("failed to encode qrcode content", error);
-    return { svg: "", failed: true };
-  }
-});
-
-const qrSvg = computed(() => qrCode.value.svg);
-
 function onBack() {
   backFromScene();
 }
@@ -218,10 +167,15 @@ function onBack() {
         <view class="qrcode-page__body">
           <!-- 卡片 865:1330：x=24 y=221，327×312，圆角 12，2px 白描边，渐变 #EFF9FF → #FFFFFF -->
           <view class="qrcode-card">
-            <!-- 二维码 865:1337：卡片内距顶 40px，192×192，彩色渐变码点。
-                 二维码是本地编码后拼出来的 SVG 字符串，只能走 v-html -->
-            <!-- eslint-disable-next-line vue/no-v-text-v-html-on-component -->
-            <view v-if="qrSvg" class="qrcode-card__code" v-html="qrSvg" />
+            <!-- 二维码 865:1337：设计给的静态素材，浅色 qrcode-light.png / 深色 qrcode-dark.png，
+                 按当前外观切换；码位尺寸由样式变量 --qrcode-code-size 统一控制 -->
+            <image
+              v-if="!qrcodeFailed"
+              class="qrcode-card__code"
+              :src="qrcodeSrc"
+              mode="aspectFit"
+              @error="qrcodeFailed = true"
+            />
             <view v-else class="qrcode-card__failed">
               <text class="qrcode-card__failed-text">{{ t("qrcode-failed") }}</text>
             </view>
@@ -277,6 +231,12 @@ function onBack() {
 <style lang="scss" scoped>
 /* 整页：865:1327 的 375×812 渐变底 */
 .qrcode-page {
+  /**
+   * 二维码边长（设计稿 192，接视频末帧后放大到 240）。
+   * 定义在页面级、深浅两套共用：深色主题不要再单独覆盖，否则两端码大小会不一致。
+   */
+  --qrcode-code-size: 480rpx;
+
   position: relative;
   width: 100%;
   height: 100vh;
@@ -467,11 +427,13 @@ function onBack() {
   transform: scale(1);
 }
 
-/* 865:1337：原稿 192×192，这里放大到 240×240（码区 188×188），
-   与视频最后一帧缩到这个尺寸后的落点对齐 */
+/* 865:1337：二维码位 240×240，里面放设计给的静态 PNG 素材（浅色 qrcode-light / 深色 qrcode-dark），
+   与视频最后一帧缩到这个尺寸后的落点对齐。
+   尺寸走页面级变量 --qrcode-code-size：深浅两套共用同一个值，深色不覆盖。 */
 .qrcode-card__code {
-  width: 480rpx; // 240px
-  height: 480rpx;
+  display: block;
+  width: var(--qrcode-code-size);
+  height: var(--qrcode-code-size);
 }
 
 /* 编码失败时的兜底，占位与二维码同尺寸，避免卡片高度跳动 */
@@ -479,8 +441,8 @@ function onBack() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 480rpx; // 240px
-  height: 480rpx;
+  width: var(--qrcode-code-size);
+  height: var(--qrcode-code-size);
 }
 
 .qrcode-card__failed-text {
@@ -544,12 +506,14 @@ function onBack() {
 }
 
 /* ==================== 深色模式：Ardot 430:1「二维码页面-方案1」暗色稿 375×812 ====================
-   设计稿关键坐标（px）：标题 y=193、副标题 y=244、卡片 (65,331) 246×252、二维码 (111,372) 159×159。
-   换算 1px = 2rpx；仅覆盖暗色稿与浅色稿的差异项，布局骨架与入场动画沿用上面那套。 */
+   布局与浅色稿完全一致：标题 y=139、副标题 y=181、卡片 y=221、卡片宽 = 屏宽 − 48px、
+   二维码 240×240、卡片内距 40 / 24、入场动画与视频落位参数都沿用上面那套。
+   这里只覆盖配色与材质：页面渐变、标题 / 副标题文字色、卡片深灰实心底（白描边改透明，
+   保留 2px 占位，外框尺寸与浅色逐像素一致）。 */
 
-/* 430:997 背景矩形：375×812，180° 线性渐变（像素采样顶部 #02080A、底部 #041729） */
+/* 430:997 背景矩形：180° 线性渐变（顶部 #0D0D0D、底部 #030F1A） */
 .qrcode-page--dark {
-  background-image: linear-gradient(180deg, #02080a 0%, #041729 100%);
+  background: linear-gradient(180deg, #0d0d0d 0%, #030f1a 100%);
 }
 
 /* 开场视频层的兜底底色：与暗色页面同渐变，视频首帧解码前不会透出浅底 */
@@ -557,66 +521,24 @@ function onBack() {
   background-image: linear-gradient(180deg, #02080a 0%, #041729 100%);
 }
 
-/* 430:989 标题顶 y=193；副标题底(268) → 卡片顶(331) 63px */
-.qrcode-page--dark .qrcode-page__main {
-  padding-top: 386rpx; /* 193px */
-  gap: 126rpx; /* 63px */
-}
-
-/* 标题底(228) → 副标题顶(244) 16px */
-.qrcode-page--dark .qrcode-page__head {
-  gap: 32rpx; /* 16px */
-}
-
-/* 430:989：24px / 行高 35px / Bold / #FFFFFF（行高沿用 70rpx，暗色稿同值） */
+/* 430:989：标题 #FFFFFF（字号 / 行高 / 位置继承浅色） */
 .qrcode-page--dark .qrcode-page__title {
   color: #ffffff;
 }
 
-/* 430:991：16px / 行高 24px / Regular / #9A9A9A */
+/* 430:991：副标题 #9A9A9A（字号 / 行高 / 位置继承浅色） */
 .qrcode-page--dark .qrcode-page__subtitle {
   color: #9a9a9a;
-  line-height: 48rpx; /* 24px */
 }
 
-/* 卡片在暗色稿里是定宽居中的一块（左 65 / 右 64，居中误差 1px） */
-.qrcode-page--dark .qrcode-page__body {
-  align-items: center;
-}
-
-/* 430:990 卡片：246×252，圆角 12，180° 渐变 #323232 → #02090B，无描边、无投影。
-   上内距 41（二维码顶 372 − 卡片顶 331）、下内距 52（卡片底 583 − 二维码底 531），
-   41 + 159 + 52 = 252，高度由内容撑出，不写死 */
+/* 430:990 卡片：只换材质 —— 深灰实心底 + 白描边改透明（保留 2px 占位，外框尺寸不变），
+   宽高 / 内边距 / 圆角 / 缩放动效全部继承浅色 */
 .qrcode-page--dark .qrcode-card {
-  box-sizing: border-box;
-  width: 492rpx; /* 246px */
-  padding: 82rpx 0 104rpx; /* 41px / 52px */
-  border: none;
-  border-radius: 24rpx; /* 12px */
-  background-image: linear-gradient(180deg, #323232 0%, #02090b 100%);
-}
-
-/* 430:3 二维码区：159×159（33×33 模块，单模块 4.818×4.818，码点由 430:4 的品牌渐变裁切上色） */
-.qrcode-page--dark .qrcode-card__code {
-  width: 318rpx; /* 159px */
-  height: 318rpx;
-}
-
-/* 编码失败占位同尺寸，避免卡片高度跳动 */
-.qrcode-page--dark .qrcode-card__failed {
-  width: 318rpx; /* 159px */
-  height: 318rpx;
+  border-color: transparent;
+  background: #212121ff;
 }
 
 .qrcode-page--dark .qrcode-card__failed-text {
   color: #9a9a9a;
-}
-
-/* 视频落位：暗色二维码区 159，去掉四周 4 个模块静默区后码区 128×128；
-   末帧码区 238（与浅色版同一支动画的实测值）→ 128 / 238 ≈ 0.538。
-   页面码区中心 y = 331 + 41 + 159/2 ≈ 451.5，末帧码区中心 49.3% × 812 ≈ 400.3 → 下移 ≈ 51px。
-   （暗色视频若与浅色版末帧构图不同，需要按真机重新标定这两个值） */
-.qrcode-page--dark .qrcode-page__intro--out .qrcode-page__intro-video {
-  transform: translateY(102rpx) scale(0.538);
 }
 </style>

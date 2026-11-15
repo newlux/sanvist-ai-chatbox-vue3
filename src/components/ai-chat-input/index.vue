@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n";
 import iconWaveActive from "@/assets/img/icon-voice-wave-blue.svg";
 import iconWaveDark from "@/assets/img/icon-voice-wave-dark.svg";
-import iconWaveLight from "@/assets/img/icon-waveform.svg";
+import iconWaveOnDark from "@/assets/img/icon-waveform-darck.svg";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
@@ -81,9 +81,9 @@ const { t } = useI18n();
 /**
  * 声波图标：**未触发**（没开实时语音）时直接落在灰胶囊上，用深色 6 段声波；
  * **触发后**换成蓝色声波 + 白色胶囊（截图两态）。
- * 深色主题下深色图标等于看不见，这里直接换一张白色声波（同一套 6 段几何）。
+ * 深色主题下深色图标等于看不见，这里换成深色专用的 `icon-waveform-darck.svg`（同一套 6 段几何）。
  */
-const waveIconIdle = computed(() => (props.dark ? iconWaveLight : iconWaveDark));
+const waveIconIdle = computed(() => (props.dark ? iconWaveOnDark : iconWaveDark));
 
 /**
  * 输入框的本地副本。父组件清空 v-model 是异步的（发送链路里还要过一次 store），
@@ -1087,7 +1087,6 @@ onBeforeUnmount(() => {
             @tap.stop="emit('duplex-toggle')"
           >
             <image :src="duplexActive ? iconWaveActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
-            <view v-if="duplexActive" class="input-bar__duplex-dot" />
           </view>
         </view>
         <view
@@ -1148,7 +1147,6 @@ onBeforeUnmount(() => {
         >
           <!-- 声波：未触发是深色 6 段声波，触发后才是纯蓝（#1166D6），不渐变 -->
           <image :src="duplexActive ? iconWaveActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
-          <view v-if="duplexActive" class="input-bar__duplex-dot" />
         </view>
 
         <view
@@ -1871,7 +1869,10 @@ onBeforeUnmount(() => {
 
 /* 声波芯片（实时语音）：截图 x450..526 / y352..409 → 48×36px 胶囊（圆角 18px），
    右内边距 8px、垂直居中；图标 20px 6 段声波。
-   未触发点击时**不铺白底**（直接落在灰胶囊上、图标走深色），触发后才出现白胶囊 + 蓝色声波 */
+   底色必须常驻：芯片原本跟「点击说话」胶囊同色（#F1F1F1 / 深色 #212121），
+   不铺底时会和胶囊连成一片，看着就像图标裸贴在胶囊右边缘外面、没有被框包住；
+   这里给它一块和右侧键盘圆钮同级的可见圆角块，图标才像"被这个框包着"。
+   触发后只换图标色（蓝色声波），底色仍在（深色底下再提亮一档做反馈） */
 .input-bar__wave-chip {
   position: absolute;
   top: 50%;
@@ -1882,11 +1883,11 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 36rpx; // 18px，两端半圆
-  background: transparent;
+  background: #ffffff;
   transform: translateY(-50%);
 }
 
-/* 已触发（实时语音进行中）：白色胶囊 */
+/* 已触发（实时语音进行中）：白底不变，靠图标换成蓝色声波区分 */
 .input-bar__wave-chip--active {
   background: #ffffff;
 }
@@ -2293,7 +2294,13 @@ onBeforeUnmount(() => {
     color: #8f8f8f;
   }
 
-  // 声波芯片：触发后浅色稿是纯白底，深底上换成 14% 白；未触发态透明（图标本身按主题换白波）
+  // 声波芯片：底色常驻 —— 深底上用 #303030（与设计稿语音胶囊内的键盘块同档），
+  // 否则芯片和 #212121 胶囊同色连成一片，图标看着像露在框外面；
+  // 触发后提到 14% 白（比 #303030 再亮一档）+ 换蓝色声波，作为"正在实时语音"的反馈
+  .input-bar__wave-chip {
+    background: #212121;
+  }
+
   .input-bar__wave-chip--active {
     background: rgba(255, 255, 255, 0.14);
   }
@@ -2332,16 +2339,6 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-.input-bar__duplex-dot {
-  position: absolute;
-  right: 0;
-  top: 0;
-  width: 18rpx;
-  height: 18rpx;
-  border: 2px solid #fafafa;
-  border-radius: 50%;
-  background: #20c56c;
-}
 .input-bar__duplex--starting {
   opacity: 0.55;
 }

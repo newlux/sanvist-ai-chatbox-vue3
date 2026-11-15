@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import iconRightArrow from "@/assets/img/iocn-right-arrow.png";
 import { isListenReportListened, openListenReportPage } from "@/utils/listen-report";
@@ -38,6 +38,89 @@ const props = defineProps({
 
 const { t } = useI18n();
 
+/**
+ * 描边渐变的唯一 id：描边改用内联 SVG 画，渐变必须用 url(#id) 引用，
+ * 同一页可能同时挂多张听汇报卡，id 重复会让后者串用前者的渐变。
+ * 这里用随机后缀而不是自增：`<script setup>` 的顶层代码每次实例化都会重跑一遍，
+ * 写在 setup 里的计数器会被重置回同一个值，自增拿到的其实是重复 id。
+ */
+const outlineId = `report-entry-outline-${Math.random().toString(36).slice(2, 9)}`;
+
+/**
+ * 描边 SVG 的绘制尺寸：必须和卡片的实际像素尺寸严格相等（viewBox 用同一个值）。
+ *
+ * 这是 1px 描边实不实的决定性条件 —— viewBox 与实际渲染尺寸只要差一点，
+ * rect 内缩的 0.5 就不再是半个 CSS 像素，1px 线落到亚像素上：直边被摊成两条淡线，
+ * 圆角段每个像素的覆盖率都低，看着就断成虚点。
+ * 卡片宽度是 rpx 换算出来的小数（如 327.6px），所以量一次实际像素尺寸、取整，
+ * 再把 SVG 的宽高也钉成这个整数，x/y 的 0.5 才真正压在像素边界上、整条边满覆盖。
+ */
+const outlineBox = ref({ width: 315, height: 104 });
+const outlineViewBox = computed(() => `0 0 ${outlineBox.value.width} ${outlineBox.value.height}`);
+const outlineStyle = computed(() => ({
+  width: `${outlineBox.value.width}px`,
+  height: `${outlineBox.value.height}px`,
+}));
+
+/**
+ * 描边渐变的两端点：设计稿是 69.6deg（左下 → 右上）。
+ * viewBox 会跟着实测尺寸变，所以端点按宽高现算，保证角度始终 69.6°、
+ * 端点正好卡在盒子对角外沿（与 CSS `linear-gradient(69.6deg, …)` 的取法一致）。
+ */
+const OUTLINE_ANGLE_RAD = (69.6 * Math.PI) / 180;
+const outlineGradient = computed(() => {
+  const { width, height } = outlineBox.value;
+  const sin = Math.sin(OUTLINE_ANGLE_RAD);
+  const cos = Math.cos(OUTLINE_ANGLE_RAD);
+  const length = width * sin + height * cos;
+  const dx = (sin * length) / 2;
+  const dy = (cos * length) / 2;
+  return {
+    x1: width / 2 - dx,
+    y1: height / 2 + dy,
+    x2: width / 2 + dx,
+    y2: height / 2 - dy,
+  };
+});
+const cardRef = ref<HTMLElement | null>(null);
+
+/** uni 的 view 在 H5 下是原生元素，但也可能拿到组件实例，两种都兜住 */
+function resolveCardEl(): HTMLElement | null {
+  const raw = cardRef.value as unknown as { $el?: HTMLElement } | HTMLElement | null;
+  if (!raw) return null;
+  const el = (raw as { $el?: HTMLElement }).$el ?? (raw as HTMLElement);
+  return typeof HTMLElement !== "undefined" && el instanceof HTMLElement ? el : null;
+}
+
+/** 量一次并同步；量不到（未布局 / 隐藏）就保留上一次的值，不要把描边缩成 0 */
+function syncOutlineBox() {
+  const el = resolveCardEl();
+  if (!el) return;
+  // offsetWidth/Height 是整数且不受父级 transform 影响，正是 CSS 像素占位尺寸
+  const width = el.offsetWidth;
+  const height = el.offsetHeight;
+  if (!width || !height) return;
+  if (outlineBox.value.width === width && outlineBox.value.height === height) return;
+  outlineBox.value = { width, height };
+}
+
+let outlineObserver: ResizeObserver | null = null;
+onMounted(() => {
+  void nextTick(() => {
+    syncOutlineBox();
+    if (typeof ResizeObserver === "undefined") return;
+    const el = resolveCardEl();
+    if (!el) return;
+    // 字体加载 / 换行 / 安全区变化都会改高度，跟着重量一次，描边才一直贴着像素边界
+    outlineObserver = new ResizeObserver(syncOutlineBox);
+    outlineObserver.observe(el);
+  });
+});
+onBeforeUnmount(() => {
+  outlineObserver?.disconnect();
+  outlineObserver = null;
+});
+
 /** 2026-11-05 → 1105；不是标准日期就原样带上，避免副标题突然空掉 */
 function formatMonthDay(value: string) {
   const raw = String(value || "").trim();
@@ -45,6 +128,15 @@ function formatMonthDay(value: string) {
   if (!match) return raw;
   return `${match[2].padStart(2, "0")}${match[3].padStart(2, "0")}`;
 }
+
+/**
+ * 描边三色标：浅色 #AAAAAA → #F2F2F2 → #AAAAAA，深色同走向换成 #72BEFF → #F9F9F9 → #72BEFF。
+ * 色值与偏移（1.67% / 44.16% / 100%）都按设计稿原样保留，只换了画法。
+ */
+const outlineStops = computed(() => (props.dark
+  ? ["#72beff", "#f9f9f9", "#72beff"]
+  : ["#aaaaaa", "#f2f2f2", "#aaaaaa"]));
+const outlineStroke = computed(() => `url(#${outlineId})`);
 
 const titleText = computed(() => t("nav-report"));
 const subtitleText = computed(() => t("report-card-subtitle", { date: formatMonthDay(props.date) }));
@@ -80,7 +172,68 @@ function onTap() {
 
 <template>
   <!-- tap.stop：气泡根节点上的 @tap 是「分享多选」的勾选开关，别让点卡片同时触发勾选 -->
-  <view class="report-entry" :class="{ 'report-entry--dark': dark }" @tap.stop="onTap">
+  <view ref="cardRef" class="report-entry" :class="{ 'report-entry--dark': dark }" @tap.stop="onTap">
+    <!-- 479:387 的 1px 渐变描边：用内联 SVG 的 rect 画（矢量描边自带圆角，拐角不会像 mask 环那样断线）。
+         设计稿矩形填充 visible=false、只有 1px 内描边，色标 #AAAAAA 1.67% → #F2F2F2 44.16% → #AAAAAA 100%，
+         走向 69.6deg（左下 → 右上）；深色是同一走向的 #72BEFF → #F9F9F9 → #72BEFF。
+
+         为什么还虚：1px 线实不实只取决于它压没压在像素边界上。
+         viewBox 一旦和实际渲染尺寸不等（卡片宽度是 rpx 换算出来的小数），内缩的 0.5 就不是半像素，
+         线落到亚像素上被抗锯齿摊薄 —— 直边还勉强连成一条淡线，圆角段每个像素的覆盖率都低，
+         看着就是断续的虚点。所以这里：
+         1) viewBox 用实测的整数像素尺寸，SVG 的宽高也钉成同一个整数，保证 1 个单位 = 1 个 CSS 像素；
+         2) 显式 shape-rendering="geometricPrecision"，别让渲染器退回 optimizeSpeed 的跳像素路径；
+         3) 1px 主描边下面垫一条 1.5px / 40% 的同色描边，把圆角段边缘的抗锯齿补实
+            （直边只多出 0.25px 的淡边，肉眼不可辨；颜色与走向保持不变）。 -->
+    <svg
+      class="report-entry__outline"
+      :viewBox="outlineViewBox"
+      :style="outlineStyle"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient
+          :id="outlineId"
+          gradientUnits="userSpaceOnUse"
+          :x1="outlineGradient.x1"
+          :y1="outlineGradient.y1"
+          :x2="outlineGradient.x2"
+          :y2="outlineGradient.y2"
+        >
+          <stop offset="1.67%" :stop-color="outlineStops[0]" />
+          <stop offset="44.16%" :stop-color="outlineStops[1]" />
+          <stop offset="100%" :stop-color="outlineStops[2]" />
+        </linearGradient>
+      </defs>
+      <!-- 抗锯齿补偿层：同色、加宽到 1.5px、压到 40%，只用来填实圆角边缘的半透明像素 -->
+      <rect
+        x="0.5"
+        y="0.5"
+        :width="outlineBox.width - 1"
+        :height="outlineBox.height - 1"
+        rx="15.5"
+        ry="15.5"
+        fill="none"
+        :stroke="outlineStroke"
+        stroke-width="1.5"
+        stroke-opacity="0.4"
+        shape-rendering="geometricPrecision"
+      />
+      <!-- 主描边：设计值 1px、100% 不透明，颜色/走向与设计稿一致 -->
+      <rect
+        x="0.5"
+        y="0.5"
+        :width="outlineBox.width - 1"
+        :height="outlineBox.height - 1"
+        rx="15.5"
+        ry="15.5"
+        fill="none"
+        :stroke="outlineStroke"
+        stroke-width="1"
+        shape-rendering="geometricPrecision"
+      />
+    </svg>
     <!-- 479:385 听汇报 + 479:391 已收听徽标 + 479:389 右向箭头 -->
     <view class="report-entry__head">
       <text class="report-entry__title">
@@ -119,22 +272,18 @@ function onTap() {
 }
 
 /* 1px 渐变描边：设计稿里卡片填充 visible=false，只剩描边。
-   用「渐变底 + mask 挖掉内容区」画 1px 环，不引入内描边颜色近似值。
-   渐变走向取设计稿 gradientTransform（起点左下 → 终点右上，约 69.6°）；
-   浅色色标保持设计原样 #AAAAAA → #F2F2F2 → #AAAAAA（蓝白那组只给深色用）。 */
-.report-entry::before {
+   之前用「渐变底 + mask 挖掉内容区」画环，圆角处外框/内洞两层抗锯齿相减会在拐角断成虚线，
+   改成内联 SVG 的 rect 描边：矢量路径的圆角是连续曲线，1px 环整圈不断，颜色/走向不变。
+   描边层绝对定位铺满卡片、不吃事件，卡片本身保持透明（不填色，不遮页面背景）。 */
+.report-entry__outline {
   position: absolute;
   inset: 0;
-  box-sizing: border-box;
-  padding: 1px;
-  border-radius: 32rpx;
-  background: linear-gradient(69.6deg, #aaaaaa 1.67%, #f2f2f2 44.16%, #aaaaaa 100%);
-  content: "";
+  /* 宽高由 JS 按实测整数像素写进 inline style（outlineStyle），不在这里写 100%：
+     必须是整数、且与 viewBox 相等，1 个单位才等于 1 个 CSS 像素，1px 描边才能压满像素行 */
+  overflow: visible;
   pointer-events: none;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
+  /* 强制走高质量抗锯齿路径：默认的 auto 在部分 WebView 会退化成跳像素绘制，1px 曲线就断成虚线 */
+  shape-rendering: geometricPrecision;
 }
 
 .report-entry:active {
@@ -217,10 +366,8 @@ function onTap() {
 /* ===== 深色（设计稿无深色稿）：材质沿用气泡回复卡同一套，描边单独用蓝白渐变 ===== */
 .report-entry--dark {
   /* 深色描边不用 #303030 那一档灰，按设计给的蓝白渐变来：
-     #72BEFF 1.67% → #F9F9F9 44.16% → #72BEFF 100%，走向与浅色一致（69.6deg） */
-  &::before {
-    background: linear-gradient(69.6deg, #72beff 1.67%, #f9f9f9 44.16%, #72beff 100%);
-  }
+     #72BEFF 1.67% → #F9F9F9 44.16% → #72BEFF 100%，走向与浅色一致（69.6deg）。
+     描边已改成 SVG，色标由模板里的 outlineStops 按 dark 切换，这里不再覆盖 ::before */
 
   .report-entry__title {
     color: #ffffff;

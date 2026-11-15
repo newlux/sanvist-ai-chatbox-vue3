@@ -9,7 +9,7 @@ import microphoneIcon from "@/assets/img/icon-mic-red.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
 import voiceWaveActive from "@/assets/img/icon-voice-wave-blue.svg";
 import voiceWaveDark from "@/assets/img/icon-voice-wave-dark.svg";
-import voiceWaveLight from "@/assets/img/icon-waveform.svg";
+import voiceWaveOnDark from "@/assets/img/icon-waveform-darck.svg";
 import listenLogo from "@/assets/img/listen.gif";
 // 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 1MB 的 webp 慢网下先空白）
 import saniLogoStatic from "@/assets/img/header-island-logo.png";
@@ -86,9 +86,9 @@ const titleImage = computed(() => (props.dark ? heySaniDark : heySaniLight));
 /**
  * 声波图标：**未触发**（没开实时语音）时直接落在灰胶囊上，用深色 6 段声波；
  * **触发后**换成蓝色声波 + 白色胶囊（截图两态）。
- * 深色主题下深色图标等于看不见，这里直接换一张白色声波（同一套 6 段几何）。
+ * 深色主题下深色图标等于看不见，这里换成深色专用的 `icon-waveform-darck.svg`（同一套 6 段几何）。
  */
-const waveIconIdle = computed(() => (props.dark ? voiceWaveLight : voiceWaveDark));
+const waveIconIdle = computed(() => (props.dark ? voiceWaveOnDark : voiceWaveDark));
 
 /**
  * 中心图标「静态图 → 动图」的无感知切换。
@@ -361,8 +361,9 @@ onBeforeUnmount(() => {
         <text class="welcome__composer-voice-label">
           {{ t("welcome-tap-to-speak") }}
         </text>
-        <!-- 声波芯片（实时语音）：嵌在灰胶囊右端内部，不另占一列（截图 x450..526 / y352..409）；
-             未触发点击 = 深色声波（不铺白底），触发后 = 白胶囊 + 蓝色声波 -->
+        <!-- 声波芯片（实时语音）：嵌在胶囊右端内部，不另占一列（截图 x450..526 / y352..409）；
+             底色常驻，图标才像"被这个框包着"（与对话页 .input-bar__wave-chip 同口径）；
+             触发后只把图标换成蓝色声波 -->
         <view
           v-if="duplexEnabled"
           class="welcome__composer-wave"
@@ -383,7 +384,6 @@ onBeforeUnmount(() => {
             mode="aspectFit"
             aria-hidden="true"
           />
-          <view v-if="duplexActive" class="welcome__composer-wave-dot" />
         </view>
       </view>
       <!-- 文本态没有胶囊可内嵌，声波仍旧单独占一列（语音态见胶囊右端的 .welcome__composer-wave） -->
@@ -402,7 +402,6 @@ onBeforeUnmount(() => {
           mode="aspectFit"
           aria-hidden="true"
         />
-        <view v-if="duplexActive" class="welcome__composer-duplex-dot" />
       </view>
       <view
         v-if="!showSend"
@@ -660,7 +659,10 @@ onBeforeUnmount(() => {
 
 /* 声波芯片（实时语音）：截图 x450..526 / y352..409 → 48×36px 胶囊（圆角 18px），
    右内边距 8px、垂直居中；里面是 20×20 的 6 段声波。
-   未触发点击时**不铺白底**（直接落在灰胶囊上、图标走深色），触发后才出现白胶囊 + 蓝色声波 */
+   底色常驻（与对话页 .input-bar__wave-chip 同一套）：芯片原本和「点击说话」胶囊同色，
+   不铺底时会和胶囊连成一片，图标看着像裸贴在胶囊右边缘外、没有被这个框包住；
+   铺一块和右侧键盘圆钮同级的圆角块，才是"被框包着"的观感。
+   触发后底色不变，靠图标换蓝色声波区分 */
 .welcome__composer-wave {
   position: absolute;
   top: 50%;
@@ -671,11 +673,11 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 36rpx; // 18px，两端半圆
-  background: transparent;
+  background: #ffffff;
   transform: translateY(-50%);
 }
 
-/* 已触发（实时语音进行中）：白色胶囊 + 蓝色声波 */
+/* 已触发（实时语音进行中）：白底不变 + 蓝色声波 */
 .welcome__composer-wave--active {
   background: #ffffff;
 }
@@ -687,17 +689,6 @@ onBeforeUnmount(() => {
 
 .welcome__composer-wave--starting {
   opacity: 0.55;
-}
-
-.welcome__composer-wave-dot {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 18rpx;
-  height: 18rpx;
-  border: 2px solid #fafafa;
-  border-radius: 50%;
-  background: #20c56c;
 }
 
 /* 键盘：44×44 圆钮，底色与胶囊同一材质 */
@@ -727,17 +718,6 @@ onBeforeUnmount(() => {
 
 .welcome__composer-duplex--starting {
   opacity: 0.55;
-}
-
-.welcome__composer-duplex-dot {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 18rpx;
-  height: 18rpx;
-  border: 2px solid #fafafa;
-  border-radius: 50%;
-  background: #20c56c;
 }
 
 /* 文本态：中间换成可输入的胶囊，材质 / 高度 / 圆角与「点击说话」完全一致 */
@@ -836,7 +816,12 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
-/* 声波芯片：触发后浅色稿是纯白底，深底上换成 14% 白；未触发态透明（图标本身按主题换成白波） */
+/* 声波芯片：底色常驻。深底上胶囊是 8% 白，芯片取 14% 白压一档，
+   才看得出是"胶囊里另起一块"而不是和胶囊糊成一片；触发后同色，靠蓝色声波区分 */
+.welcome--dark .welcome__composer-wave {
+  background: rgba(255, 255, 255, 0.14);
+}
+
 .welcome--dark .welcome__composer-wave--active {
   background: rgba(255, 255, 255, 0.14);
 }

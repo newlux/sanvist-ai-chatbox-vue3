@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { onHide, onShow } from "@dcloudio/uni-app";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import headerIslandLogo from "@/assets/img/header-island-logo.png";
 import glowBottom from "@/assets/img/persona-awakening/glow-bottom.png";
 import glowMaskBottom from "@/assets/img/persona-awakening/glow-mask-bottom.png";
 import heySani from "@/assets/img/persona-awakening/hey-sani.png";
+import AudioRipple from "@/components/audio-ripple/index.vue";
 import PushNoticePanel from "@/components/push-notice-panel/index.vue";
 import { pushNoticeSoundPlaying } from "@/utils/push/push-sound";
 
@@ -42,6 +43,19 @@ defineOptions({ name: "PersonaAwakening" });
 
 const pageVisible = ref(false);
 const debugPanelOpen = ref(false);
+
+/**
+ * 播报声纹的弧段端点（0 = 右中，90 = 顶中，180 = 左中，270 = 底中，角度递增即沿边绕行）。
+ * 与首页 pages/index 的 TTS_RIPPLE_APPEARANCE 同一套参数：
+ * 120 → 60 走 3/4 圈（左 → 底 → 右，顶部留 60° 缺口）；colorSpeed 归零让
+ * 「左紫 → 蓝 → 蓝紫 → 右粉」固定不旋转，不跟着动画转圈。改这里记得同步首页那份。
+ */
+const TTS_RIPPLE_APPEARANCE = { startAngle: 120, endAngle: 60, colorSpeed: 0 };
+/**
+ * 只在「推送语音播报中」点亮声纹：与下面 logo / 底部光晕的 breathing 动画同一个触发条件
+ * （`pushNoticeSoundPlaying` 是推送提示音的播放状态），页面上没有其它播报源。
+ */
+const rippleVisible = computed(() => pageVisible.value && pushNoticeSoundPlaying.value);
 
 onShow(() => {
   pageVisible.value = true;
@@ -103,6 +117,18 @@ onHide(() => {
         <PushNoticePanel dark />
       </view>
     </view>
+
+    <!-- 语音播报声纹（迁移自 audio-ripple，与首页同一套动效）：播报期间沿屏幕左、底、右三边
+         走渐变光带，纯装饰层不吃点击；pixel-ratio 压到 1 是因为大屏逐像素运算开销大 -->
+    <AudioRipple
+      v-if="rippleVisible"
+      class="persona-awakening__ripple"
+      variant="output"
+      preview="speech"
+      :dark="true"
+      :pixel-ratio="1"
+      :output-appearance="TTS_RIPPLE_APPEARANCE"
+    />
   </view>
 </template>
 
@@ -123,6 +149,15 @@ onHide(() => {
   overflow: hidden;
   background: #0d0d0d;
   border: 0;
+}
+
+/* 语音播报声纹（AudioRipple）：全屏铺满、只走左 / 底 / 右三边，压在内容之上但不吃点击
+   （与首页 .ai-page__tts-ripple 同口径，只是这里固定深色底，dark 恒为 true） */
+.persona-awakening__ripple {
+  position: fixed;
+  inset: 0;
+  z-index: 1025;
+  pointer-events: none;
 }
 
 /**

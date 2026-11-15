@@ -48,8 +48,6 @@ const portraitLogoSrc = computed(() => (isDark.value ? tellLogoDark : tellLogoLi
 const transcriptViewportRef = ref<unknown>(null);
 const transcriptTrackRef = ref<unknown>(null);
 const transcriptHasScrolled = ref(false);
-/** 字幕内容超出可视区（可滚动）时为 true：底部渐隐只在这种时候出现。 */
-const transcriptOverflow = ref(false);
 let bottomFrame: number | null = null;
 let bottomQueued = false;
 let contentResizeObserver: ResizeObserver | null = null;
@@ -65,6 +63,37 @@ function getTranscriptScroller() {
     || root;
 }
 
+/**
+ * 自动贴底开关：用户手动往上翻（看历史）时关掉 —— 否则每来一句新字幕、
+ * 每次 ResizeObserver 回调都会把 scrollTop 拽回底部，手指刚滑上去就被弹回来，
+ * 表现就是「滑动不好操作」。滑回底部附近再自动恢复跟随。
+ */
+const transcriptAutoFollow = ref(true);
+let transcriptLastScrollTop = 0;
+/** 用户滑回底部这个距离内就恢复自动跟随（rpx 换算后的 px 值，8px 约半行字） */
+const AUTO_FOLLOW_RESUME_PX = 8;
+
+/** scroll-view 的 @scroll：只更新顶部渐隐状态和自动跟随开关，不主动改 scrollTop。 */
+function onTranscriptScroll() {
+  const scroller = getTranscriptScroller();
+  if (!scroller) return;
+  const bottom = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  const top = scroller.scrollTop;
+  transcriptHasScrolled.value = top > 1;
+  if (bottom <= 1) {
+    transcriptAutoFollow.value = true;
+  }
+  else if (top < transcriptLastScrollTop - 2) {
+    // 手指往上滑：暂停跟随，让用户停在原位看历史
+    transcriptAutoFollow.value = false;
+  }
+  else if (bottom - top <= AUTO_FOLLOW_RESUME_PX) {
+    // 已经滑到底：恢复跟随新字幕
+    transcriptAutoFollow.value = true;
+  }
+  transcriptLastScrollTop = top;
+}
+
 /** 只负责滚到底部；列表仅包含已开始播放的句子，不再计算居中和回中。 */
 function scrollTranscriptToBottom() {
   if (bottomQueued) return;
@@ -77,14 +106,18 @@ function scrollTranscriptToBottom() {
       const scroller = getTranscriptScroller();
       if (!scroller) return;
       const bottom = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-      transcriptOverflow.value = bottom > 1;
       // 未溢出时自然从顶部展示；只有超高、正在播放时才跟随到底部。
       if (bottom <= 1) {
         if (scroller.scrollTop !== 0) scroller.scrollTop = 0;
         transcriptHasScrolled.value = false;
+        transcriptAutoFollow.value = true;
         return;
       }
-      if (props.playing && Math.abs(scroller.scrollTop - bottom) > 1) scroller.scrollTop = bottom;
+      // 用户手动翻看历史时不要抢滚动位置，等他自己滑回底部再恢复
+      if (props.playing && transcriptAutoFollow.value && Math.abs(scroller.scrollTop - bottom) > 1) {
+        scroller.scrollTop = bottom;
+      }
+      transcriptLastScrollTop = scroller.scrollTop;
       transcriptHasScrolled.value = scroller.scrollTop > 1;
     };
     // 等待 WebView 完成这次布局后再读 scrollHeight，不读取插入前的旧高度。
@@ -123,12 +156,25 @@ const qaTextLines = computed(() => {
   (props.qaSteps || []).forEach(step => push(step?.message));
   return lines;
 });
-// 播放器在音频 onplay 时追加当前句；未播放分片只留在音频缓存中。
-const transcriptItems = computed(() => props.transcriptSegments.map(segment => ({
-  key: `segment-${segment.seq}`,
-  role: segment.seq === props.currentSeq ? "current" : "previous",
-  text: segment.text,
-})));
+/**
+ * 播放器在音频 onplay 时追加当前句；未播放分片只留在音频缓存中。
+ *
+ * role 三种：
+ * - `current`：正在念的这一句（白色 + 打字机 + 光标）；
+ * - `latest`：序号最大的那一句，也就是刚输出完的最近一段 —— 不弱化，保持正文色，
+ *   否则播报一切句它就掉到 20% 白，看起来像「最新的文字被压暗了」；
+ * - `previous`：更早的历史段，按设计稿压到 20%。
+ */
+const transcriptItems = computed(() => {
+  const lastSeq = props.transcriptSegments.reduce((max, segment) => Math.max(max, segment.seq), -1);
+  return props.transcriptSegments.map(segment => ({
+    key: `segment-${segment.seq}`,
+    role: segment.seq === props.currentSeq
+      ? "current"
+      : (segment.seq === lastSeq ? "latest" : "previous"),
+    text: segment.text,
+  }));
+});
 
 /* —— 打字机（设计稿 195:1985）：当前播报段落逐字出现，不一次性摊开 ——
    只作用于「当前段」：已播完的段落保持全文，未开始播放的句子不加入列表，
@@ -178,6 +224,9 @@ function syncTyping() {
 
 watch(() => props.currentSeq, () => {
   typedLength.value = 0;
+  // 切到新的一句：字幕要跟着新的当前段走，恢复自动贴底
+  transcriptAutoFollow.value = true;
+  transcriptLastScrollTop = 0;
   syncTyping();
 });
 watch(() => props.playing, syncTyping);
@@ -236,7 +285,7 @@ onBeforeUnmount(() => {
         v-show="!showTranscriptSkeleton && !qaVisible && !voiceRecording"
         class="report-broadcast-content__transcript-content"
         scroll-y
-        @scroll="scrollTranscriptToBottom"
+        @scroll="onTranscriptScroll"
       >
         <view
           ref="transcriptTrackRef"
@@ -296,11 +345,8 @@ onBeforeUnmount(() => {
         v-if="transcriptHasScrolled && !showTranscriptSkeleton && !qaVisible && !voiceRecording"
         class="report-broadcast-content__top-fade"
       />
-      <!-- 底部渐隐：与顶部渐隐对称，字幕溢出可滚动时压住底部边缘 -->
-      <view
-        v-if="transcriptOverflow && !showTranscriptSkeleton && !qaVisible && !voiceRecording"
-        class="report-broadcast-content__bottom-fade"
-      />
+      <!-- 底部渐隐已移除：它会在字幕底边压出一条灰白/暗色渐变，把正在念的最后一行字糊掉，
+           观感像"文字发虚"；字幕超出时靠正常滚动查看即可，不再叠这层遮罩 -->
     </view>
   </view>
 </template>
@@ -313,9 +359,11 @@ onBeforeUnmount(() => {
   flex-direction: column;
   overflow: hidden;
 }
+/* 顶部留白：原 34rpx（约 17px），按设计稿「图标再上去一点」收到 10rpx，
+   图标整体上移约 12px，头像与下方字幕的相对关系不变。 */
 .report-broadcast-content__portrait-gap {
-  height: 34rpx;
-  flex: 0 0 34rpx;
+  height: 10rpx;
+  flex: 0 0 10rpx;
 }
 .report-broadcast-content__portrait-stage {
   position: relative;
@@ -343,10 +391,11 @@ onBeforeUnmount(() => {
   z-index: 1;
   width: 480rpx;
   height: 480rpx;
-  /* 只缩小动画本体、保留原占位，字幕位置不跟着跳。
-     tell 图案占画布 40.5% → 480rpx 盒子里图案约 194rpx；缩到 0.81 后约 157rpx，
-     与原来 think（aspectFill 裁成 1:1 后 158rpx）视觉等大。 */
-  transform: scale(0.81);
+  /* 缩放只作用于动画本体、保留原占位，字幕位置不跟着跳。
+     tell 图案占画布 40.5% → 480rpx 盒子里图案约 194rpx（≈97px）；
+     按设计稿「头像再大一点」放到 1.2，图案约 233rpx（≈116px），
+     比最初 0.81 的 157rpx 大约 48%。 */
+  transform: scale(1.2);
   transform-origin: center;
 }
 .report-broadcast-content__glow {
@@ -572,18 +621,6 @@ onBeforeUnmount(() => {
   pointer-events: none;
   background: linear-gradient(180deg, #fff 0%, rgb(255 255 255 / 86%) 40%, rgb(255 255 255 / 0%) 100%);
 }
-/* 底部渐隐：与顶部渐隐对称，贴在字幕区底边，压住滚出的文字 */
-.report-broadcast-content__bottom-fade {
-  position: absolute;
-  z-index: 2;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 72rpx;
-  max-height: 30%;
-  pointer-events: none;
-  background: linear-gradient(0deg, #fff 0%, rgb(255 255 255 / 86%) 40%, rgb(255 255 255 / 0%) 100%);
-}
 /* 播放/暂停按钮已按浅色稿 195:1927 移除（节点样式一并删掉，不留死代码） */
 .report-broadcast-content__play-btn {
   display: flex;
@@ -603,7 +640,7 @@ onBeforeUnmount(() => {
 
 /* ===== 浅色主题：Ardot 195:1927「日常运营助手-听播-正在播放」=====
    只按浅色稿的坐标与材质实现，深色稿（1193:2708）继续走下面的 --dark 块：
-   - 头像位 195:2031：换成 tell-light.webp 动图，正方形画布、图案居中占 40.5%，整体缩到 0.81 摆放
+   - 头像位 195:2031：换成 tell-light.webp 动图，正方形画布、图案居中占 40.5%，按画布原尺寸（scale 1）摆放
    - 光晕：浅色稿无此元素，隐藏（声波两个主题都已去掉）
    - 字幕 195:1985：左 44 / 右 48（文本宽 283），头像底 → 文字顶 49px，18/26 Medium #0D0D0D
    - 上下渐隐：底色跟随页面底色 #FAFAFA，文字淡出不出现色块接缝 */
@@ -667,11 +704,6 @@ onBeforeUnmount(() => {
   .report-broadcast-content__top-fade {
     background: linear-gradient(180deg, #fafafa 0%, rgb(250 250 250 / 86%) 40%, rgb(250 250 250 / 0%) 100%);
   }
-
-  .report-broadcast-content__bottom-fade {
-    background: linear-gradient(0deg, #fafafa 0%, rgb(250 250 250 / 86%) 40%, rgb(250 250 250 / 0%) 100%);
-  }
-
 }
 
 /* ===== 深色主题：播报内容区（Ardot 1193:2708 正在播放 / 1193:3357 正在回答 / 1193:1864 中途提问）=====
@@ -698,6 +730,11 @@ onBeforeUnmount(() => {
     color: #ffffff;
   }
 
+  /* 最近输出的一段（刚念完的那句）不弱化：保持正文白色，只有更早的历史段才压到 20% */
+  .report-broadcast-content__segment--latest {
+    color: #ffffff;
+  }
+
   .report-broadcast-content__skeleton-line {
     background: linear-gradient(90deg, #212121 25%, #303030 50%, #212121 75%);
     background-size: 200% 100%;
@@ -705,10 +742,6 @@ onBeforeUnmount(() => {
 
   .report-broadcast-content__top-fade {
     background: linear-gradient(180deg, #0d0d0d 0%, rgb(13 13 13 / 86%) 40%, rgb(13 13 13 / 0%) 100%);
-  }
-
-  .report-broadcast-content__bottom-fade {
-    background: linear-gradient(0deg, #0d0d0d 0%, rgb(13 13 13 / 86%) 40%, rgb(13 13 13 / 0%) 100%);
   }
 
 
@@ -734,14 +767,28 @@ onBeforeUnmount(() => {
     color: #ffffff !important;
   }
 }
-/* 播报态采用短阅读区：先从顶部逐句展示，超高后滚底，上方旧文字渐隐。
-   通过区域位置形成页面中下部的视觉重心，不再给段落塞半屏留白来强制居中。 */
+/* 播报态阅读区（浅色稿 195:1927 坐标）：先从顶部逐句展示，超高后滚底，上方旧文字渐隐。
+   浅色这边维持上一版的紧凑尺寸，避免动到设计稿对齐。 */
 .report-broadcast-content--reading .report-broadcast-content__transcript {
-  flex: 0 1 360rpx;
-  height: 360rpx;
-  max-height: 24vh;
+  flex: 0 1 460rpx;
+  height: 460rpx;
+  max-height: 32vh;
   margin-top: auto;
-  margin-bottom: max(240rpx, 30vh);
+  margin-bottom: max(200rpx, 26vh);
   padding-top: 0;
+}
+
+/* 播报态阅读区（深色 / 老板屏截图口径）：上下都吃满。
+   - `flex: 1 1 auto` + `height: auto`：吃掉头像舞台底边留白之外的剩余高度，
+     不再写死 rpx，高一点的机器也不会在下方留一大块空白；
+   - `margin-top: -86rpx`：头像舞台（510rpx）里图案下方本来有约 70px 透明留白，
+     用负外边距把字幕顶往上吃掉 43px，文字离图标更近，但不会压到图案本体（图案下沿约 190px）；
+   - `margin-bottom: max(120rpx, 13vh)`：底部留白从 26vh 收到约 13vh，文字区底边明显下探。 */
+.report-broadcast-content--reading.report-broadcast-content--dark .report-broadcast-content__transcript {
+  flex: 1 1 auto;
+  height: auto;
+  max-height: none;
+  margin-top: -86rpx;
+  margin-bottom: max(120rpx, 13vh);
 }
 </style>
