@@ -26,7 +26,10 @@ const logger = createLogger("remote-key");
  * 确认键：宿主给的 key 名、Android keyCode、scanCode 三套都认
  * （DPAD_CENTER = 23、ENTER = 66、NUM_ENTER = 160；scanCode 23 / 28 对应同一组物理键）。
  */
-const CONFIRM_KEYS = new Set(["ok", "enter", "center", "select", "dpad_center"]);
+const CONFIRM_KEYS = new Set([
+  "ok", "enter", "center", "select", "dpad_center",
+  "volumeup", "volumedown", "volumemute",
+]);
 const CONFIRM_KEY_CODES = new Set([23, 66, 160]);
 const CONFIRM_SCAN_CODES = new Set([23, 28]);
 /** 返回键：KEYCODE_BACK = 4，Linux scanCode 158 */

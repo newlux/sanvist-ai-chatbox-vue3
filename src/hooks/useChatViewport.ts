@@ -14,7 +14,8 @@ const MIN_KEYBOARD_HEIGHT_PX = 80;
  * 键盘高度来源：visualViewport 反推 + 宿主推送。
  * 页面高度不随键盘压缩；输入栏用 bottom 抬到键盘上方。
  */
-export function useChatViewport() {
+export function useChatViewport(options: { recoverKeyboardOnBlur?: () => boolean } = {}) {
+  const recoverKeyboard = () => options.recoverKeyboardOnBlur?.() === true;
   /** 输入栏实测高度；尚未量到时用一个接近胶囊+页脚的兜底值 */
   const FALLBACK_DOCK_HEIGHT_PX = 120;
 
@@ -25,8 +26,13 @@ export function useChatViewport() {
   let collapseTimer: ReturnType<typeof setTimeout> | null = null;
   let inputFocused = false;
   let h5KeyboardAuthoritative = false;
+  let viewportSawKeyboard = false;
+  let focusGeneration = 0;
+  let keyboardClosedAt = -Infinity;
   let disposeNativeKeyboard: (() => void) | null = null;
   let disposeH5Keyboard: (() => void) | null = null;
+  let disposeNativeResume: (() => void) | null = null;
+  let viewportObserver: ResizeObserver | null = null;
   let baseViewportHeight = 0;
 
   /** 设备像素比（物理像素 / CSS 像素）。H5/WebView 里 window.devicePixelRatio 最权威。 */
@@ -93,8 +99,7 @@ export function useChatViewport() {
    * 页面高度连量三次的原因：宿主转屏是异步的。
    *
    * 从横屏调度视图（pushWindow 开的场景窗口）返回本页时，onShow 往往在设备转回竖屏之前就触发了，
-   * 这一刻拿到的还是横屏高度（约 375），之后再没有 onShow，页面就永远停在横屏高度上：
-   * 消息列表被压扁、下方留一大片空白。所以 onShow 后再补量两帧。
+   * 这一刻拿到的可能仍是横屏高度。返回信号先补量，视口尺寸真的变化时再同步一次。
    */
   const WINDOW_HEIGHT_RETRY_DELAYS = [120, 400];
 
@@ -107,6 +112,7 @@ export function useChatViewport() {
 
   /** 真正读取并写入高度（不变就不触发重渲染） */
   function applyWindowHeight() {
+    if (recoverKeyboard() && Date.now() - keyboardClosedAt < KEYBOARD_COLLAPSE_DELAY_MS) return;
     const next = Number(uni.getSystemInfoSync().windowHeight) || 0;
     if (next <= 0) return;
     if (Math.abs(next - windowHeight.value) < 1) return;
@@ -115,7 +121,7 @@ export function useChatViewport() {
   }
 
   function syncWindowHeight() {
-    applyWindowHeight();
+    if (!measuredKeyboardHeight.value) applyWindowHeight();
     if (typeof window === "undefined") return;
     clearHeightSyncTimers();
     WINDOW_HEIGHT_RETRY_DELAYS.forEach((delay) => {
@@ -134,6 +140,7 @@ export function useChatViewport() {
   }
 
   function applyKeyboardHeight(height: unknown, fromNative = false) {
+    if (recoverKeyboard() && !inputFocused) return;
     if (h5KeyboardAuthoritative && !fromNative) return;
     const next = normalizeKeyboardHeight(height);
     if (collapseTimer) {
@@ -152,7 +159,7 @@ export function useChatViewport() {
       collapseTimer = null;
       const live = readViewportKeyboardHeight();
       measuredKeyboardHeight.value = live > 0 ? live : 0;
-      if (live <= 0) focusOwner.value = "none";
+      if (live <= 0 && (!recoverKeyboard() || !inputFocused)) focusOwner.value = "none";
     }, KEYBOARD_COLLAPSE_DELAY_MS);
   }
 
@@ -191,47 +198,89 @@ export function useChatViewport() {
   }
 
   function onViewportChange() {
+    if (!inputFocused && !measuredKeyboardHeight.value) {
+      if (recoverKeyboard() && Date.now() - keyboardClosedAt < KEYBOARD_COLLAPSE_DELAY_MS) return;
+      // 转屏也会改变可视高度。未编辑时用新视口重建基线，避免拿竖屏高度猜出一个键盘。
+      baseViewportHeight = Number(window.visualViewport?.height) || window.innerHeight;
+      applyWindowHeight();
+      return;
+    }
     const height = readViewportKeyboardHeight();
-    if (height > 0) pinLayoutViewport();
-    if (inputFocused || height > 0) applyKeyboardHeight(height);
-    // 转屏（横屏调度视图切回竖屏）走的也是 resize：没有键盘时顺手把页面高度重新量一次
-    if (height <= 0 && measuredKeyboardHeight.value <= 0) applyWindowHeight();
+    if (height > 0) {
+      viewportSawKeyboard = true;
+      pinLayoutViewport();
+    }
+    else if (recoverKeyboard() && viewportSawKeyboard) {
+      // 曾实测视口被键盘压缩，现在已恢复；即使宿主漏发高度 0 也能收尾。
+      h5KeyboardAuthoritative = false;
+      viewportSawKeyboard = false;
+    }
+    applyKeyboardHeight(height);
+  }
+
+  function onViewportReturn() {
+    if (typeof document === "undefined" || document.hidden) return;
+    onViewportChange();
+    syncWindowHeight();
   }
 
   /** 方向变化：页面高度会跟着变，多量两帧等它稳定 */
   function onOrientationChange() {
     if (measuredKeyboardHeight.value > 0) return;
-    syncWindowHeight();
+    onViewportReturn();
   }
 
   function onFocusIn(event?: FocusEvent) {
     const owner = resolveFocusOwner(event?.target || null);
+    if (recoverKeyboard() && owner === "none") return;
     if (owner !== "none") focusOwner.value = owner;
     inputFocused = true;
+    const generation = ++focusGeneration;
     pinLayoutViewport();
     applyKeyboardHeight(readViewportKeyboardHeight());
     [60, 260].forEach((delay) => {
       setTimeout(() => {
+        if (recoverKeyboard() && (!inputFocused || generation !== focusGeneration)) return;
         pinLayoutViewport();
         applyKeyboardHeight(readViewportKeyboardHeight());
       }, delay);
     });
   }
 
-  function onFocusOut() {
+  function onFocusOut(event: FocusEvent) {
     inputFocused = false;
+    if (recoverKeyboard() && resolveFocusOwner(event.target) !== "none") {
+      resetKeyboardHeight();
+    }
   }
 
   function onWindowScroll() {
     if (measuredKeyboardHeight.value > 0) pinLayoutViewport();
   }
 
-  function forceCollapse() {
-    if (measuredKeyboardHeight.value <= 0) return;
+  function clearKeyboardState() {
+    if (recoverKeyboard() && measuredKeyboardHeight.value) keyboardClosedAt = Date.now();
     inputFocused = false;
+    focusGeneration += 1;
     h5KeyboardAuthoritative = false;
+    viewportSawKeyboard = false;
+    if (collapseTimer) clearTimeout(collapseTimer);
+    collapseTimer = null;
     measuredKeyboardHeight.value = 0;
     focusOwner.value = "none";
+  }
+
+  function forceCollapse() {
+    if (recoverKeyboard()) {
+      const activeInput = document.activeElement as HTMLElement | null;
+      const wasOpen = measuredKeyboardHeight.value > 0;
+      clearKeyboardState();
+      // iOS 原生收起可能仍保留焦点。释放本次焦点，让再次点同一个输入框能重新测量。
+      if (wasOpen && resolveFocusOwner(activeInput) !== "none") activeInput?.blur();
+      return;
+    }
+    if (measuredKeyboardHeight.value <= 0) return;
+    clearKeyboardState();
     try {
       uni.hideKeyboard();
       (document.activeElement as HTMLElement | null)?.blur?.();
@@ -241,6 +290,7 @@ export function useChatViewport() {
   }
 
   function onDocumentTouchStart(event: TouchEvent) {
+    if (recoverKeyboard()) return;
     if (measuredKeyboardHeight.value <= 0) return;
     const touch = event.touches?.[0] || event.changedTouches?.[0];
     if (!touch) return;
@@ -255,6 +305,7 @@ export function useChatViewport() {
       forceCollapse();
       return;
     }
+    if (recoverKeyboard() && !inputFocused) return;
     h5KeyboardAuthoritative = true;
     // 原生推的是物理像素 → 换算成 CSS 像素再进布局
     applyKeyboardHeight(cssKeyboardHeightFromNative(height), true);
@@ -288,6 +339,7 @@ export function useChatViewport() {
       forceCollapse();
       return;
     }
+    if (recoverKeyboard() && !inputFocused) return;
 
     const top = Number(payload.top);
     const viewportHeight = Number(payload.viewportHeight);
@@ -322,6 +374,10 @@ export function useChatViewport() {
   }
 
   function resetKeyboardHeight() {
+    if (recoverKeyboard()) {
+      clearKeyboardState();
+      return;
+    }
     applyKeyboardHeight(0);
   }
 
@@ -355,11 +411,17 @@ export function useChatViewport() {
       window.addEventListener("scroll", onWindowScroll, { passive: true });
       window.addEventListener("resize", onViewportChange);
       window.addEventListener("orientationchange", onOrientationChange);
+      window.addEventListener("pageshow", onViewportReturn);
+      document.addEventListener("visibilitychange", onViewportReturn);
       document.addEventListener("focusin", onFocusIn);
       document.addEventListener("focusout", onFocusOut);
       document.addEventListener("touchstart", onDocumentTouchStart, { passive: true });
       window.visualViewport?.addEventListener("resize", onViewportChange);
       window.visualViewport?.addEventListener("scroll", onViewportChange);
+      if (typeof ResizeObserver !== "undefined") {
+        viewportObserver = new ResizeObserver(onViewportChange);
+        viewportObserver.observe(document.documentElement);
+      }
       // H5 容器中 Native 主动推送的前端事件，用 document.addEventListener 注册
       document.addEventListener("h5KeyboardChange", onH5KeyboardChangeEvent);
       logger.info("[h5KeyboardChange] 已通过 document.addEventListener 注册监听");
@@ -369,9 +431,12 @@ export function useChatViewport() {
       };
     }
     disposeNativeKeyboard = onNativeEvent("keyboardHeightChange", onNativeKeyboardHeight);
+    // 独立甘特图容器关闭时，原 WebView 有时只收到宿主 resume。
+    disposeNativeResume = onNativeEvent("resume", onViewportReturn);
   });
 
   onBeforeUnmount(() => {
+    if (recoverKeyboard()) clearKeyboardState();
     if (collapseTimer) clearTimeout(collapseTimer);
     clearHeightSyncTimers();
     uni.offKeyboardHeightChange?.(onKeyboardHeightChange);
@@ -379,6 +444,8 @@ export function useChatViewport() {
       window.removeEventListener("scroll", onWindowScroll);
       window.removeEventListener("resize", onViewportChange);
       window.removeEventListener("orientationchange", onOrientationChange);
+      window.removeEventListener("pageshow", onViewportReturn);
+      document.removeEventListener("visibilitychange", onViewportReturn);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", onFocusOut);
       document.removeEventListener("touchstart", onDocumentTouchStart);
@@ -387,6 +454,8 @@ export function useChatViewport() {
     }
     disposeNativeKeyboard?.();
     disposeNativeKeyboard = null;
+    disposeNativeResume?.();
+    viewportObserver?.disconnect();
     disposeH5Keyboard?.();
     disposeH5Keyboard = null;
   });

@@ -127,7 +127,7 @@ const {
   setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
-} = useChatViewport();
+} = useChatViewport({ recoverKeyboardOnBlur: () => systemStore.isIOS });
 /**
  * 欢迎态 → 对话态：与首页同一套起飞动画。
  * 进页面先是整屏「Hey,SANI」欢迎层，点语音 / 键盘后中间 logo 飞到头部灵动岛、对话页淡入。
