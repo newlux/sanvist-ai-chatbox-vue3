@@ -336,7 +336,11 @@ onBeforeUnmount(() => {
         src="@/assets/img/icon-plus.svg"
         mode="aspectFit"
       />
-      <view v-if="textMode" class="welcome__composer-field">
+      <view
+        v-if="textMode"
+        class="welcome__composer-field"
+        :class="{ 'welcome__composer-field--with-wave': duplexEnabled }"
+      >
         <textarea
           ref="textareaRef"
           class="welcome__composer-textarea"
@@ -354,6 +358,26 @@ onBeforeUnmount(() => {
           @blur="emit('input-blur')"
           @confirm="sendDraft()"
         />
+        <view
+          v-if="duplexEnabled"
+          class="welcome__composer-wave"
+          :class="{
+            'welcome__composer-wave--active': duplexActive,
+            'welcome__composer-wave--starting': duplexStarting,
+          }"
+          role="button"
+          :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
+          :aria-pressed="duplexActive"
+          @tap.stop="onDuplexTap"
+        >
+          <image
+            class="welcome__composer-wave-icon"
+            :src="duplexActive ? voiceWaveActive : waveIconIdle"
+            mode="aspectFit"
+            aria-hidden="true"
+          />
+          <view v-if="duplexActive" class="welcome__composer-wave-dot" />
+        </view>
       </view>
       <view
         v-else
@@ -392,24 +416,7 @@ onBeforeUnmount(() => {
           <view v-if="duplexActive" class="welcome__composer-wave-dot" />
         </view>
       </view>
-      <!-- 文本态没有胶囊可内嵌，声波仍旧单独占一列（语音态见胶囊右端的 .welcome__composer-wave） -->
-      <view
-        v-if="duplexEnabled && textMode"
-        class="welcome__composer-kb welcome__composer-duplex"
-        :class="{ 'welcome__composer-duplex--starting': duplexStarting }"
-        role="button"
-        :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
-        :aria-pressed="duplexActive"
-        @tap.stop="onDuplexTap"
-      >
-        <image
-          class="welcome__composer-wave-icon"
-          :src="duplexActive ? voiceWaveActive : waveIconIdle"
-          mode="aspectFit"
-          aria-hidden="true"
-        />
-        <view v-if="duplexActive" class="welcome__composer-duplex-dot" />
-      </view>
+
       <view
         v-if="!showSend"
         class="welcome__composer-kb"
@@ -723,29 +730,6 @@ onBeforeUnmount(() => {
   height: 40rpx;
 }
 
-.welcome__composer-duplex {
-  position: relative;
-}
-
-.welcome__composer-duplex:active {
-  opacity: 0.7;
-}
-
-.welcome__composer-duplex--starting {
-  opacity: 0.55;
-}
-
-.welcome__composer-duplex-dot {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 18rpx;
-  height: 18rpx;
-  border: 2px solid #fafafa;
-  border-radius: 50%;
-  background: #20c56c;
-}
-
 /* 文本态：中间换成可输入的胶囊，材质 / 高度 / 圆角与「点击说话」完全一致 */
 .welcome__composer-field {
   display: flex;
@@ -757,6 +741,11 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   border-radius: 90rpx;
   background: rgba(13, 13, 13, 0.0361);
+}
+
+.welcome__composer-field--with-wave {
+  position: relative;
+  padding-right: 120rpx;
 }
 
 .welcome__composer-textarea {

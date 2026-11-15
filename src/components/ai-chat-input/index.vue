@@ -1112,6 +1112,7 @@ onBeforeUnmount(() => {
           v-else
           class="input-bar__text-field"
           :class="{
+            'input-bar__text-field--with-wave': duplexEnabled,
             'input-bar__text-field--padding': attachmentDisabled || voice.isRecognizing,
           }"
         >
@@ -1134,21 +1135,22 @@ onBeforeUnmount(() => {
             @focus="onTextareaFocus"
             @blur="onTextareaBlur"
           />
-        </view>
-
-        <!-- 文本态没有胶囊可内嵌，声波仍旧单独占一列（语音态见 .input-bar__wave-chip） -->
-        <view
-          v-if="duplexEnabled && inputMode === 'text'"
-          class="input-bar__duplex"
-          :class="{ 'input-bar__duplex--starting': duplexStarting }"
-          role="button"
-          :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
-          :aria-pressed="duplexActive"
-          @tap.stop="emit('duplex-toggle')"
-        >
-          <!-- 声波：未触发是深色 6 段声波，触发后才是纯蓝（#1166D6），不渐变 -->
-          <image :src="duplexActive ? iconWaveActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
-          <view v-if="duplexActive" class="input-bar__duplex-dot" />
+          <view
+            v-if="duplexEnabled"
+            class="input-bar__wave-chip"
+            :class="{
+              'input-bar__wave-chip--active': duplexActive,
+              'input-bar__duplex--starting': duplexStarting,
+            }"
+            role="button"
+            :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
+            :aria-pressed="duplexActive"
+            @tap.stop="emit('duplex-toggle')"
+          >
+            <!-- 声波：未触发是深色 6 段声波，触发后才是纯蓝（#1166D6），不渐变 -->
+            <image :src="duplexActive ? iconWaveActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
+            <view v-if="duplexActive" class="input-bar__duplex-dot" />
+          </view>
         </view>
 
         <view
@@ -1915,10 +1917,9 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-/* 双工与语音态键盘共用 44×44 圆形按钮样式 */
+/* 语音态和开启双工入口时，右侧模式切换使用 44×44 圆形按钮。 */
 .input-bar:not(.input-bar--text) .input-bar__mode,
-.input-bar--duplex .input-bar__mode,
-.input-bar__duplex {
+.input-bar--duplex .input-bar__mode {
   width: 88rpx;
   height: 88rpx;
   flex: 0 0 88rpx;
@@ -1927,14 +1928,8 @@ onBeforeUnmount(() => {
   background: rgba(13, 13, 13, 0.0361); // 3.61% 黑，叠在 #FAFAFA 上即截图实测的 #F1F1F1
 }
 
-/* 声波（实时语音）钮：白底 + 蓝色声波，和左右两颗灰底圆钮区分开（截图为白色圆钮） */
-.input-bar__duplex {
-  background: #ffffff;
-}
-
-/* 键盘 / 声波图标同为 20×20 → 40rpx（截图声波竖条间距 3.33px × 6 段 + 最短 4.17px 高） */
-.input-bar__mode image,
-.input-bar__duplex image {
+/* 键盘图标 20×20 */
+.input-bar__mode image {
   width: 40rpx;
   height: 40rpx;
 }
@@ -1977,8 +1972,7 @@ onBeforeUnmount(() => {
 }
 
 .input-bar__plus,
-.input-bar__mode,
-.input-bar__duplex {
+.input-bar__mode {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2047,7 +2041,6 @@ onBeforeUnmount(() => {
 }
 
 .input-bar__mode:active,
-.input-bar__duplex:active,
 .input-bar__hold:active,
 .input-bar__plus:active,
 .input-bar__send:active,
@@ -2162,9 +2155,10 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
-/* 双工与切换按钮单独占列，文本框无需给右侧控件预留空间。 */
-.chat-input .input-bar--plain.input-bar--duplex .input-bar__text-field {
-  padding-right: 32rpx;
+/* 与语音胶囊共用声波位置，为按钮和文字之间留出空隙。 */
+.chat-input .input-bar .input-bar__text-field--with-wave {
+  position: relative;
+  padding-right: 120rpx;
 }
 
 .chat-input .input-bar--plain .input-bar__textarea {
@@ -2269,8 +2263,7 @@ onBeforeUnmount(() => {
   // 语音态：「按住说话」与右侧键盘（浅色是 #0D0D0D 3.61%）
   .input-bar__hold,
   .input-bar:not(.input-bar--text) .input-bar__mode,
-  .input-bar--duplex .input-bar__mode,
-  .input-bar__duplex {
+  .input-bar--duplex .input-bar__mode {
     background: #212121;
   }
 
@@ -2326,10 +2319,6 @@ onBeforeUnmount(() => {
 
 .chat-input--dark .input-bar__mode--mic image {
   filter: brightness(0) invert(1);
-}
-
-.input-bar__duplex {
-  position: relative;
 }
 
 .input-bar__duplex-dot {
