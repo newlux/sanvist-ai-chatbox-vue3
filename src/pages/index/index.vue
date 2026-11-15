@@ -161,7 +161,7 @@ const {
   setInputDockHeight,
   setTextInputFocused,
   setVoiceInputFocused,
-} = useChatViewport();
+} = useChatViewport({ recoverKeyboardOnBlur: () => systemStore.isIOS });
 /**
  * 纯净模式（设置弹层 → 纯净模式）：关闭时底部才露出快捷入口胶囊
  * （作业指导 / 任务协同 / 维修助理 / 配件助手 / 听汇报），打开后整条导航不渲染
@@ -2135,6 +2135,8 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       @duplex-toggle="onWelcomeDuplexToggle"
       @start-chat="startWelcomeVoiceFromGesture"
       @send-text="onWelcomeTextSend"
+      @input-focus="setTextInputFocused(true)"
+      @input-blur="setTextInputFocused(false)"
     >
       <!-- 初始页也带底部胶囊入口：与对话页同一口径，纯净模式关闭时才出现 -->
       <template #nav>

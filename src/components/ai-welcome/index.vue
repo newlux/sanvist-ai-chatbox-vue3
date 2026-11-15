@@ -71,6 +71,8 @@ const emit = defineEmits<{
   (e: "start-text"): void;
   (e: "duplex-toggle"): void;
   (e: "send-text", text: string): void;
+  (e: "input-focus"): void;
+  (e: "input-blur"): void;
 }>();
 
 const { t } = useI18n();
@@ -236,6 +238,7 @@ async function enterTextMode() {
 function exitTextMode() {
   if (!textMode.value) return;
   textMode.value = false;
+  emit("input-blur");
   uni.hideKeyboard();
 }
 
@@ -252,6 +255,7 @@ function sendDraft() {
   // 先收键盘：父页面紧接着要播落位动画，键盘继续弹着会让对话页底部跟着上下抽动
   uni.hideKeyboard();
   emit("send-text", content);
+  emit("input-blur");
 }
 
 function onModeTap() {
@@ -346,6 +350,8 @@ onBeforeUnmount(() => {
           confirm-type="send"
           placeholder-class="welcome__composer-placeholder"
           @input="onDraftInput"
+          @focus="emit('input-focus')"
+          @blur="emit('input-blur')"
           @confirm="sendDraft()"
         />
       </view>
