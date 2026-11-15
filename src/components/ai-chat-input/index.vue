@@ -1898,10 +1898,14 @@ onBeforeUnmount(() => {
   height: 40rpx;
 }
 
-/* 生成中（思考中）：整块「按住说话」暂时禁用 —— 不吃手势、文案再淡一档到 #BABABA，
-   与参考图里思考中的置灰态一致；生成结束（isLoading 变 false）即恢复 */
+/* 生成中禁用单次录音，已开启或正在启动的双工仍可关闭。 */
 .input-bar__hold--disabled {
   pointer-events: none;
+}
+
+.input-bar__hold--disabled .input-bar__wave-chip--active,
+.input-bar__hold--disabled .input-bar__duplex--starting {
+  pointer-events: auto;
 }
 
 .input-bar__hold--disabled .input-bar__hold-label {
