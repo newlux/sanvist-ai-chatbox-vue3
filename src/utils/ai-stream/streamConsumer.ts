@@ -72,7 +72,21 @@ export async function consumeChatStream(
     if (update.assistantScene) snapshot.assistantScene = update.assistantScene;
     if (update.languageSwitch) snapshot.languageSwitch = update.languageSwitch;
     if (update.colorSwitch) snapshot.colorSwitch = update.colorSwitch;
-    if (update.speechText) snapshot.speechText = update.speechText;
+    if (update.speechText) {
+      /**
+       * 语音稿有两种下发方式，必须分开处理，不能直接覆盖：
+       * - **整段重发**：新稿以旧稿为前缀（后端把前几片合起来再发一次）→ 取新值，避免累加出重复；
+       * - **分片追加**：新稿与旧稿无包含关系（一次只发一小段）→ 追加到旧稿后面。
+       *
+       * 原来直接覆盖，导致上层（useChatSend 的 answer delta）按「同一段文本的长度增量」切片时
+       * 基准对不上：第二片会从第一片的长度位置开始截，出现「范围内的设备情况。」这种半句；
+       * 片比上一片短时更是整段丢字。累加成完整稿后，增量才和真实文本对齐。
+       */
+      const previousSpeech = snapshot.speechText || "";
+      snapshot.speechText = previousSpeech && !update.speechText.startsWith(previousSpeech)
+        ? previousSpeech + update.speechText
+        : update.speechText;
+    }
     if (update.processSubtitle !== undefined) snapshot.processSubtitle = update.processSubtitle;
     if (update.processStatus) snapshot.processStatus = update.processStatus;
     if (replacedTips && snapshot.processStatus) {

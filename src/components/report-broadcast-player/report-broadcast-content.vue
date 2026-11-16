@@ -645,6 +645,13 @@ onBeforeUnmount(() => {
    - 字幕 195:1985：左 44 / 右 48（文本宽 283），头像底 → 文字顶 49px，18/26 Medium #0D0D0D
    - 上下渐隐：底色跟随页面底色 #FAFAFA，文字淡出不出现色块接缝 */
 .report-broadcast-content--light {
+  /* 诉说图标整体下移：舞台上方留白 10rpx → 50rpx（+20px）。
+     字幕区靠 `margin-top: auto` 贴底，图标下移只是压缩中间的空白，字幕位置不变。 */
+  .report-broadcast-content__portrait-gap {
+    height: 50rpx;
+    flex: 0 0 50rpx;
+  }
+
   /**
    * 头像位放 tell-light.webp：正方形画布、透明底，缩放后图案约 157rpx，
    * 按「画布中心 = 头像位中心」摆放：
@@ -699,6 +706,17 @@ onBeforeUnmount(() => {
     text-decoration: none;
     text-transform: none; /* textCase: ORIGINAL */
     vertical-align: top;
+  }
+
+  /* 已播完的历史段：从上到下由正文色渐隐到 20% 黑（#0D0D0D33），越往下越淡。
+     刚念完的 latest 保持正文色（与深色主题同口径），当前段另有打字机样式。
+     兜底的 color 保证不支持 background-clip: text 的 WebView 只是变成纯 20% 黑，不会消失 */
+  .report-broadcast-content__segment--previous {
+    color: #0d0d0d33;
+    background: #0d0d0d33;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 
   .report-broadcast-content__top-fade {

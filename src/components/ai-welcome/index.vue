@@ -618,12 +618,8 @@ onBeforeUnmount(() => {
   transition: opacity 240ms ease;
 }
 
-/* 胶囊整体宽度对齐下方输入条：输入条左右内边距 48rpx（加号左沿 / 键盘右沿），
-   而胶囊列表自带 20rpx，差 28rpx，三段胶囊会左右各外扩一截。
-   这里补齐到同一档，胶囊的左沿卡在加号左边、右沿卡在键盘右边 */
-.welcome__nav :deep(.ai-chat-nav__list) {
-  padding: 0 48rpx;
-}
+/* 胶囊左右沿与下方输入条对齐（加号左沿 / 键盘右沿）：
+   内边距已在 ai-chat-nav 的 .ai-chat-nav__list 里统一成 48rpx，这里不再重复覆盖 */
 
 /* ===== 底部输入条：加号 / 点击说话 / 键盘 =====
    尺寸与问答页 .input-bar 语音态完全同一套（上下 8px / 左右 20px、min-height 64px、间距 10px），

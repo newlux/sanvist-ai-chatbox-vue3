@@ -2166,6 +2166,38 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
+/* ==========================================================================
+   生成中 / 识别中（文本态但不在 plain 态）：
+   输入区自己成一颗胶囊，右侧的停止键落在胶囊**外面**。
+   原来是整条 input-bar 铺底，停止键被包在同一个胶囊里，看着像输入框的一部分。
+   盒模型与 plain 态对齐（margin 0 / padding 16-40 / gap 20），两态互相切换时不跳。
+   ========================================================================== */
+.input-bar.input-bar--text:not(.input-bar--plain) {
+  gap: 20rpx;
+  min-height: 128rpx;
+  margin: 0;
+  padding: 16rpx 40rpx;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.input-bar.input-bar--text:not(.input-bar--plain) .input-bar__text-field {
+  min-height: 88rpx;
+  padding: 0 32rpx;
+  border-radius: 44rpx;
+  background: #f3f3f3;
+  box-sizing: border-box;
+}
+
+/* 停止键：胶囊外的独立位置，与胶囊右边缘留 10px（gap），不再吃胶囊底色 */
+.input-bar.input-bar--text:not(.input-bar--plain) .input-bar__stop {
+  flex: 0 0 70rpx;
+  width: 70rpx;
+  height: 70rpx;
+  margin: 0;
+}
+
 /* 与语音胶囊共用声波位置，为按钮和文字之间留出空隙。 */
 .chat-input .input-bar .input-bar__text-field--with-wave {
   position: relative;
@@ -2260,14 +2292,14 @@ onBeforeUnmount(() => {
     background: transparent;
   }
 
-  // 文本态整条胶囊（浅色 #FFFFFF，只有非 plain 的「有文字 / 生成中」才铺满整条）
+  // 整条不再铺底：胶囊只包住输入区，停止键落在胶囊外（见上方 --text:not(--plain) 分组）
   .input-bar.input-bar--text:not(.input-bar--plain) {
-    background: #212121;
+    background: transparent;
     box-shadow: none;
   }
 
-  // 文本态灰胶囊 #F3F3F3 → 与 Voice Pill 同一材质 #212121
-  .input-bar.input-bar--plain .input-bar__text-field {
+  // 文本态灰胶囊 #F3F3F3 → 与 Voice Pill 同一材质 #212121（plain 与生成中 / 识别中都适用）
+  .input-bar.input-bar--text .input-bar__text-field {
     background: #212121;
   }
 

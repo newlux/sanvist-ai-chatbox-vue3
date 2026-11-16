@@ -702,6 +702,7 @@ onMounted(async () => {
   margin-top: 24rpx;
   padding: 32rpx;
   background: #ffffff;
+  border-radius:24rpx;
 }
 
 /* 设计稿 180:219 等：卡片 298×64（596×128rpx）、白底、圆角 12px（24rpx）；
@@ -916,7 +917,7 @@ onMounted(async () => {
 
   /* 203:1126 等 Rectangle 185：音色卡 #303030，圆角 12（24rpx） */
   .sound-settings__voice {
-    background: #303030;
+    background: #202020;
   }
 
   /* 203:1123 Group 183（当前选中）：1px（2rpx）#1166D6 描边，其余卡片无描边 */
