@@ -737,13 +737,19 @@ function onGuideStepCardSpaceChange(space: number) {
  * 步骤卡的附件按钮：选完不直接发送——收起步骤卡、把附件挂到输入栏并聚焦输入框，
  * 用户补一句说明或直接点发送，都走原来的对话发送链路。
  */
-/** 步骤卡片展开 / 翻页时，把这一步对应的核对卡（最新那一轮）顶到对话区顶部 */
+/**
+ * 步骤卡片展开 / 翻页时，把这一步对应的核对卡（最新那一轮）顶到对话区顶部。
+ * 切步第一时间关掉贴底跟随：换卡那帧旧卡卸载、新卡挂载会让内容高度变化，
+ * 若还贴着底，content-grow 会把视口先拽到回复末尾「向下滚一下」，再被顶到顶拉回来；
+ * 用户主动切步就是要看这一步，跟随理应先让位。
+ */
 function onGuideStepChange(step: GuideStepItem | null) {
   const stepId = String(step?.id || "").trim();
   if (!stepId) return;
   const steps = guideStepPayload.value?.steps || [];
   const index = steps.findIndex(item => String(item?.id || "") === stepId);
   if (index >= 0) guideStepCardStepId.value = stepId;
+  chatStore.setPinnedToBottom(false);
   nextTick(() => focusGuideStepCardAtTop());
 }
 
@@ -784,6 +790,9 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   if (nextStepId && nextStepId !== String(guideStepCardStepId.value || "")) realtimeTts.stop();
   guideStepCardStepId.value = nextStepId;
   guideStepRequestedIndex.value = index;
+  // 切步先关贴底跟随，再靠卡片重挂载后的 card-ready 顶到对话区顶部：
+  // 关晚了换卡那帧 content-grow 会把视口先拽到回复末尾（见 focusGuideStepCardAtTop）。
+  chatStore.setPinnedToBottom(false);
   // 内联卡片模式：卡片自己翻页，只切对话里那张卡，不弹白板
   if (INLINE_STEP_CARD) return;
   guideStepSheetVisible.value = true;
@@ -1556,6 +1565,8 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         :suppress-highlight="shareSuppressHighlight"
         :bottom-inset="messageBottomInset"
         :step-card-step-id="guideStepCardStepId"
+        :card-pin-token="chatStore.cardPinToken"
+        :card-pin-dom-id="chatStore.cardPinDomId"
         :pin-step-card="guideStepSheetVisible"
         :compact-guide-card="true"
         @card-space-change="onGuideStepCardSpaceChange"

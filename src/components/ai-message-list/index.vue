@@ -106,6 +106,20 @@ const props = defineProps({
     default: false,
   },
   /**
+   * 核对卡置顶请求令牌：自增一次 = 一次请求，把 cardPinDomId 那张卡按 px 对齐到
+   * 「悬浮头部下沿」（scroll-into-view 会把卡塞到头部下面被糊掉，见 alignCardToHeaderBottom）。
+   * store 的 focusStepBlock 命中卡片时自增。
+   */
+  cardPinToken: {
+    type: Number,
+    default: 0,
+  },
+  /** 置顶请求要定位的那张核对卡的 DOM id（guideStepCardDomId 拼过，可直接进 `#id` 选择器） */
+  cardPinDomId: {
+    type: String,
+    default: "",
+  },
+  /**
    * 核对卡精简版（作业协同 / 作业指导页）：卡片不画动作区、状态行，
    * 也不把同一条回答的参考来源塞进卡片里。
    */
@@ -902,6 +916,55 @@ function alignMessageToTop(messageId: string, attempt = 0) {
   // #endif
 }
 
+/**
+ * 把核对卡顶到「悬浮头部下沿」。
+ *
+ * 不用 scroll-into-view：那个把元素顶部对到滚动容器最上沿，卡片会钻到悬浮头部
+ * （top-aligned 模式内容起点垫着一段等于头部高度的 padding-top）下面被糊掉，标题行看不见。
+ * 这里和 alignMessageToTop 同口径按 px 定位：
+ * 目标 scrollTop = 卡片在内容里的偏移 − padding-top（头部高）− .chat-box 自己的上内边距，
+ * 卡片顶部正好落在悬浮头部下沿。
+ */
+function alignCardToHeaderBottom(domId: string) {
+  // #ifdef H5
+  const inner = document.querySelector(".msg-list__inner") as HTMLElement | null;
+  const anchor = document.getElementById(domId);
+  if (!inner || !anchor) return;
+  const padTop = Number.parseFloat(getComputedStyle(inner).paddingTop) || 0;
+  const chatBox = document.querySelector(".chat-box") as HTMLElement | null;
+  const chatBoxTop = chatBox ? Number.parseFloat(getComputedStyle(chatBox).paddingTop) || 0 : 0;
+  const offsetInContent = anchor.getBoundingClientRect().top - inner.getBoundingClientRect().top;
+  const next = Math.max(0, Math.round(offsetInContent - padTop - chatBoxTop));
+  scrollTopPx.value = next;
+  const scroller = findScrollableAncestor(inner) || findScrollLayer(inner);
+  if (!scroller) return;
+  if (next !== Math.round(scroller.scrollTop)) {
+    scroller.scrollTop = next;
+    // 定位是用户主动跳的，别把它当成「上翻看历史」而关掉后续的贴底判定
+    lastScrollTop = next;
+  }
+  // #endif
+}
+
+watch(
+  () => props.cardPinToken,
+  async (token) => {
+    if (!token) return;
+    const domId = props.cardPinDomId;
+    if (!domId) return;
+    // 等卡片重挂载 / 高度收敛后再定位（切步时新卡是重挂载的）
+    await nextTick();
+    alignCardToHeaderBottom(domId);
+    [90, 320, 760].forEach((delay) => {
+      setTimeout(() => {
+        if (props.cardPinToken !== token) return;
+        alignCardToHeaderBottom(domId);
+      }, delay);
+    });
+  },
+  { flush: "post" },
+);
+
 watch(
   () => props.pinMessageToken,
   async () => {
@@ -1076,6 +1139,69 @@ function onGuideCheckFinish(index: number) {
   // 最后一步的语音可能还在念：小结出现前先掐掉（页面 stop），再让小结挂载后自动念小结
   emit("tts-stop");
   requestSummaryTts();
+  // 小结首次出现：把小结区块滚到可视区中央偏上一线（finished 按 key 去重，天然只做一次）
+  void scrollSummaryToCenter(index);
+}
+
+/** 小结居中偏上一线：小结中心放在可视区垂直中线上方约 11% 屏高的位置（更贴近阅读视区） */
+const SUMMARY_CENTER_LIFT_RATIO = 0.11;
+
+/**
+ * 最后一步确认完、步骤小结首次注入到卡片时，把小结区块滚到可视区中央。
+ *
+ * 完成态只是同一张卡 payload 里多出 summary，block.id 不变、卡片不重挂载，
+ * 没有 card-ready 可借，所以在 onGuideCheckFinish 里直接按 px 定位。
+ * summary 由 v-if 挂到 `#<domId> .guide-check-block__summary`（domId 已 sanitize，
+ * 见 utils/guide-content 的 guideStepCardDomId），量它与滚动可视区（.msg-list）的相对位置，
+ * 再换算成对滚动容器的 scrollTop：summary 中心上移到「中线偏上 11% 屏高」处。
+ * markdown 图片 / 字体渲染后才撑开高度，补量两次兜底。
+ */
+function scrollSummaryToCenter(index: number) {
+  const message = props.messages?.[index];
+  if (!message) return;
+  const card = standaloneBlocks(message, index)[0];
+  if (!card?.id) return;
+  const domId = guideStepCardDomId(message?.id, card.id);
+  if (!domId) return;
+  // 等 summary 真正渲染到 DOM（finished 置位 → standaloneBlocks 重算 → 下一帧 patch）
+  void nextTick().then(() => {
+    const applyScroll = () => {
+      uni.createSelectorQuery()
+        .select(".msg-list")
+        .boundingClientRect()
+        .select(".msg-list__inner")
+        .boundingClientRect()
+        .select(`#${domId} .guide-check-block__summary`)
+        .boundingClientRect()
+        .exec((rects) => {
+          const listRect = (Array.isArray(rects) ? rects[0] : null) as { height?: number } | null;
+          const innerRect = (Array.isArray(rects) ? rects[1] : null) as { top?: number } | null;
+          const summaryRect = (Array.isArray(rects) ? rects[2] : null) as { top?: number; height?: number } | null;
+          const listHeight = Number(listRect?.height);
+          const innerTop = Number(innerRect?.top);
+          const summaryTop = Number(summaryRect?.top);
+          const summaryHeight = Number(summaryRect?.height);
+          if (!Number.isFinite(innerTop) || !Number.isFinite(listHeight) || listHeight <= 0) return;
+          if (!Number.isFinite(summaryTop) || summaryHeight <= 0) return;
+          // summary 相对「内容原点」（.msg-list__inner）的垂直位移：同一帧同步量测，差值不受滚动影响，
+          // 等于 alignToReplyEnd 里 currentScrollTop 的口径（listTop - innerTop）去掉可视区 top 的纯内容偏移。
+          const offsetInInner = summaryTop - innerTop;
+          // 目标：summary 中心落在可视区垂直中线偏上 11% 屏高 ——
+          // summary 中心相对可视区的位置 = offsetInInner + summaryHeight/2 - scrollTop，推到 0.39*listHeight。
+          const next = Math.max(0, Math.round(offsetInInner - (listHeight - summaryHeight) / 2 + listHeight * SUMMARY_CENTER_LIFT_RATIO));
+          if (next === Math.round(scrollTopPx.value)) return;
+          scrollTopPx.value = next;
+          // #ifdef H5
+          // uni 的 scroll-top 落不到内层滚动容器上，这里再直接操作一次 DOM（同 alignToReplyEnd）
+          const scroller = findScrollableAncestor(document.querySelector(".msg-list__inner"));
+          if (scroller) scroller.scrollTop = next;
+          // #endif
+        });
+    };
+    applyScroll();
+    // 小结里的 markdown 图 / 字体是渲染后才撑开高度的，补量两次兜底
+    [150, 450].forEach(delay => setTimeout(applyScroll, delay));
+  });
 }
 
 function isStepCardFinished(message: UiChatMessage, index: number) {

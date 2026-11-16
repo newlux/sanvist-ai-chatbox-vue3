@@ -66,6 +66,15 @@ function defineChatStore(scope: string) {
      * 用户主动点「回到底部」时关掉（见 jumpToBottom），否则会被下一次对齐拽回去。
      */
     const capRoundAtTop = ref(false);
+    /**
+     * 核对卡置顶的请求令牌 + 目标卡片 dom id：自增一次 = 一次请求。
+     *
+     * 步骤卡要被顶到对话区时不是用 scroll-into-view（那把元素顶部对到滚动容器最上沿，
+     * 卡片会钻到悬浮头部下面被糊掉），而是发令牌让消息列表按 px 把卡片顶部对齐到
+     * 「悬浮头部下沿」（见 ai-message-list 的 alignCardToHeaderBottom）。
+     */
+    const cardPinToken = ref(0);
+    const cardPinDomId = ref("");
     const requestSeq = ref(0);
     const activeRequestSeq = ref(0);
     /** 当前正在生成的那条 AI 消息 id。按 id 而不是下标记录，切会话后不会指错 */
@@ -242,34 +251,13 @@ function defineChatStore(scope: string) {
     }
 
     /**
-     * 把某个块滚到对话区顶部。
+     * 定位到某个步骤对应的核对卡（对话区的 .chat-box__card），并把它顶到「悬浮头部下沿」。
+     * 卡片顶在头部下沿才整张完整可见，贴底时会被底部固定 UI（输入栏 / 步骤白板）挡住大半。
      *
-     * scroll-into-view 只在值变化时生效，同一张卡需要重新对齐时（卡片收起后再点开同一步、
-     * 步骤卡高度/底部间距量出来后触发的二次对齐）必须先清空再设回，否则不会滚动；
-     * 空值是 no-op（uni 的实现里只有非空才滚），不会把列表拉回顶部。
-     * 传的是元素在 DOM 上的 id：核对卡这类「多轮之间会撞 block id」的块，
-     * 要用 guideStepCardDomId 拼过的唯一 id（消息列表渲染时也是这么给的）。
-     */
-    function scrollBlockToTop(blockId: string) {
-      if (scrollIntoView.value !== blockId) {
-        scrollIntoView.value = blockId;
-        return;
-      }
-      // 同一个 id：uni 只在值变化时才滚，先清空再设回
-      scrollIntoView.value = "";
-      nextTick(() => {
-        scrollIntoView.value = blockId;
-      });
-    }
-
-    /**
-     * 定位到某个步骤对应的核对卡（对话区的 .chat-box__card），并把它滚到对话区顶部：
-     * 卡片顶在最上方才整张完整可见，贴底时会被底部步骤卡挡住大半。
-     *
-     * 能不能真的顶到，取决于页面给的底部间距（messageBottomInset 里的
-     * max(步骤卡高, 对话区高 − 卡片高)）：间距不够时滚动会被浏览器夹在偏下的位置，
-     * 这里只负责把滚动目标指向这张卡。
-     * 注意这里不再贴底，也就不会把 pinnedToBottom 置回 true（贴底会让后续追加内容再滚一次、冲掉对齐）。
+     * 不走 scroll-into-view（那把元素顶部对到滚动容器最上沿，卡片会钻到悬浮头部下面被糊掉），
+     * 这里只负责按 step_id 定位到那张卡、发「置顶令牌」，由消息列表量完 DOM 按 px 对齐（见
+     * ai-message-list 的 alignCardToHeaderBottom）。命中即关掉贴底——贴底会让后续追加内容滚一次、
+     * 冲掉对齐。
      * 从最后一条往前找，避免同一份步骤在历史里来回跳。
      * 卡片在 DOM 上的 id 并进了消息 id（guideStepCardDomId），这里必须按同一规则拼，才能指到那张卡。
      */
@@ -281,7 +269,10 @@ function defineChatStore(scope: string) {
         const block = (message?.blocks || [])
           .find(item => String(item?.payload?.step_id || "") === target);
         if (!block?.id) continue;
-        scrollBlockToTop(guideStepCardDomId(message?.id, block.id));
+        // 不再用 scroll-into-view 顶部对齐（会把卡片塞到悬浮头部下面被糊掉），
+        // 改为发「置顶令牌」：消息列表量完 DOM 按 px 把卡片对齐到悬浮头部下沿。
+        cardPinDomId.value = guideStepCardDomId(message?.id, block.id);
+        cardPinToken.value += 1;
         return true;
       }
       return false;
@@ -300,6 +291,8 @@ function defineChatStore(scope: string) {
       pinnedToBottom,
       replyEndToken,
       jumpToBottomToken,
+      cardPinToken,
+      cardPinDomId,
       requestSeq,
       activeRequestSeq,
       activeMessageId,
