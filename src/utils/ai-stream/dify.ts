@@ -495,6 +495,8 @@ function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockD
     const description = String(data.description || "").trim();
     const slot = parseAskSlotPayload({
       ...data,
+      // 场景透传：气泡内联卡按它决定要不要给「其他输入」入口（作业协同不给，见 AskSlotBlock）
+      scene: String(value?.scene || "").trim().toLowerCase(),
       slot_name: data.ask_name || data.slot_name,
       title: description || title,
       description: description ? title : "",
@@ -502,7 +504,10 @@ function parseAskBlock(value: Record<string, unknown> | null): DifyHistoryBlockD
     return slot ? { type: "ask-slot", payload: slot } : null;
   }
   if (type === "slot") {
-    const slot = parseAskSlotPayload(data);
+    const slot = parseAskSlotPayload({
+      ...data,
+      scene: String(value?.scene || "").trim().toLowerCase(),
+    });
     return slot ? { type: "ask-slot", payload: slot } : null;
   }
   /**
