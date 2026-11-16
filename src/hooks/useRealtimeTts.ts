@@ -77,42 +77,18 @@ function extractAnswerText(message: UiChatMessage, stepId = ""): string {
  */
 const cleanAnswerText = markdownToPlainText;
 
-/**
- * 单个「念得出来」的字符：字母 / 数字 / 中日韩文字。
- * 与 tts-stream 里 SPEAKABLE_TEXT_RE 同一口径（不用 \p{L} 这类属性转义，老 WebView 不认）。
- */
-const SPEAKABLE_CHAR_RE = /[0-9A-Za-z\u00C0-\u024F\u0370-\u04FF\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF]/;
-
-/**
- * 取「第一个句末标点之后」的位置：播报只念这一段，后面的正文一律不念。
- *
- * 产品口径：回复框里的语音播报只念第一句，长回答不整段念出来。
- * 找不到句末标点时返回 0，由调用方决定是「整段还没说完，继续等」还是「整段就是一句，全送」。
- */
-function firstSentenceBoundary(text: string) {
-  /** 已经出现过可朗读的字符（字母 / 数字 / 中日韩）：句首的纯标点片段不算一句 */
-  let speakableSeen = false;
-  for (let i = 0; i < text.length; i += 1) {
+/** 流式喂数时取「最后一个句末标点之后」的边界：边界之前的文本视为完整句子可送 TTS。 */
+function lastSentenceBoundary(text: string) {
+  for (let i = text.length - 1; i >= 0; i -= 1) {
     const ch = text[i];
-    if (SPEAKABLE_CHAR_RE.test(ch)) speakableSeen = true;
-    if ("。！？!?；;\n".includes(ch)) {
-      // 模型偶尔先吐一个 "**。" 这种残缺片段，跳过它，接着找真正的第一句
-      if (!speakableSeen) continue;
-      return i + 1;
-    }
+    if ("。！？!?；;\n".includes(ch)) return i + 1;
     // 半角句点要求后面是空白/结尾，避免把 3.14 这类小数从中间切开。
     if (ch === ".") {
       const next = text[i + 1];
-      if ((next === undefined || next === " " || next === "\t" || next === "\n") && speakableSeen) return i + 1;
+      if (next === undefined || next === " " || next === "\t" || next === "\n") return i + 1;
     }
   }
   return 0;
-}
-
-/** 只留第一句（含句末标点）；整段没有句末标点时原样返回，避免「一句话都念不出来」 */
-function takeFirstSentence(text: string) {
-  const boundary = firstSentenceBoundary(text);
-  return boundary > 0 ? text.slice(0, boundary) : text;
 }
 
 /**
@@ -162,13 +138,14 @@ export function useRealtimeTts(scope?: string) {
   /** 用户手动停止过的消息：后续增量不再自动重启听播。 */
   const manualStopKeys = new Set<string>();
   /**
-   * 已经念过第一句的消息：这一轮后续增量一律不再自动开播。
+   * 当前流式听播会话归属的消息 key。
    *
-   * 「只播第一句」意味着第一句送出去之后本轮播报很快就结束，`playNext` 收尾时会把
-   * `playingMessageKey` 清空 —— 此时 answer 往往还在流，下一块 delta 会被误判成
-   * 「新答案的第一块」重新开一局，于是又念一句。靠这个集合把同一条消息按住。
+   * 单看 `playingMessageKey` 判断「新答案的第一块」不够：音频可能比文本流先播完，
+   * `playNext` 收尾时会把 `playingMessageKey` 清空，此后到达的 delta 会被误判成
+   * 新消息重新开一局（ttsLoading 重新点亮、作废在途请求）。会话归属单独记一份，
+   * answer 收尾或用户停止才清空。
    */
-  const firstSentenceSpokenKeys = new Set<string>();
+  let streamMessageKey: string | null = null;
   /**
    * 场景跳转（pushWindow 进维修助理 / 配件助手）离开那一刻，store 里已存在的消息 key 快照。
    *
@@ -365,8 +342,9 @@ export function useRealtimeTts(scope?: string) {
 
   /**
    * 流式听播：answer 文字边渲染边喂数据。第一块文字到达即自动开播（等价于自动点了
-   * 播音按钮），攒到**第一个句末标点**就只把这一句送 TTS —— 产品口径是回复框只播第一句，
-   * 后面流进来的正文不再念。整段都没有句末标点时，ended = true 把它当唯一一句送出去。
+   * 播音按钮），每攒到一个句末标点就把这批完整句子送 TTS，整段回复都会念完；
+   * answer 收尾（ended）时把最后那段没有句末标点的尾巴一并送出去。
+   * 切片只在**原始文本**上按偏移做，raw 偏移单调增长，绝不丢内容。
    */
   function feedAnswerDelta(message: UiChatMessage, deltaText: string, ended: boolean) {
     // 语音播报总开关关掉：这一轮不自动播报。
@@ -376,8 +354,6 @@ export function useRealtimeTts(scope?: string) {
     if (messageId == null || message?.sessionId == null) return;
     const key = String(message.id ?? messageId);
     if (manualStopKeys.has(key)) return;
-    // 这条消息的第一句已经念过：后面的正文不再自动播（只播第一句）
-    if (firstSentenceSpokenKeys.has(key)) return;
     /**
      * 刚从维修助理 / 配件助手跳出去过：离开那一刻快照里没有的新消息 =
      * 跳转之后才流进来的这条回复（「好的，正在为你进入维修助理。」），
@@ -390,7 +366,9 @@ export function useRealtimeTts(scope?: string) {
       return;
     }
 
-    if (playingMessageKey.value !== key) {
+    // 同一条消息的流式会话还活着就继续往里喂（音频可能比文本流先播完，
+    // 那时 playingMessageKey 已被 playNext 清空，不能据此重开一局）。
+    if (streamMessageKey !== key || !activeSession) {
       // 新答案的第一块文字：自动开启流式听播会话。
       stop();
       streamFinished = false;
@@ -399,6 +377,7 @@ export function useRealtimeTts(scope?: string) {
       submittedRawLength = 0;
       sessionSeq += 1;
       activeSession = { pendingFetches: 0 };
+      streamMessageKey = key;
       playingMessageId.value = messageId;
       playingMessageKey.value = key;
       patchMessage(messageId, { ttsLoading: true, ttsPlaying: false });
@@ -406,19 +385,7 @@ export function useRealtimeTts(scope?: string) {
 
     const seq = sessionSeq;
     const session = activeSession;
-    if (!session || playingMessageKey.value !== key) return;
-
-    /**
-     * 只播第一句：第一句已经送出去之后，后续流进来的正文不再参与播报。
-     * （产品口径：回复框的语音播报只念第一个句号之前那段，不是整段念完。）
-     */
-    if (submittedRawLength > 0) {
-      if (ended) {
-        streamInputDone = true;
-        settleStreamIdle(seq, messageId, session);
-      }
-      return;
-    }
+    if (!session || streamMessageKey !== key) return;
 
     streamedRawText += String(deltaText || "");
 
@@ -426,24 +393,14 @@ export function useRealtimeTts(scope?: string) {
     // 之前按「全文清洗后差量 + 固定清洗偏移」切片，清洗不是追加稳定的
     // （合成句号被后续真实字符顶掉、markdown 后半截到达让前缀收缩、列表符转顿号改写），
     // 偏移错位会跳过若干真实文字 —— 这就是漏播的根因。
-    const boundary = firstSentenceBoundary(streamedRawText);
-    if (boundary > 0) {
-      submitBatch(streamedRawText.slice(0, boundary), messageId, seq, session);
+    // ended 时直接取到结尾，尾部没有句末标点的那半句也会一并送出。
+    const boundary = ended ? streamedRawText.length : lastSentenceBoundary(streamedRawText);
+    if (boundary > submittedRawLength) {
+      submitBatch(streamedRawText.slice(submittedRawLength, boundary), messageId, seq, session);
       submittedRawLength = boundary;
-      firstSentenceSpokenKeys.add(key);
-      // 第一句都送出去了：输入侧就此收尾，剩下的正文不再喂给 TTS
-      streamInputDone = true;
-      settleStreamIdle(seq, messageId, session);
-      return;
     }
 
     if (ended) {
-      // 整段没有句末标点：它本身就是唯一的一句，全送，别让用户听不到任何声音
-      if (streamedRawText.trim()) {
-        submitBatch(streamedRawText, messageId, seq, session);
-        submittedRawLength = streamedRawText.length;
-        firstSentenceSpokenKeys.add(key);
-      }
       streamInputDone = true;
       settleStreamIdle(seq, messageId, session);
     }
@@ -482,13 +439,11 @@ export function useRealtimeTts(scope?: string) {
     playingStepId.value = stepId;
     patchMessage(messageId, { ttsLoading: true, ttsPlaying: false });
     try {
-      const raw = cleanAnswerText(textOverride || extractAnswerText(message, stepId));
       /**
-       * 回复框的播报只念第一句（与自动听播同一口径：第一个句末标点之前那段）。
-       * 传了 textOverride 的是卡片自己的播报（步骤正文 / 小结），内容本来就是一句一段，
-       * 不做截断，否则「念当前这一步」会变成只念半句。
+       * 手动播报与自动听播同一口径：整段都念，不再只念第一句。
+       * 手动点的消息已渲染完毕，整段一次性送后端合成分句即可。
        */
-      const text = textOverride ? raw : takeFirstSentence(raw);
+      const text = cleanAnswerText(textOverride || extractAnswerText(message, stepId));
       if (!text) {
         finishRequest(messageId, seq);
         playingMessageId.value = null;
@@ -526,6 +481,7 @@ export function useRealtimeTts(scope?: string) {
     releaseAudio();
     // 流式增量会话一并作废：排队的链式请求因 seq 不匹配自然短路。
     activeSession = null;
+    streamMessageKey = null;
     streamInputDone = true;
     streamedRawText = "";
     submittedRawLength = 0;
