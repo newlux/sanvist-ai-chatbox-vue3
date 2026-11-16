@@ -265,6 +265,8 @@ const overview = computed(() => {
 const REPORT_TITLE_KEY_MAP: Record<string, string> = {
   经营概览: "overview-report-title",
   经营概览早报: "overview-report-title-morning",
+  // 听汇报入口卡 / 概览卡上的标题，后端直接下发「听汇报」时也要跟着切语言
+  听汇报: "nav-report",
 };
 
 const listenBroadcastTitle = computed(() => {

@@ -131,6 +131,7 @@
   "nav-repair": "Repair",
   "nav-task": "Tasks",
   "nav-parts": "Parts",
+  "overview-fallback-user-name": "Boss Fu",
   "overview-greeting-suffix": ", nice to meet you.",
   "overview-morning-report": "({date})",
   "overview-listen": "Listen",
