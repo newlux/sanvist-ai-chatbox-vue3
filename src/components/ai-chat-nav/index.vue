@@ -148,7 +148,10 @@ function onItemTap(item: NavItem) {
 }
 
 /* 整行等分：三个入口（PC 端两个）把可用宽度平均分掉，
-   左右各留 20rpx、胶囊之间 16rpx，剩下的宽度由 flex 均分，不再跟着文案宽度走 */
+   胶囊之间 16rpx，剩下的宽度由 flex 均分，不再跟着文案宽度走。
+   左右内边距对齐下方输入栏语音态（.input-bar 的 padding 左右 48rpx）：
+   第一颗胶囊的左沿卡在加号左边、最后一颗的右沿卡在键盘右边，
+   原来 20rpx 会让整排比输入栏左右各外扩 28rpx */
 .ai-chat-nav__list {
   display: flex;
   width: 100%;
@@ -156,7 +159,7 @@ function onItemTap(item: NavItem) {
   box-sizing: border-box;
   align-items: center;
   gap: 16rpx;
-  padding: 0 20rpx;
+  padding: 0 48rpx;
 }
 
 .ai-chat-nav__chip {

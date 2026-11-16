@@ -702,6 +702,7 @@ onMounted(async () => {
   margin-top: 24rpx;
   padding: 32rpx;
   background: #ffffff;
+  border-radius:24rpx;
 }
 
 /* 设计稿 180:219 等：卡片 298×64（596×128rpx）、白底、圆角 12px（24rpx）；

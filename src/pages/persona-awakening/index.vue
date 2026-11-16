@@ -403,10 +403,14 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-/* 聆听层：内容只占画布 40%，按 236 渲染会小一大圈，反算到 566 让可见图形与平时等大 */
+/* 聆听层：内容只占画布 40%，按 236 渲染会小一大圈，反算到 566 让可见图形与平时等大。
+   用负 inset 把元素向四周撑满（254 + 156 × 2 = 566），保证与 254 的 frame 同心 ——
+   只写 `inset: 0 + margin: auto` 时，元素比容器大，Chrome 不会给出负的 auto margin，
+   会变成贴左上，图标整体偏右。 */
 .persona-awakening__logo--listen {
-  width: calc(566 * var(--u));
-  height: calc(566 * var(--u));
+  inset: calc(-156 * var(--u));
+  width: auto;
+  height: auto;
   opacity: 0;
 }
 
