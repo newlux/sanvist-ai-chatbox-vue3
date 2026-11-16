@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onHide, onShow } from "@dcloudio/uni-app";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import heySani from "@/assets/img/hey-sani.svg";
 import enlargeIcon from "@/assets/img/icon-enlarge.svg";
 import reduceIcon from "@/assets/img/icon-reduce.svg";
@@ -66,9 +66,49 @@ const rippleVisible = computed(() => pageVisible.value && pushNoticeSoundPlaying
 /**
  * 中间图标：平时是 sani-logo.webp，推送语音播报期间换成 tell-dark.webp，播完自动切回。
  * 切换条件与上面声纹、`.persona-awakening__screen--playing` 的呼吸动画完全一致。
+ *
+ * 直接切 `src` 是硬切一帧（新图还可能没解码完，看着像闪一下），所以改成两层叠图交叉淡入淡出：
+ * 基础层常驻，聆听层按需挂载；退出后等淡出走完再卸载 —— tell-dark 是 6.6MB 动图，
+ * 藏在 `opacity: 0` 里浏览器仍会持续解码，没必要一直挂着。
  */
 const logoPlaying = computed(() => pageVisible.value && pushNoticeSoundPlaying.value);
-const logoSource = computed(() => (logoPlaying.value ? tellDark : saniLogo));
+
+/** 聆听层是否已挂载（淡出结束后才卸） */
+const listenLogoMounted = ref(false);
+/** 聆听层是否已淡入（与挂载分开：挂载当帧就改 opacity，浏览器不会跑过渡） */
+const listenLogoShown = ref(false);
+/** 淡入淡出时长，与样式里的 transition 保持一致 */
+const LOGO_FADE_MS = 360;
+let listenLogoUnmountTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearListenLogoUnmount() {
+  if (listenLogoUnmountTimer == null) return;
+  clearTimeout(listenLogoUnmountTimer);
+  listenLogoUnmountTimer = null;
+}
+
+watch(logoPlaying, (playing) => {
+  clearListenLogoUnmount();
+  if (playing) {
+    listenLogoMounted.value = true;
+    // 等两帧再加 shown：让浏览器先画出 opacity: 0 的初始态，过渡才跑得起来
+    const reveal = () => {
+      if (logoPlaying.value) listenLogoShown.value = true;
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => requestAnimationFrame(reveal));
+    }
+    else {
+      setTimeout(reveal, 16);
+    }
+    return;
+  }
+  listenLogoShown.value = false;
+  listenLogoUnmountTimer = setTimeout(() => {
+    listenLogoUnmountTimer = null;
+    if (!logoPlaying.value) listenLogoMounted.value = false;
+  }, LOGO_FADE_MS + 80);
+}, { immediate: true });
 
 /**
  * tell-dark.webp 是 600 × 600 动图、约 6.6MB，第一次切 src 会先白一帧。
@@ -149,6 +189,11 @@ if (typeof document !== "undefined") {
     document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
   });
 }
+
+onBeforeUnmount(() => {
+  // 页面卸载时别再挂着「淡出后卸载聆听层」的定时器
+  clearListenLogoUnmount();
+});
 </script>
 
 <template>
@@ -166,9 +211,21 @@ if (typeof document !== "undefined") {
         <text class="persona-awakening__title">随时为你而来</text>
       </view>
 
-      <!-- 291:7290 中间图标 254 × 254：平时 sani-logo.webp，语音播报期间换 tell-dark.webp -->
+      <!-- 291:7290 中间图标 254 × 254：两层叠图，语音播报时交叉淡入 tell-dark.webp -->
       <view class="persona-awakening__logo-frame">
-        <image class="persona-awakening__logo" :src="logoSource" mode="aspectFit" />
+        <image
+          class="persona-awakening__logo persona-awakening__logo--idle"
+          :class="{ 'persona-awakening__logo--dimmed': listenLogoShown }"
+          :src="saniLogo"
+          mode="aspectFit"
+        />
+        <image
+          v-if="listenLogoMounted"
+          class="persona-awakening__logo persona-awakening__logo--listen"
+          :class="{ 'persona-awakening__logo--shown': listenLogoShown }"
+          :src="tellDark"
+          mode="aspectFit"
+        />
       </view>
 
       <!-- 291:7298 底部一段话（672 × 41，80% 白色） -->
@@ -308,9 +365,8 @@ if (typeof document !== "undefined") {
 
 /**
  * 291:7290 中间图标：设计尺寸 254 × 254 @ (833, 359)
- * 素材两张动图，按播放态切源（见 logoSource）：
- * - 平时：src/assets/img/sani-logo.webp（280 × 260）；
- * - 语音播报中：src/assets/img/tell-dark.webp（600 × 600）。
+ * 两层叠图（见模板）：基础层 sani-logo.webp 常驻，聆听层 tell-dark.webp 按需挂载，
+ * 切换靠 opacity 过渡交叉淡入淡出，不再硬切一帧。
  *
  * 两张图的「画布留白」差很多（透明像素包围盒实测）：
  * - sani：内容 252 × 216 / 画布 280 × 260（占宽 90%、占高 83%）；
@@ -318,39 +374,49 @@ if (typeof document !== "undefined") {
  * 直接按同一个盒子渲染，tell 的图形只有平时的 1/3 多一点，看着明显偏小。
  * 所以两边都按「**可见图形等大**」反算渲染尺寸：
  * - 平时 254 × 236（sani 内容可见 228.6 × 196）；
- * - 播报 566 × 566（tell 内容可见 228.3 × 196.2）。
- * 宽高同用 --u 保证正方形；水平居中，距顶 359 用纵向基准
- * 设计稿 DROP_SHADOW 为 visible: false，故不写 box-shadow；无边框
+ * - 聆听 566 × 566（tell 内容可见 228.3 × 196.2）。
+ * 水平居中，距顶 359 用纵向基准；设计稿 DROP_SHADOW 为 visible: false，故不写 box-shadow。
  */
 .persona-awakening__logo-frame {
   position: absolute;
   z-index: 1;
   top: calc(359 * var(--uh));
   left: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: calc(254 * var(--u));
   height: calc(254 * var(--u));
   transform: translateX(-50%);
 }
 
-/* 高度取 sani-logo 在 254 宽下的等比高度（280 × 260 → 236），平时那张正好铺满 */
+/**
+ * 两层图标都绝对定位叠在 frame 上：`inset: 0 + margin: auto` 做居中，
+ * 不用 translate —— 呼吸动画的 transform 会把它覆盖掉。
+ * transition 的时长与脚本里的 LOGO_FADE_MS 保持一致。
+ */
 .persona-awakening__logo {
+  position: absolute;
+  inset: 0;
   display: block;
-  width: 100%;
+  width: calc(254 * var(--u));
   height: calc(236 * var(--u));
+  margin: auto;
+  transition: opacity 360ms ease;
   pointer-events: none;
 }
 
-/**
- * 播报态的 tell-dark.webp：内容只占画布 40%，按 236 渲染图形会小一大圈。
- * 反算到「可见图形与平时等大」的渲染尺寸：228.6 / 0.4033 ≈ 566（宽）、196 / 0.3467 ≈ 566（高），
- * 恰好是正方形。图比 254 的框大，靠 frame 的 flex 居中溢出显示，透明边不会撑开布局。
- */
-.persona-awakening__screen--playing .persona-awakening__logo {
+/* 聆听层：内容只占画布 40%，按 236 渲染会小一大圈，反算到 566 让可见图形与平时等大 */
+.persona-awakening__logo--listen {
   width: calc(566 * var(--u));
   height: calc(566 * var(--u));
+  opacity: 0;
+}
+
+.persona-awakening__logo--listen.persona-awakening__logo--shown {
+  opacity: 1;
+}
+
+/* 基础层在聆听图标淡入的同时淡出，两边交叉过渡 */
+.persona-awakening__logo--idle.persona-awakening__logo--dimmed {
+  opacity: 0;
 }
 
 /**

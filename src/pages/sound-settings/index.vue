@@ -916,7 +916,7 @@ onMounted(async () => {
 
   /* 203:1126 等 Rectangle 185：音色卡 #303030，圆角 12（24rpx） */
   .sound-settings__voice {
-    background: #303030;
+    background: #202020;
   }
 
   /* 203:1123 Group 183（当前选中）：1px（2rpx）#1166D6 描边，其余卡片无描边 */
