@@ -1659,7 +1659,9 @@ $color-white: #ffffff;
   min-height: 100vh;
   height: 100%;
   box-sizing: border-box;
-  background: #fafafa;
+  // 首帧兜底：深色下 index.html 内联脚本已把 --app-page-bg 设成 #0d0d0d，
+  // 这里默认浅色 #fafafa 只在变量未设（浅色）时生效，避免新窗口冷启动闪白
+  background: var(--app-page-bg, #fafafa);
   font-family: PingFang SC;
   overflow: hidden;
   overscroll-behavior: none;
@@ -1670,7 +1672,8 @@ $color-white: #ffffff;
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: #fafafa;
+  // 与 .ai-page 同一套首帧兜底：深色下由 --app-page-bg 直接给深色，不等 .ai-page--dark 类
+  background: var(--app-page-bg, #fafafa);
   overflow: hidden;
   position: relative;
   /* 形成层叠上下文：机型背景图（AiChatBackdrop）是 z-index: -1，
