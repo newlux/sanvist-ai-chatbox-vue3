@@ -9,7 +9,7 @@
  * 1. 生命周期：`enabled` 为 true 时注册并订阅，变 false / 组件卸载时注销并退订
  *    —— 注册成功后原生侧会拦截遥控器按键（含返回键），不注销用户就退不出去；
  * 2. 事件规整：长按的 `repeatCount > 0` 丢掉；宿主漏推 `up` 时用时间窗兜住重复 `down`；
- * 3. 按键分发：确认键（OK / 方向中键）→ onConfirm，返回键 → onBack，其余键忽略。
+ * 3. 按键分发：音量加 / 音量减 / 静音→ onConfirm，返回键 → onBack，其余键忽略。
  *
  * 宿主没实现这套 JSAPI（浏览器 / 旧容器）时静默降级：只打一条 warn，触屏交互照旧。
  */
@@ -22,16 +22,7 @@ import { onRemoteKeyEvent, registerRemoteKeyListener, unregisterRemoteKeyListene
 
 const logger = createLogger("remote-key");
 
-/**
- * 确认键：宿主给的 key 名、Android keyCode、scanCode 三套都认
- * （DPAD_CENTER = 23、ENTER = 66、NUM_ENTER = 160；scanCode 23 / 28 对应同一组物理键）。
- */
-const CONFIRM_KEYS = new Set([
-  "ok", "enter", "center", "select", "dpad_center",
-  "volumeup", "volumedown", "volumemute",
-]);
-const CONFIRM_KEY_CODES = new Set([23, 66, 160]);
-const CONFIRM_SCAN_CODES = new Set([23, 28]);
+const VOLUME_KEYS = new Set(["volumeup", "volumedown", "volumemute"]);
 /** 返回键：KEYCODE_BACK = 4，Linux scanCode 158 */
 const BACK_KEYS = new Set(["back", "escape", "esc", "browser_back"]);
 const BACK_KEY_CODES = new Set([4]);
@@ -43,7 +34,7 @@ const REPEAT_GUARD_MS = 400;
 export interface UseRemoteKeyOptions {
   /** 是否处于需要接管遥控器的页面态；离开页面务必置 false，否则按键被原生一直拦截 */
   enabled: Ref<boolean>;
-  /** 确认键（OK / 方向中键）按下 */
+  /** 音量加 / 音量减 / 静音按下 */
   onConfirm?: () => void;
   /** 返回键按下：注册后原生不再处理返回键，这里必须给退路 */
   onBack?: () => void;
@@ -83,8 +74,8 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
     if (now - (lastTriggerAt.get(keyId) ?? 0) < REPEAT_GUARD_MS) return;
     lastTriggerAt.set(keyId, now);
 
-    if (matches(CONFIRM_KEYS, CONFIRM_KEY_CODES, CONFIRM_SCAN_CODES, payload)) {
-      logger.info("遥控器确认键", payload);
+    if (VOLUME_KEYS.has(payload.key)) {
+      logger.info("遥控器音量键", payload);
       options.onConfirm?.();
       return;
     }
