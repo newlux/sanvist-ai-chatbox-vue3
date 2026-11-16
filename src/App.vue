@@ -18,10 +18,10 @@ const logger = createLogger("app");
  * 本地兜底 token：只在宿主启动参数里没带 Authorization 时使用。
  *
  * 取值优先级：宿主注入（query.Authorization）> 本地兜底（这一串）> 空串。
- * 置空时请求不会带 Authorization 头（见 utils/request 的 getRequestHeaders）。 
+ * 置空时请求不会带 Authorization 头（见 utils/request 的 getRequestHeaders）。
  * 注意：这串会打进产物，正式上线前需要确认是否保留。
  */
-const LOCAL_AUTHORIZATION_FALLBACK = "bearer f1e22c66-1488-45c9-80a6-916b88026e62";
+const LOCAL_AUTHORIZATION_FALLBACK = "bearer 981edeb0-1bbc-413c-a0db-51ea925fda57";
 
 type StartupQuery = Record<string, any>;
 

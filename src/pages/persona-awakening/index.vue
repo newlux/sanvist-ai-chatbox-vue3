@@ -1,28 +1,32 @@
 <script setup lang="ts">
 import { onHide, onShow } from "@dcloudio/uni-app";
-import { computed, ref } from "vue";
-import headerIslandLogo from "@/assets/img/header-island-logo.png";
-import glowBottom from "@/assets/img/persona-awakening/glow-bottom.png";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import heySani from "@/assets/img/hey-sani.svg";
+import enlargeIcon from "@/assets/img/icon-enlarge.svg";
+import reduceIcon from "@/assets/img/icon-reduce.svg";
 import glowMaskBottom from "@/assets/img/persona-awakening/glow-mask-bottom.png";
-import heySani from "@/assets/img/persona-awakening/hey-sani.png";
+import saniLogo from "@/assets/img/sani-logo.webp";
+import tellDark from "@/assets/img/tell-dark.webp";
 import AudioRipple from "@/components/audio-ripple/index.vue";
 import PushNoticePanel from "@/components/push-notice-panel/index.vue";
+import { createLogger } from "@/utils/logger";
 import { pushNoticeSoundPlaying } from "@/utils/push/push-sound";
 
 /**
  * 「老板屏-个性觉醒」大屏页（Ardot 291:7285「老板屏页面」，设计基准 1920 × 1080）。
  *
- * 完整画面由 291:7285 下的 6 个子节点叠出来（291:7291 只是底层「黑底 + 标题」）：
+ * 完整画面由 291:7285 下的 5 个子节点叠出来（291:7291 只是底层「黑底 + 标题」）：
  *
  * | 节点 | 名称 | 内容 | 尺寸 | 位置 |
  * |---|---|---|---|---|
  * | 291:7291 | 个性觉醒 | 黑底 #0D0D0D + 标题「随时为你而来」 | 1920 × 1080.889 | (0, 0) |
  * | 291:7290 | 微信图片… | 中间的 SANI 图标（图片填充） | 254 × 254 | (833, 359) |
  * | 291:7298 | Desc 1 | 底部一段话 | 672 × 41 | (624, 682) |
- * | 291:7286 | Frame 85 | 底部渐变光晕（3 个模糊椭圆） | 1923 × 233 | (-3, 848) |
  * | 291:18734 | Mask group | 底部叠加光效，整体 10% 透明 | 2464.165 × 552.15 | (-234.377, 947.176) |
  * | 291:18735 | Group 192 | 顶部「Hey，SANI」 | 176.962 × 47 | (871, 312) |
  * | 291:7293 / 291:7297 | Plus Icon / Label 2 | 设计稿中 visible = false | — | — |
+ *
+ * 291:7286「Frame 85」底部渐变光晕按需求整层移除（素材 glow-bottom.png 与 pulse 动画一并去掉）。
  *
  * 文案：标题 32px / 副标题 28px，均为 Source Han Sans CN Medium（font-weight 500）、#FFFFFF，
  * 副标题整体 opacity 0.8；行高 = 设计稿文本盒高（46 / 41）。
@@ -34,12 +38,14 @@ import { pushNoticeSoundPlaying } from "@/utils/push/push-sound";
  * - `--u  = min(--uw, --uh)`：元素自身尺寸用它，图标永远保持 254:254 的正方形、文字不因
  *   单方向拉伸而变形。
  * 水平方向一律 `left: 50% + translateX(-50%)` 居中（设计稿里图标 / 文案 / Hey，SANI 本就居中），
- * 底部光晕宽度 100% 贴底，因此任何宽高比（16:9 / 21:9 / 4:3）都不会出现左右黑边或固定宽度。
+ * 底部叠加光效按设计稿宽度居中并超出画面，因此任何宽高比（16:9 / 21:9 / 4:3）都不会出现左右黑边。
  * 1920 × 1080 视口下 --u = --uw = --uh = 1px，与设计稿 1:1。
  *
  * 单位说明：大屏用 px 基准（uni-app 的 rpx 按「750rpx = 视口宽」换算，1920 画布会被放大 5.12 倍）。
  */
 defineOptions({ name: "PersonaAwakening" });
+
+const logger = createLogger("persona-awakening");
 
 const pageVisible = ref(false);
 const debugPanelOpen = ref(false);
@@ -57,14 +63,92 @@ const TTS_RIPPLE_APPEARANCE = { startAngle: 120, endAngle: 60, colorSpeed: 0 };
  */
 const rippleVisible = computed(() => pageVisible.value && pushNoticeSoundPlaying.value);
 
+/**
+ * 中间图标：平时是 sani-logo.webp，推送语音播报期间换成 tell-dark.webp，播完自动切回。
+ * 切换条件与上面声纹、`.persona-awakening__screen--playing` 的呼吸动画完全一致。
+ */
+const logoPlaying = computed(() => pageVisible.value && pushNoticeSoundPlaying.value);
+const logoSource = computed(() => (logoPlaying.value ? tellDark : saniLogo));
+
+/**
+ * tell-dark.webp 是 600 × 600 动图、约 6.6MB，第一次切 src 会先白一帧。
+ * 页面可见后预取一次，之后切 source 走浏览器缓存，基本无感。模块级标记避免重复预取。
+ */
+let tellDarkPreloaded = false;
+function preloadTellDark() {
+  if (tellDarkPreloaded || typeof Image === "undefined") return;
+  tellDarkPreloaded = true;
+  const image = new Image();
+  image.src = tellDark;
+}
+
 onShow(() => {
   pageVisible.value = true;
+  preloadTellDark();
 });
 
 onHide(() => {
   pageVisible.value = false;
   debugPanelOpen.value = false;
 });
+
+/**
+ * 右上角全屏切换（大屏机型常用的「放大看」入口）。
+ *
+ * 走浏览器全屏 API，标准与 `webkit` 前缀两条都试：Android WebView / 部分大屏容器
+ * 只实现了带前缀的那套。状态以 `fullscreenchange` 为准 —— 用户用 Esc / 系统手势退出时，
+ * 图标也要跟着切回「放大」。
+ *
+ * 容器没实现全屏 API（部分内嵌 WebView 会拒绝）时只记一条日志，不弹窗打断页面。
+ */
+const isFullscreen = ref(false);
+const fullscreenIcon = computed(() => (isFullscreen.value ? reduceIcon : enlargeIcon));
+
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+function syncFullscreenState() {
+  const doc = document as FullscreenDocument;
+  isFullscreen.value = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
+}
+
+async function toggleFullscreen() {
+  const doc = document as FullscreenDocument;
+  const root = document.documentElement as FullscreenElement;
+  try {
+    if (isFullscreen.value) {
+      const exit = doc.exitFullscreen?.bind(doc) || doc.webkitExitFullscreen?.bind(doc);
+      await exit?.();
+    }
+    else {
+      const enter = root.requestFullscreen?.bind(root) || root.webkitRequestFullscreen?.bind(root);
+      await enter?.();
+    }
+    syncFullscreenState();
+  }
+  catch (error) {
+    logger.warn("全屏切换失败", error);
+    // 退出全屏没成功时保持原图标，避免 UI 与真实状态不一致
+    syncFullscreenState();
+  }
+}
+
+if (typeof document !== "undefined") {
+  onMounted(() => {
+    syncFullscreenState();
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    document.addEventListener("webkitfullscreenchange", syncFullscreenState);
+  });
+  onBeforeUnmount(() => {
+    document.removeEventListener("fullscreenchange", syncFullscreenState);
+    document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
+  });
+}
 </script>
 
 <template>
@@ -82,22 +166,19 @@ onHide(() => {
         <text class="persona-awakening__title">随时为你而来</text>
       </view>
 
-      <!-- 291:7290 中间图标 254 × 254：素材改用 src/assets/img/header-island-logo.png -->
+      <!-- 291:7290 中间图标 254 × 254：平时 sani-logo.webp，语音播报期间换 tell-dark.webp -->
       <view class="persona-awakening__logo-frame">
-        <image class="persona-awakening__logo" :src="headerIslandLogo" />
+        <image class="persona-awakening__logo" :src="logoSource" mode="aspectFit" />
       </view>
 
       <!-- 291:7298 底部一段话（672 × 41，80% 白色） -->
       <!-- eslint-disable-next-line vue/singleline-html-element-content-newline -->
       <text class="persona-awakening__desc">你的三一设备伙伴。把问题交给我，把时间留给工作。</text>
 
-      <!-- 291:7286 底部渐变光晕 1923 × 233（图层模糊已烘焙） -->
-      <image class="persona-awakening__glow" :src="glowBottom" />
-
       <!-- 291:18734 底部叠加光效，opacity 0.1 -->
       <image class="persona-awakening__glow-mask" :src="glowMaskBottom" />
 
-      <!-- 291:18735 顶部「Hey，SANI」176.962 × 47 -->
+      <!-- 291:18735 顶部「Hey，SANI」176.962 × 47：素材改用 src/assets/img/hey-sani.svg -->
       <button
         type="button"
         class="persona-awakening__hey-trigger"
@@ -105,7 +186,17 @@ onHide(() => {
         :aria-expanded="debugPanelOpen"
         @click.stop="debugPanelOpen = true"
       >
-        <image class="persona-awakening__hey" :src="heySani" />
+        <image class="persona-awakening__hey" :src="heySani" mode="aspectFit" />
+      </button>
+
+      <!-- 右上角全屏切换：默认 icon-enlarge.svg，全屏后切 icon-reduce.svg -->
+      <button
+        type="button"
+        class="persona-awakening__fullscreen"
+        :aria-label="isFullscreen ? '退出全屏' : '全屏'"
+        @click.stop="toggleFullscreen"
+      >
+        <image class="persona-awakening__fullscreen-icon" :src="fullscreenIcon" />
       </button>
 
       <view
@@ -217,7 +308,17 @@ onHide(() => {
 
 /**
  * 291:7290 中间图标：设计尺寸 254 × 254 @ (833, 359)
- * 素材改用 src/assets/img/header-island-logo.png（220 × 220 方图，等比铺满 254 的盒子不变形）
+ * 素材两张动图，按播放态切源（见 logoSource）：
+ * - 平时：src/assets/img/sani-logo.webp（280 × 260）；
+ * - 语音播报中：src/assets/img/tell-dark.webp（600 × 600）。
+ *
+ * 两张图的「画布留白」差很多（透明像素包围盒实测）：
+ * - sani：内容 252 × 216 / 画布 280 × 260（占宽 90%、占高 83%）；
+ * - tell：内容 242 × 208 / 画布 600 × 600（占宽 40%、占高 35%）。
+ * 直接按同一个盒子渲染，tell 的图形只有平时的 1/3 多一点，看着明显偏小。
+ * 所以两边都按「**可见图形等大**」反算渲染尺寸：
+ * - 平时 254 × 236（sani 内容可见 228.6 × 196）；
+ * - 播报 566 × 566（tell 内容可见 228.3 × 196.2）。
  * 宽高同用 --u 保证正方形；水平居中，距顶 359 用纵向基准
  * 设计稿 DROP_SHADOW 为 visible: false，故不写 box-shadow；无边框
  */
@@ -226,17 +327,30 @@ onHide(() => {
   z-index: 1;
   top: calc(359 * var(--uh));
   left: 50%;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: calc(254 * var(--u));
   height: calc(254 * var(--u));
   transform: translateX(-50%);
 }
 
+/* 高度取 sani-logo 在 254 宽下的等比高度（280 × 260 → 236），平时那张正好铺满 */
 .persona-awakening__logo {
   display: block;
   width: 100%;
-  height: 100%;
+  height: calc(236 * var(--u));
   pointer-events: none;
+}
+
+/**
+ * 播报态的 tell-dark.webp：内容只占画布 40%，按 236 渲染图形会小一大圈。
+ * 反算到「可见图形与平时等大」的渲染尺寸：228.6 / 0.4033 ≈ 566（宽）、196 / 0.3467 ≈ 566（高），
+ * 恰好是正方形。图比 254 的框大，靠 frame 的 flex 居中溢出显示，透明边不会撑开布局。
+ */
+.persona-awakening__screen--playing .persona-awakening__logo {
+  width: calc(566 * var(--u));
+  height: calc(566 * var(--u));
 }
 
 /**
@@ -268,21 +382,6 @@ onHide(() => {
   transform: translateX(-50%);
 }
 
-/**
- * 291:7286 底部渐变光晕：设计 1923 × 233 @ (-3, 848)，底边比画面多 1px
- * 自适应：宽度铺满 100%，高度按纵向基准，底边贴住画面（不再有固定宽度）
- */
-.persona-awakening__glow {
-  position: absolute;
-  right: 0;
-  bottom: calc(-1 * var(--uh));
-  left: 0;
-  display: block;
-  width: 100%;
-  height: calc(233 * var(--uh));
-  border: 0;
-}
-
 /** 291:18734 底部叠加光效：设计 2464.165 × 552.15 @ (-234.377, 947.176)，opacity 0.1、底边超出画面 419.326 */
 .persona-awakening__glow-mask {
   position: absolute;
@@ -299,11 +398,6 @@ onHide(() => {
   .persona-awakening__screen--playing {
     .persona-awakening__logo {
       animation: persona-logo-breathe 2s ease-in-out infinite;
-    }
-
-    .persona-awakening__glow {
-      transform-origin: center bottom;
-      animation: persona-glow-pulse 2s ease-in-out infinite;
     }
 
     .persona-awakening__glow-mask {
@@ -323,19 +417,6 @@ onHide(() => {
   }
 }
 
-@keyframes persona-glow-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scaleY(1);
-  }
-
-  50% {
-    opacity: 0.86;
-    transform: scaleY(1.22);
-  }
-}
-
 @keyframes persona-glow-ripple {
   0%,
   100% {
@@ -349,7 +430,11 @@ onHide(() => {
   }
 }
 
-/** 291:18735 顶部「Hey，SANI」：设计 176.962 × 47 @ (871, 312)，水平居中、距顶用纵向基准 */
+/**
+ * 291:18735 顶部「Hey，SANI」：设计 176.962 × 47 @ (871, 312)，水平居中、距顶用纵向基准
+ * 素材改用 hey-sani.svg（106 × 24，比例 4.42 比按钮的 3.77 更扁），
+ * `mode="aspectFit"` 等比装入按钮，宽度贴满、上下各留一点空白，字形不被拉伸
+ */
 .persona-awakening__hey-trigger {
   position: absolute;
   z-index: 1;
@@ -372,6 +457,39 @@ onHide(() => {
 }
 
 .persona-awakening__hey {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/**
+ * 右上角全屏按钮（设计稿里没有这个元素，尺寸取图标原始 40 × 40）。
+ * z-index 压过通知调试面板，面板展开时按钮仍可点。
+ */
+.persona-awakening__fullscreen {
+  position: absolute;
+  z-index: 3;
+  top: max(24px, calc(48 * var(--uh)));
+  right: max(24px, calc(48 * var(--uw)));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(40 * var(--u));
+  height: calc(40 * var(--u));
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.persona-awakening__fullscreen::after {
+  border: 0;
+}
+
+.persona-awakening__fullscreen-icon {
   display: block;
   width: 100%;
   height: 100%;
