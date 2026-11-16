@@ -671,14 +671,14 @@ onBeforeUnmount(disposeChart);
 }
 .chart-block--dark .chart-block__fallback,
 .chart-block--dark .chart-block__data-series-name {
-  color: rgba(255, 255, 255, 0.45);
+  color: #ffffff
 }
 .chart-block--dark .chart-block__data-title,
 .chart-block--dark .chart-block__data-value {
   color: #ffffff;
 }
 .chart-block--dark .chart-block__data-label {
-  color: rgba(255, 255, 255, 0.65);
+  color: #ffffff
 }
 .chart-block--dark .chart-block__data-row {
   border-bottom-color: rgba(255, 255, 255, 0.12);

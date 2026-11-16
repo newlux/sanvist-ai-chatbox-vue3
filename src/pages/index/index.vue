@@ -1811,22 +1811,14 @@ function onSessionClick(session: { sessionId?: string | number; id?: string | nu
   void openLocalHistory(id);
 }
 
-async function confirmModal(title: string, content: string) {
-  return new Promise<boolean>((resolve) => {
-    uni.showModal({
-      title,
-      content,
-      confirmColor: "#F8315E",
-      success: res => resolve(Boolean(res.confirm)),
-      fail: () => resolve(false),
-    });
-  });
-}
-
+/**
+ * 删除 / 批量删除的二次确认已经由历史抽屉里的自定义弹窗完成（ai-chat-header 的
+ * history-delete-confirm → confirmDelete），这里只负责执行删除。
+ * 早前这里还调了一次 uni.showModal，确认后会再弹一个系统框，等于问两遍。
+ */
 async function onSessionDelete(session: { id?: string | number }) {
   const id = session?.id;
   if (!id) return;
-  if (!await confirmModal("删除此对话？", "删除后，这条对话记录将无法找回。确定删除此对话？")) return;
   try {
     await sessionStore.removeSession(id);
     if (String(chatStore.aiSessionId) === String(id)) chatStore.resetConversation();
@@ -1840,7 +1832,6 @@ async function onSessionDelete(session: { id?: string | number }) {
 async function onSessionDeleteBatch(ids: Array<string | number>) {
   const uniqueIds = Array.from(new Set((ids || []).map(id => String(id))));
   if (!uniqueIds.length) return;
-  if (!await confirmModal("批量删除选中对话？", "删除后，选中对话记录将无法找回。确定删除选中对话？")) return;
   try {
     await sessionStore.removeSessions(uniqueIds);
     if (chatStore.aiSessionId && uniqueIds.includes(String(chatStore.aiSessionId))) {

@@ -38,6 +38,7 @@ import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments, type AttachmentSource } from "@/hooks/useComposerAttachments";
 import { usePlainTts } from "@/hooks/usePlainTts";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
+import { useRemoteKey } from "@/hooks/useRemoteKey";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useVoiceQuery } from "@/hooks/useVoiceQuery";
 import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
@@ -1015,6 +1016,53 @@ function onBack() {
   backFromScene();
 }
 
+/* ---------------- 遥控器（Android TV / 蓝牙遥控器） ---------------- */
+
+/**
+ * 遥控器接管开关：本页可见且没有浮层挡住时才注册（与首页同一套时序）。
+ * 注册成功后原生侧会拦截遥控器按键（含返回键），被压栈 / 卸载必须注销，
+ * 所以初值给 false，跟着下面的 onShow / onHide / onUnload 走。
+ */
+const remoteKeyActive = ref(false);
+/** 连按保护：startVoiceQuery 起手要先等双工释放，这段时间 voiceQueryActive 还是 false，挡住第二次 */
+let remoteKeyStarting = false;
+
+/**
+ * 遥控器 OK 键 = 输入栏的「点击说话」：
+ * - 欢迎层：起飞进对话并同时起一轮录音（与点按钮同一时序）；
+ * - 对话态：直接起一轮录音，说完静音自动收尾；
+ * - 已在录音：再按一次 = 说完了（等同录音条上的 ↑ 发送）；
+ * - 生成中 / 双工模式：不抢，交给原链路。
+ */
+function onRemoteKeyConfirm() {
+  if (voiceQueryActive.value) {
+    // stopVoiceQuery 自带「正在收尾就不重复发 finish」的保护
+    stopVoiceQuery();
+    return;
+  }
+  if (remoteKeyStarting || isLoading.value || duplexActive.value) return;
+  remoteKeyStarting = true;
+  const starting = pageStage.value === "welcome" ? onWelcomeStart() : startVoiceQuery();
+  void Promise.resolve(starting).finally(() => {
+    remoteKeyStarting = false;
+  });
+}
+
+/** 遥控器返回键：注册后原生不再处理返回键，必须自己给退路（录音中先取消这一轮） */
+function onRemoteKeyBack() {
+  if (voiceQueryActive.value) {
+    cancelVoiceQuery();
+    return;
+  }
+  onBack();
+}
+
+useRemoteKey({
+  enabled: computed(() => remoteKeyActive.value && !shareSheetVisible.value),
+  onConfirm: onRemoteKeyConfirm,
+  onBack: onRemoteKeyBack,
+});
+
 /**
  * 右上角房子按钮「返回主页」：调用宿主原生 goHome 回 App 首页
  * （宿主没有这个 JSAPI 时依次退到 popWindow、history.back），
@@ -1081,22 +1129,13 @@ function onSessionClick(session: { sessionId?: string | number; id?: string | nu
   void openLocalHistory(id);
 }
 
-async function confirmModal(title: string, content: string) {
-  return new Promise<boolean>((resolve) => {
-    uni.showModal({
-      title,
-      content,
-      confirmColor: "#F8315E",
-      success: res => resolve(Boolean(res.confirm)),
-      fail: () => resolve(false),
-    });
-  });
-}
-
+/**
+ * 删除 / 批量删除的二次确认已经由历史抽屉里的自定义弹窗完成（ai-chat-header 的
+ * history-delete-confirm → confirmDelete），这里只负责执行删除，不再弹 uni.showModal。
+ */
 async function onSessionDelete(session: { id?: string | number }) {
   const id = session?.id;
   if (!id) return;
-  if (!await confirmModal(t("delete-conversation-title"), t("delete-conversation-desc"))) return;
   try {
     await sessionStore.removeSession(id);
     await chatHeader.value?.reloadSessions?.();
@@ -1111,7 +1150,6 @@ async function onSessionDelete(session: { id?: string | number }) {
 async function onSessionDeleteBatch(ids: Array<string | number>) {
   const uniqueIds = Array.from(new Set((ids || []).map(id => String(id))));
   if (!uniqueIds.length) return;
-  if (!await confirmModal(t("delete-conversations-title"), t("delete-conversations-desc"))) return;
   try {
     await sessionStore.removeSessions(uniqueIds);
     await chatHeader.value?.reloadSessions?.();
@@ -1225,6 +1263,8 @@ onShow(() => {
   // 注：横屏调度视图的方向由宿主容器自己管（openH5Container 打开就是全屏横屏），
   // 回到本页不再需要复原方向，所以这里没有 landscapeFullscreen(false) 的兜底。
   syncWindowHeight();
+  // 页面可见才接管遥控器：注册后原生会拦截按键（含返回键），压在栈里时必须放回去
+  remoteKeyActive.value = true;
   const sessionId = consumePendingHistorySession("TASK");
   // 有心跳转的会话就先切过去，再补发甘特图里问的问题，避免问错会话
   if (sessionId) {
@@ -1236,6 +1276,8 @@ onShow(() => {
 });
 
 onHide(() => {
+  // 遥控器按键还给系统：被压栈后继续拦截，子页面与系统返回键都会失灵
+  remoteKeyActive.value = false;
   cancelVoiceArrival?.();
   cancelVoiceArrival = null;
   voiceArrivalOrigin = null;
@@ -1246,6 +1288,7 @@ onHide(() => {
 });
 
 onUnload(() => {
+  remoteKeyActive.value = false;
   cancelVoiceArrival?.();
   cancelActiveStream();
   stopSceneTts();

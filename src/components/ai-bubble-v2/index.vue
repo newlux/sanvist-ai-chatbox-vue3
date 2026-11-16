@@ -12,13 +12,16 @@ import saniIcon from "@/assets/img/icon-sani.png";
 import iconRightArrow from "@/assets/img/iocn-right-arrow.png";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
+import { getVoiceInputLanguage } from "@/utils/asr/voice-language";
 import { openImagePreview, toInlineImageUrl } from "@/utils/image-preview";
+import { createLogger } from "@/utils/logger";
 import { animateVoiceMessageArrival, readVoiceMessageOrigin, resolveMotionElement } from "@/utils/voice-message-motion";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
 
 const { t, locale } = useI18n();
+const logger = createLogger("ai-bubble-v2");
 
 const props = defineProps({
   role: { type: String, default: "ai" },
@@ -380,9 +383,13 @@ const showProcessStatus = computed(
  * 过程副标题（接口 subtitle 事件）的展示文案。
  *
  * 后端会把中英两套节点名用「|」拼成一条（如「前置直接回复 | Direct Reply正在执行」），
- * 这里按当前语言只留对应那一半：中文取带汉字的那段，英文取不带汉字的那段；
+ * 这里只留对应那一半：中文取带汉字的那段（分隔后的第一个），英文取不带汉字的那段（第二个）；
  * 再把尾部的执行状态（正在执行 / 执行完成 / 已完成…）摘掉 —— 状态已经由上面那行 SANI 表达，
  * 副标题只留节点名本身。
+ *
+ * 语种跟**本轮语音识别的语言**走（WebSocket ASR 回传的 language，见 utils/asr/voice-language），
+ * 没识别过（纯键盘提问）才退回界面语言 —— 与回答播报的 language 同一口径。
+ * 否则会出现「英文提问 + 英文回答 + 中文过程标题」的割裂。
  */
 const SUBTITLE_STATUS_SUFFIX = /[\s·,，—-]*(正在执行|执行完成|执行中|已完成|进行中|is running|is executing|executing|running|completed|in progress)\s*$/i;
 
@@ -396,10 +403,17 @@ function formatProcessSubtitle(value: string) {
     .filter(Boolean);
   if (!parts.length) return "";
   if (parts.length === 1) return parts[0];
-  const isEnglish = locale.value.toLowerCase().startsWith("en");
+  const speechLanguage = (getVoiceInputLanguage() || locale.value).toLowerCase();
+  // 按「带不带汉字」挑而不按下标：英文段里常混着「正在执行」这类中文状态词（已被上面摘掉），
+  // 位置在脏数据下不一定可靠，含不含汉字才是稳定特征。
+  const isEnglish = speechLanguage.startsWith("en");
   const chinese = parts.find(part => /[\u4E00-\u9FFF]/.test(part));
   const english = parts.find(part => !/[\u4E00-\u9FFF]/.test(part));
-  return (isEnglish ? english : chinese) || parts[0];
+  // 特征匹配优先，挑不到再按约定位置兜底：第 1 段中文、第 2 段英文
+  const picked = isEnglish ? (english ?? parts[1] ?? parts[0]) : (chinese ?? parts[0]);
+  // 排查用语种问题（English 提问却显示中文）时，看这条就能知道是 language 没拿到还是分段不对
+  logger.debug("[process-subtitle] 语种选择", { raw, speechLanguage, isEnglish, picked, parts });
+  return picked;
 }
 
 const processSubtitleText = computed(() =>

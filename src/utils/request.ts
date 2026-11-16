@@ -48,6 +48,26 @@ let guestRole = "";
 let baseURL = import.meta.env.VITE_AI_QUESTION_BASE_URL;
 
 /**
+ * 打包环境标识头 `env`：`.env.production` 里 `VITE_BAG_ENABLE_ENV=Y` 时，
+ * 所有接口（JSON / 上传 / SSE）的请求头都带一份 `env: <VITE_WEB_ENV>`（如 `env: production`）。
+ *
+ * - 值在构建期被静态替换进产物，运行时不可改：`=N` 打出来的包根本不带这个头；
+ * - `=N`（或未配置 / 配了别的值）时，调用方显式传上来的 `env` 也会被摘掉 —— 关掉就得真关掉。
+ */
+const BAG_ENV_HEADER_NAME = "env";
+/**
+ * 开关判定：先去行尾注释再比 `Y`。
+ * `.env` 里写成 `VITE_BAG_ENABLE_ENV=Y # 说明` 时，部分 dotenv 版本不截断注释，
+ * 拿到的会是整串 `Y # 说明`，直接比会误判成「关闭」。
+ */
+const BAG_ENV_ENABLED = String(import.meta.env.VITE_BAG_ENABLE_ENV || "")
+  .replace(/#.*$/, "")
+  .trim()
+  .toUpperCase() === "Y";
+/** 头的值只认构建期的 VITE_WEB_ENV，不接受调用方覆盖 */
+const BAG_ENV_VALUE = String(import.meta.env.VITE_WEB_ENV || "").replace(/#.*$/, "").trim();
+
+/**
  * 宿主下发的鉴权串（Authorization 头原值，通常形如 `bearer xxx`），由 App.vue 启动时写入。
  *
  * `source` 只进日志：排查「现在用的是宿主下发的还是本地兜底那条」时看它，
@@ -125,8 +145,23 @@ function mergeHeaders(base: Record<string, string>, extra: Record<string, string
 }
 
 /**
- * 统一请求头：JSON / 上传 / SSE（fetch）都走这里。
- * Authorization 与 Guest-Role 都从这里出，调用方不用各自拼。
+ * 按打包开关处理 `env` 头（头名大小写不敏感）：
+ * - 开（Y）且 VITE_WEB_ENV 非空：强制写入构建期的那份值，调用方传的会被覆盖；
+ * - 关（N / 未配置）：同名头一律摘掉，包括调用方显式传上来的。
+ */
+function applyBagEnvHeader(headers: Record<string, string>) {
+  const result: Record<string, string> = {};
+  Object.entries(headers).forEach(([name, value]) => {
+    if (name.toLowerCase() === BAG_ENV_HEADER_NAME) return;
+    result[name] = value;
+  });
+  if (BAG_ENV_ENABLED && BAG_ENV_VALUE) result[BAG_ENV_HEADER_NAME] = BAG_ENV_VALUE;
+  return result;
+}
+
+/**
+ * 统一请求头：JSON / 上传 / SSE（fetch 与 XHR）都走这里。
+ * Authorization、Guest-Role、env 都从这里出，调用方不用各自拼。
  */
 export function getRequestHeaders(headers: Record<string, string> = {}) {
   const base: Record<string, string> = {};
@@ -134,7 +169,7 @@ export function getRequestHeaders(headers: Record<string, string> = {}) {
   if (authorization) base.Authorization = authorization;
   if (guestRole) base["Guest-Role"] = guestRole;
   // 调用方显式传的（如工作流的 Guest-Role）覆盖全局身份，且不会产生重名头
-  return mergeHeaders(base, headers);
+  return applyBagEnvHeader(mergeHeaders(base, headers));
 }
 
 export const GUEST_ROLE_OPTIONS = ["OWNER", "OPERATOR"] as const;

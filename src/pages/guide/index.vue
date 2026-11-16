@@ -36,6 +36,7 @@ import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { usePlainTts } from "@/hooks/usePlainTts";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
+import { useRemoteKey } from "@/hooks/useRemoteKey";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useVoiceQuery } from "@/hooks/useVoiceQuery";
 import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
@@ -43,6 +44,7 @@ import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useS
 import { getInitIntroContent, getInitIntroSpeech } from "@/mock/init-intro";
 import { exitMiniProgram } from "@/utils/exit-mini-program";
 import { createLogger } from "@/utils/logger";
+import { onNativeEvent } from "@/utils/platform/mpaas";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 import { markWelcomeDone } from "@/utils/welcome-done";
@@ -999,6 +1001,53 @@ function onBack() {
   backFromScene();
 }
 
+/* ---------------- 遥控器（Android TV / 蓝牙遥控器） ---------------- */
+
+/**
+ * 遥控器接管开关：本页可见且没有浮层挡住时才注册（与首页同一套时序）。
+ * 注册成功后原生侧会拦截遥控器按键（含返回键），被压栈 / 卸载必须注销，
+ * 所以初值给 false，跟着下面的 onShow / onHide / onUnload 走。
+ */
+const remoteKeyActive = ref(false);
+/** 连按保护：startVoiceQuery 起手要先等双工释放，这段时间 voiceQueryActive 还是 false，挡住第二次 */
+let remoteKeyStarting = false;
+
+/**
+ * 遥控器 OK 键 = 输入栏的「点击说话」：
+ * - 欢迎层：起飞进对话并同时起一轮录音（与点按钮同一时序）；
+ * - 对话态：直接起一轮录音，说完静音自动收尾；
+ * - 已在录音：再按一次 = 说完了（等同录音条上的 ↑ 发送）；
+ * - 生成中 / 双工模式：不抢，交给原链路。
+ */
+function onRemoteKeyConfirm() {
+  if (voiceQueryActive.value) {
+    // stopVoiceQuery 自带「正在收尾就不重复发 finish」的保护
+    stopVoiceQuery();
+    return;
+  }
+  if (remoteKeyStarting || isLoading.value || duplexActive.value) return;
+  remoteKeyStarting = true;
+  const starting = pageStage.value === "welcome" ? onWelcomeStart() : startVoiceQuery();
+  void Promise.resolve(starting).finally(() => {
+    remoteKeyStarting = false;
+  });
+}
+
+/** 遥控器返回键：注册后原生不再处理返回键，必须自己给退路（录音中先取消这一轮） */
+function onRemoteKeyBack() {
+  if (voiceQueryActive.value) {
+    cancelVoiceQuery();
+    return;
+  }
+  onBack();
+}
+
+useRemoteKey({
+  enabled: computed(() => remoteKeyActive.value && !shareSheetVisible.value),
+  onConfirm: onRemoteKeyConfirm,
+  onBack: onRemoteKeyBack,
+});
+
 /**
  * 右上角房子按钮「返回主页」：调用宿主原生 goHome 回 App 首页
  * （宿主没有这个 JSAPI 时依次退到 popWindow、history.back），
@@ -1062,22 +1111,13 @@ function onSessionClick(session: { sessionId?: string | number; id?: string | nu
   void openLocalHistory(id);
 }
 
-async function confirmModal(title: string, content: string) {
-  return new Promise<boolean>((resolve) => {
-    uni.showModal({
-      title,
-      content,
-      confirmColor: "#F8315E",
-      success: res => resolve(Boolean(res.confirm)),
-      fail: () => resolve(false),
-    });
-  });
-}
-
+/**
+ * 删除 / 批量删除的二次确认已经由历史抽屉里的自定义弹窗完成（ai-chat-header 的
+ * history-delete-confirm → confirmDelete），这里只负责执行删除，不再弹 uni.showModal。
+ */
 async function onSessionDelete(session: { id?: string | number }) {
   const id = session?.id;
   if (!id) return;
-  if (!await confirmModal(t("delete-conversation-title"), t("delete-conversation-desc"))) return;
   try {
     await sessionStore.removeSession(id);
     await chatHeader.value?.reloadSessions?.();
@@ -1092,7 +1132,6 @@ async function onSessionDelete(session: { id?: string | number }) {
 async function onSessionDeleteBatch(ids: Array<string | number>) {
   const uniqueIds = Array.from(new Set((ids || []).map(id => String(id))));
   if (!uniqueIds.length) return;
-  if (!await confirmModal(t("delete-conversations-title"), t("delete-conversations-desc"))) return;
   try {
     await sessionStore.removeSessions(uniqueIds);
     await chatHeader.value?.reloadSessions?.();
@@ -1345,6 +1384,17 @@ onMounted(() => {
 
 onShow(() => {
   syncWindowHeight();
+  // 页面可见才接管遥控器：注册后原生会拦截按键（含返回键），压在栈里时必须放回去
+  remoteKeyActive.value = true;
+  const sessionId = consumePendingHistorySession("GUIDE");
+  if (sessionId) void openLocalHistory(sessionId, true);
+});
+
+/**
+ * 原生 resume：本页打开的场景页是独立 webview（pushWindow），关窗回来时本页一直在，
+ * 不一定会走 onShow。这里补一次待打开会话的消费，重复调用有 peek 判空，安全。
+ */
+const stopNativeResume = onNativeEvent("resume", () => {
   const sessionId = consumePendingHistorySession("GUIDE");
   if (sessionId) void openLocalHistory(sessionId, true);
 });
@@ -1352,6 +1402,8 @@ onShow(() => {
 // 离开页面时停止听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
 // 两个 TTS hook 自带的 onBeforeUnmount 清理不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
+  // 遥控器按键还给系统：被压栈后继续拦截，子页面与系统返回键都会失灵
+  remoteKeyActive.value = false;
   cancelVoiceArrival?.();
   cancelVoiceArrival = null;
   voiceArrivalOrigin = null;
@@ -1361,10 +1413,12 @@ onHide(() => {
   resetVoiceQuery();
 });
 onUnload(() => {
+  remoteKeyActive.value = false;
   cancelVoiceArrival?.();
   cancelActiveStream();
   stopSceneTts();
   clearAutoOpenTimer();
+  stopNativeResume();
   resetVoiceQuery();
   disarmIntroVoiceRetry();
 });

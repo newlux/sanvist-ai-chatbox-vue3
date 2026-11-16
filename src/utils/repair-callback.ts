@@ -1,54 +1,54 @@
 import type { RepairInformationPayload } from "@/api/repair/types";
 import { i18n } from "@/i18n";
 
-const PENDING_REPAIR_CALLBACK_KEY = "pending-repair-callback";
+/** 老版本把回流任务写在这个 storage key 下，现在只用来清残留，不再读写 */
+const LEGACY_PENDING_REPAIR_CALLBACK_KEY = "pending-repair-callback";
 
 export interface PendingRepairCallback {
   aiAskConversationId: string;
   aiAskSessionId: string;
 }
 
-function readPendingRepairCallback() {
+/**
+ * 本次进程内待消费的回流任务 —— 只放内存，**不落 storage**。
+ *
+ * 维修助理是 pushWindow 打开的独立 webview，本页一直活着，用户关窗回来时
+ * （原生 resume / onShow）靠这个标记出回流卡。
+ *
+ * 之前是写 local storage 的：用户在三方页里直接杀掉 APP，那份任务会留到下次启动，
+ * 一进日常运营助手就冒出一张「维修助理」回流卡 —— 那一次跳转其实早就结束了。
+ * 内存标记天然区分两种情况：正常返回时它还在；冷启动后必然是空的，不会出卡。
+ */
+let pendingTaskInRun: PendingRepairCallback | null = null;
+
+/** 清掉老版本写进 storage 的残留任务，避免升级后仍被读出来 */
+function clearLegacyStoredTask() {
   try {
-    const value = uni.getStorageSync(PENDING_REPAIR_CALLBACK_KEY);
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const task = value as Partial<PendingRepairCallback>;
-    const aiAskConversationId = String(task.aiAskConversationId || "").trim();
-    const aiAskSessionId = String(task.aiAskSessionId || "").trim();
-    return aiAskConversationId && aiAskSessionId ? { aiAskConversationId, aiAskSessionId } : null;
+    uni.removeStorageSync(LEGACY_PENDING_REPAIR_CALLBACK_KEY);
   }
   catch {
-    return null;
+    // 存储不可用时无需处理：内存标记才是唯一的数据源
   }
 }
 
 export function stashPendingRepairCallback(task: PendingRepairCallback) {
-  try {
-    uni.setStorageSync(PENDING_REPAIR_CALLBACK_KEY, task);
-  }
-  catch {
-    // 本地存储不可用时仍允许继续维修，只是不触发返回摘要。
-  }
+  const aiAskConversationId = String(task.aiAskConversationId || "").trim();
+  const aiAskSessionId = String(task.aiAskSessionId || "").trim();
+  if (!aiAskConversationId || !aiAskSessionId) return;
+  pendingTaskInRun = { aiAskConversationId, aiAskSessionId };
+  clearLegacyStoredTask();
 }
 
 export function clearPendingRepairCallback() {
-  try {
-    uni.removeStorageSync(PENDING_REPAIR_CALLBACK_KEY);
-  }
-  catch {
-    // 本地存储不可用时无需阻断维修页面跳转。
-  }
+  pendingTaskInRun = null;
+  clearLegacyStoredTask();
 }
 
 export function consumePendingRepairCallback() {
-  const task = readPendingRepairCallback();
-  if (!task) return null;
-  try {
-    uni.removeStorageSync(PENDING_REPAIR_CALLBACK_KEY);
-  }
-  catch {
-    // 已读取的任务仍可继续处理，删除失败只会在下次进入时重试。
-  }
+  const task = pendingTaskInRun;
+  pendingTaskInRun = null;
+  // 顺手清一次旧 key：升级到本版本后第一次进页面就能把历史残留抹掉
+  clearLegacyStoredTask();
   return task;
 }
 
