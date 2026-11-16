@@ -12,27 +12,41 @@
  */
 let pendingStepIndex = 0;
 let pendingStepAt = 0;
+/**
+ * 完成态（步骤小结已出现）下切回前面步骤时，翻页信号要附带小结文本：
+ * 期望「切回某步」播报 该步正文 + 步骤小结，组件认领后把它拼进播报文本。
+ * 非完成态翻页（普通步骤间切换）没有小结，保持空串走原来的 stepId 兜底。
+ */
+let pendingStepSummary = "";
 /** 最后一步确认完：小结卡挂载后要念小结 */
 let pendingSummaryAt = 0;
 /** 标记存活时间：翻页是「点完立刻重挂载」，超过这个时间还没人认领就是过期信号 */
 const STEP_TTS_SWITCH_TTL_MS = 2000;
 
 /** 点「确认，进入下一步」：标记下一步（1 起的步序）的卡片挂载后要接着播 */
-export function requestStepTtsSwitch(nextStepIndex: number) {
+export function requestStepTtsSwitch(nextStepIndex: number, summaryText = "") {
   pendingStepIndex = Math.round(Number(nextStepIndex) || 0);
+  pendingStepSummary = String(summaryText || "");
   pendingStepAt = Date.now();
 }
 
-/** 新卡片挂载时按自己的步序认领标记：返回 true 表示这次挂载就是「翻页」来的那一步 */
-export function consumeStepTtsSwitch(stepIndex: number): boolean {
-  if (!pendingStepIndex) return false;
+/**
+ * 新卡片挂载时按自己的步序认领标记：返回认领到的小结文本（无小结为空串），
+ * 返回 null 表示这次挂载不是「翻页」来的那一步（不该出声）。
+ * 认领即清空标记，避免重复挂载误吞。
+ */
+export function consumeStepTtsSwitch(stepIndex: number): string | null {
+  if (!pendingStepIndex) return null;
   if (Date.now() - pendingStepAt > STEP_TTS_SWITCH_TTL_MS) {
     pendingStepIndex = 0;
-    return false;
+    pendingStepSummary = "";
+    return null;
   }
-  if (Math.round(Number(stepIndex) || 0) !== pendingStepIndex) return false;
+  if (Math.round(Number(stepIndex) || 0) !== pendingStepIndex) return null;
+  const summaryText = pendingStepSummary;
   pendingStepIndex = 0;
-  return true;
+  pendingStepSummary = "";
+  return summaryText;
 }
 
 /**
