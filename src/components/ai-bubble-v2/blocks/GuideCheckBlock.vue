@@ -146,7 +146,9 @@ function onSelectStep(index: number) {
   // 完成态也能切回中间步查看：确认区整体不渲染，小结固定在卡底部
   if (index < 1 || index > stepTotal.value) return;
   if (index === stepIndex.value) return;
-  requestStepTtsSwitch(index);
+  // 完成态切回前面步骤：期望播报「该步正文 + 步骤小结」，把小结文本随翻页信号带上，
+  // 新卡认领后拼进播报文本（普通步骤间切换没有小结，保持原来的 stepId 兜底）。
+  requestStepTtsSwitch(index, summary.value);
   emit("select-step", { index, stepId: String(props.payload?.step_id || "") });
 }
 
@@ -182,6 +184,10 @@ function onOptionTap(index: number) {
  * 挂载时若认领到「翻页」标记，就把这一步的播报点一下
  * （页面会先停旧语音，再按新的 step_id 取文本播放）。
  *
+ * 认领到小结文本（完成态切回前面步骤）：期望念「该步正文 + 步骤小结」，
+ * 在这里把当前步（标题 + 正文）与小结拼成完整文本直接上抛，
+ * 页面 togglePlay 用 textOverride 念组合文本，不再只按 step_id 取该步正文。
+ *
  * 不再要求「翻页前正在播」：一步念完后再点确认（playing 已被置回 false）时，
  * 旧判断会直接 return，表现为「确认后不播下一步」。
  */
@@ -189,10 +195,16 @@ onMounted(() => {
   // 先告诉外层「卡已经在了」，让它把视图滚到这张卡（切步骤时新卡是重新挂载的，
   // 页面在改 stepCardStepId 那一下 nextTick 滚，滚的还是上一张卡，所以必须等挂载后再说）
   emit("card-ready");
-  if (!consumeStepTtsSwitch(stepIndex.value)) return;
+  const summaryText = consumeStepTtsSwitch(stepIndex.value);
+  if (summaryText === null) return;
   if (!props.ttsEnabled) return;
   // 语音播报总开关关掉：切步的自动续播不播（手动点播报按钮走 onTtsTap，不受开关影响）
   if (!settingsStore.autoTtsEnabled) return;
+  if (summaryText) {
+    // 完成态切回步骤：步骤正文（标题 + 当前步正文）+ 小结一起念
+    emit("tts-click", [title.value, content.value, summaryText].filter(Boolean).join("\n"));
+    return;
+  }
   emit("tts-click");
 });
 
@@ -216,10 +228,15 @@ function onCopyTap() {
   emit("copy-click", { text: copyText.value });
 }
 
-/** 播报：完成态念小结文本（随事件带到页面），普通步骤不带文本、由页面按 step action 兜底 */
+/** 播报：完成态念「当前步（标题 + 正文）+ 步骤小结」，普通步骤不带文本、由页面按 step action 兜底 */
 function onTtsTap() {
   if (!props.ttsEnabled) return;
-  emit("tts-click", isSummaryMode.value ? summary.value : undefined);
+  if (isSummaryMode.value) {
+    // 与切回步骤的自动播报同口径：完成态下无论当前停在哪一步，都念「这一步正文 + 小结」
+    emit("tts-click", [title.value, content.value, summary.value].filter(Boolean).join("\n"));
+    return;
+  }
+  emit("tts-click");
 }
 
 /** 分享：把卡片根节点交给页面的 useChatShare 截图（动作区带 data-share-poster-ignore，不会进海报） */

@@ -140,6 +140,28 @@ function stripVoiceFromAnswer(content: string, voiceText: string): string {
   return `${content.slice(0, index)}${after}`.trim();
 }
 
+/**
+ * 新手（分步骤）模式：后端可能仍返回老师傅的导语（voice）块与播报稿（speechText），
+ * 这里一并丢弃——既不渲染也不播报。返回过滤后的快照字段。
+ *
+ * 关键：speechText 只来自 <COMPONENT type=voice> 播报稿（见 chatStreamParser 的 speech 分支），
+ * 与 voice 块同源，必须一起清空，否则渲染过滤了块、播报却仍念 voice 稿
+ * （useRealtimeTts.extractAnswerText 优先返回 speechText；useChatSend 的 answer delta 也取它）。
+ * 显式置空字符串而非 undefined：applySnapshot 用 `speechText ?? 旧值` 回落，
+ * 设 undefined 会回落到消息上残留的旧播报稿，仍会念出 voice 内容。
+ */
+function filterNoviceVoice(
+  blocks: ReturnType<typeof buildInitialBlocks>,
+  speechText: string | undefined,
+  isNovice: boolean,
+): { blocks: ReturnType<typeof buildInitialBlocks>; speechText: string | undefined } {
+  if (!isNovice) return { blocks, speechText };
+  return {
+    blocks: blocks.filter(block => block.type !== "voice"),
+    speechText: "",
+  };
+}
+
 /** 把快照里的 answer / voice 块拼成整段播报文本：导语（voice）在前，answer 剔除重复导语后接正文 */
 function collectAnswerText(blocks: ReturnType<typeof buildInitialBlocks>) {
   const voiceText = blocks
@@ -873,14 +895,12 @@ export function useChatSend(scope?: string, handlers?: {
               style: reportStyleCode,
             });
           }
-          // 新手（分步骤）模式：后端可能仍返回老师傅的导语（voice）块，这里直接丢弃，不渲染也不播报
+          // 新手（分步骤）模式：后端可能仍返回老师傅的导语（voice）块与播报稿，这里一并丢弃，不渲染也不播报
           const isNovice = userStore.operatorRole?.roleKey === "novice_operator";
-          const filteredBlocks = isNovice
-            ? displayBlocks.filter(block => block.type !== "voice")
-            : displayBlocks;
+          const { blocks: filteredBlocks, speechText: filteredSpeechText } = filterNoviceVoice(displayBlocks, snapshot.speechText, isNovice);
           const displaySnapshot = displayBlocks === snapshot.blocks && turnMetadata === snapshot.metadata
-            ? snapshot
-            : { ...snapshot, blocks: filteredBlocks, metadata: turnMetadata };
+            ? (isNovice ? { ...snapshot, blocks: filteredBlocks, speechText: filteredSpeechText } : snapshot)
+            : { ...snapshot, blocks: filteredBlocks, metadata: turnMetadata, ...(isNovice ? { speechText: filteredSpeechText } : {}) };
           // 要跳页的这一轮不触发「回答完成」回调（页面会据此起自动听播，跳走就白播了）
           applySnapshot(aiMsgId, userMsgId, displaySnapshot, preserveProcessStatus, qrcodeTurn.matched || Boolean(sceneTarget));
           if (qrcodeTurn.matched) {
@@ -1144,9 +1164,16 @@ export function useChatSend(scope?: string, handlers?: {
           ...options.messageProps,
         });
       }
+      // 新手（分步骤）模式：静默消息（机型引导 / 初始化）同样丢弃 voice 块与播报稿，
+      // 与 sendAiFlow 主链路同一口径（filterNoviceVoice）。
+      const isNovice = userStore.operatorRole?.roleKey === "novice_operator";
+      const filtered = filterNoviceVoice(snapshot.blocks, snapshot.speechText, isNovice);
+      const displaySnapshot = isNovice
+        ? { ...snapshot, blocks: filtered.blocks, speechText: filtered.speechText }
+        : snapshot;
       // skipComplete=true：不派发 onAiMessageComplete，避免初始化这一轮被页面当成
       // 普通问答去自动听播（自我介绍不该一进页面就开口）。
-      applySnapshot(aiMsgId, "", snapshot, false, true);
+      applySnapshot(aiMsgId, "", displaySnapshot, false, true);
     };
 
     try {
