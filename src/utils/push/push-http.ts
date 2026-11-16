@@ -1,6 +1,7 @@
 import type { PushInboxPage } from "./types";
 import { PUSH_DEVICE_NO, PUSH_HTTP_BASE_URL, PUSH_HTTP_TIMEOUT_MS, PUSH_INBOX_PAGE_SIZE } from "@/config/push";
 import { createLogger } from "@/utils/logger";
+import { getBagEnvHeaders } from "@/utils/request";
 
 /**
  * 推送的 HTTP 通道（协议第 6 节）：离线补漏 + 送达回执。
@@ -8,6 +9,7 @@ import { createLogger } from "@/utils/logger";
  * 这里不复用 `utils/request`：那条链路会带上 App 的 Authorization、剥 `{code,message,data}`
  * 外层并触发 401 跳登录，而推送接口用的是车载设备的 `X-Channel / X-Device-No` 身份，
  * 两者语义不同，混用会把「推送接口 401」误判成「用户登录失效」。
+ * 只借用其中的 `env` 打包标识头（同一份后端，按环境路由）。
  *
  * 全部失败都返回 null / false，不抛异常、不弹窗 —— 协议明确 MQTT 是主通道，
  * HTTP 只是补漏，接口没开通（跨域 / 未启用）时页面照常可用。
@@ -23,7 +25,9 @@ interface PushHttpResponse<T> {
 
 function buildHeaders(): Record<string, string> {
   return {
-    // 协议 6.1：联调阶段未开启验签，只需前两个头
+    // 打包环境标识（VITE_BAG_ENABLE_ENV=Y 时才有，见 utils/request）
+    ...getBagEnvHeaders(),
+    // 协议 6.1：联调阶段未开启验签，只需后两个头
     "X-Channel": "vehicle",
     "X-Device-No": PUSH_DEVICE_NO,
     "Content-Type": "application/json",

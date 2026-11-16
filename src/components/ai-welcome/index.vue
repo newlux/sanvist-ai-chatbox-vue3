@@ -2,8 +2,7 @@
 import type { PropType } from "vue";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import heySaniDark from "@/assets/img/hey-sani-dark.svg";
-import heySaniLight from "@/assets/img/hey-sani-light.svg";
+import heySani from "@/assets/img/hey-sani.svg";
 import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
 import microphoneIcon from "@/assets/img/icon-mic-red.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
@@ -81,10 +80,8 @@ const { safeAreaStyle } = useSafeArea();
 
 /**
  * 「Hey,SANI」整行字标：直接用设计导出的整行图，不再用文字 + background-clip 拼。
- * - 浅色：hey-sani-light.svg（106×35，渐变字）
- * - 深色：hey-sani-dark.svg（102.69×29，白色字标）
+ * 浅色 / 深色统一用同一张 hey-sani.svg（106×24），不再按主题切图。
  */
-const titleImage = computed(() => (props.dark ? heySaniDark : heySaniLight));
 
 /**
  * 声波图标：**未触发**（没开实时语音）时用未激活态切图，**触发后**换成蓝色声波 + 白色胶囊（截图两态）。
@@ -285,10 +282,9 @@ onBeforeUnmount(() => {
     :style="safeAreaStyle"
   >
     <view class="welcome__hero">
-      <!-- 标题行「Hey,SANI」：直接用设计导出的整行字标，
-           浅色 hey-sani-light.svg（106×35）/ 深色 hey-sani-dark.svg（102.69×29） -->
+      <!-- 标题行「Hey,SANI」：直接用设计导出的整行字标 hey-sani.svg（106×24），深浅色同一张 -->
       <view class="welcome__title">
-        <image class="welcome__title-img" :src="titleImage" mode="aspectFit" />
+        <image class="welcome__title-img" :src="heySani" mode="aspectFit" />
       </view>
       <!-- 主视觉：原 306:2783 容器 134×134 / 306:2791 图 110×110，投影 0 3 9 rgba(0,0,0,.14)
            起飞时整组按父页面给的 transform 滑到对话页顶部的灵动岛位置；
@@ -502,8 +498,7 @@ onBeforeUnmount(() => {
 
 /* ===== 标题行「Hey,SANI」=====
    整行直接贴设计导出的字标（颜色、渐变、字距都在图里，不再用文字 + background-clip 拼）：
-   - 浅色 hey-sani-light.svg：106×35 → 212×70rpx；
-   - 深色 hey-sani-dark.svg：102.69×29 → 206×58rpx（深色稿字号小一档，尺寸分开写） */
+   hey-sani.svg：106×24 → 212×48rpx，深浅色共用同一张，不再按主题切图。 */
 .welcome__title {
   display: flex;
   align-items: center;
@@ -513,12 +508,7 @@ onBeforeUnmount(() => {
 
 .welcome__title-img {
   width: 212rpx; // 106px
-  height: 70rpx; // 35px
-}
-
-.welcome--dark .welcome__title-img {
-  width: 206rpx; // 102.69px
-  height: 58rpx; // 29px
+  height: 48rpx; // 24px
 }
 
 .welcome__logo {
@@ -820,7 +810,7 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
-/* 标题行深色稿不再需要额外覆盖：hey-sani-dark.svg 自己就是深色那套白字标 */
+/* 标题行深色稿不需要额外覆盖：hey-sani.svg 深浅色共用同一张 */
 
 /* 输入条控件的材质换成「白色 8%」：浅色稿的 #0D0D0D 3.61% 在深底上等于没有 */
 .welcome--dark .welcome__composer-voice,

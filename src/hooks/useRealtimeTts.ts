@@ -30,20 +30,16 @@ function extractAnswerText(message: UiChatMessage, stepId = ""): string {
    */
   const speech = String(message.speechText || "").trim();
   if (speech) return speech;
-  const blocks = message.blocks || [];
   /**
-   * 多步骤卡（guide-step）的回答：正文既不渲染也不播报（见 ai-bubble-v2 的 hideBody），
-   * 播报文本直接取核对卡（标题 + 步骤正文），别把隐藏起来的正文念出来。
+   * 没有播报稿就不播：产品口径是「只念 `<COMPONENT type=voice>` 的 data.text」，
+   * 不再兜底把气泡正文（answer 块 / message.content）整段念一遍。
+   * 下面只保留「要念的文本不在正文里」的卡片台词。
    */
-  const hasStepCard = blocks.some(block => block?.type === "guide-step");
-  const fromBlocks = hasStepCard
-    ? ""
-    : blocks.filter(block => block.type === "answer").map(block => String(block.payload?.content || "")).join("");
-  if (fromBlocks) return fromBlocks;
+  const blocks = message.blocks || [];
   /**
    * 开场引导卡（guide-lead，scene=guide / type=lead）：「你好，我是 SANI…」这段正文是整块下发的，
    * 不经过 answer delta（流式喂数拿不到），只存在于卡片的 text 上。
-   * 不带它的话，点播报按钮会因为 answer 为空而「没声音」。
+   * 不带它的话，点播报按钮会因为 speech 为空而「没声音」。
    */
   const fromLeadBlocks = blocks
     .filter(block => block.type === "guide-lead")
@@ -52,7 +48,7 @@ function extractAnswerText(message: UiChatMessage, stepId = ""): string {
     .join("\n");
   if (fromLeadBlocks) return fromLeadBlocks;
   // 核对卡（guide-check）场景：气泡正文隐藏 / 为空时，用核对卡的「标题 + 步骤正文」当播报文本，
-  // 否则点播报按钮会因为 answer 为空而「没声音」。
+  // 否则点播报按钮会因为 speech 为空而「没声音」。
   // 传了 stepId 就只念当前这一步（多步骤卡翻页后不能把 5 步全念一遍）；
   // 找不到对应步骤时退回全部，避免出现「点了没声音」。
   const checkBlocks = blocks.filter(block => block.type === "guide-check");
@@ -66,8 +62,7 @@ function extractAnswerText(message: UiChatMessage, stepId = ""): string {
     ].filter(Boolean).join("\n"))
     .join("");
   if (fromCheckBlocks) return fromCheckBlocks;
-  // 带多步骤卡的回答不再回落到 message.content（那通常就是被隐藏的正文）
-  return hasStepCard ? "" : String(message.content || "");
+  return "";
 }
 
 /**
@@ -114,12 +109,11 @@ export function useRealtimeTts(scope?: string) {
   let activeStream: TtsStreamHandle | null = null;
   let audioQueue: AudioItem[] = [];
   let playbackGain = 1;
+  let activeAudio: ReturnType<typeof uni.createInnerAudioContext> | null = null;
   function setPlaybackGain(value: number) {
     playbackGain = Math.max(0, Math.min(1, value));
     if (activeAudio) activeAudio.volume = playbackGain;
   }
-
-  let activeAudio: ReturnType<typeof uni.createInnerAudioContext> | null = null;
 
   /** 流式听播会话的内部状态：输入侧（answer 文本）与请求链是否已全部结束。 */
   interface StreamingSession {

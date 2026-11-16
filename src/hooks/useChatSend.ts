@@ -933,8 +933,8 @@ export function useChatSend(scope?: string, handlers?: {
           // 只取第一块会让后半段文字永远收不到增量、听播漏播。
           else if (handlers?.onAiAnswerDelta) {
             /**
-             * 播报稿优先：`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>`
-             * 一旦本轮下发了语音稿，整轮只念它，标签外的正文一律不再喂给 TTS。
+             * 只念播报稿：`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>`
+             * 本轮下发了语音稿才播报；没有语音稿整轮不自动播 —— 不再兜底把正文念一遍。
              * 协议块通常先于正文到达；万一正文先念了个开头才出语音稿，这里把已读长度归零，
              * 保证语音稿能完整播一遍（已播出去的正文收不回来，但不会接着念正文）。
              */
@@ -943,14 +943,13 @@ export function useChatSend(scope?: string, handlers?: {
               answerDeltaSource = "speech";
               lastSeenAnswerLength = 0;
             }
-            const answerContent = speechContent || collectAnswerText(displaySnapshot.blocks);
             // "QRCODE" 是给前端看的占位，不是给人听的：文本还是占位前缀时按住不播，
             // 一旦长成正常答案（含已压住的开头）再一次性补播，避免把字母一个个念出来。
             // <QRCODE>…</QRCODE> 这一轮同样不进听播（要跳二维码页），整段按住。
-            const placeholderPrefix = qrcodeTurn.tagged || isQrcodePlaceholderPrefix(answerContent);
-            if (!placeholderPrefix && answerContent.length > lastSeenAnswerLength) {
-              notifyAnswerDelta(answerContent.slice(lastSeenAnswerLength), false);
-              lastSeenAnswerLength = answerContent.length;
+            const placeholderPrefix = qrcodeTurn.tagged || isQrcodePlaceholderPrefix(speechContent);
+            if (speechContent && !placeholderPrefix && speechContent.length > lastSeenAnswerLength) {
+              notifyAnswerDelta(speechContent.slice(lastSeenAnswerLength), false);
+              lastSeenAnswerLength = speechContent.length;
             }
             if (snapshot.ended && lastSeenAnswerLength > 0) notifyAnswerDelta("", true);
           }

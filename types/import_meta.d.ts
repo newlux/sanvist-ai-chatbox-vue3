@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  /** 是否给所有接口请求头加 `env: <VITE_WEB_ENV>`：Y 开 / 其它关 */
+  readonly VITE_BAG_ENABLE_ENV?: string;
   readonly VITE_WEB_ENV: string;
   readonly VITE_H5_OUT_DIR: number;
   readonly VITE_LOG_LEVEL: string;

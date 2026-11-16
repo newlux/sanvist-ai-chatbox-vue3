@@ -145,6 +145,16 @@ function mergeHeaders(base: Record<string, string>, extra: Record<string, string
 }
 
 /**
+ * 打包环境标识头（`env: <VITE_WEB_ENV>`）。
+ * request 链路由 `getRequestHeaders` 自动带上；少数不走 request 的自有服务（如推送 HTTP）
+ * 也用这一份，保证口径一致。开关关闭或 VITE_WEB_ENV 为空时返回空对象（关掉就真不带）。
+ */
+export function getBagEnvHeaders(): Record<string, string> {
+  if (!BAG_ENV_ENABLED || !BAG_ENV_VALUE) return {};
+  return { [BAG_ENV_HEADER_NAME]: BAG_ENV_VALUE };
+}
+
+/**
  * 按打包开关处理 `env` 头（头名大小写不敏感）：
  * - 开（Y）且 VITE_WEB_ENV 非空：强制写入构建期的那份值，调用方传的会被覆盖；
  * - 关（N / 未配置）：同名头一律摘掉，包括调用方显式传上来的。
@@ -155,8 +165,7 @@ function applyBagEnvHeader(headers: Record<string, string>) {
     if (name.toLowerCase() === BAG_ENV_HEADER_NAME) return;
     result[name] = value;
   });
-  if (BAG_ENV_ENABLED && BAG_ENV_VALUE) result[BAG_ENV_HEADER_NAME] = BAG_ENV_VALUE;
-  return result;
+  return Object.assign(result, getBagEnvHeaders());
 }
 
 /**
