@@ -87,6 +87,17 @@ const hasRemark = computed(() => Boolean(remark.value.trim()));
 const otherInputPlaceholder = computed(
   () => String(props.payload.other_text || props.payload.other_placeholder || "").trim() || t("slot-other-input"),
 );
+/**
+ * 作业协同场景（解析层透传的 scene：task / test）：只允许在选项里作答，不给「其他输入」入口。
+ * 与底部抽屉（AiSlotDrawer 的 scene 判定）同一套口径，两边不会一个有一个没有。
+ * 其它场景（ai问问 / 作业指导 / 老协议没带 scene）保持原行为。
+ */
+const isTaskScene = computed(() => {
+  const scene = String(props.payload?.scene || "").trim().toLowerCase();
+  return scene === "task" || scene === "test";
+});
+/** 内联卡的「其他输入」胶囊：只有多选才给，作业协同不给 */
+const showOtherInput = computed(() => isMultiple.value && !isTaskScene.value);
 
 onMounted(() => {
   // 非内联形态保持原行为：auto_open 时把 payload 抛给页面开抽屉
@@ -149,9 +160,9 @@ function submitRemark() {
         </text>
       </view>
 
-      <!-- 其他输入：与选项同一套胶囊，填完按键盘「发送」提交 -->
+      <!-- 其他输入：与选项同一套胶囊，填完按键盘「发送」提交；作业协同场景不渲染（见 showOtherInput） -->
       <view
-        v-if="isMultiple"
+        v-if="showOtherInput"
         class="ask-slot__option ask-slot__option--remark"
         :class="{ 'ask-slot__option--disabled': props.disabled || submitted }"
         @tap.stop="openRemarkInput"

@@ -21,7 +21,7 @@ const logger = createLogger("app");
  * 置空时请求不会带 Authorization 头（见 utils/request 的 getRequestHeaders）。p 
  * 注意：这串会打进产物，正式上线前需要确认是否保留。
  */
-const LOCAL_AUTHORIZATION_FALLBACK = "bearer 2e729dca-582b-4fbb-bd5d-550c6b051567";
+const LOCAL_AUTHORIZATION_FALLBACK = "bearer 981edeb0-1bbc-413c-a0db-51ea925fda57";
 
 type StartupQuery = Record<string, any>;
 
@@ -61,6 +61,10 @@ watch(
     if (typeof document === "undefined") return;
     // 浅色时把内联值撤掉，交还给浏览器默认白底，不额外改变现网观感
     document.documentElement.style.backgroundColor = dark ? "#0d0d0d" : "";
+    // 页面根节点 .ai-page / .ai-page__chat 的默认底色来源：深色时也同步，
+    // 让运行期切外观（不重建页面）与首帧内联脚本口径一致，双保险兜住闪白
+    if (dark) document.documentElement.style.setProperty("--app-page-bg", "#0d0d0d");
+    else document.documentElement.style.removeProperty("--app-page-bg");
   },
   { immediate: true, flush: "sync" },
 );

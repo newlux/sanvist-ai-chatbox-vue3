@@ -33,7 +33,6 @@ const rows = computed(() => rawRows.value.map(row => Array.from(
   { length: columnCount.value },
   (_, index) => String(row[index] ?? ""),
 )));
-const tableWidth = computed(() => `${columnCount.value * 180}rpx`);
 
 const tableRoot = ref<unknown>(null);
 useVerticalScrollGesture(tableRoot);
@@ -48,20 +47,24 @@ useVerticalScrollGesture(tableRoot);
     :show-scrollbar="false"
     enhanced
   >
-    <view class="table-block__table" :style="{ minWidth: tableWidth }">
+    <view class="table-block__table">
       <view class="table-block__row table-block__row--head">
-        <text
+        <view
           v-for="(column, index) in columns"
           :key="`${column}-${index}`"
           class="table-block__cell"
         >
-          {{ column }}
-        </text>
+          <text class="table-block__cell-text">
+            {{ column }}
+          </text>
+        </view>
       </view>
       <view v-for="(row, rowIndex) in rows" :key="rowIndex" class="table-block__row">
-        <text v-for="(cell, cellIndex) in row" :key="cellIndex" class="table-block__cell">
-          {{ cell }}
-        </text>
+        <view v-for="(cell, cellIndex) in row" :key="cellIndex" class="table-block__cell">
+          <text class="table-block__cell-text">
+            {{ cell }}
+          </text>
+        </view>
       </view>
     </view>
   </scroll-view>
@@ -82,36 +85,59 @@ useVerticalScrollGesture(tableRoot);
     touch-action: pan-x;
   }
 }
+/* 宽度按内容自适应：
+   - 短内容的列收窄，长文本的列拿到足够宽度，不会因为「按列数均分」把长文本挤在窄列里
+     换出一大堆行，导致这一行比别的行高出一截；
+   - 最窄仍铺满气泡（min-width: 100%），再宽就交给外层 scroll-view 横向滚动。
+   表格布局同时保证「同一列的单元格跨行对齐」—— 换成 flex 逐行自适应会各行算各的列宽、上下错位。
+
+   宽度必须是 max-content，不能留 auto：table 的 auto 宽度是 shrink-to-fit（不超过容器宽），
+   内容比容器宽时会把各列压到 min-content —— 中文一列只有一个字宽，整列逐字竖排。
+   老内核不认 max-content 时按块级收缩，虽不理想但不会出现上面的竖排。 */
 .table-block__table {
-  width: 100%;
+  display: table;
+  width: -webkit-max-content;
+  width: max-content;
+  min-width: 100%;
+  /* 横向 scroll-view 的内层容器在部分 uni 版本里是 flex：不加这行，表格会被 shrink 回容器宽，
+     又变成一列一个字宽 */
+  flex: none;
 }
 .table-block__row {
-  display: flex;
-  border-top: 1px solid #e8e8e8;
+  display: table-row;
   color: #1a1a1e;
-}
-.table-block__row:first-child {
-  border-top: 0;
 }
 /* 表头（第一行）：铺 #E1F0FF，再靠加粗与正文区分 */
 .table-block__row--head {
-  color: #1a1a1e;
   font-weight: 600;
+}
+.table-block__row--head .table-block__cell {
   background: #e1f0ff;
 }
 .table-block__cell {
-  flex: 1 1 0;
-  min-width: 0;
+  display: table-cell;
   padding: 24rpx;
   box-sizing: border-box;
-  /* 列分隔线：与行分隔线同色；首列左边由表格外框负责，不重复画 */
+  /* 行分隔线 / 列分隔线：同色；首行顶边与首列左边由表格外框负责，不重复画 */
+  border-top: 1px solid #e8e8e8;
   border-left: 1px solid #e8e8e8;
+  vertical-align: top;
   font-size: 24rpx;
   line-height: 36rpx;
-  word-break: break-word;
+}
+.table-block__row:first-child .table-block__cell {
+  border-top: 0;
 }
 .table-block__cell:first-child {
   border-left: 0;
+}
+/* 单元格内容：单条文本的宽度上限落在这层块级容器上（table-cell 自身的 max-width 会被表格算法忽略）。
+   平时的短文本按内容收窄，只有超过上限的长文本才换行 —— 换行行数可控，行高不会被一条长文本拉爆 */
+.table-block__cell-text {
+  display: block;
+  max-width: 420rpx;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* ===== 深色主题：结构化表格块（Ardot 1193:5104 → 回复卡 1193:5116）=====
@@ -120,19 +146,20 @@ useVerticalScrollGesture(tableRoot);
    尺寸 / 间距 / 字号不动 */
 .table-block--dark {
   border-color: #303030;
+  margin-bottom: 16rpx;
 
   .table-block__row {
-    border-top-color: #303030;
     color: #ffffff;
   }
 
-  // 列分隔线（表格内部竖线）跟随 #303030
+  // 行 / 列分隔线（表格内部横竖线）跟随 #303030
   .table-block__cell {
+    border-top-color: #303030;
     border-left-color: #303030;
   }
 
   // 表头：深蓝底 #173859 + 白字加粗；浅色稿的 #E1F0FF 在这里顶掉
-  .table-block__row--head {
+  .table-block__row--head .table-block__cell {
     color: #ffffff;
     background: #173859;
   }
