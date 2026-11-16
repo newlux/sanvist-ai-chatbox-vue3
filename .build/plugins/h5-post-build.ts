@@ -33,6 +33,18 @@ export function addResourceErrorHandlers(html: string): string {
     );
 }
 
+/**
+ * `public/` 下的运行时资源（scriptError.js / scriptStyle.css）不参与打包，
+ * Vite 会把 html 里 `/xxx` 的写法**原样保留**，不跟着 `base` 一起改写。
+ *
+ * 项目已经用 `base: "./"`，整包允许部署在任意子目录；
+ * 这两个绝对路径留在产物里，一放到子目录就会 404 —— 错误兜底脚本丢了，
+ * 控制台还会多两条红字。这里统一改成相对当前 html 的写法。
+ */
+export function toRelativePublicAssets(html: string): string {
+  return html.replace(/(\s(?:src|href)=")\/(?:\.\/)?(scriptError\.js|scriptStyle\.css)"/g, "$1./$2\"");
+}
+
 async function createZip(outDir: string): Promise<string> {
   const zipName = path.basename(outDir);
   const zipPath = path.join(path.dirname(outDir), `${zipName}.zip`);
@@ -155,8 +167,10 @@ export function h5PostBuild(options: H5PostBuildOptions = {}): Plugin {
         ),
       ]);
 
+      // 先按原始 html 判断哪些标签要挂 onerror（依赖 `/scriptError.js` 这类绝对写法），
+      // 再把 public 资源的绝对路径改成相对，避免子目录部署时 404
       const html = await fs.readFile(sourceHtmlPath, "utf8");
-      await fs.writeFile(sourceHtmlPath, addResourceErrorHandlers(html), "utf8");
+      await fs.writeFile(sourceHtmlPath, toRelativePublicAssets(addResourceErrorHandlers(html)), "utf8");
       if (sourceOutDir !== outDir) {
         await fs.rm(outDir, { recursive: true, force: true });
         await fs.rename(sourceOutDir, outDir);

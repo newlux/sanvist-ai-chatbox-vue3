@@ -754,10 +754,14 @@ export interface TextToSpeechResult {
   format?: string;
 }
 
-/** 分句并发合成的实时 TTS 请求。text 传整段回答，后端自行按句切分并并发合成。 */
+/**
+ * 分句并发合成的实时 TTS 请求。text 传整段回答，后端自行按句切分并并发合成。
+ *
+ * 注意：**不再下发 `language`**。语种由后端按文本自行判断，
+ * 端上原来传的是「本轮 ASR 识别语言 / 界面语言」，与后端判断结果经常打架。
+ */
 export interface RealtimeTtsParams {
   text: string;
-  language?: string;
   /**
    * 音色 id（如听播页所选 `xieshurou_v3.1`）。
    * 听播页的问答朗读按用户选的音色合成；不传时后端按默认音色处理。

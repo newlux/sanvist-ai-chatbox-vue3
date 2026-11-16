@@ -3,11 +3,9 @@ import type { Identifier, RealtimeTtsChunk, RealtimeTtsParams } from "@/api/chat
 
 import type { UiChatMessage } from "@/stores/chat-types";
 import { onBeforeUnmount, ref, watch } from "vue";
-import { useI18n } from "vue-i18n";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { resolveReportVoiceId, waitReportVoiceSynced } from "@/hooks/useReportVoice";
 import { useChatStore, useSettingsStore } from "@/stores";
-import { resolveTtsLanguage } from "@/utils/asr/voice-language";
 import { createLogger } from "@/utils/logger";
 import { markdownToPlainText } from "@/utils/markdown-to-text";
 
@@ -126,7 +124,6 @@ function takeFirstSentence(text: string) {
  * 历史对话仍走 useChatTts + GET /chat/tts，本引擎不影响它。
  */
 export function useRealtimeTts(scope?: string) {
-  const { locale } = useI18n();
   const chatStore = useChatStore(scope);
   const settingsStore = useSettingsStore();
   const playing = ref(false);
@@ -182,22 +179,15 @@ export function useRealtimeTts(scope?: string) {
   let sceneLeaveKnownKeys: Set<string> | null = null;
 
   /**
-   * 播报语言：优先本轮语音识别出来的语言（ASR 回传的 language），
-   * 用户用英文提问、界面还是中文时，英文答案要按英文合成；没识别过才退回界面语言。
-   */
-  function currentLanguage() {
-    return resolveTtsLanguage(locale.value);
-  }
-
-  /**
    * TTS 请求参数：音色每次现取（`<VOICE_STYLE style="…">` 标签可能刚把它改掉），
    * 没选过音色就不带这个字段，由后端按默认音色合成。
+   *
+   * 语种不再由端上指定（原先是「本轮 ASR 识别语言 → 界面语言」），后端按文本自行判断。
    */
-  function buildTtsParams(text: string, language: string): RealtimeTtsParams {
+  function buildTtsParams(text: string): RealtimeTtsParams {
     const voice = resolveReportVoiceId();
-    // 端上排查「播报语种不对」时，先看这里用的 language 是不是识别语言
-    logger.debug("tts 请求参数", { language, chars: text.length, voice: voice || "(默认)" });
-    return { text, language, ...(voice ? { voice } : {}) };
+    logger.debug("tts 请求参数", { chars: text.length, voice: voice || "(默认)" });
+    return { text, ...(voice ? { voice } : {}) };
   }
 
   function patchMessage(messageId: Identifier, patch: { ttsLoading?: boolean; ttsPlaying?: boolean }) {
@@ -342,7 +332,6 @@ export function useRealtimeTts(scope?: string) {
   function enqueueTtsBatch(text: string, messageId: Identifier, seq: number, session: StreamingSession) {
     if (!text) return;
     session.pendingFetches += 1;
-    const language = currentLanguage();
     fetchChain = fetchChain.then(() => new Promise<void>((resolve) => {
       const settle = () => {
         if (activeSession === session) session.pendingFetches -= 1;
@@ -355,7 +344,7 @@ export function useRealtimeTts(scope?: string) {
         if (seq !== sessionSeq || activeSession !== session) return settle();
         try {
           activeStream = consumeTextToSpeechStream(
-            buildTtsParams(text, language),
+            buildTtsParams(text),
             payload => handleChunk(payload, messageId, seq, text),
             () => settle(),
             () => settle(),
@@ -488,7 +477,6 @@ export function useRealtimeTts(scope?: string) {
     stop();
     streamFinished = false;
     const seq = ++sessionSeq;
-    const language = currentLanguage();
     playingMessageId.value = messageId;
     playingMessageKey.value = String(message.id ?? messageId);
     playingStepId.value = stepId;
@@ -509,7 +497,7 @@ export function useRealtimeTts(scope?: string) {
       }
 
       activeStream = consumeTextToSpeechStream(
-        buildTtsParams(text, language),
+        buildTtsParams(text),
         payload => handleChunk(payload, messageId, seq, text),
         (error) => {
           if (seq !== sessionSeq) return;

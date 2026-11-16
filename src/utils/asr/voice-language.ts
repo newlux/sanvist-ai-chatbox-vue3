@@ -49,6 +49,9 @@ export function clearVoiceInputLanguage() {
 /**
  * TTS 的 language 取值：优先本轮语音识别的语言，其次调用方给的兜底（一般是界面语言），
  * 都没有才落到 zh。
+ *
+ * 注意：`/speech/tts/v2/stream` 现在**不再接收 language**（语种由后端按文本自行判断），
+ * 端上播报链路已不再调用本函数；保留它是为了将来需要显式指定语种的场景。
  */
 export function resolveTtsLanguage(fallback?: unknown) {
   return voiceInputLanguage || normalizeSpeechLanguage(fallback) || "zh";

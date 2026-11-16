@@ -208,7 +208,7 @@ const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceh
  * 初始化介绍的口播：走 usePlainTts（按句切分 → /speech/tts/v2/stream）。
  * mock 消息没有服务端 messageId，走不了 useChatTts / 实时听播那两套，所以这里单独一套。
  */
-const introTts = usePlainTts(String(systemStore.header?.Lang || "").toLowerCase().startsWith("en") ? "en" : "zh");
+const introTts = usePlainTts();
 
 /** 补播监听的事件：个别 WebView 会拦掉无用户手势的自动播放，等第一次触摸再补一次 */
 const INTRO_GESTURE_EVENTS = ["touchstart", "pointerdown"] as const;

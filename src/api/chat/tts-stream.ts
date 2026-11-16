@@ -52,9 +52,14 @@ export function consumeTextToSpeechStream(
 
   const controller = new AbortController();
   const url = `${getRequestBaseURL().replace(/\/$/, "")}/speech/tts/v2/stream`;
-  // 语速由后端在合成时生效（int）；调用方不传时统一按默认语速下发。
-  const body = {
-    ...params,
+  /**
+   * 只取需要的字段，**不再下发 `language`**（语种由后端按文本自行判断）。
+   * 这里不写 `...params`：即使调用方多塞了 language / 其它字段也进不了请求体。
+   * 语速由后端在合成时生效（int），调用方不传时统一按默认语速下发。
+   */
+  const body: RealtimeTtsParams = {
+    text: params.text,
+    ...(params.voice ? { voice: params.voice } : {}),
     ttsSpeechRate: params.ttsSpeechRate ?? DEFAULT_TTS_SPEECH_RATE,
   };
 

@@ -91,8 +91,10 @@ function resolveAudioSource(chunk: RealtimeTtsChunk) {
  *
  * 另有 play()：直接播一段现成的音频地址（本地录音欢迎语音），跳过 TTS 接口，
  * 但共用同一个播放队列与 playing / started，播完推进的逻辑不用改。
+ *
+ * 语种不由端上指定（原先取的是界面语言），由后端按文本自行判断。
  */
-export function usePlainTts(language = "zh") {
+export function usePlainTts() {
   /** 当前是否有音频在播（整段播完才回落 false） */
   const playing = ref(false);
   /** 是否成功播出过至少一句：WebView 拦截自动播放时，调用方据此决定要不要在手势里补播 */
@@ -221,7 +223,7 @@ export function usePlainTts(language = "zh") {
       // 音色每次现取：`<VOICE_STYLE style="…">` 标签改动后，下一句口播就用新音色
       const voice = resolveReportVoiceId();
       handle = consumeTextToSpeechStream(
-        { text: job.text, language, ...(voice ? { voice } : {}) },
+        { text: job.text, ...(voice ? { voice } : {}) },
         (payload) => {
           if (id !== session || !payload || typeof payload !== "object") return;
           const chunk = payload as RealtimeTtsChunk;

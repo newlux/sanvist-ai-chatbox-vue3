@@ -310,7 +310,7 @@ const isEnglish = computed(() => String(locale.value || "").toLowerCase().starts
  * 语音播报：与首页 / 欢迎页共用同一套（usePlainTts → 按句号切分后逐句 POST /speech/tts/v2/stream），
  * 每一步出现时口播标题；播报期间底部淡入「播报」那张弧形柔光，播完淡回常态（常态不铺底色）。
  */
-const introTts = usePlainTts(isEnglish.value ? "en" : "zh");
+const introTts = usePlainTts();
 /** 模板里直接用：true 时底部换成播报态柔光（与首页 welcome-visitor__glow 一致） */
 const speaking = introTts.playing;
 

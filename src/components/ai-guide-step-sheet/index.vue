@@ -118,9 +118,9 @@ const photoText = computed(() => String(currentStep.value?.photo_text || "").tri
  * 不是流式答案，所以走 usePlainTts（与 guide-init / task-init 同一套：
  * 文本按句号切分，每句单独 POST /speech/tts/v2/stream，再顺序拼接播放）。
  * 每切一步 speak 内部会先 stop 再播，天然满足「终止当前语音、播最新一步」。
+ * 语种由后端按文本判断，不再由端上传。
  */
-const isEnglish = computed(() => String(locale.value || "").toLowerCase().startsWith("en"));
-const stepTts = usePlainTts(isEnglish.value ? "en" : "zh");
+const stepTts = usePlainTts();
 
 /** 这一步要读的文案：只播 action，不读 title / 确认问题 / 选项 / 输入框占位 */
 const narrationText = computed(() => {

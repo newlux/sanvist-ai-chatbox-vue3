@@ -44,7 +44,6 @@ import { stripMarkdownTables } from "@/utils/ai-stream";
 import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
 import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
-import { resolveTtsLanguage } from "@/utils/asr/voice-language";
 import { getCurrentListenReportDate, getCurrentListenReportLanguage, isListenReportListened, markListenReportListened } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, permissionDeniedMessage } from "@/utils/platform/mpaas";
@@ -62,7 +61,7 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
 defineOptions({ name: "AiPodcastPage" });
 
 const logger = createLogger("podcast-page");
-const { locale, t } = useI18n();
+const { t } = useI18n();
 
 const chatScope = provideChatScope("podcast");
 const chatStore = useChatStore(chatScope);
@@ -336,14 +335,6 @@ function cleanAnswerText(raw: string): string {
   return text;
 }
 
-/**
- * 问答回答的播报语言：优先本轮语音识别出来的语言（ASR 回传的 language），
- * 没识别过才退回界面语言。
- */
-function resolveAnswerTtsLanguage() {
-  return resolveTtsLanguage(locale.value);
-}
-
 function playNextAnswerTtsChunk(seq: number) {
   if (seq !== answerTtsSeq) return;
   if (answerTtsActiveAudio) return;
@@ -411,13 +402,13 @@ function playAnswerTts(answer: string) {
   const seq = ++answerTtsSeq;
   answerTtsStreamFinished = false;
   answerTtsPlaying.value = true;
-  const language = resolveAnswerTtsLanguage();
   // 音色现取本机记忆（可能刚被「<VOICE_STYLE style="…">」标签改过），没有再退回本轮听播参数；
-  // 都没取到就不带这个字段，由后端按默认音色合成
+  // 都没取到就不带这个字段，由后端按默认音色合成。
+  // 语种不再由端上指定（原先是 ASR 识别语言 → 界面语言），后端按文本自行判断。
   const voice = resolveReportVoiceId() || String(reportBroadcastParams.value?.voice || "").trim();
   try {
     answerTtsStream = consumeTextToSpeechStream(
-      { text, language, ...(voice ? { voice } : {}) },
+      { text, ...(voice ? { voice } : {}) },
       (payload) => {
         if (seq !== answerTtsSeq) return;
         if (!payload || typeof payload !== "object") return;
