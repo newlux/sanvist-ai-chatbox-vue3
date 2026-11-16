@@ -376,7 +376,6 @@ onBeforeUnmount(() => {
             mode="aspectFit"
             aria-hidden="true"
           />
-          <view v-if="duplexActive" class="welcome__composer-wave-dot" />
         </view>
       </view>
       <view

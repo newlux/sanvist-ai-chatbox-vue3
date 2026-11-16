@@ -1148,7 +1148,6 @@ onBeforeUnmount(() => {
           >
             <!-- 声波：未触发是深色 6 段声波，触发后才是纯蓝（#1166D6），不渐变 -->
             <image :src="duplexActive ? iconWaveActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
-            <view v-if="duplexActive" class="input-bar__duplex-dot" />
           </view>
         </view>
 
@@ -2333,16 +2332,6 @@ onBeforeUnmount(() => {
   filter: brightness(0) invert(1);
 }
 
-.input-bar__duplex-dot {
-  position: absolute;
-  right: 0;
-  top: 0;
-  width: 18rpx;
-  height: 18rpx;
-  border: 2px solid #fafafa;
-  border-radius: 50%;
-  background: #20c56c;
-}
 .input-bar__duplex--starting {
   opacity: 0.55;
 }

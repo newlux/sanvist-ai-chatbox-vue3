@@ -140,6 +140,14 @@ export function useRealtimeTts(scope?: string) {
   let fetchChain: Promise<void> = Promise.resolve();
   /** 用户手动停止过的消息：后续增量不再自动重启听播。 */
   const manualStopKeys = new Set<string>();
+  /**
+   * 场景跳转（pushWindow 进维修助理 / 配件助手）离开那一刻，store 里已存在的消息 key 快照。
+   *
+   * 「好的，正在为你进入维修助理。」这句常常是跳转**之后**才流进来的：后端先下发 ENTER_ASSISTANT
+   * 触发开窗，正文随后到达。离开时它还没进 store，`playingMessageKey` 记不到它，
+   * 返回页面后第一块正文一到就自动开口。靠这个快照把「离开后才出现的那条」认出来并吞掉。
+   */
+  let sceneLeaveKnownKeys: Set<string> | null = null;
 
   /**
    * 播报语言：优先本轮语音识别出来的语言（ASR 回传的 language），
@@ -347,6 +355,17 @@ export function useRealtimeTts(scope?: string) {
     if (messageId == null || message?.sessionId == null) return;
     const key = String(message.id ?? messageId);
     if (manualStopKeys.has(key)) return;
+    /**
+     * 刚从维修助理 / 配件助手跳出去过：离开那一刻快照里没有的新消息 =
+     * 跳转之后才流进来的这条回复（「好的，正在为你进入维修助理。」），
+     * 判成「跳转前已被停止」，记进 manualStopKeys 并吞掉这一条，返回时不再念。
+     * 只吞一次，之后（用户回来继续提问的）新回复照常自动播报。
+     */
+    if (sceneLeaveKnownKeys && !sceneLeaveKnownKeys.has(key)) {
+      sceneLeaveKnownKeys = null;
+      manualStopKeys.add(key);
+      return;
+    }
 
     if (playingMessageKey.value !== key) {
       // 新答案的第一块文字：自动开启流式听播会话。
@@ -483,6 +502,15 @@ export function useRealtimeTts(scope?: string) {
   function stopForSceneLeave() {
     // 这一轮记进 manualStopKeys：万一正文还在流，回包到达时也不会自己再开口
     if (playingMessageKey.value) manualStopKeys.add(playingMessageKey.value);
+    /**
+     * 兜底一：离开这一刻 store 里最后一条消息（就是本轮这条回复）也记成手动停止 ——
+     * 极端情况下正文刚插进 store、还没轮到开口，返回后也不会补开。
+     * 兜底二：留下 key 快照，用来认出「跳转之后才流进来的那条」（见 feedAnswerDelta）。
+     */
+    const tail = chatStore.messages[chatStore.messages.length - 1];
+    if (tail) manualStopKeys.add(String(tail.id ?? tail.messageId));
+    sceneLeaveKnownKeys = new Set(chatStore.messages.map(message => String(message.id ?? message.messageId)));
+
     stop();
   }
 

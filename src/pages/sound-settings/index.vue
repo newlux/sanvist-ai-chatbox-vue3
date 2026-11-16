@@ -871,7 +871,7 @@ onMounted(async () => {
 
   /* 203:1202 Rectangle 180：播放速度卡 #303030，圆角 12（24rpx） */
   .sound-settings__speed {
-    background: #303030;
+    background: #202020;
   }
 
   /* 203:1203 播放速度：12px Regular #FFFFFF */
@@ -911,7 +911,7 @@ onMounted(async () => {
   /* 203:1111 Frame 135：列表面板 #303030，圆角 12（24rpx）、内边距 16（浅色稿是直角） */
   .sound-settings__list {
     border-radius: 24rpx;
-    background: #303030;
+    background: #202020;
   }
 
   /* 203:1126 等 Rectangle 185：音色卡 #303030，圆角 12（24rpx） */

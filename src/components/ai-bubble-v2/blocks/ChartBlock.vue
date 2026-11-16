@@ -275,18 +275,31 @@ function axisBottomSpace(axis: any) {
   const fontSize = Number(axis?.axisLabel?.fontSize) || DEFAULT_FONT_SIZE;
   const lineHeight = Number(axis?.axisLabel?.lineHeight) || Math.ceil(fontSize * 1.35);
   const labelWidth = Number(axis?.axisLabel?.width) || 0;
+  /**
+   * 标签与轴线之间的间距（echarts 默认 8px）必须算进来：
+   * 这里只留 labelHeight 的话，最后一行会正好贴着画布底边，被切掉小半截
+   * （柱状图底部「临港自卸车09 (25ZX3241013)」这类两行标签就是这样被裁的）。
+   */
+  const marginValue = Number(axis?.axisLabel?.margin);
+  const labelMargin = Number.isFinite(marginValue) ? marginValue : 8;
   const lineCount = (label: string) => {
     const explicitLines = label.split("\n");
     if (!labelWidth) return explicitLines.length;
+    /**
+     * 折行宽度按 95% 折算：canvas 测量与实际渲染之间有几个像素的字体回退差，
+     * 估算偏乐观就会少算一行，导致最下面一行整个落到画布外。
+     * 宁可多算半行，也不能让文字被裁。
+     */
+    const usableWidth = Math.max(1, labelWidth * 0.95);
     return explicitLines.reduce((count, line) => {
-      return count + Math.max(1, Math.ceil(longestLineWidth(line, axis.axisLabel) / labelWidth));
+      return count + Math.max(1, Math.ceil(longestLineWidth(line, axis.axisLabel) / usableWidth));
     }, 0);
   };
   const labelHeight = lineHeight * Math.max(1, ...labels.map(lineCount));
   const axisNameSpace = String(axis?.name || "").trim()
     ? Number(axis?.nameGap) || DEFAULT_AXIS_NAME_GAP
     : 0;
-  return Math.ceil(labelHeight + axisNameSpace + 12);
+  return Math.ceil(labelMargin + labelHeight + axisNameSpace + 12);
 }
 
 function resolveTopSpace(option: any, xAxes: any[], yAxes: any[], series: any[], chartWidth: number) {

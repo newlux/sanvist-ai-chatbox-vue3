@@ -269,6 +269,18 @@ const hasGuideStepCard = computed(() => visibleBlocks.value.some(block => block?
 const hideBody = computed(() => !isUser.value && hasGuideStepCard.value);
 
 /**
+ * 历史消息（从会话记录拉回来的回答）不带 `processStatus` —— 品牌行原本是「生成过程」的产物，
+ * 落库时就没带回来，于是点开历史对话只看到一坨没有出处的正文。
+ * 这里把它补回来：非用户消息、已经收尾、没有过程状态、正文也没被独立卡片顶掉、且确实有内容，
+ * 就按「已完成」渲染同一条品牌行（sani 图标 + SANI + 右侧播报按钮）。
+ */
+const isHistoryAnswer = computed(() => {
+  if (isUser.value || props.loading || props.interrupted || props.processStatus) return false;
+  if (props.assistantCallbackTitle || hideBody.value) return false;
+  return Boolean(props.content) || contentBlocks.value.length > 0;
+});
+
+/**
  * 消息里带独立卡片（核对卡 / 调度视图入口卡）时，气泡正文为空属于正常情况，
  * 不能再补「系统繁忙」兜底提示——内容在气泡外那张卡上。
  */
@@ -297,7 +309,8 @@ const showWaiting = computed(() => Boolean(props.waitingText) && props.loading &
  */
 const processStatusText = computed(() => {
   const status = props.processStatus as { phase?: string; title?: string } | null;
-  if (!status) return "";
+  // 历史回答没有 processStatus，同样署品牌名（见 isHistoryAnswer）
+  if (!status) return isHistoryAnswer.value ? "SANI" : "";
   if (status.phase === "failed") return t("process-status-failed");
   if (status.phase === "stopped") return t("process-status-stopped");
   return "SANI";
@@ -305,6 +318,12 @@ const processStatusText = computed(() => {
 
 /** 失败状态单独显示提示，停止状态复用品牌行。 */
 const showBrandStatus = computed(() => isStopped.value || props.processStatus?.phase !== "failed");
+
+/** 品牌行的状态修饰类：历史回答按「已完成」渲染，与当前会话里的完成态同一套样式 */
+const processStatusPhase = computed(() => {
+  if (isStopped.value) return "stopped";
+  return props.processStatus?.phase || (isHistoryAnswer.value ? "succeeded" : "");
+});
 
 /** 是否还在生成（首包前 processStatus 可能为空，用 loading 兜底） */
 const isGenerating = computed(() => {
@@ -651,7 +670,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
         <view
           v-if="showProcessStatus && !props.assistantCallbackTitle"
           class="ai-bubble-v2__process-status"
-          :class="`ai-bubble-v2__process-status--${isStopped ? 'stopped' : props.processStatus?.phase}`"
+          :class="`ai-bubble-v2__process-status--${processStatusPhase}`"
         >
           <!-- 品牌署名：sani 图标 26×26（52rpx）+ 文案 SANI，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
           <image
@@ -664,12 +683,13 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
             {{ isStopped ? "SANI" : processStatusText }}
           </text>
           <!-- 生成中实时秒数（单位 S），紧跟 SANI；可以播报后自动消失，位置让给语音图标 -->
-          <text v-if="elapsedText" class="ai-bubble-v2__process-elapsed">
+          <!-- <text v-if="elapsedText" class="ai-bubble-v2__process-elapsed">
             {{ elapsedText }}
-          </text>
-          <!-- 语音播报按钮：SANI 后面常显（拉流 → spinner，播放 → 声波起伏，其余 → 静态语音图标） -->
+          </text> -->
+          <!-- 语音播报按钮：SANI 后面常显（拉流 → spinner，播放 → 声波起伏，其余 → 静态语音图标）；
+               历史回答没有 processStatus（见 isHistoryAnswer），同样要能点播 -->
           <view
-            v-if="!isStopped && props.processStatus?.phase === 'succeeded' && props.showActions && props.ttsEnabled"
+            v-if="!isStopped && (props.processStatus?.phase === 'succeeded' || isHistoryAnswer) && props.showActions && props.ttsEnabled"
             class="ai-bubble-v2__action-btn ai-bubble-v2__process-tts"
             @tap.stop="onTtsTap"
           >
