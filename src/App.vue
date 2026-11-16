@@ -11,7 +11,10 @@ import { createLogger } from "@/utils/logger";
 import { isMpaasReady, notifyTokenExpiration, waitForMpaas } from "@/utils/platform/mpaas";
 import { describeRequestAuth, setAuthFailureHandler, setGuestRole, setRequestAuth, setRequestBaseURL } from "@/utils/request";
 
-import { setSceneStartupQuery } from "@/utils/scene-navigation";
+import { installContainerBackGuard, setSceneStartupQuery } from "@/utils/scene-navigation";
+
+// 站内压栈（作业指导 / 任务协同 / 听汇报）后，容器左滑要回到上一页，而不是关掉整个 mPaaS。
+installContainerBackGuard();
 
 const logger = createLogger("app");
 /**

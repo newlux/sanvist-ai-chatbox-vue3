@@ -746,7 +746,7 @@ export function useChatSend(scope?: string, handlers?: {
     /**
      * 工作流结束事件（workflow_finished）带上跳转目标时的收尾：直接切到对应助手页。
      *
-     * 与其它页面跳转一致走 navigateToScene（mPaaS 下开新场景窗口，Web 下退化为 navigateTo）。
+     * 走 navigateToScene：作业指导 / 任务协同在当前 webview 内跳转，其它场景 mPaaS 下仍开新窗口。
      * 已经停在目标页时不重复跳自己；同一轮只处理一次。
      *
      * @returns 是否已经触发跳转，调用方据此跳过本轮后续的听播出口

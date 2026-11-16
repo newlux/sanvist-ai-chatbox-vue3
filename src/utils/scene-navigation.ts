@@ -42,12 +42,33 @@ export function buildSceneWindowUrl(route: string, href: string) {
   return url.href;
 }
 
+/**
+ * 留在当前 webview 里跳的场景页。
+ *
+ * 作业指导 / 任务协同 / 听汇报以前都是 pushWindow。新开的窗口在 mPaaS 里左滑会被容器当成
+ * 「关掉当前 webview」——当前窗口就是整个 mPaaS，手势直接把小程序关了。
+ * 改成站内压栈之后，左滑由 installContainerBackGuard 退回上一页。
+ */
+const IN_PAGE_SCENE_PATHS = new Set([
+  "/pages/guide/index",
+  "/pages/task/index",
+  "/pages/podcast/index",
+]);
+
+function scenePathname(url: string) {
+  return String(url || "").split("?")[0].split("#")[0];
+}
+
+function staysInCurrentWebview(url: string) {
+  return IN_PAGE_SCENE_PATHS.has(scenePathname(url));
+}
+
 export async function navigateToScene(url: string) {
   if (opening) return;
   opening = true;
   try {
     const fallback = () => uni.navigateTo({ url });
-    if (!isMpaasReady() || typeof location === "undefined") {
+    if (staysInCurrentWebview(url) || !isMpaasReady() || typeof location === "undefined") {
       fallback();
       return;
     }
@@ -58,6 +79,81 @@ export async function navigateToScene(url: string) {
       opening = false;
     }, 600);
   }
+}
+
+function pageStackDepth() {
+  try {
+    return getCurrentPages().length;
+  }
+  catch {
+    return 1;
+  }
+}
+
+/**
+ * 拦住 mPaaS 容器的返回（iOS 左滑、安卓返回键、标题栏返回）。
+ *
+ * 容器默认行为是关掉当前 webview。作业指导 / 任务协同 / 听汇报改成站内跳转后，
+ * 这个 webview 就是整个 mPaaS，左滑会把小程序关掉。栈里还有上一页时
+ * preventDefault，再 navigateBack 回到上一页；栈里只剩首页时不拦，
+ * 左滑仍然退出 mPaaS。
+ *
+ * 有的容器派发 back 的同时还会自己 history.back。先等一小段：
+ * 这段里如果已经收到 popstate，说明 uni 自己会退栈，这里不再退一次。
+ */
+const CONTAINER_BACK_EVENT = "back";
+const CONTAINER_BACK_WAIT_MS = 50;
+let containerBackGuardInstalled = false;
+let containerBackPending = false;
+
+export function installContainerBackGuard() {
+  if (containerBackGuardInstalled || typeof document === "undefined") return;
+  containerBackGuardInstalled = true;
+
+  document.addEventListener(CONTAINER_BACK_EVENT, (event) => {
+    if (pageStackDepth() <= 1 || containerBackPending) return;
+    event.preventDefault?.();
+    containerBackPending = true;
+    // 没有 window（非 H5）时直接退栈；H5 走下面的 popstate 去重。
+    if (typeof window === "undefined") {
+      uni.navigateBack({
+        delta: 1,
+        complete: () => {
+          containerBackPending = false;
+        },
+        fail: () => {
+          containerBackPending = false;
+        },
+      });
+      return;
+    }
+
+    let settled = false;
+    const release = () => {
+      containerBackPending = false;
+    };
+    const finish = (shouldNavigate: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("popstate", onPopState);
+      if (!shouldNavigate || pageStackDepth() <= 1) {
+        release();
+        return;
+      }
+      uni.navigateBack({
+        delta: 1,
+        complete: () => {
+          window.setTimeout(release, 300);
+        },
+        fail: release,
+      });
+    };
+    const onPopState = () => finish(false);
+    window.addEventListener("popstate", onPopState);
+    window.setTimeout(() => finish(true), CONTAINER_BACK_WAIT_MS);
+    // navigateBack 没回调时别把后续返回一直锁死
+    window.setTimeout(release, 800);
+  }, false);
 }
 
 export function isSceneWindowRoot() {

@@ -821,9 +821,8 @@ function onGoListenReport() {
 /**
  * 底部快捷入口点击（仅纯净模式关闭时可见）：
  * - mode=inline（配件助手）：就地切换智能体，再点一次取消；
- * - 听汇报：先固定当天早报日期，再进播报页（与卡片入口同一套逻辑）；
- * - 其余 page 入口（含作业指导 / 任务协同）：navigateToScene 到对应的场景页，
- *   mPaaS 下 pushWindow 新开一个 webview，Web 下退化为 navigateTo。
+ * - 听汇报：先固定当天早报日期，再在当前页进播报页（与卡片入口同一套逻辑）；
+ * - 作业指导 / 任务协同 / 听汇报都在当前 mPaaS 内跳转，左滑回到上一页，而不是关掉整个容器。
  */
 function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; url?: string }) {
   if (item?.mode === "inline") {
