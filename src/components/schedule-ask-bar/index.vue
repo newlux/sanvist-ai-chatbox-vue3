@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
+import iconWaveLight from "@/assets/img/icon-voice-wave-light.svg";
+import iconWaveOnDark from "@/assets/img/icon-waveform-darck.svg";
 import { isAsrServiceFailure } from "@/utils/asr-error";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission, permissionDeniedMessage } from "@/utils/platform/mpaas";
@@ -13,7 +15,8 @@ import VoiceRecorder from "@/utils/voiceRecorder.js";
  *
  * - **6694:82（空态）**：240×38 胶囊，白底 + `#E6E6E6` 描边、圆角 14、阴影 `0 3px 5px -1px rgba(0,0,0,.086)`；
  *   占位文案「请输入你的问题」12px `#999999`（稿子是斜体，按需求不加倾斜），
- *   **右侧语音入口图标**（与对话页输入栏同一张 `icon-voice-wave-dark.svg`，20×20，按住说话）；
+ *   **右侧语音入口图标**（与对话页输入栏同一套切图：浅色 `icon-voice-wave-light.svg`、
+ *   深色 `icon-waveform-darck.svg`，20×20，按住说话）；
  * - **4704:261（语音态）**：中间 9 颗 4px 红色圆点声纹（`#C8201E`，透明度 0.8→0.02 渐隐），
  *   右侧红色麦克风（`#C8201E`，即按住的那颗），占位文案隐藏；
  * - **4704:235（有内容态）**：正文 12px Italic `#1A1A1A`，右侧 22×22 发送按钮
@@ -48,6 +51,13 @@ const emit = defineEmits<{ (e: "send", text: string): void }>();
 
 const logger = createLogger("schedule-ask");
 const { t } = useI18n();
+
+/**
+ * 语音入口图标（与对话页输入栏同一套切图）：
+ * - 浅色：`icon-voice-wave-light.svg`（白色胶囊底 + 灰色声波）
+ * - 深色：深色版图标在深底上等于看不见，换 `icon-waveform-darck.svg`（纯白声波）
+ */
+const micIcon = computed(() => (props.dark ? iconWaveOnDark : iconWaveLight));
 
 const ASR_TIMEOUT_MS = 30_000;
 
@@ -508,7 +518,7 @@ onBeforeUnmount(() => {
       <view v-else-if="canSend" class="schedule-ask__send" @tap="onSubmit">
         <image src="@/assets/img/icon-send-up.svg" mode="aspectFit" />
       </view>
-      <!-- 空态：语音输入，按住说话；图标与对话页输入栏的语音入口同一张（icon-voice-wave-dark，20×20） -->
+      <!-- 空态：语音输入，按住说话；图标与对话页输入栏的语音入口同一套切图（20×20，随明暗切换） -->
       <view
         v-else
         class="schedule-ask__mic"
@@ -516,7 +526,7 @@ onBeforeUnmount(() => {
         @touchend.stop.prevent="onMicEnd"
         @touchcancel.stop.prevent="onMicEnd"
       >
-        <image src="@/assets/img/icon-voice-wave-dark.svg" mode="aspectFit" />
+        <image :src="micIcon" mode="aspectFit" />
       </view>
     </view>
 

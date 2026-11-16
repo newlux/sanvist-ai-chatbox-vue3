@@ -7,8 +7,9 @@ import heySaniLight from "@/assets/img/hey-sani-light.svg";
 import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
 import microphoneIcon from "@/assets/img/icon-mic-red.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
-import voiceWaveActive from "@/assets/img/icon-voice-wave-blue.svg";
-import voiceWaveDark from "@/assets/img/icon-voice-wave-dark.svg";
+import voiceWaveBlueDark from "@/assets/img/icon-voice-wave-blue-dark.svg";
+import voiceWaveBlueLight from "@/assets/img/icon-voice-wave-blue-light.svg";
+import voiceWaveLight from "@/assets/img/icon-voice-wave-light.svg";
 import voiceWaveOnDark from "@/assets/img/icon-waveform-darck.svg";
 import listenLogo from "@/assets/img/listen.gif";
 // 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 1MB 的 webp 慢网下先空白）
@@ -86,11 +87,16 @@ const { safeAreaStyle } = useSafeArea();
 const titleImage = computed(() => (props.dark ? heySaniDark : heySaniLight));
 
 /**
- * 声波图标：**未触发**（没开实时语音）时直接落在灰胶囊上，用深色 6 段声波；
- * **触发后**换成蓝色声波 + 白色胶囊（截图两态）。
- * 深色主题下深色图标等于看不见，这里换成深色专用的 `icon-waveform-darck.svg`（同一套 6 段几何）。
+ * 声波图标：**未触发**（没开实时语音）时用未激活态切图，**触发后**换成蓝色声波 + 白色胶囊（截图两态）。
+ * 两种态都按主题取不同切图：
+ *
+ * | | 浅色主题 | 深色主题 |
+ * | --- | --- | --- |
+ * | 未触发 | `icon-voice-wave-light.svg`（白胶囊 + 灰声波） | `icon-waveform-darck.svg`（纯白声波） |
+ * | 触发后 | `icon-voice-wave-blue-light.svg`（深蓝 #1166D6） | `icon-voice-wave-blue-dark.svg`（亮蓝 #47B5FF） |
  */
-const waveIconIdle = computed(() => (props.dark ? voiceWaveOnDark : voiceWaveDark));
+const waveIconIdle = computed(() => (props.dark ? voiceWaveOnDark : voiceWaveLight));
+const waveIconActive = computed(() => (props.dark ? voiceWaveBlueDark : voiceWaveBlueLight));
 
 /**
  * 中心图标「静态图 → 动图」的无感知切换。
@@ -372,7 +378,7 @@ onBeforeUnmount(() => {
         >
           <image
             class="welcome__composer-wave-icon"
-            :src="duplexActive ? voiceWaveActive : waveIconIdle"
+            :src="duplexActive ? waveIconActive : waveIconIdle"
             mode="aspectFit"
             aria-hidden="true"
           />
@@ -409,7 +415,7 @@ onBeforeUnmount(() => {
         >
           <image
             class="welcome__composer-wave-icon"
-            :src="duplexActive ? voiceWaveActive : waveIconIdle"
+            :src="duplexActive ? waveIconActive : waveIconIdle"
             mode="aspectFit"
             aria-hidden="true"
           />
@@ -622,6 +628,13 @@ onBeforeUnmount(() => {
   transition: opacity 240ms ease;
 }
 
+/* 胶囊整体宽度对齐下方输入条：输入条左右内边距 48rpx（加号左沿 / 键盘右沿），
+   而胶囊列表自带 20rpx，差 28rpx，三段胶囊会左右各外扩一截。
+   这里补齐到同一档，胶囊的左沿卡在加号左边、右沿卡在键盘右边 */
+.welcome__nav :deep(.ai-chat-nav__list) {
+  padding: 0 48rpx;
+}
+
 /* ===== 底部输入条：加号 / 点击说话 / 键盘 =====
    尺寸与问答页 .input-bar 语音态完全同一套（上下 8px / 左右 20px、min-height 64px、间距 10px），
    两页来回切时这一行的高度、按钮大小、图标大小都不许变 */
@@ -685,7 +698,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 36rpx; // 18px，两端半圆
-  background: #ffffff;
+  background: #ffffff00;
   transform: translateY(-50%);
 }
 
@@ -824,7 +837,7 @@ onBeforeUnmount(() => {
 /* 声波芯片：底色常驻。深底上胶囊是 8% 白，芯片取 14% 白压一档，
    才看得出是"胶囊里另起一块"而不是和胶囊糊成一片；触发后同色，靠蓝色声波区分 */
 .welcome--dark .welcome__composer-wave {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgb(255 255 255 / 0%);
 }
 
 .welcome--dark .welcome__composer-wave--active {

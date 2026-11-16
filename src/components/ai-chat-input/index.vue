@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import iconWaveActive from "@/assets/img/icon-voice-wave-blue.svg";
-import iconWaveDark from "@/assets/img/icon-voice-wave-dark.svg";
+import iconWaveBlueDark from "@/assets/img/icon-voice-wave-blue-dark.svg";
+import iconWaveBlueLight from "@/assets/img/icon-voice-wave-blue-light.svg";
+import iconWaveLight from "@/assets/img/icon-voice-wave-light.svg";
 import iconWaveOnDark from "@/assets/img/icon-waveform-darck.svg";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
@@ -79,11 +80,16 @@ const emit = defineEmits([
 const { t } = useI18n();
 
 /**
- * 声波图标：**未触发**（没开实时语音）时直接落在灰胶囊上，用深色 6 段声波；
- * **触发后**换成蓝色声波 + 白色胶囊（截图两态）。
- * 深色主题下深色图标等于看不见，这里换成深色专用的 `icon-waveform-darck.svg`（同一套 6 段几何）。
+ * 声波图标：**未触发**（没开实时语音）时用未激活态切图，**触发后**换成蓝色声波 + 白色胶囊（截图两态）。
+ * 两种态都按主题取不同切图：
+ *
+ * | | 浅色主题 | 深色主题 |
+ * | --- | --- | --- |
+ * | 未触发 | `icon-voice-wave-light.svg`（白胶囊 + 灰声波） | `icon-waveform-darck.svg`（纯白声波） |
+ * | 触发后 | `icon-voice-wave-blue-light.svg`（深蓝 #1166D6） | `icon-voice-wave-blue-dark.svg`（亮蓝 #47B5FF） |
  */
-const waveIconIdle = computed(() => (props.dark ? iconWaveOnDark : iconWaveDark));
+const waveIconIdle = computed(() => (props.dark ? iconWaveOnDark : iconWaveLight));
+const waveIconActive = computed(() => (props.dark ? iconWaveBlueDark : iconWaveBlueLight));
 
 /**
  * 输入框的本地副本。父组件清空 v-model 是异步的（发送链路里还要过一次 store），
@@ -1086,7 +1092,7 @@ onBeforeUnmount(() => {
             @mousedown.stop="onVoiceQueryPressEnd"
             @tap.stop="emit('duplex-toggle')"
           >
-            <image :src="duplexActive ? iconWaveActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
+            <image :src="duplexActive ? waveIconActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
           </view>
         </view>
         <view
@@ -1147,7 +1153,7 @@ onBeforeUnmount(() => {
             @tap.stop="emit('duplex-toggle')"
           >
             <!-- 声波：未触发是深色 6 段声波，触发后才是纯蓝（#1166D6），不渐变 -->
-            <image :src="duplexActive ? iconWaveActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
+            <image :src="duplexActive ? waveIconActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
           </view>
         </view>
 
@@ -1885,7 +1891,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 36rpx; // 18px，两端半圆
-  background: #ffffff;
+  background: #ffffff00;
   transform: translateY(-50%);
 }
 
