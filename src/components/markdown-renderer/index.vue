@@ -70,8 +70,8 @@ const rawTagStyle = {
   h4: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 600; line-height: 1.4;",
   h5: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 600; line-height: 1.4;",
   h6: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 600; line-height: 1.4;",
-  p: "margin: 0 0 12rpx; color: #2f323c; font-size: 28rpx; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
-  strong: "font-weight: 600; color: #1a1a1e;",
+  p: "margin: 0 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 400; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
+  strong: "font-weight: bolder; color: #1a1a1e;",
   em: "font-style: italic;",
   ul: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 34rpx; list-style: disc;",
   // iOS WebKit 的列表序号绘制在 li 外侧，给多位数字留下按字号缩放的空间。

@@ -95,7 +95,7 @@ function pick(option: string) {
   display: block;
   font-family: "PingFang SC", sans-serif;
   font-size: 28rpx;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 34rpx;
   // color: #999999;
 }
