@@ -919,6 +919,12 @@ watch(
     // 与手动点播报只念当前步骤的口径不一致，表现为「第一次播报内容比手动点击长一大截」。
     // 语音播报总开关关掉：核对卡出来后不再自动念
     if (!settingsStore.autoTtsEnabled) return;
+    // 新消息落列时把「当前步骤」归一到这条消息的第一步：内联卡片模式（INLINE_STEP_CARD）
+    // 不会走 openGuideStepSheet 重置 guideStepCardStepId，全局会残留上一条消息翻页到的步骤
+    // （如第 4 步），resolveActiveStepId 据此误播到第 4 步、而 UI 默认显示第 1 步 —— 错位。
+    // 用户主动翻页（onGuideStepChange）仍会更新它，同一条消息的手动播报不受影响。
+    const checkCards = blocks.filter(block => block?.type === "guide-check");
+    if (checkCards.length) guideStepCardStepId.value = String(checkCards[0]?.payload?.step_id || "");
     void realtimeTts.togglePlay(last, resolveActiveStepId(last));
   },
 );
