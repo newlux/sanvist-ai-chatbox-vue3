@@ -3,15 +3,10 @@ import { useI18n } from "vue-i18n";
 import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete.svg";
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
-import listenLogoDark from "@/assets/img/listen-dark.webp";
-import listenLogoGif from "@/assets/img/listen.gif";
 import saniLogoWebp from "@/assets/img/sani-logo.webp";
-import tellLogoDark from "@/assets/img/tell-dark.webp";
-import tellLogoGif from "@/assets/img/tell.gif";
-import thinkLogoWebp from "@/assets/img/think.webp";
 import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useChatStore, useSystemStore } from "@/stores";
+import { useSystemStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { getSessionSceneLabel, isPodcastSession } from "@/utils/session-scene";
 
@@ -81,15 +76,10 @@ const emit = defineEmits([
   "update:sessions",
   "share-select-all",
   "restart",
+  /** PC 车机版：点顶部居中胶囊 = 开始说话 */
+  "voice-tap",
 ]);
 
-/**
- * 头部只区分「思考中 / 回答中」两态（Ardot 722:69 浅色思考中 / 722:489 浅色回答中）：
- * - 最后一条 AI 消息还没有 answer 正文 → 思考中：图标放大 + 渐变环自转，文案「正在思考中..」
- * - 一旦出现 answer 正文 → 回答中：图标回落到原尺寸，文案「正在回答中..」
- * 不传 scope，沿 provide 链取页面自己的那份 store（首页 / 智能体页各自独立）。
- */
-const chatStore = useChatStore();
 const systemStore = useSystemStore();
 /**
  * 深色只有一个作用域：首页对话页的悬浮头部（plainBg）。
@@ -101,98 +91,8 @@ const systemStore = useSystemStore();
  */
 const darkPlain = computed(() => props.plainBg && !props.shareMode);
 
-/**
- * 灵动岛状态图按深浅色分两套 webp：
- * - 浅色：listen-light.webp / tell-light.webp；
- * - 深色：listen-dark.webp / tell-dark.webp。
- * 原来的 listen.gif / tell.gif 只留作加载失败时的兜底（个别老内核不认 webp）。
- * 注意两张 listen 的图案占画布比例不同（light 60.5% / dark 40.5%），
- * 所以 scale 补偿也不同，见样式里 .chat-header__island-logo--listen-light。
- */
-const listenLogoFailed = ref(false);
-const tellLogoFailed = ref(false);
-
-/** PC 版固定深色：岛内状态图只用深色一套 */
-const listenLogoSrc = computed(() => {
-  if (listenLogoFailed.value) return listenLogoGif;
-  return listenLogoDark;
-});
-
-const tellLogoSrc = computed(() => {
-  if (tellLogoFailed.value) return tellLogoGif;
-  return tellLogoDark;
-});
-
-/** 个别老内核（智慧屏 / 大屏一体机）不认 webp：加载失败退回 gif，避免岛内空一块 */
-function onListenLogoError() {
-  listenLogoFailed.value = true;
-  stateGifLoaded.value.listen = false;
-}
-
-function onTellLogoError() {
-  tellLogoFailed.value = true;
-  stateGifLoaded.value.tell = false;
-}
-const answering = computed(() => {
-  if (!props.generating) return false;
-  const list = chatStore.messages;
-  const message = list[list.length - 1];
-  if (!message || message.role !== "ai") return false;
-  return (message.blocks || []).some(
-    block => block.type === "answer" && String(block.payload?.content || "").trim().length > 0,
-  );
-});
-/**
- * 思考中 = 生成已开始但还没吐出 answer 正文；一出现正文就转「回答中」，生成结束回到常态。
- */
-const thinking = computed(() => props.generating && !answering.value);
-/**
- * 消息上的播报态：气泡里的声波 / 播放图标就是按它亮的（见 ai-message-list）。
- * 除了首页的实时听播（useRealtimeTts，有对应 prop），其余两条播报链路只写消息、不看 prop：
- * - 开场白自我介绍（usePlainTts，没有服务端 messageId）；
- * - 历史消息整段播报（useChatTts → GET /chat/tts）。
- * 只看 prop 的话这两种播报岛内不会切到 tell，和气泡状态对不上，所以这里一起兜住。
- */
-const anyMessageTtsPlaying = computed(() => chatStore.messages.some(message => Boolean(message?.ttsPlaying)));
-/**
- * 播报中 = 已出字进入「回答中」，一直到自动听播（TTS）放完为止。
- * 生成结束后 answering 会落回 false，由 realtimeTtsPlaying（以及消息上的播报态）续上，
- * 两段相接就是完整的播报期。
- */
-const telling = computed(() => answering.value || props.realtimeTtsPlaying || anyMessageTtsPlaying.value);
-/** 录音中（按住说话 / 初始页「点击说话」那条语音链路） */
-const recording = computed(() => props.voiceListening);
-/**
- * 岛内动图按状态分四层，各自作为叠图靠 opacity 交叉溶解（绝不切常态图的 src，换源是硬切）：
- *   空闲            → sani-logo.webp（常驻底层；280×260，图案占画布 89.3%，四周留透明边）
- *   正在思考        → think.webp（480×240，2:1 透明画布，aspectFill 裁掉两侧留白）
- *   正在回答 / 自动播报 → tell-light / tell-dark.webp（加载失败退 tell.gif）
- *   语音输入（点击说话 → 录音中）→ listen-light / listen-dark.webp（加载失败退 listen.gif）
- * 优先级：语音输入 > 回答/播报 > 思考 > 从初始页飞入那一段，同一时刻只亮一层。
- * 全部透明底，深浅两种头部都直接叠。
- */
-// 替代图加载成功后才隐藏常态图；资源缺失或尚未解码时仍保留可见的三角图。
-const stateGifLoaded = ref({ listen: false, tell: false, think: false });
-const answeringGifOn = computed(() => !recording.value && telling.value && stateGifLoaded.value.tell);
-const thinkingGifOn = computed(() => !recording.value && !telling.value && thinking.value && stateGifLoaded.value.think);
-/** 从初始页飞入那一段（落位时是同一张图在延续）；有状态时让位给状态图 */
-const listeningGifOn = computed(
-  () => !telling.value && !recording.value && !thinking.value && props.listenIdle,
-);
-/** 语音输入层：录音中与飞入段共用同一张 listen.gif */
-const listenSayGifOn = computed(() => (recording.value || listeningGifOn.value) && stateGifLoaded.value.listen);
-/** 有任意状态图亮着：底层常驻图淡出 */
-const islandAnyGifOn = computed(
-  () => listenSayGifOn.value || answeringGifOn.value || thinkingGifOn.value,
-);
-
 const logger = createLogger("chat-header");
 const { t, locale } = useI18n();
-const duplexDisplayText = computed(() => {
-  const status = props.duplexStatus.trim();
-  if (!status) return '';
-  return `${status.replace(/(?:\.{3,}|…)+$/, '')}...`;
-});
 const { safeTopPx, safeAreaStyle } = useSafeArea();
 /**
  * 抽屉顶部的「中 / EN」开关已下线（设计稿 309:3088 的位置让给了品牌头像），
@@ -297,10 +197,6 @@ const groupedSessionList = computed(() => {
   });
   return [...groups.values()].sort((a, b) => a.order - b.order);
 });
-
-const statusbarStyle = computed(() => ({
-  height: `${safeTopPx.value}px`,
-}));
 
 const historyDrawerStyle = computed(() => ({
   paddingTop: `calc(${safeTopPx.value}px + 32rpx)`,
@@ -503,132 +399,16 @@ function deleteSelected() {
   cancelMultiSelect();
 }
 
-/**
- * 长按灵动岛回到初始页（只有首页对话页开 restartable 时生效）。
- * 5 秒本身已经是「明显有意为之」的时长，但首页这块岛压在消息列表上方，
- * 上下滑列表、惯性滚动时手指很容易停在岛附近 —— 所以再叠四层防误触：
- * 1) 起手静置 300ms 才起算：轻点、擦碰连进度环都不会亮，也不会白等 5 秒；
- * 2) 位移按直线距离判定（≤12px）：原来逐轴判断，斜向要走到 12√2≈17px 才算滑动，
- *    斜着拖列表会误触发，改成欧氏距离后各方向一致；
- * 3) 按住期间只要页面 / 列表发生滚动就取消：惯性滚动时手指几乎不动，
- *    光靠位移阈值挡不住，这是最容易误触的场景；
- * 4) 多指按下（第二根手指 / 手掌）、切后台、窗口失焦：一律取消。
- * 触发后立刻复位视觉与监听，避免同一次按压被重复触发。
- */
-const ISLAND_LONG_PRESS_MS = 5000;
-/** 判定为滑动的手指位移（px）：与首页整页长按录音的阈值保持一致 */
-const ISLAND_MOVE_TOLERANCE_PX = 12;
-/** 起手静置时长（ms）：短于此值的按压视作轻点 / 擦碰，不点亮进度环也不计时 */
-const ISLAND_PRESS_ARM_MS = 300;
-let islandPressTimer: ReturnType<typeof setTimeout> | null = null;
-/** 起手静置计时器：还没起算时只有它在跑，页面不会出现进度环 */
-let islandArmTimer: ReturnType<typeof setTimeout> | null = null;
-let islandPressOrigin = { x: 0, y: 0 };
-/** 已起算：驱动那圈 5 秒走满的进度环，取消 / 计时结束都会复位 */
-const islandPressing = ref(false);
-
-/** 任意滚动（含 scroll-view 内部滚动）：capture 阶段兜住，直接取消长按 */
-function onIslandScrollGuard() {
-  if (islandArmTimer || islandPressTimer) clearIslandPressTimer();
-}
-
-/** 切后台 / 熄屏：回来时不该还停在一半的进度环上 */
-function onIslandVisibilityGuard() {
-  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-    clearIslandPressTimer();
-  }
-}
-
-function attachIslandGuards() {
-  if (typeof window === "undefined") return;
-  // scroll 不冒泡，但捕获阶段会经过 window，能兜住页面与列表容器的滚动
-  window.addEventListener("scroll", onIslandScrollGuard, true);
-  window.addEventListener("blur", clearIslandPressTimer);
-  if (typeof document !== "undefined") {
-    document.addEventListener("visibilitychange", onIslandVisibilityGuard);
-  }
-}
-
-function detachIslandGuards() {
-  if (typeof window === "undefined") return;
-  window.removeEventListener("scroll", onIslandScrollGuard, true);
-  window.removeEventListener("blur", clearIslandPressTimer);
-  if (typeof document !== "undefined") {
-    document.removeEventListener("visibilitychange", onIslandVisibilityGuard);
-  }
-}
-
-function clearIslandPressTimer() {
-  islandPressing.value = false;
-  if (islandArmTimer) {
-    clearTimeout(islandArmTimer);
-    islandArmTimer = null;
-  }
-  if (islandPressTimer) {
-    clearTimeout(islandPressTimer);
-    islandPressTimer = null;
-  }
-  detachIslandGuards();
-}
-
-function readPressPoint(e: any) {
-  const point = e?.touches?.[0] || e?.changedTouches?.[0] || e;
-  return { x: Number(point?.clientX ?? 0), y: Number(point?.clientY ?? 0) };
-}
-
-/** 走满 5 秒：先复位环与监听再回传，避免这一次按压还能被 touchend 再取消一次 */
-function finishIslandPress() {
-  islandPressTimer = null;
-  islandPressing.value = false;
-  detachIslandGuards();
-  emit("restart");
-}
-
-function onIslandPressStart(e: any) {
-  if (!props.restartable) return;
-  // 录音中岛内已经不是常态图，这会儿按下去大概率是想结束说话，不接管
-  if (props.voiceListening) return;
-  // 多指 / 手掌误碰直接忽略
-  if (Array.isArray(e?.touches) && e.touches.length > 1) return;
-  islandPressOrigin = readPressPoint(e);
-  // 先归零上一轮（同时摘下上一轮的监听），再进入静置阶段
-  clearIslandPressTimer();
-  attachIslandGuards();
-  islandArmTimer = setTimeout(() => {
-    islandArmTimer = null;
-    // 进度环与 5 秒计时同时起步，环走满时刚好触发
-    islandPressing.value = true;
-    islandPressTimer = setTimeout(finishIslandPress, ISLAND_LONG_PRESS_MS);
-  }, ISLAND_PRESS_ARM_MS);
-}
-
-/** 位移超阈值 / 多指：一律当滑动或误碰处理，取消长按 */
-function onIslandPressMove(e: any) {
-  if (!islandArmTimer && !islandPressTimer) return;
-  if (Array.isArray(e?.touches) && e.touches.length > 1) {
-    clearIslandPressTimer();
-    return;
-  }
-  const point = readPressPoint(e);
-  const offsetX = point.x - islandPressOrigin.x;
-  const offsetY = point.y - islandPressOrigin.y;
-  // 斜向 12px 也要挡住：用直线距离而不是逐轴比较
-  if (Math.hypot(offsetX, offsetY) > ISLAND_MOVE_TOLERANCE_PX) {
-    clearIslandPressTimer();
-  }
-}
-
 onBeforeUnmount(() => {
   clearTimeout(sessionScrollIdleTimer);
   clearTimeout(historyReloadTimer);
-  clearIslandPressTimer();
 });
 </script>
 
 <template>
   <!-- 分享选择态是「文字 + 勾选」条，保留原来的实底渐隐，避免文字压在滚动内容上看不清 -->
   <view
-    class="ai-chat-header"
+    class="ai-chat-header ai-chat-header--pc"
     :style="safeAreaStyle"
     :class="{
       'ai-chat-header--plain': plainBg && !shareMode,
@@ -638,155 +418,83 @@ onBeforeUnmount(() => {
     }"
   >
     <view class="chat-header">
-      <!-- 状态栏占位：动态读取真实机型状态栏高度 -->
-      <view class="chat-header__statusbar" :style="statusbarStyle" />
+      <!-- PC 车机版（设计稿 Ardot 747340735267872）：
+           顶部状态栏与底部 Dock 由宿主绘制，对话态只做两件事 ——
+           左上 80px 圆历史按钮（x=108,y=170）+ 顶部居中 64px 状态胶囊（y=84，点击开始说话）。
+           待机页（showIsland=false）严格按设计稿只有居中内容：历史按钮与状态胶囊都等
+           图标飞起进入对话态（showIsland=true）后才出现，避免待机页顶部露任何元素。 -->
+      <template v-if="!shareMode">
+        <!-- 左上角历史对话抽屉按钮 -->
+        <view v-if="showIsland" class="pc-header__history-btn" @tap="openHistoryDrawer">
+          <image
+            src="@/assets/img/icon-list.svg"
+            mode="aspectFit"
+            class="pc-header__history-icon"
+          />
+        </view>
 
-      <!-- 头部（设计稿 722:69：50px 高、左右 20px、图标 24×24 垂直居中）；灵动岛是浮层，不参与这一行的布局 -->
-      <view class="chat-header__bar">
-        <template v-if="!shareMode">
-          <!-- PC 版：左上角固定为菜单键（历史对话抽屉），不再区分纯净模式下的返回箭头 -->
-          <view class="chat-header__icon-btn" @tap="openHistoryDrawer">
-            <view class="chat-header__icon-history">
-              <image
-                src="@/assets/img/icon-list.svg"
-                mode="aspectFit"
-                class="chat-header__icon-history-img"
-              />
-            </view>
-          </view>
+        <!-- 顶部居中状态胶囊：logo 44px + 文案 28px，点击开始说话 -->
+        <view
+          v-if="showIsland"
+          class="pc-header__capsule"
+          @tap="emit('voice-tap')"
+        >
+          <image
+            class="pc-header__capsule-logo"
+            :src="saniLogoWebp"
+            mode="aspectFit"
+          />
+          <text class="pc-header__capsule-text">
+            {{ generating ? t("guide-pc-capsule-thinking") : t("guide-pc-capsule-idle") }}
+          </text>
+        </view>
+      </template>
 
-          <!-- 顶部中间「灵动岛」+ 下方状态胶囊
-               Ardot 722:69（浅色思考中）/ 722:489（浅色回答中）：胶囊只在生成中出现
-               未生成时只留圆形灵动岛，胶囊整体不渲染 -->
-          <view v-if="showIsland" class="chat-header__island-wrap">
-            <view
-              class="chat-header__island"
-              :class="{ 'chat-header__island--thinking': thinking }"
-            >
-              <!-- 圆形玻璃底盘（.chat-header__island-glass）与 1px 白描边已按需求去掉，
-                   容器只作为呼吸动画的载体 + 图标的定位基准，本身不再有任何可见形状 -->
-              <!-- 长按进度环：按住才出现，5s 走满一圈；松手 / 滑动 / 计时结束都会卸载，
-                   卸载即复位，下次按住重新从 0 开始 -->
-              <view
-                v-if="props.restartable && islandPressing"
-                class="chat-header__press-ring"
-              >
-                <svg class="chat-header__press-ring-svg" viewBox="0 0 72 72">
-                  <circle class="chat-header__press-ring-track" cx="36" cy="36" r="34" />
-                  <circle class="chat-header__press-ring-arc" cx="36" cy="36" r="34" />
-                </svg>
-              </view>
-              <!-- 岛内三角图标：动态 webp（原 header-island-logo.png 的动画版），空闲 sani-logo.webp；
-                   空闲 logo / 思考 think / 回答·播报 tell 主题图 / 录音 listen 四层同位置叠图 淡入，
-                   不做 src / mode 切换，位置一律不动 -->
-              <!-- 长按 5 秒回到初始页：只有 restartable（首页对话页）碰触摸事件，
-                   其它页面的岛保持纯展示、不抢触摸；热区就是三角图本身（62×62） -->
-              <!-- 空闲态动图：有状态图亮起时只淡出、不卸载，长按热区与定位基准始终挂在它身上。
-                   这是 sani-logo.webp，绝不在这里换 src —— 换源是硬切，没有过渡；
-                   状态图各自作为上层叠图淡入淡出，切换才是柔和交叉溶解 -->
-              <image
-                class="chat-header__island-logo chat-header__island-logo--idle"
-                :class="{
-                  'chat-header__island-logo--restartable': props.restartable,
-                  'chat-header__island-logo--faded': islandAnyGifOn,
-                }"
-                :src="saniLogoWebp"
-                mode="aspectFit"
-                @touchstart="onIslandPressStart"
-                @touchmove="onIslandPressMove"
-                @touchend="clearIslandPressTimer"
-                @touchcancel="clearIslandPressTimer"
-                @mousedown="onIslandPressStart"
-                @mousemove="onIslandPressMove"
-                @mouseup="clearIslandPressTimer"
-                @mouseleave="clearIslandPressTimer"
-              />
-              <!-- 语音输入整段（点击说话起飞 → 录音中 → 松手结束）：浅色 listen-light.webp / 深色 listen-dark.webp，
-                   透明画布（三角居中），直接叠在头部上；纯展示层，不吃触摸，避免抢走长按回首页的手势 -->
-              <image
-                class="chat-header__island-logo chat-header__island-logo--listen-say"
-                :class="{ 'chat-header__island-logo--listen-say-on': listenSayGifOn }"
-                :src="listenLogoSrc"
-                mode="aspectFit"
-                @load="stateGifLoaded.listen = true"
-                @error="onListenLogoError"
-              />
-              <!-- 回答中 / 语音播报：浅色 tell-light.webp / 深色 tell-dark.webp（图形居中，两张图案占比一致） -->
-              <image
-                class="chat-header__island-logo chat-header__island-logo--tell-play"
-                :class="{ 'chat-header__island-logo--tell-play-on': answeringGifOn }"
-                :src="tellLogoSrc"
-                mode="aspectFit"
-                @load="stateGifLoaded.tell = true"
-                @error="onTellLogoError"
-              />
-              <!-- think.webp：正在思考（480×240 画布，留白用 aspectFill 裁掉，换算见 --think 注释） -->
-              <image
-                class="chat-header__island-logo chat-header__island-logo--think"
-                :class="{ 'chat-header__island-logo--think-on': thinkingGifOn }"
-                :src="thinkLogoWebp"
-                mode="aspectFill"
-                @load="stateGifLoaded.think = true"
-                @error="stateGifLoaded.think = false"
-              />
-            </view>
-            <view v-if="duplexDisplayText" class="chat-header__duplex-status" role="status">
-              <view class="chat-header__duplex-lines">
-                <view class="chat-header__duplex-text">{{ duplexDisplayText }}</view>
-              </view>
-            </view>
-          </view>
+      <template v-else>
+        <!-- Figma 41139:396：左侧 Check All（checkbox + 文案），右侧已选轮次提示 -->
+        <view
+          class="chat-header__check-all"
+          :class="{
+            'chat-header__check-all--disabled': shareSelectAllDisabled,
+          }"
+          @tap="onShareSelectAllTap"
+        >
+          <image
+            v-if="shareSelectAllDisabled"
+            class="chat-header__check-icon"
+            src="@/assets/img/icon-checkDisabled.svg"
+            mode="aspectFit"
+          />
+          <image
+            v-else-if="shareAllChecked"
+            class="chat-header__check-icon"
+            src="@/assets/img/icon-checked.svg"
+            mode="aspectFit"
+          />
+          <image
+            v-else
+            class="chat-header__check-icon"
+            src="@/assets/img/icon-check.svg"
+            mode="aspectFit"
+          />
+          <text class="chat-header__check-all-text">
+            {{ t("share-select-all") }}
+          </text>
+        </view>
 
-          <!-- PC 版不渲染右侧按钮（全局播报开关 / 回主页 / 最小化），
-               灵动岛是绝对定位浮层，左侧按钮单独占位不影响其水平居中 -->
-        </template>
-
-        <template v-else>
-          <!-- Figma 41139:396：左侧 Check All（checkbox + 文案），右侧已选轮次提示 -->
-          <view
-            class="chat-header__check-all"
-            :class="{
-              'chat-header__check-all--disabled': shareSelectAllDisabled,
-            }"
-            @tap="onShareSelectAllTap"
-          >
-            <image
-              v-if="shareSelectAllDisabled"
-              class="chat-header__check-icon"
-              src="@/assets/img/icon-checkDisabled.svg"
-              mode="aspectFit"
-            />
-            <image
-              v-else-if="shareAllChecked"
-              class="chat-header__check-icon"
-              src="@/assets/img/icon-checked.svg"
-              mode="aspectFit"
-            />
-            <image
-              v-else
-              class="chat-header__check-icon"
-              src="@/assets/img/icon-check.svg"
-              mode="aspectFit"
-            />
-            <text class="chat-header__check-all-text">
-              {{ t("share-select-all") }}
-            </text>
-          </view>
-
-          <view class="chat-header__share-title-wrap">
-            <text class="chat-header__share-title">
-              {{ t("share-selected-rounds", { count: shareSelectedRoundCount }) }}
-            </text>
-          </view>
-        </template>
-      </view>
+        <view class="chat-header__share-title-wrap">
+          <text class="chat-header__share-title">
+            {{ t("share-selected-rounds", { count: shareSelectedRoundCount }) }}
+          </text>
+        </view>
+      </template>
 
       <!-- Left drawer (40834-437) -->
       <uni-popup
         ref="historyPopup"
         type="left"
         :animation="true"
-        :background-color="darkPlain ? '#0D0D0D' : '#ffffff'"
+        :background-color="darkPlain ? '#181A1E' : '#ffffff'"
         :mask-background-color="darkPlain ? 'rgba(13, 13, 13, 0.4)' : 'rgba(0, 0, 0, 0.4)'"
         :safe-area="false"
         :is-mask-click="true"
@@ -817,7 +525,7 @@ onBeforeUnmount(() => {
           </view>
           <view class="history-drawer__session-history">
             <text class="history-drawer__session-history-label">
-              {{ t("history-title") }}
+              {{ t("guide-pc-history-title") }}
             </text>
           </view>
           <z-paging
@@ -1095,8 +803,8 @@ onBeforeUnmount(() => {
 }
 
 :deep(.uni-popup__wrapper.left) {
-  width: 644rpx !important;
-  max-width: 86vw;
+  width: 933px !important;
+  max-width: 933px;
   height: 100vh;
   box-sizing: border-box;
   overflow: hidden;
@@ -1757,9 +1465,10 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   filter: drop-shadow(0 6rpx 18rpx rgba(0, 0, 0, 0.14));
 }
-/* 设计稿 309:3059：224×44（448×88rpx）/ 圆角 10px（20rpx）/ 描边 1px（2rpx）#E0E0E0 / 内边距 12px（24rpx） */
+/* 设计稿 309:3059：224×44（448×88rpx）/ 圆角 10px（20rpx）/ 描边 1px（2rpx）#E0E0E0 / 内边距 12px（24rpx）
+   PC 车机版：隐藏搜索历史记录框 */
 .history-drawer__search {
-  display: flex;
+  display: none;
   width: 448rpx;
   flex: 0 0 448rpx;
   height: 88rpx;
@@ -2223,5 +1932,146 @@ onBeforeUnmount(() => {
   .history-delete-confirm__btn-text--ghost {
     color: #ffffff;
   }
+}
+
+/* ===== PC 车机版头部（Ardot 747340735267872）：全部 px =====
+   顶部状态栏 / 底部 Dock 由宿主绘制；对话态只有两件事：
+   - 左上 80px 圆历史按钮（x=108, y=170）
+   - 顶部居中 64px 状态胶囊（y=84）：logo 44 + 文案 28px 白，点击开始说话 */
+.ai-chat-header--pc .chat-header {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* PC 车机版：头部背景透明，露出页面底 #181A1E（不要 #0d0d0d 实底） */
+.ai-chat-header--pc.ai-chat-header--plain.ai-chat-header--dark {
+  background: transparent;
+}
+
+/* 左上角历史按钮：80px 圆、rgba(255,255,255,.2) 底、白线图标 58px */
+.ai-chat-header--pc .pc-header__history-btn {
+  position: absolute;
+  top: 86px; /* 菜单按钮距顶部 86px */
+  left: 68px; /* 距左边 68px，使按钮中心约 x=148（设计稿按钮圆心 148） */
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.ai-chat-header--pc .pc-header__history-icon {
+  width: 34px;
+  height: 34px;
+  filter: brightness(0) invert(1);
+}
+
+/* 顶部居中状态胶囊：64px 高、#26243A 底、圆角 32、内边距 0 20px；logo 44 + 文案 28px 白 */
+.ai-chat-header--pc .pc-header__capsule {
+  position: absolute;
+  top: 02px;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 64px;
+  padding: 0 20px;
+  border-radius: 32px;
+  background: #26243a;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+.ai-chat-header--pc .pc-header__capsule-logo {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  /* sani-logo.webp 在胶囊深色底上是白色三角，直接展示 */
+}
+
+.ai-chat-header--pc .pc-header__capsule-text {
+  color: #ffffff;
+  font-family: "PingFang SC", "Inter", sans-serif;
+  font-size: 28px;
+  line-height: 64px;
+  white-space: nowrap;
+}
+
+/* ===== PC 车机版历史抽屉（Ardot 747340735267872）：全部 px =====
+   抽屉 933px 宽、全高、底 #181A1E；标题 38px SemiBold 白；条目 32px 白；
+   选中项 79px 高圆角胶囊底 #212833；底部「新建对话」206×68 / 圆角 10 */
+.ai-chat-header--pc :deep(.history-drawer) {
+  padding: 0 42px;
+  background: #181a1e;
+}
+
+/* 抽屉标题「历史对话记录」：38px SemiBold 白（!important 压过组件内深色块的 #5d5d5d） */
+.ai-chat-header--pc .history-drawer__session-history-label {
+  color: #ffffff !important;
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 46px;
+}
+
+/* 条目：32px 白，左右留白对齐设计稿 x=92 */
+.ai-chat-header--pc .history-drawer_item {
+  height: 79px;
+  padding: 0 20px;
+}
+
+.ai-chat-header--pc .history-drawer_item-label {
+  color: #ffffff !important;
+  font-size: 32px;
+  line-height: 40px;
+}
+
+/* 选中态：79px 高胶囊、圆角 39.5、底 #212833 */
+.ai-chat-header--pc .history-drawer_item_current,
+.ai-chat-header--pc .history-drawer_item_active {
+  border-radius: 39.5px;
+  background: #212833 !important;
+}
+
+.ai-chat-header--pc .history-drawer_item_current .history-drawer_item-label,
+.ai-chat-header--pc .history-drawer_item_active .history-drawer_item-label {
+  color: #ffffff !important;
+}
+
+/* 分组标题（今天 / 昨天…）：PC 版隐藏，只留条目排序 */
+.ai-chat-header--pc .history-drawer__group-title {
+  display: none;
+}
+
+/* 底部「新建对话」206×68 / 圆角 10 / 底 #485064（设计稿 x=56, y=847） */
+.ai-chat-header--pc .history-drawer__new-conversation-item {
+  width: 206px;
+  height: 68px;
+  padding: 0;
+  border-radius: 10px;
+  background: #485064 !important;
+  justify-content: center;
+}
+
+.ai-chat-header--pc .history-drawer__new-conversation-item-label {
+  color: #ffffff !important;
+  font-size: 28px;
+}
+
+/* 齿轮图标 40px */
+.ai-chat-header--pc .history-drawer__settings {
+  width: 40px;
+  height: 40px;
 }
 </style>

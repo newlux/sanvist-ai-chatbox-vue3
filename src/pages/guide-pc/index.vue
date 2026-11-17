@@ -1,52 +1,51 @@
 <script setup lang="ts">
-import AiVoiceHoldOverlay from "@/components/ai-voice-hold-overlay/index.vue";
-import { useDuplexVoice } from "@/hooks/useDuplexVoice";
-import { useVoiceQueryGesture } from "@/hooks/useVoiceQueryGesture";
+import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload, GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload } from "@/api/chat/types";
+import type { UiChatMessage } from "@/stores/chat-types";
+import type { VoiceMessageOrigin } from "@/utils/voice-message-motion";
 import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import type { VoiceMessageOrigin } from "@/utils/voice-message-motion";
-import { chatMessageAnchorDomId } from "@/stores/modules/chat";
-import { animateVoiceMessageArrival, readVoiceMessageOrigin } from "@/utils/voice-message-motion";
-import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload, GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload } from "@/api/chat/types";
-import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
 import { getRecommendedGuideQuestions } from "@/api/guide";
 import { getTodayAwakeningPrompt } from "@/api/user-role";
-import arrowDownIcon from "@/assets/img/arrow-down.png";
 import arrowDownDarkIcon from "@/assets/img/arrow-down-dark.png";
-import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
+import arrowDownIcon from "@/assets/img/arrow-down.png";
+import saniLogoWebp from "@/assets/img/sani-logo.webp";
+import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
-import AiChatHeader from "./components/ai-chat-header/index.vue";
-import AiChatInput from "@/components/ai-chat-input/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
-import AiMessageList from "@/components/ai-message-list/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
-import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
+import AiVoiceHoldOverlay from "@/components/ai-voice-hold-overlay/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
-import AiWelcome from "@/components/ai-welcome/index.vue";
-import { useChatFeedback } from "@/hooks/useChatFeedback";
+import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
 import { useAssistantNavigation } from "@/hooks/useAssistantNavigation";
+import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useChatSend } from "@/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
 import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
+import { useDuplexVoice } from "@/hooks/useDuplexVoice";
 import { usePlainTts } from "@/hooks/usePlainTts";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { useRemoteKey } from "@/hooks/useRemoteKey";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useVoiceQuery } from "@/hooks/useVoiceQuery";
-import { useWelcomeStage, WELCOME_LISTEN_HOLD_MS } from "@/hooks/useWelcomeStage";
+import { useWelcomeStage } from "@/hooks/useWelcomeStage";
+import { getInitIntroSpeech } from "@/mock/init-intro";
 import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
-import { getInitIntroContent, getInitIntroSpeech } from "@/mock/init-intro";
+import { chatMessageAnchorDomId } from "@/stores/modules/chat";
 import { createLogger } from "@/utils/logger";
 import { onNativeEvent } from "@/utils/platform/mpaas";
 import { backFromScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
+import { animateVoiceMessageArrival, readVoiceMessageOrigin } from "@/utils/voice-message-motion";
 import { markWelcomeDone } from "@/utils/welcome-done";
+import AiChatHeader from "./components/ai-chat-header/index.vue";
+import AiMessageList from "./components/ai-message-list/index.vue";
+import PcWelcome from "./components/pc-welcome/index.vue";
 
 /**
  * 作业指导 PC 版（由 pages/guide 复制而来，路由 #/pages/guide-pc/index，独立演变）。
@@ -109,11 +108,6 @@ const guideWelcomeLoading = ref(false);
 const guideRecommendContext = ref({ deviceModel: "", experience: "", modelExperience: "" });
 const sessionStore = useSessionStore();
 const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
-/** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送 */
-const chatInputRef = ref<{
-  appendAttachments?: (meta: ChatMessageAttachment[]) => void;
-  focusTextInput?: () => void;
-} | null>(null);
 const sharePosterWrap = ref<unknown>(null);
 const shareSheetBottomInset = ref("");
 /**
@@ -142,7 +136,6 @@ const guideStepCardSpace = ref(0);
 
 const {
   messages,
-  inputText,
   isLoading,
   aiSessionId,
   showQuickPrompts,
@@ -156,14 +149,8 @@ const { sessions, isSessionSwitching } = storeToRefs(sessionStore);
 
 const {
   chatViewportStyle,
-  keyboardHeight,
-  voiceKeyboardHeight,
   composerBottomInset,
-  composerDockOffset,
   syncWindowHeight,
-  setInputDockHeight,
-  setTextInputFocused,
-  setVoiceInputFocused,
 } = useChatViewport({ recoverKeyboardOnBlur: () => systemStore.isIOS });
 /**
  * 欢迎态 → 对话态：与首页同一套起飞动画。
@@ -171,12 +158,8 @@ const {
  */
 const {
   stage: pageStage,
-  leaving: welcomeLeaving,
-  landed: welcomeLanded,
-  logoStyle: welcomeLogoStyle,
   showWelcome,
   chatEnterDelayMs,
-  goToChat,
   enterChatNow,
   backToWelcome,
 } = useWelcomeStage();
@@ -190,11 +173,13 @@ const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessa
 const realtimeTts = useRealtimeTts(chatScope);
 const duplex = useDuplexVoice({
   cancelManual() {
+    // resetVoiceQuery 由下方 useVoiceQuery 提供：options 回调在调用时执行，声明后置安全
+    // eslint-disable-next-line ts/no-use-before-define -- 见上行说明
     const released = resetVoiceQuery();
     stopHistoryTts();
     return released;
   },
-  submit: text => { void sendMessage({ text, markPreviousStopped: true }); },
+  submit: (text) => { void sendMessage({ text, markPreviousStopped: true }); },
   setGain: gain => realtimeTts.setPlaybackGain(gain),
   playbackText: () => realtimeTts.playbackText.value,
   playbackActive: () => realtimeTts.playing.value,
@@ -202,19 +187,11 @@ const duplex = useDuplexVoice({
 });
 const { active: duplexActive, starting: duplexStarting, listening: duplexListening, transcript: duplexTranscript } = duplex;
 const duplexStatus = computed(() => {
-  if (duplexStarting.value) return t('duplex-starting');
-  return duplexActive.value ? duplexTranscript.value || t('duplex-listening') : '';
+  if (duplexStarting.value) return t("duplex-starting");
+  return duplexActive.value ? duplexTranscript.value || t("duplex-listening") : "";
 });
 
-/**
- * 是否正在语音播报（页面左右下边缘流光的显示时机）：
- * 实时流式听播（realtimeTts.playing）或整段播报（消息上的 ttsPlaying）任一在播都算。
- */
-const isTtsPlaying = computed(() =>
-  Boolean(realtimeTts.playing.value)
-  || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
-);
-const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
   // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
   // 回复里的核对卡仍由 focusStepBlock 在卡片出现 / 翻页时顶到对话区最上方（见 onGuideStepOpen）。
@@ -341,16 +318,6 @@ function sendMessage(payload?: Parameters<typeof sendChatMessage>[0]) {
 }
 
 /**
- * 按住说话 / 再次识别按下的瞬间停掉听播。此时录音刚开始、请求还没发出，
- * activeRequestSeq watcher 不会动 —— 但旧播报继续响会盖住用户对着麦克风说话，
- * 还会被录进 ASR 里，必须按下即停。
- */
-function stopSceneTtsOnVoiceStart() {
-  void duplex.stop();
-  stopSceneTts();
-}
-
-/**
  * 本轮实时转写文本：录音期间逐字刷新，只长在顶部浮动条上，不进消息列表。
  * 与首页一致：不做占位气泡，实时文字走页面级 .voice-live 浮动条。
  */
@@ -398,6 +365,7 @@ const {
   cancelVoiceQuery,
   resetVoiceQuery,
 } = useVoiceQuery({
+  // eslint-disable-next-line ts/no-use-before-define -- 按住状态为脚本尾部 ref（回调在 setup 运行期才执行）
   isHolding: () => voiceHoldActive.value,
   beginPlaceholder: () => {
     // 与首页一致：不插「识别中」占位气泡，实时文字由 .voice-live 浮动条承载。
@@ -419,9 +387,10 @@ const {
   discardPlaceholder: () => { voiceTranscript.value = ""; },
   onBeforeSubmit: () => {
     voiceArrivalOrigin = readVoiceMessageOrigin(typeof document === "undefined"
-      ? null : document.querySelector(".voice-live__text"));
+      ? null
+      : document.querySelector(".voice-live__text"));
   },
-  submit: async text => {
+  submit: async (text) => {
     const origin = voiceArrivalOrigin;
     voiceArrivalOrigin = null;
     // 说完：先清浮动条文字，再走正常发送链路（提问由 sendQuickPrompt 落成正式气泡）
@@ -438,7 +407,10 @@ const {
     cancelVoiceArrival = animateVoiceMessageArrival(body, origin);
   },
   // 开口前先掐掉正在播的回答，避免外放被麦克风收进 ASR
-  onStart: async () => { await duplex.stop(); stopSceneTts(); },
+  onStart: async () => {
+    await duplex.stop();
+    stopSceneTts();
+  },
 });
 
 /**
@@ -464,8 +436,6 @@ watch(
 watch(() => chatStore.activeRequestSeq, () => {
   stopSceneTts();
 });
-
-
 
 /**
  * 作业指导是「核对卡顶到对话区最上方」的阅读方式，所以核对卡一旦置顶就不能再被流式追加拽走：
@@ -549,6 +519,7 @@ function onAskSlotPick(payload: { slot: AskSlotPayload; option: AskSlotOption })
 }
 
 const messageBottomInset = computed(() => {
+  // PC 车机版：底部 Dock（宿主绘制）119px，列表底部固定让开 160px，内容不会被 Dock 盖住
   if (shareSheetVisible.value) return shareSheetBottomInset.value;
   // 追问抽屉贴底展开
   if (askSlotDrawerVisible.value && askSlotDrawerHeight.value > 0) {
@@ -558,14 +529,14 @@ const messageBottomInset = computed(() => {
   if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) {
     return `${Math.max(guideStepSheetHeight.value, guideStepCardSpace.value)}px`;
   }
+  // eslint-disable-next-line ts/no-use-before-define -- 追问卡状态声明在脚本下方（Vue setup 运行期已就绪）
   if (guideSuggestionSheetVisible.value && guideSuggestionSheetHeight.value > 0) {
+    // eslint-disable-next-line ts/no-use-before-define -- 同上
     return `${guideSuggestionSheetHeight.value}px`;
   }
-  // 导航、输入栏都是 fixed，列表要用 padding 把最后一条抬到它们上方
-  if (showQuickPrompts.value) return `calc(${composerBottomInset.value} + 72rpx)`;
-  return composerBottomInset.value;
+  // PC 车机版：无输入栏，底部固定让开 Dock（宿主绘制）
+  return "160px";
 });
-const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 
 /**
  * 把当前显示的那张核对卡（对话区的 .chat-box__card）顶到对话区最上方。
@@ -930,11 +901,6 @@ watch(
 
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
 /** 有 greeting 或有推荐问题时才渲染引导区（接口没给就走纯聊天界面） */
-const hasGuideWelcome = computed(() => Boolean(guideGreeting.value) || guideQuestions.value.length > 0);
-const showSceneWelcome = computed(() => (
-  !messages.value.length && !isSessionSwitching.value && !guideWelcomeLoading.value && hasGuideWelcome.value
-));
-
 watch(() => chatStore.messages.length, (length) => {
   // 会话里已经有内容（历史会话 / 推荐页带过来的问题 / 语音占位气泡）：不再停在欢迎层
   if (length) enterChatNow();
@@ -957,32 +923,26 @@ watch(shareSheetVisible, async (visible) => {
     .exec();
 });
 
-function onWelcomeDuplexToggle() {
-  duplex.toggle();
-  markWelcomeDone();
-  void goToChat({ holdMs: 0 });
-}
-
 /**
- * 欢迎层「点击说话」：起飞的同时把语音会话跑起来，
- * 用户在飞行动画里开口也不会丢（ready 前的音频由会话自己缓存）。
+ * PC 车机版待机页点击：收起待机页直接进对话态（无飞行动画），并同时起一轮语音。
+ * 车机稿没有手机版那颗「点击说话」胶囊，点击居中的 logo / 文案整块即开始说话。
  */
-async function onWelcomeStart() {
+async function onPcWelcomeStart() {
   markWelcomeDone();
-  // 起飞前先关上「识别中」文字：语音链路是异步的，慢一点就会抢在动效前面冒出文字
-  asrTipReady.value = false;
-  const recording = startVoiceQuery();
-  // goToChat 在 logo 落位、动效收尾后才 resolve，此时再放行实时文字
-  await goToChat({ holdMs: WELCOME_LISTEN_HOLD_MS });
+  // 对话态先放行（直接切，不走 goToChat 的飞行动画——PC 没有灵动岛落点）
+  enterChatNow();
   asrTipReady.value = true;
-  await recording;
+  await startVoiceQuery();
 }
 
-/** 欢迎层「键盘」：同一套抛物线把 logo 送上去，落位后再聚焦输入框（键盘由此弹出） */
-async function onWelcomeText() {
-  markWelcomeDone();
-  await goToChat();
-  chatInputRef.value?.focusTextInput?.();
+/** 顶部胶囊点击：录音中继续点就收尾（等同说完），否则开始一轮语音 */
+function onPcCapsuleVoice() {
+  if (voiceQueryActive.value) {
+    stopVoiceQuery();
+    return;
+  }
+  if (isLoading.value) return;
+  void startVoiceQuery();
 }
 
 function startNewConversation() {
@@ -1033,7 +993,7 @@ function onRemoteKeyConfirm() {
   }
   if (remoteKeyStarting || isLoading.value || duplexActive.value) return;
   remoteKeyStarting = true;
-  const starting = pageStage.value === "welcome" ? onWelcomeStart() : startVoiceQuery();
+  const starting = pageStage.value === "welcome" ? onPcWelcomeStart() : startVoiceQuery();
   void Promise.resolve(starting).finally(() => {
     remoteKeyStarting = false;
   });
@@ -1073,11 +1033,6 @@ function onRestartToStart() {
  */
 function getAISessionList(pageNo = 1, pageSize = 20) {
   return sessionStore.loadSessions(pageNo, pageSize);
-}
-
-function toggleQuickList(show: boolean) {
-  if (chatStore.messages.length > 0 && show) return;
-  chatStore.showQuickList = show;
 }
 
 async function openLocalHistory(id: string | number, force = false) {
@@ -1298,52 +1253,19 @@ const welcomeDecisionReady = ref(false);
  * - mock 里原本就没有 tips（「正在思考」这类过程提示），这里再兜一道，别的对话的 tips 照常显示；
  * - 语种按 `header.Lang` 取；guide 只有一套文案（中英文各一份），task 是三套随机挑一套。
  */
+/**
+ * PC 车机版：不插自我介绍、不自动进对话 —— 先停在待机页（PcWelcome），
+ * 用户点击 logo 才开始说话（见 onPcWelcomeStart）。这里只放行待机页渲染的闸门。
+ */
 function showInitIntro() {
   const start = () => {
     welcomeDecisionReady.value = true;
-    if (pureMode.value) return;
-    // 一次取齐「渲染用 blocks + 口播文本」，task 的随机套数在这里定下来，后面不再换
-    const intro = getInitIntroContent("guide", String(systemStore.header?.Lang || ""));
-    const blocks = intro.blocks;
-    if (!blocks.length) return;
-    const messageId = `ai-intro-${Date.now()}`;
-    // 用户已经自己开口：不再插这条 mock（否则会插到他的提问之后）
-    if (!chatStore.messages.length) {
-      chatStore.messages.push({
-        id: messageId,
-        role: "ai",
-        content: "",
-        // 初始化这轮没有流式过程，tips 一律不落
-        blocks: blocks.filter(block => block.type !== "tips"),
-        loading: false,
-        interrupted: false,
-        sessionId: null,
-        // 纯前端 mock：没有服务端消息 id，点播报走 plain tts（见 toggleMockIntroTts）
-        messageId: null,
-        ttsEnabled: true,
-        // Voice 文案单独带在消息上：task 的口播与气泡正文不是同一段话
-        mockSpeech: intro.speech,
-        processStatus: { phase: "succeeded" },
-      });
-    }
-    // 不走欢迎层的起飞动画，直接切到对话页（onLoad 里同步执行，首帧就是自我介绍）
-    enterChatNow();
-    /**
-     * 开场白跟着念出来：guide 念引导卡正文，task 念这套文案的 Voice 文本。
-     * 必须等这一拍落定再开口：onLoad 里的 resetConversation() 会改一次 activeRequestSeq，
-     * 它对应的 watch（stopSceneTts → introTts.stop）是在下一个微任务里跑的 ——
-     * 口播若在这里同步发起，刚发出的 speech/tts/v2/stream 会被那一拍立刻 abort，
-     * Network 里就是一串「已取消」的 stream，口播一声不出。
-     */
-    void nextTick(() => speakInitIntro(intro.speech, messageId));
   };
-  // 设置由 App.vue 异步拉取（不 await 首屏），进页面时纯净模式可能还没落地；
-  // 没落地就等它回来再判断，否则纯净模式会被当成关闭。闸门挡住欢迎层，避免先闪一下。
   if (settingsStore.loaded) {
     start();
     return;
   }
-  // 等 `/settings` 不能无限等：超时先把欢迎层放出来，别让整页一直空着。
+  // 等 `/settings` 不能无限等：超时先把待机页放出来，别让整页一直空着。
   const timer = setTimeout(() => {
     welcomeDecisionReady.value = true;
   }, WELCOME_DECISION_TIMEOUT_MS);
@@ -1421,26 +1343,10 @@ onUnload(() => {
 });
 const voiceHoldActive = ref(false);
 const voiceHoldCancelPending = ref(false);
-const startWelcomeVoiceFromGesture = useVoiceQueryGesture({
-  active: voiceQueryActive,
-  holding: voiceHoldActive,
-  cancelPending: voiceHoldCancelPending,
-  start: onWelcomeStart,
-  send: stopVoiceQuery,
-  cancel: cancelVoiceQuery,
-});
-const startVoiceQueryFromGesture = useVoiceQueryGesture({
-  active: voiceQueryActive,
-  holding: voiceHoldActive,
-  cancelPending: voiceHoldCancelPending,
-  start: startVoiceQuery,
-  send: stopVoiceQuery,
-  cancel: cancelVoiceQuery,
-});
 </script>
 
 <template>
-  <view class="ai-page" :class="{ 'ai-page--dark': isDark }" :style="safeAreaStyle">
+  <view class="ai-page ai-page--pc" :class="{ 'ai-page--dark': isDark }" :style="safeAreaStyle">
     <AiVoiceHoldOverlay
       :active="voiceHoldActive"
       :cancel-pending="voiceHoldCancelPending"
@@ -1448,10 +1354,10 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
     />
     <AiChatHeader
       v-if="!pureMode || pageStage === 'chat'"
-      :show-island="pageStage === 'chat'"
-      :duplex-status="duplexStatus"
       ref="chatHeader"
       v-model:sessions="sessions"
+      :show-island="pageStage === 'chat'"
+      :duplex-status="duplexStatus"
       class="ai-page__header"
       plain-bg
       :load-sessions="getAISessionList"
@@ -1472,22 +1378,15 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       @session-delete-batch="onSessionDeleteBatch"
       @session-rename="onSessionRename"
       @share-select-all="onShareSelectAll"
+      @voice-tap="onPcCapsuleVoice"
     />
 
     <!-- 欢迎层：与首页初始页同款（Hey,SANI + logo + 点击说话 / 键盘）；
          起飞动画期间继续挂载，logo 滑到顶部灵动岛再收起 -->
-    <AiWelcome
+    <!-- PC 车机版待机页：居中 logo / 文案，点击整块收起并开始说话（见 onPcWelcomeStart） -->
+    <PcWelcome
       v-if="(showWelcome && welcomeDecisionReady) || voiceHoldActive"
-      :leaving="welcomeLeaving || !showWelcome"
-      :landed="welcomeLanded || !showWelcome"
-      :logo-style="welcomeLogoStyle"
-      :dark="isDark"
-      duplex-enabled
-      :duplex-active="duplexActive"
-      :duplex-starting="duplexStarting"
-      @duplex-toggle="onWelcomeDuplexToggle"
-      @start-chat="startWelcomeVoiceFromGesture"
-      @start-text="onWelcomeText"
+      @start="onPcWelcomeStart"
     />
     <!-- 对话页：与欢迎层同时存在，整体淡入 -->
     <view
@@ -1503,8 +1402,9 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
 
       <!-- 待机引导（Ardot 347:5392）：标题 + greeting + 推荐问题；
-           greeting / 问题来自 /recommended-questions/guide，标题是固定问候语 -->
-      <view v-if="showSceneWelcome" class="guide-welcome">
+           greeting / 问题来自 /recommended-questions/guide，标题是固定问候语。
+           PC 车机版待机由 PcWelcome 承载，这里不再展示 -->
+      <view v-if="false" class="guide-welcome">
         <text class="guide-welcome__title">
           {{ t("guide-welcome-title") }}
         </text>
@@ -1531,8 +1431,10 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       </view>
       <AiMessageList
         :key="chatListKey"
-        top-inset="var(--chat-top-inset, 300rpx)"
+        top-inset="170px"
         :dark="isDark"
+        pc-layout
+        :generating="isLoading"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
@@ -1553,8 +1455,6 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         :card-pin-dom-id="chatStore.cardPinDomId"
         :pin-step-card="guideStepSheetVisible"
         :compact-guide-card="true"
-        @card-space-change="onGuideStepCardSpaceChange"
-        @content-grow="chatStore.scrollToBottom()"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"
@@ -1563,6 +1463,8 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         :voice-top-pad="voiceLiveHeight"
         :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
         :realtime-tts-playing="realtimeTts.playing.value"
+        @card-space-change="onGuideStepCardSpaceChange"
+        @content-grow="chatStore.scrollToBottom()"
         @quick-prompt="sendQuickPrompt"
         @suggestion-tap="onGuideSuggestionTap"
         @guide-step-open="onGuideStepOpen"
@@ -1582,6 +1484,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         @select-toggle="onShareSelectToggle"
         @scroll-top="onScrollTop"
         @pinned-change="onPinnedChange"
+        @stop="stopGenerating"
       />
       <!-- 录音中的实时转写：铺在提问气泡的同一个落点（头部下沿）上，纯文字、没有气泡外壳，
            文字从左往右长出来；说完才收成正式提问气泡。
@@ -1709,38 +1612,25 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         </view>
       </view>
 
-      <AiChatInput
-        v-else
-        :voice-query-active="voiceQueryActive"
-        duplex-enabled
-        :duplex-active="duplexActive"
-        :duplex-starting="duplexStarting"
-        @duplex-toggle="duplex.toggle"
-        ref="chatInputRef"
-        v-model="inputText"
-        :dark="isDark"
-        :is-loading="isLoading"
-        :keyboard-height="keyboardHeight"
-        :voice-keyboard-height="voiceKeyboardHeight"
-        :compact-voice-listening="true"
-        :tap-to-talk="true"
-        :speaking="realtimeTts.playing.value"
-        @send="sendMessage"
-        @stop="stopGenerating"
-        @voice-start="stopSceneTtsOnVoiceStart"
-        @voice-restart="stopSceneTtsOnVoiceStart"
-        @recognize-begin="beginAsrPlaceholder"
-        @recognize-fail="discardAsrPlaceholder"
-        @toggle-quick-list="toggleQuickList"
-        @input-focus="setTextInputFocused(true)"
-        @input-blur="setTextInputFocused(false)"
-        @voice-input-focus="setVoiceInputFocused(true)"
-        @voice-input-blur="setVoiceInputFocused(false)"
-        @voice-query-start="startVoiceQueryFromGesture"
-        @dock-height-change="setInputDockHeight"
-      />
+      <!-- PC 车机版：底部蓝色氛围光（设计稿 y≈863 起三层椭圆，被底部 Dock 覆盖）；
+           仅语音识别（录音中）才显示，普通状态下不渲染（需求：蓝光只在识别时出现） -->
+      <view v-if="voiceQueryActive || duplexListening" class="pc-chat-glow" aria-hidden="true" />
 
-      <!-- 点击说话录音中：输入栏换成「取消 / 声纹 / 计时 + 发送」这一条（与首页同稿） -->
+      <!-- PC 车机版右下角 logo：点击开始说话（与顶部胶囊同一链路 onPcCapsuleVoice；
+           录音中整条不渲染（不可见也不可点），避免被底部录音条盖住后残留热区） -->
+      <view
+        v-if="!shareSheetVisible && !voiceQueryActive"
+        class="pc-corner-logo"
+        @tap="onPcCapsuleVoice"
+      >
+        <image
+          class="pc-corner-logo__img"
+          :src="saniLogoWebp"
+          mode="aspectFit"
+        />
+      </view>
+
+      <!-- PC 车机版：无文字输入栏（纯语音），保留录音条 -->
       <AiVoiceQueryBar
         v-if="voiceQueryActive && !shareSheetVisible"
         :level="voiceLevel"
@@ -1931,12 +1821,8 @@ $color-white: #ffffff;
     color: #a3a3a3;
   }
 
-
-
   /* 边缘流光在深色下同样保留：色值、厚度、流动都与浅色一致 */
 }
-
-
 
 .ai-chat-glow {
   position: absolute;
@@ -2388,5 +2274,56 @@ $color-white: #ffffff;
   top: 0;
   left: -9999px;
   pointer-events: none;
+}
+
+/* ===== PC 车机版（Ardot 747340735267872）：固定深色 #181A1E，全部 px =====
+   顶部状态栏 / 底部 Dock 由宿主绘制；对话态隐藏手机版顶部毛玻璃与角落光晕。 */
+.ai-page--pc,
+.ai-page--pc .ai-page__chat {
+  background: #181a1e;
+}
+
+/* 对话态：隐藏手机版顶部毛玻璃渐隐与角落光晕（设计稿对话页无这些元素） */
+.ai-page--pc .ai-page__top-fade,
+.ai-page--pc .ai-chat-glow {
+  display: none;
+}
+
+/* 对话态底部蓝色氛围光（设计稿 Ardot 747340735267872 Frame 85）：适配对话区滚动 */
+.ai-page--pc .pc-chat-glow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 220px;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(ellipse 100% 100% at 50% 100%, #1b72cfff, rgba(27, 114, 207, 0));
+
+}
+
+/* PC 车机版右下角 logo（点击开始说话）：
+   右下角避开底部 Dock（宿主绘制约 119px，messageBottomInset 让出 160px）与录音条，
+   与一键回底箭头（居中）不冲突；深色页面直接用白色三角 sani-logo.webp */
+.ai-page--pc .pc-corner-logo {
+  position: absolute;
+  right: 40px;
+  bottom: 160px;
+  display: flex;
+  z-index: 20;
+  align-items: center;
+  justify-content: center;
+  width: 150px;
+  height: 150px;
+  cursor: pointer;
+  &:active {
+    opacity: 0.8;
+  }
+}
+
+.ai-page--pc .pc-corner-logo__img {
+  display: block;
+  width: 150px;
+  height: 150px;
 }
 </style>
