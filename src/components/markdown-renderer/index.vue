@@ -73,10 +73,18 @@ const rawTagStyle = {
   p: "margin: 0 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 400; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
   strong: "font-weight: bolder; color: #1a1a1e;",
   em: "font-style: italic;",
-  ul: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 34rpx; list-style: disc;",
-  // iOS WebKit 的列表序号绘制在 li 外侧，给多位数字留下按字号缩放的空间。
-  ol: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 2.5em; list-style: decimal outside;",
-  li: "margin: 4rpx 0; padding-left: 34rpx; text-indent: -34rpx; list-style-position: inside; color: #2f323c; font-size: 28rpx; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
+  // 列表序号/圆点用 list-style-position: outside，由浏览器画在列表容器（ol/ul）的
+  // padding 区域内，不占用 li 内容盒 —— 所以 ol/ul 必须保留 padding-left 给序号区
+  // （mp-html 走原生 list-style，padding-left: 0 会让序号画到容器外被裁掉，序号消失）。
+  // li 的 padding-left 只负责「序号到文字」的间距。
+  //
+  // 绝不能退回 inside + text-indent 负值：text-indent 会被 li 里的 p 继承，
+  // 宽松列表（项间夹空行 → markdown-it 产出 li>p）的 p 首行会单独向左缩进，
+  // 而换行行不缩进，文字整体错位。outside 下 marker 垂直对齐首行、
+  // 换行行从 li 内容起点开始，任何结构都整齐。
+  ul: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 34rpx; list-style-type: disc; list-style-position: outside;",
+  ol: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 2.5em; list-style-type: decimal; list-style-position: outside;",
+  li: "margin: 4rpx 0;/* padding-left: 34rpx;*/ list-style-position: outside; color: #2f323c; font-size: 28rpx; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
   blockquote: "margin: 12rpx 0; padding: 12rpx 20rpx; border-left: 6rpx solid #e4e9f0; color: #5f6775; background: #f6f7f9; border-radius: 8rpx;",
   hr: "margin: 16rpx 0; height: 1px; border: 0; background: #e4e9f0;",
   a: "color: #f12832; text-decoration: underline; word-break: break-all;",
