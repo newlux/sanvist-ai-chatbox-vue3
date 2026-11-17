@@ -348,6 +348,11 @@ onBeforeUnmount(() => {
       <!-- 底部渐隐已移除：它会在字幕底边压出一条灰白/暗色渐变，把正在念的最后一行字糊掉，
            观感像"文字发虚"；字幕超出时靠正常滚动查看即可，不再叠这层遮罩 -->
     </view>
+
+    <!-- 底部提示：内容由AI生成，请核实重要信息（与对话页输入栏下方同一句、同一套排版） -->
+    <text class="report-broadcast-content__disclaimer">
+      {{ t("ai-content-disclaimer") }}
+    </text>
   </view>
 </template>
 
@@ -358,6 +363,18 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
+}
+/* 底部提示：内容由AI生成，请核实重要信息。
+   与对话页输入栏下方那句 `.chat-input__footer` 同一套排版（12px / #BABABA / 居中 / 距底 15px），
+   深色稿也是同色，不再单独覆盖；safe-area 兜住带手势条的机型 */
+.report-broadcast-content__disclaimer {
+  display: block;
+  flex: 0 0 auto;
+  padding-bottom: max(30rpx, env(safe-area-inset-bottom));
+  color: #bababa;
+  font-size: 24rpx;
+  line-height: 30rpx;
+  text-align: center;
 }
 /* 顶部留白：原 34rpx（约 17px），按设计稿「图标再上去一点」收到 10rpx，
    图标整体上移约 12px，头像与下方字幕的相对关系不变。 */
