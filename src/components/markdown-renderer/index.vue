@@ -83,7 +83,7 @@ const rawTagStyle = {
   // 而换行行不缩进，文字整体错位。outside 下 marker 垂直对齐首行、
   // 换行行从 li 内容起点开始，任何结构都整齐。
   ul: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 34rpx; list-style-type: disc; list-style-position: outside;",
-  ol: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 2.5em; list-style-type: decimal; list-style-position: outside;",
+  ol: "width: 100%; box-sizing: border-box; margin: 0 0 12rpx; padding-left: 1.5em; list-style-type: decimal; list-style-position: outside;",
   li: "margin: 4rpx 0;/* padding-left: 34rpx;*/ list-style-position: outside; color: #2f323c; font-size: 28rpx; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
   blockquote: "margin: 12rpx 0; padding: 12rpx 20rpx; border-left: 6rpx solid #e4e9f0; color: #5f6775; background: #f6f7f9; border-radius: 8rpx;",
   hr: "margin: 16rpx 0; height: 1px; border: 0; background: #e4e9f0;",
