@@ -279,6 +279,12 @@ function defineChatStore(scope: string) {
     }
 
     return {
+      /**
+       * 会话域标识（main / guide / task / podcast）：只读。
+       * 少数「页面级差异化」的判断要用它（如历史消息里要不要按新手身份过滤老师傅导语），
+       * 页面自己 provide 的 scope 在 store 外拿不到。
+       */
+      scope,
       messages,
       inputText,
       isLoading,
