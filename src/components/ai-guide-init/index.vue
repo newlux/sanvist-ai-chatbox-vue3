@@ -14,7 +14,7 @@ import brandLogo from "@/assets/img/sani-logo.webp";
 import SaniLogoStage from "@/components/sani-logo-stage/index.vue";
 import { usePlainTts } from "@/hooks/usePlainTts";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useUserStore } from "@/stores";
+import { useSystemStore, useUserStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { ensureNativePermission } from "@/utils/platform/mpaas";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
@@ -65,6 +65,9 @@ const emit = defineEmits(["finish"]);
 const logger = createLogger("guide-init-page");
 const { t, locale } = useI18n();
 const userStore = useUserStore();
+const systemStore = useSystemStore();
+/** 深浅色：与对话页同一套口径（唯一数据源 systemStore.isDark），根节点挂 gi--dark 类，由 CSS 整页切换 */
+const isDark = computed(() => systemStore.isDark);
 /**
  * 顶部状态栏高度：设计稿 375×812（含 54 高状态栏），自我介绍帧标题 y=117（节点 350:1052 /
  * 722:2492 这一帧里 Main Title 的位置）。本页所有 y 都是扣掉状态栏后的值（126rpx = 63px），
@@ -1363,6 +1366,7 @@ onBeforeUnmount(() => {
     :style="safeAreaStyle"
     :class="{
       'gi--en': isEnglish,
+      'gi--dark': isDark,
       'gi--welcome': isWelcomeStep,
       'gi--speaking': speaking,
       'gi--recording': isRecording,
@@ -1502,7 +1506,7 @@ onBeforeUnmount(() => {
   height: 100vh;
   padding-top: max(var(--safe-top-px, 0px), env(safe-area-inset-top));
   overflow: hidden;
-  background: #fafafa;
+  background: var(--app-page-bg, #fafafa);
   font-family: "PingFang SC", "Source Han Sans CN", sans-serif;
 }
 
@@ -1519,6 +1523,16 @@ onBeforeUnmount(() => {
    （底部常态也不铺声纹，见下面的 .gi__glow） */
 .gi--welcome .gi__bg {
   background: #fafafa;
+}
+
+/* ===== 深色：整页换深底（--app-page-bg 由 index.html 内联脚本 / App.vue 设为 #0d0d0d），
+   去掉冷色渐变和浅色遮罩，与对话页 .ai-page--dark 同一口径 ===== */
+.gi--dark .gi__bg {
+  background: #0d0d0d;
+}
+
+.gi--dark.gi--welcome .gi__bg {
+  background: #0d0d0d;
 }
 
 /* ===== 底部光效：与首页（ai-welcome/visitor.vue 的 .welcome-visitor__glow）同一套实现 =====
@@ -1780,15 +1794,11 @@ onBeforeUnmount(() => {
 
 
 /* ===== 胶囊版式（第三 / 四态）=====
-   与首页「老板身份信息」帧（welcome-visitor__detail-tag，1006:313 等）同一套处理：
-   只有 16% 不透明的紫粉蓝渐变填充 + 背景模糊 29px + 投影，**不画描边**
-   （原 2px OUTSIDE 渐变描边的 ::before 已移除，与首页保持一致）；
-   入场同为方案 4「全息升维翻展」，从中心图标圆心翻折飞回槽位。
+   与对话里「追踪 / 推荐问题」胶囊（GuideCheckBlock / GuideSuggestionBlock）同一套样式：
+   浅色白底 + 1px #E6E6E6 描边 + 999rpx 全圆角；深色 6% 白底 + 1px 渐变描边环 + 白文字。
+   （原玻璃胶囊：紫粉蓝渐变填充 + 背景模糊 + 投影，已整体换成这套标准；入场动画仍在）
    宽度不写死：中文与设计稿同宽，英文按 max-width 折行，胶囊变高而不是顶出屏幕 */
 .gi__pill {
-  /* 填充不透明度抽成变量：默认态是设计稿的 16%，
-     命中态（--selected）抬到 34%，与首页身份球「高亮玻璃」同一套思路 */
-  --pill-fill-alpha: 0.16;
   position: absolute;
   display: flex;
   align-items: center;
@@ -1797,36 +1807,25 @@ onBeforeUnmount(() => {
   min-height: 64rpx; // 32px
   pointer-events: auto;
   padding: 12rpx 36rpx; // 6/18
-  border-radius: 76rpx; // 38
-  background-image: linear-gradient(
-    93.66deg,
-    rgba(61, 33, 205, var(--pill-fill-alpha)) 0%,
-    rgba(193, 228, 255, var(--pill-fill-alpha)) 27.8%,
-    rgba(123, 156, 255, var(--pill-fill-alpha)) 50.9%,
-    rgba(192, 103, 250, var(--pill-fill-alpha)) 71.2%,
-    rgba(247, 207, 255, var(--pill-fill-alpha)) 85.8%,
-    rgba(253, 144, 196, var(--pill-fill-alpha)) 100%
-  );
-  /* 投影按首页 detail-tag：只留 0 3 16 那层冷蓝光，去掉黑色投影 */
-  box-shadow: 0 6rpx 32rpx rgba(0, 159, 235, 0.127);
-  -webkit-backdrop-filter: blur(58rpx); // 29px
-  backdrop-filter: blur(58rpx);
+  border: 1px solid #e6e6e6;
+  border-radius: 999rpx; /* 真胶囊：左右两端半圆 */
+  background: #ffffff;
   animation: gi-bubble-holo 1200ms cubic-bezier(0.16, 1, 0.3, 1) var(--holo-delay, 0ms) backwards;
   will-change: transform, opacity, filter;
 }
 
-/* 按住反馈：压一下 + 提亮，不改填充 */
+/* 按住反馈：压暗 + 缩小，与气泡胶囊同一套 */
 .gi__pill:active {
-  filter: brightness(1.08);
+  opacity: 0.7;
   transform: scale(0.97);
 }
 
-/* 命中 / 选中态：与首页 index 身份球（welcome-visitor__bubble--active）同一套 ——
-   玻璃填充提亮 + 白色柔光外圈 + 1.04 → 1.08 呼吸。语音命中停留 HIT_HOLD_MS，
-   点选走同一套（停留 SELECT_DELAY_MS）；animation 覆盖入场 keyframes，两段不抢 transform */
+/* 命中 / 选中态：保留原「白色柔光外圈 + 1.04 → 1.08 呼吸」（语音命中停 HIT_HOLD_MS、
+   点选停 SELECT_DELAY_MS；animation 覆盖入场 keyframes，两段不抢 transform）；
+   玻璃填充提亮已随白底胶囊改为浅蓝底色，让选中在浅底上也看得清 */
 .gi__pill--selected {
-  --pill-fill-alpha: 0.34;
   z-index: 2;
+  background: #eaf2ff;
   box-shadow:
     0 0 12rpx 2rpx rgba(255, 255, 255, 0.85),
     0 0 20rpx 4rpx rgba(158, 199, 255, 0.45),
@@ -1854,6 +1853,55 @@ onBeforeUnmount(() => {
   text-align: center;
   white-space: pre-line;
   word-break: break-word;
+}
+
+/* ===== 深色胶囊（与对话里追踪 / 推荐问题胶囊同一套）：6% 白底 + 1px 渐变描边环 =====
+   原生 border 只能单色，把 border 留作占位（透明），再用「渐变底 + mask 挖掉内容区」画 1px 内描边。
+   注意胶囊是 absolute 定位，::before 画环挂在胶囊盒子上即可，不动 position */
+.gi--dark .gi__pill {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.gi--dark .gi__pill::before {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  padding: 1px;
+  border-radius: 999rpx; /* 与胶囊半圆端一致 */
+  background: linear-gradient(135deg, #5a5a5a 0%, #f7f7f7 50%, #5a5a5a 100%);
+  content: "";
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.gi--dark .gi__pill--selected {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.gi--dark .gi__pill-text {
+  color: #ffffff;
+}
+
+/* ===== 深色文字反白：标题 / 提示 / 品牌区，跟深底一起走，保证可读 ===== */
+.gi--dark .gi__title {
+  color: #fff;
+}
+
+.gi--dark .gi__hint {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* 首帧欢迎区：标题「Hey,」反白（SANI / 标语是渐变字，深底仍可读，守住不动） */
+.gi--dark .gi__brand-title-hey {
+  color: #fff;
+}
+
+.gi--dark .gi__brand-desc {
+  color: rgba(255, 255, 255, 0.45);
 }
 
 /* 方案 4「全息升维翻展」：与首页欢迎页身份球 / 开始体验胶囊同一套关键帧 */
