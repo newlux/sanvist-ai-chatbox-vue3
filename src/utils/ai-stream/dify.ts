@@ -24,17 +24,6 @@ const PROTOCOL_MARKERS = ["<SANVIST>", "<ASK>", "<GUIDE>", "<COMPONENT>", TIPS_O
  */
 const ASSISTANT_SCENE_TARGETS = new Set(["operations_assistant", "work_guidance_assistant", "task_coordination_assistant"]);
 
-/**
- * 允许「整轮只念 COMPONENT 里的语音稿」的场景：
- * - `ask`：运营助手问答；
- * - `task` / `test`：作业协同（两代 scene 名同构）；
- * - 空串：老协议 `<ASK>` 没有 scene 字段。
- *
- * `guide` 不在白名单：那一路的 `type=voice` 是老师傅导语，渲染在回答顶部、随正文一起播，
- * 不能当成「整轮只念它」，否则正文会被一句导语压掉。
- */
-const SPEECH_COMPONENT_SCENES = new Set(["", "ask", "task", "test"]);
-
 /** Dify `/chat-messages` 的请求体；只在网络边界使用 snake_case。 */
 export interface DifyChatMessagesRequest {
   /** Dify 要求非空，用于标识同一用户的会话。 */
@@ -574,7 +563,6 @@ function parseAskStreamEvent(value: Record<string, unknown> | null) {
    */
   const directData = asRecord(value?.data) || {};
   const componentType = String(value?.type || "").toLowerCase();
-  const componentScene = String(value?.scene || "").toLowerCase();
   /**
    * 语言切换指令（`<COMPONENT>{"scene":"ask","type":"language_switch","data":{"language":"en"}}`）：
    * 不落卡片、不进正文，只把目标语言带进快照，由 useChatSend 去切界面语言并落 `/settings`。
@@ -595,23 +583,6 @@ function parseAskStreamEvent(value: Record<string, unknown> | null) {
     const mode = String(directData.mode || "").trim().toLowerCase();
     if (mode !== "dark" && mode !== "light") return null;
     return { event: "color_switch" as const, data: { mode } };
-  }
-  /**
-   * 播报稿（`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>`）：
-   * 这一轮的语音只念 `data.text`，标签外的正文不参与播报。
-   * 不落卡片、不进正文 —— 与 language_switch 同一类「动作」事件，先于 parseAskBlock 判定，
-   * 否则会被当未知类型丢掉，整轮就没有可播报的文本了。
-   *
-   * 两个条件必须同时成立，缺一不认（照常走下面的卡片 / 正文链路）：
-   * 1. `type` 严格等于 `voice` —— 其它 type（table / echarts / slot / navigation …）的 data
-   *    里即使带了 text，也不当播报稿，避免把卡片转述当成整轮语音稿、把正文压掉；
-   * 2. `scene` 在 SPEECH_COMPONENT_SCENES 里（ask / task / test / 缺省）——
-   *    scene=guide 的 voice 是导语，随正文播报，不走「整轮只念它」。
-   */
-  if (componentType === "voice" && SPEECH_COMPONENT_SCENES.has(componentScene)) {
-    const text = String(directData.text || "").trim();
-    if (!text) return null;
-    return { event: "speech" as const, data: { text, type: "voice", scene: componentScene } };
   }
   const directTarget = String(directData.target || "").trim();
   if (String(value?.type || "").toLowerCase() === "navigation" && ASSISTANT_SCENE_TARGETS.has(directTarget)) {
@@ -635,7 +606,7 @@ function parseAskStreamEvent(value: Record<string, unknown> | null) {
  * - task（作业协同）→ 与 ask 同一套交互组件，复用同一条解析/渲染链路；
  * - guide → 走 GUIDE 卡片；
  * - 带 dify_event/event 的 → 仍按节点状态事件处理；
- * - voice（播报稿）由 parseAskStreamEvent 单独接住，不落卡片、不进正文；
+ * - voice 的播报事件在流式解析时先于场景分发处理；
  * - 其余认不出的组件 → 返回 null，正文直接丢弃，避免 JSON 泄漏到气泡与 TTS。
  */
 function unwrapComponent(value: Record<string, unknown>) {
@@ -844,6 +815,7 @@ export function createDifyEventNormalizer() {
   /** 正文是否已经从流里拿到过（workflow_finished 的 outputs.answer 通常与流式正文重复） */
   let receivedAnswer = false;
   let receivedTips = false;
+  const receivedVoiceTexts = new Set<string>();
   /** Chatflow 通常先发 message_end，后发 workflow_finished；先暂存，等待后者提供总耗时。 */
   let pendingMessageEnd: {
     conversationId: Identifier;
@@ -985,6 +957,18 @@ export function createDifyEventNormalizer() {
       }
       try {
         const parsed = asRecord(JSON.parse(raw));
+        if ((tag === "COMPONENT" || tag === "ASK" || tag === "GUIDE")
+          && String(parsed?.type || "").toLowerCase() === "voice") {
+          const voiceScene = String(parsed?.scene || (tag === "GUIDE" ? "guide" : "")).toLowerCase();
+          const text = String(asRecord(parsed?.data)?.text || "").trim();
+          receivedSanvistEvent = true;
+          if (text && !receivedVoiceTexts.has(text)) {
+            receivedVoiceTexts.add(text);
+            events.push({ event: "speech", ...references, data: { text, type: "voice", scene: voiceScene } });
+            if (voiceScene === "guide") appendGuideEvent({ type: "voice", payload: { text } });
+          }
+          continue;
+        }
         let customEvent = parsed;
         if (tag === "COMPONENT") {
           // 新版包装层：按 scene 解包；voice 等播报专用场景不进正文，避免 JSON 泄漏到气泡与 TTS。

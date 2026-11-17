@@ -580,8 +580,6 @@ export function useChatSend(scope?: string, handlers?: {
     let receivedContent = false;
     /** 当前请求里已通知过 onAiAnswerDelta 的答案文本长度，用于计算增量。 */
     let lastSeenAnswerLength = 0;
-    /** 当前增量的取样来源：正文（answer 块）还是播报稿（COMPONENT type=voice）。 */
-    let answerDeltaSource: "body" | "speech" = "body";
     /** 是否已发过 ended: true 的收尾通知，避免重入。 */
     let answerDeltaEnded = false;
     /** PODCAST：聚合流式答案正文，流结束后按汇报交互协议派发。 */
@@ -895,12 +893,12 @@ export function useChatSend(scope?: string, handlers?: {
               style: reportStyleCode,
             });
           }
-          // 新手（分步骤）模式：后端可能仍返回老师傅的导语（voice）块与播报稿，这里一并丢弃，不渲染也不播报
+          // 新手模式隐藏老师傅导语，显式下发的语音稿仍参与播报。
           const isNovice = userStore.operatorRole?.roleKey === "novice_operator";
-          const { blocks: filteredBlocks, speechText: filteredSpeechText } = filterNoviceVoice(displayBlocks, snapshot.speechText, isNovice);
-          const displaySnapshot = displayBlocks === snapshot.blocks && turnMetadata === snapshot.metadata
-            ? (isNovice ? { ...snapshot, blocks: filteredBlocks, speechText: filteredSpeechText } : snapshot)
-            : { ...snapshot, blocks: filteredBlocks, metadata: turnMetadata, ...(isNovice ? { speechText: filteredSpeechText } : {}) };
+          const filteredBlocks = isNovice ? displayBlocks.filter(block => block.type !== "voice") : displayBlocks;
+          const displaySnapshot = filteredBlocks === snapshot.blocks && turnMetadata === snapshot.metadata
+            ? snapshot
+            : { ...snapshot, blocks: filteredBlocks, metadata: turnMetadata };
           // 要跳页的这一轮不触发「回答完成」回调（页面会据此起自动听播，跳走就白播了）
           applySnapshot(aiMsgId, userMsgId, displaySnapshot, preserveProcessStatus, qrcodeTurn.matched || Boolean(sceneTarget));
           if (qrcodeTurn.matched) {
@@ -932,17 +930,7 @@ export function useChatSend(scope?: string, handlers?: {
           // 聚合全部 answer 块（而非只取第一块）：answer 中途穿插了别的块时，
           // 只取第一块会让后半段文字永远收不到增量、听播漏播。
           else if (handlers?.onAiAnswerDelta) {
-            /**
-             * 只念播报稿：`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>`
-             * 本轮下发了语音稿才播报；没有语音稿整轮不自动播 —— 不再兜底把正文念一遍。
-             * 协议块通常先于正文到达；万一正文先念了个开头才出语音稿，这里把已读长度归零，
-             * 保证语音稿能完整播一遍（已播出去的正文收不回来，但不会接着念正文）。
-             */
             const speechContent = String(displaySnapshot.speechText || "").trim();
-            if (speechContent && answerDeltaSource !== "speech") {
-              answerDeltaSource = "speech";
-              lastSeenAnswerLength = 0;
-            }
             // "QRCODE" 是给前端看的占位，不是给人听的：文本还是占位前缀时按住不播，
             // 一旦长成正常答案（含已压住的开头）再一次性补播，避免把字母一个个念出来。
             // <QRCODE>…</QRCODE> 这一轮同样不进听播（要跳二维码页），整段按住。

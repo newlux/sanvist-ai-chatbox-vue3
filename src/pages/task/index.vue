@@ -185,18 +185,10 @@ const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceh
   scene: TASK_SCENE,
   // 沙箱代码只在配了环境变量时下发（dev：sb0010），生产不配 → 不入参
   getExtraInputs: () => (TASK_SANDBOX_CODE ? { code: TASK_SANDBOX_CODE } : {}),
-  // 同首页 / 作业指导：问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
-  // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
-  // 多步骤卡（guide-step）的回答与作业指导页同一套处理：正文不渲染也不播报（见 ai-bubble-v2 的 contentBlocks）。
+  // 显式下发的 voice 播报稿按流式增量进入队列。
   onAiAnswerDelta({ aiMsgId, delta, ended }) {
-    const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
-    if (index < 0) return;
-    const message = chatStore.messages[index];
-    if ((message.blocks || []).some(block => block?.type === "guide-step")) {
-      const key = String(message.messageId ?? message.id);
-      if (String(realtimeTts.playingMessageKey.value ?? "") === key) realtimeTts.stop();
-      return;
-    }
+    const message = chatStore.messages.find(item => item.id === aiMsgId);
+    if (!message) return;
     realtimeTts.feedAnswerDelta(message, delta, ended);
   },
   // 与首页同一套滚动：发送时只登记本轮的提问（消息列表据此加大顶部呼吸位），

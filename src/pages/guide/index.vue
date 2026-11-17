@@ -225,21 +225,10 @@ const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beg
     ...(selectedDeviceModel.value ? { device_model: selectedDeviceModel.value } : {}),
     ...(userStore.operatorRole?.roleKey ? { operator_role: userStore.operatorRole.roleKey } : {}),
   }),
-  // 与首页同一套：答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
-  // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
-  //
-  // 多步骤卡（guide-step）的回答保留原逻辑：正文既不渲染（见 ai-bubble-v2 的 hideBody）也不播报，
-  // 播报交给卡片自己（展开 / 切步只念当前步骤）；卡片一到就把已开播的这一轮掐掉，
-  // 后续增量不再喂给 TTS（stop 会把这条消息记成「手动停止」，之后不会自动重启）。
+  // 显式下发的 voice 播报稿按流式增量进入队列。
   onAiAnswerDelta({ aiMsgId, delta, ended }) {
-    const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
-    if (index < 0) return;
-    const message = chatStore.messages[index];
-    if ((message.blocks || []).some(block => block?.type === "guide-step")) {
-      const key = String(message.messageId ?? message.id);
-      if (String(realtimeTts.playingMessageKey.value ?? "") === key) realtimeTts.stop();
-      return;
-    }
+    const message = chatStore.messages.find(item => item.id === aiMsgId);
+    if (!message) return;
     realtimeTts.feedAnswerDelta(message, delta, ended);
   },
   /**
@@ -254,7 +243,7 @@ const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beg
     if (index < 0) return;
     const message = chatStore.messages[index];
     const blocks = message.blocks || [];
-    if (!blocks.some(block => block?.type === "guide-lead")) return;
+    if (!blocks.some(block => block?.type === "guide-lead") || message.speechText) return;
     if (blocks.some(block => block?.type === "guide-step")) return;
     if (blocks.some(block => block?.type === "answer" && String(block.payload?.content || "").trim())) return;
     // 语音播报总开关关掉：不自动补播
@@ -914,7 +903,7 @@ watch(
     if (!prev?.endsWith(":loading") || !state.endsWith(":done")) return;
     const list = chatStore.messages;
     const last = list[list.length - 1];
-    if (!last || last.role !== "ai" || !last.ttsEnabled) return;
+    if (!last || last.role !== "ai" || !last.ttsEnabled || last.speechText) return;
     const blocks = last.blocks || [];
     if (!blocks.some(block => block?.type === "guide-check")) return;
     // answer 正文已有内容时走 onAiAnswerDelta 的流式听播，这里不重复播

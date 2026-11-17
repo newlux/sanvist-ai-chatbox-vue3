@@ -166,3 +166,25 @@ test('历史回答移除临时提示，提示独占的历史回答不会成为�
   ]);
   assert.deepEqual(extractDifyHistoryBlocks(wrap('<TIPS>处理') + wrap('中</TIPS>')), []);
 });
+
+test('不同场景的 voice 按到达顺序播报，收尾重放不重复追加', async () => {
+  const normalize = createDifyEventNormalizer();
+  const voice = (scene, text) => `<COMPONENT>${JSON.stringify({ scene, type: 'voice', data: { text } })}</COMPONENT>`;
+  const first = voice('ask', '嗯，我收到了。');
+  const second = voice('guide', '遥控钥匙可唤醒。');
+  const third = voice('task', '正在安排任务。');
+  const fourth = voice('other', '已完成。');
+  async function* source() {
+    for (const payload of [
+      { event: 'message', answer: first },
+      { event: 'message', answer: second + third + fourth + '界面正文' },
+      { event: 'workflow_finished', data: { status: 'succeeded', outputs: { answer: first + second + third + fourth + '界面正文' } } },
+    ]) {
+      const result = normalize({ ...references, ...payload });
+      for (const event of Array.isArray(result) ? result : result ? [result] : []) yield { result: event };
+    }
+  }
+  const result = await consumeChatStream({ source: source(), flushIntervalMs: 0, onSnapshot() {} });
+  assert.equal(result.speechText, '嗯，我收到了。遥控钥匙可唤醒。正在安排任务。已完成。');
+  assert.equal(result.blocks.find(block => block.type === 'answer')?.payload.content, '界面正文');
+});
