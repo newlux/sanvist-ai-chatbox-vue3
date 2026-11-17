@@ -58,7 +58,7 @@
   "delete-conversations-title": "Delete the selected chats?",
   "delete-conversations-desc": "The selected chats cannot be recovered after deletion. Delete them?",
   "tts-play-failed": "Voice playback failed",
-  "link-copied": "Link copied",
+  "link-copied": "The file is too large please copy the link and open it in a browser",
   "already-new-conversation": "This is already a new chat",
   "auth-expired-reenter": "Session expired, please reopen",
   "file-select-unsupported": "File selection is not supported here",

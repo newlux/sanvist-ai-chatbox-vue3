@@ -2,8 +2,8 @@
 import MarkdownIt from "markdown-it";
 import mpHtml from "mp-html/dist/uni-app/components/mp-html/mp-html.vue";
 import { computed, inject, onBeforeUnmount, ref, watch } from "vue";
-import { createLogger } from "@/utils/logger";
 import { useVerticalScrollGesture } from "@/hooks/useVerticalScrollGesture";
+import { createLogger } from "@/utils/logger";
 
 defineOptions({ name: "MarkdownRenderer" });
 const props = defineProps({
@@ -172,8 +172,10 @@ function clearRenderTimer() {
   renderTimer = null;
 }
 
-/** 可信 HTML 渲染前缀：内容以该标记开头时直接交给 mp-html，跳过 markdown-it 转义。
- * 仅用于本地 demo 等可控场景，正常模型输出仍走 markdown 安全渲染。 */
+/**
+ * 可信 HTML 渲染前缀：内容以该标记开头时直接交给 mp-html，跳过 markdown-it 转义。
+ * 仅用于本地 demo 等可控场景，正常模型输出仍走 markdown 安全渲染。
+ */
 const TRUSTED_HTML_PREFIX = "<!--html-->";
 
 /**
@@ -403,7 +405,7 @@ function onLinkTap(e) {
   if (!href) return;
   uni.setClipboardData({
     data: href,
-    success: () => uni.showToast({ title: "链接已复制", icon: "none", duration: 1500 }),
+    success: () => uni.showToast({ title: "文件过大，请复制链接后在浏览器打开", icon: "none", duration: 1500 }),
   });
 }
 
