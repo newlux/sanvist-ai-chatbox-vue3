@@ -910,12 +910,18 @@ export function useChatSend(scope?: string, handlers?: {
               style: reportStyleCode,
             });
           }
-          // 新手模式隐藏老师傅导语，显式下发的语音稿仍参与播报。
+          // 新手（分步骤）模式：老师傅导语（voice 块）与播报稿（speechText）一并丢弃 ——
+          // 块不渲染，speechText 清空后流式听播（下方 speechContent 取它）与手动/翻页播报
+          // （useRealtimeTts.extractAnswerText 优先返回 speechText）才都不会念出导语，
+          // 并能回落到 guide-check 步骤卡内容。
           const isNovice = shouldHideNoviceVoice();
-          const filteredBlocks = isNovice ? displayBlocks.filter(block => block.type !== "voice") : displayBlocks;
-          const displaySnapshot = filteredBlocks === snapshot.blocks && turnMetadata === snapshot.metadata
+          const filtered = filterNoviceVoice(displayBlocks, snapshot.speechText, isNovice);
+          const snapshotUnchanged = filtered.blocks === snapshot.blocks
+            && (filtered.speechText ?? snapshot.speechText) === snapshot.speechText
+            && turnMetadata === snapshot.metadata;
+          const displaySnapshot = snapshotUnchanged
             ? snapshot
-            : { ...snapshot, blocks: filteredBlocks, metadata: turnMetadata };
+            : { ...snapshot, blocks: filtered.blocks, speechText: filtered.speechText, metadata: turnMetadata };
           // 要跳页的这一轮不触发「回答完成」回调（页面会据此起自动听播，跳走就白播了）
           applySnapshot(aiMsgId, userMsgId, displaySnapshot, preserveProcessStatus, qrcodeTurn.matched || Boolean(sceneTarget));
           if (qrcodeTurn.matched) {

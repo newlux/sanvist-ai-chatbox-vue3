@@ -203,9 +203,8 @@ function parseGuideBlock(value: Record<string, unknown> | null): { type: GuideBl
     const evidence = Array.isArray(data.evidence) ? data.evidence.filter(item => asRecord(item)?.url) : [];
     return evidence.length ? { type: "source", payload: { evidence } } : null;
   }
-  // 老师傅（非分步骤）返回的导语文本：**只播报、不进气泡**（任何 scene 都不显示，
-  // 由 AiContentBlocks 统一摘掉），这里解析成 voice 块是给播报与正文剔重当素材。
-  // 新手（分步骤）由消费侧按 operator_role 一并丢弃（连播报素材一起）。
+  // 老师傅（非分步骤）返回的导语文本：一句普通正文，显示在回答内容顶部并参与播报。
+  // 新手（分步骤）由消费侧按 operator_role 过滤，这里统一解析成 voice 块。
   if (type === "voice") {
     const text = String(data.text || "").trim();
     return text ? { type: "voice", payload: { text } } : null;
@@ -967,9 +966,9 @@ export function createDifyEventNormalizer() {
             receivedVoiceTexts.add(text);
             events.push({ event: "speech", ...references, data: { text, type: "voice", scene: voiceScene } });
             /**
-             * guide 场景再落一个 voice 块：它**不进气泡**（AiContentBlocks 一律不渲染 voice 块，
-             * 任何 scene 都不显示），只作播报素材 —— collectAnswerText 把导语拼在正文前，
-             * 渲染前还会用这段文本把正文里重复的导语剔掉。
+             * guide 场景再落一个 voice 块：老师傅（非分步骤）模式下显示在回答内容顶部
+             * 并参与播报 —— collectAnswerText 把导语拼在正文前，渲染时正文里重复的导语会被剔掉；
+             * 新手模式由消费侧按 operator_role 过滤。
              */
             if (voiceScene === "guide") appendGuideEvent({ type: "voice", payload: { text } });
           }
@@ -1157,6 +1156,11 @@ export function createDifyEventNormalizer() {
         if (parseOutputsAnswer) {
           protocolBuffer = "";
           wrappedAnswerBuffer = "";
+          // voice 导语在流式阶段已收到过（receivedVoiceTexts 记账），重放时若仍去重，
+          // 重放事件序列里就没有 voice —— answer_layout 整体重建会替换掉流式阶段建的
+          // voice 块，重建序列又不含导语，老师傅导语就只剩播报、不显示。
+          // 重放是权威完整快照，先清掉去重记账让导语重新发出（speech 事件重设同值无害）。
+          receivedVoiceTexts.clear();
         }
         // 收尾快照会重放已显示的提示，只补正式内容。
         const replayingTips = receivedTips;

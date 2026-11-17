@@ -48,8 +48,8 @@ const normalizedBlocks = computed(() => expandChartFences(expandMarkdownTables((
 
 /**
  * 从 answer 正文里剔除 voice 导语：同一句导语后端会既下发给 voice 块，
- * 又可能重复写进正文 answer 开头。导语只播报、不渲染（见 renderItems），
- * answer 里再留一段就等于把「不显示」的导语又显示出来——这里剔掉那段。
+ * 又可能重复写进正文 answer 开头。导语由 voice 块（VoiceBlock）渲染，
+ * answer 里再保留一段就会显示两次——这里在渲染前剔掉那段导语。
  * 逐块用 indexOf 精确匹配，导语后面的换行一并去掉。
  */
 function stripVoiceFromAnswers(blocks: AiBlock[], voiceTexts: string[]) {
@@ -86,16 +86,15 @@ const lastTipId = computed(() => {
  */
 const renderItems = computed(() => {
   /**
-   * voice 导语（`<COMPONENT type="voice" data.text>`）**只播报、不在气泡里出现** ——
-   * 不管 scene 是 guide / task / test / ask 都不渲染（块本身仍留在 messages 里，
-   * 播报用的 collectAnswerText / useRealtimeTts 取的还是它）。
+   * voice 导语（`<COMPONENT type="voice" data.text>`）：老师傅（非分步骤）模式下的开场白，
+   * 固定排在回答内容最顶部并参与播报。新手（分步骤）模式不会走到这里 ——
+   * useChatSend 的 filterNoviceVoice / 历史映射已把 voice 块在进入渲染前丢弃。
    *
    * 另一半用途：同一句导语后端可能既下发 voice 块、又写进 answer 开头，
-   * 这里先从正文里剔掉重复那段，免得正文里单独再出现一遍。
+   * 这里先从正文里剔掉重复那段，免得显示两遍。
    */
-  const voiceTexts = normalizedBlocks.value
-    .filter(block => block.type === "voice")
-    .map(block => String((block.payload?.text as string) || ""));
+  const voiceBlocks = normalizedBlocks.value.filter(block => block.type === "voice");
+  const voiceTexts = voiceBlocks.map(block => String((block.payload?.text as string) || ""));
   const rest = stripVoiceFromAnswers(
     normalizedBlocks.value.filter(block => block.type !== "voice"),
     voiceTexts,
@@ -105,9 +104,9 @@ const renderItems = computed(() => {
 
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
   // 避免展示「输出结果」标题和分隔线；chart 内容本身仍由 AiBlockRenderer 渲染
-  if (props.noAnswerGroup) return [...contentBlocks, ...slotBlocks];
+  if (props.noAnswerGroup) return [...voiceBlocks, ...contentBlocks, ...slotBlocks];
 
-  const items: any[] = [];
+  const items: any[] = [...voiceBlocks];
   let group = [];
 
   function appendGroup() {

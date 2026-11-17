@@ -903,9 +903,12 @@ watch(
     if (!prev?.endsWith(":loading") || !state.endsWith(":done")) return;
     const list = chatStore.messages;
     const last = list[list.length - 1];
-    if (!last || last.role !== "ai" || !last.ttsEnabled || last.speechText) return;
+    if (!last || last.role !== "ai" || !last.ttsEnabled) return;
     const blocks = last.blocks || [];
     if (!blocks.some(block => block?.type === "guide-check")) return;
+    // 分步骤卡消息：播报归卡片管（念当前步骤），speechText 是老师傅导语（新手模式应忽略），
+    // 不能按「有播报稿就不播」短路；无步骤卡时才按 speechText 判断。
+    if (last.speechText && !blocks.some(block => block?.type === "guide-check" || block?.type === "guide-step")) return;
     // answer 正文已有内容时走 onAiAnswerDelta 的流式听播，这里不重复播
     if (blocks.some(block => block?.type === "answer" && String(block.payload?.content || "").trim())) return;
     const key = String(last.messageId ?? last.id);
