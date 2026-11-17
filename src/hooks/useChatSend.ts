@@ -331,6 +331,14 @@ export function useChatSend(scope?: string, handlers?: {
    * 作业指导 / 任务协同不传，仍是「发送回底、回答变长后由 capRoundAtTop 收住」。
    */
   pinOnSend?: boolean;
+  /**
+   * 是否按「新手（分步骤）身份」隐藏老师傅导语（voice 块 + 播报稿 speechText）。默认 true。
+   *
+   * 这套过滤是给作业指导用的（新手走分步骤，后端仍可能下发老师傅导语）。
+   * 任务协同没有新老手之分，但身份存在全局 user store 里、跨页面保留，
+   * 用户先在作业指导选了「新手」再来任务协同，本页下发的 voice 就会被误吞 —— 该页传 false。
+   */
+  hideNoviceVoice?: boolean;
 }) {
   const { t } = useI18n();
   const chatStore = useChatStore(scope);
@@ -346,6 +354,15 @@ export function useChatSend(scope?: string, handlers?: {
 
   /** 已回调过 onAiMessageComplete 的 aiMsgId，避免重入/重发。 */
   const notifiedCompletedAiIds = new Set<string>();
+
+  /**
+   * 新手身份是否丢弃老师傅导语（voice 块 + 播报稿）。
+   * 页面显式传 hideNoviceVoice: false 时整体不过滤（任务协同）。
+   */
+  function shouldHideNoviceVoice() {
+    if (handlers?.hideNoviceVoice === false) return false;
+    return userStore.operatorRole?.roleKey === "novice_operator";
+  }
 
   /** 每次发送时现取场景：页面可以按当前所处视图决定走哪套后端分支。 */
   function resolveScene(): ChatScene {
@@ -894,7 +911,7 @@ export function useChatSend(scope?: string, handlers?: {
             });
           }
           // 新手模式隐藏老师傅导语，显式下发的语音稿仍参与播报。
-          const isNovice = userStore.operatorRole?.roleKey === "novice_operator";
+          const isNovice = shouldHideNoviceVoice();
           const filteredBlocks = isNovice ? displayBlocks.filter(block => block.type !== "voice") : displayBlocks;
           const displaySnapshot = filteredBlocks === snapshot.blocks && turnMetadata === snapshot.metadata
             ? snapshot
@@ -1153,7 +1170,7 @@ export function useChatSend(scope?: string, handlers?: {
       }
       // 新手（分步骤）模式：静默消息（机型引导 / 初始化）同样丢弃 voice 块与播报稿，
       // 与 sendAiFlow 主链路同一口径（filterNoviceVoice）。
-      const isNovice = userStore.operatorRole?.roleKey === "novice_operator";
+      const isNovice = shouldHideNoviceVoice();
       const filtered = filterNoviceVoice(snapshot.blocks, snapshot.speechText, isNovice);
       const displaySnapshot = isNovice
         ? { ...snapshot, blocks: filtered.blocks, speechText: filtered.speechText }

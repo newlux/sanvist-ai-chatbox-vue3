@@ -258,8 +258,8 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
   <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />
   <GuideVideoBlock v-else-if="block.type === 'video'" :payload="block.payload" />
   <GuideSourceBlock v-else-if="block.type === 'source'" :payload="block.payload" />
-  <!-- 老师傅导语（voice）：一句普通正文，显示在回答内容顶部，参与播报。
-     answer 正文里若后端重复下发了同一句导语，由 AiContentBlocks 剔除，避免显示两次 -->
+  <!-- 老师傅导语（voice）：只播报、不显示 —— 所有 scene 一律不进气泡，
+     AiContentBlocks 的 renderItems 已把 voice 块从渲染序列里摘掉，这里只是兜底分支 -->
   <VoiceBlock v-else-if="block.type === 'voice'" :payload="block.payload" />
   <ErrorBlock v-else-if="block.type === 'error'" :payload="block.payload" />
   <SuggestionBlock v-else-if="block.type === 'suggestion'" :payload="block.payload" @suggestion-tap="onSuggestionTap" />

@@ -194,6 +194,13 @@ const { sendMessage, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceh
   // 与首页同一套滚动：发送时只登记本轮的提问（消息列表据此加大顶部呼吸位），
   // 回答边写边贴底跟随，本轮提问顶到头部下沿就停住（见 ai-message-list 的 alignToReplyEnd）
   alignSentMessageToTop: true,
+  /**
+   * 任务协同不区分新手 / 资深，不做「新手隐藏老师傅导语」的过滤：
+   * 那份身份是作业指导的选择结果，存在全局 store 里跨页面保留，
+   * 不关掉的话，用户在作业指导选过「新手司机」后进本页，后端下发的 voice 导语
+   * 会被静默丢掉（既不显示也不播报）。
+   */
+  hideNoviceVoice: false,
 });
 
 /**
