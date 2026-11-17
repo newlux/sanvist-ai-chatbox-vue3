@@ -85,6 +85,11 @@ function mapHistoryAttachments(value: unknown) {
 export function mapHistoryMessages(
   list: unknown[],
   fallbackSessionId: Identifier | null,
+  /**
+   * 是否按新手（分步骤）身份过滤老师傅导语（voice 块），默认 true。
+   * 任务协同不区分新老手，调用方传 false（见 loadHistory 里的 scope 判断）。
+   */
+  options: { hideNoviceVoice?: boolean } = {},
 ): UiChatMessage[] {
   const mapped: UiChatMessage[] = [];
   (Array.isArray(list) ? list : []).forEach((raw) => {
@@ -115,8 +120,13 @@ export function mapHistoryMessages(
           }
         : block)
       .filter(block => block.type !== "answer" || String(block.payload.content || "").trim())
-      // 新手（分步骤）回看旧会话：老师傅导语（voice）块不展示
-      .filter(block => !(useUserStore().operatorRole?.roleKey === "novice_operator" && block.type === "voice"))
+      // 新手（分步骤）回看旧会话：连播报素材一起丢 —— 老师傅导语（voice）块本身
+      // 已经不渲染了（AiContentBlocks 一律不显示），这里留着是为了不让它进整段播报。
+      // 任务协同没有新老手之分，调用方传 hideNoviceVoice: false，导语照常念。
+      .filter((block) => {
+        if (options.hideNoviceVoice === false) return true;
+        return !(useUserStore().operatorRole?.roleKey === "novice_operator" && block.type === "voice");
+      })
       .map((block, index) => ({
         id: `history-${messageId ?? "message"}-${block.type}-${index}`,
         type: block.type,
@@ -207,7 +217,7 @@ export const useSessionStore = defineStore("session", () => {
       limit: HISTORY_PAGE_SIZE,
     });
     const rows = page?.data || [];
-    chatStore.messages = mapHistoryMessages(rows, sessionId);
+    chatStore.messages = mapHistoryMessages(rows, sessionId, { hideNoviceVoice: chatStore.scope !== "task" });
     // 接口按时间正序返回，最早的一条就是下一页的游标
     historyFirstId.value = (rows[0]?.id ?? null) as Identifier | null;
     historyHasMore.value = Boolean(page?.hasMore);
@@ -238,7 +248,7 @@ export const useSessionStore = defineStore("session", () => {
         historyHasMore.value = false;
         return false;
       }
-      const older = mapHistoryMessages(rows, sessionId);
+      const older = mapHistoryMessages(rows, sessionId, { hideNoviceVoice: chatStore.scope !== "task" });
       chatStore.messages = [...older, ...chatStore.messages];
       historyFirstId.value = (rows[0]?.id ?? null) as Identifier | null;
       historyHasMore.value = Boolean(page?.hasMore);
