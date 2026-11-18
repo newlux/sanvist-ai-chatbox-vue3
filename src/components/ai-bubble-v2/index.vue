@@ -275,7 +275,7 @@ const hideBody = computed(() => !isUser.value && hasGuideStepCard.value);
  * 历史消息（从会话记录拉回来的回答）不带 `processStatus` —— 品牌行原本是「生成过程」的产物，
  * 落库时就没带回来，于是点开历史对话只看到一坨没有出处的正文。
  * 这里把它补回来：非用户消息、已经收尾、没有过程状态、正文也没被独立卡片顶掉、且确实有内容，
- * 就按「已完成」渲染同一条品牌行（sani 图标 + SANI + 右侧播报按钮）。
+ * 就按「已完成」渲染同一条品牌行（SANY NEO 图标 + SANY NEO + 右侧播报按钮）。
  */
 const isHistoryAnswer = computed(() => {
   if (isUser.value || props.loading || props.interrupted || props.processStatus) return false;
@@ -307,16 +307,16 @@ const showWaiting = computed(() => Boolean(props.waitingText) && props.loading &
 
 /**
  * 过程状态行文案随当前语言切换（英文界面下不再出现中文）：
- * 进行中不再显示后端下发的节点名（如「调用运营助手...」），与完成态统一成品牌署名 SANI，
- * 前面由模板配 sani 图标（26×26），停止状态在品牌名后补充提示。
+ * 进行中不再显示后端下发的节点名（如「调用运营助手...」），与完成态统一成品牌署名 SANY NEO，
+ * 前面由模板配 SANY NEO 图标（26×26），停止状态在品牌名后补充提示。
  */
 const processStatusText = computed(() => {
   const status = props.processStatus as { phase?: string; title?: string } | null;
   // 历史回答没有 processStatus，同样署品牌名（见 isHistoryAnswer）
-  if (!status) return isHistoryAnswer.value ? "SANI" : "";
+  if (!status) return isHistoryAnswer.value ? "SANY NEO" : "";
   if (status.phase === "failed") return t("process-status-failed");
   if (status.phase === "stopped") return t("process-status-stopped");
-  return "SANI";
+  return "SANY NEO";
 });
 
 /** 失败状态单独显示提示，停止状态复用品牌行。 */
@@ -337,7 +337,7 @@ const isGenerating = computed(() => {
 
 /**
  * 生成中实时秒数：后端只在工作流结束时才下发耗时，所以这里本地计时。
- * 一旦「可以播报」（ttsEnabled 为 true）就收掉，位置让给 SANI 后面的语音图标。
+ * 一旦「可以播报」（ttsEnabled 为 true）就收掉，位置让给 SANY NEO 后面的语音图标。
  */
 const elapsedSeconds = ref(0);
 const showElapsed = computed(() => isGenerating.value && !props.ttsEnabled);
@@ -384,7 +384,7 @@ const showProcessStatus = computed(
  *
  * 后端会把中英两套节点名用「|」拼成一条（如「前置直接回复 | Direct Reply正在执行」），
  * 这里只留对应那一半：中文取带汉字的那段（分隔后的第一个），英文取不带汉字的那段（第二个）；
- * 再把尾部的执行状态（正在执行 / 执行完成 / 已完成…）摘掉 —— 状态已经由上面那行 SANI 表达，
+ * 再把尾部的执行状态（正在执行 / 执行完成 / 已完成…）摘掉 —— 状态已经由上面那行 SANY NEO 表达，
  * 副标题只留节点名本身。
  *
  * 语种跟**本轮语音识别的语言**走（WebSocket ASR 回传的 language，见 utils/asr/voice-language），
@@ -493,7 +493,7 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   emit("guide-check-step-select", payload);
 }
 
-/** 语音播报：按钮已移到过程状态行（SANI 后面），这里只把点击往上抛 */
+/** 语音播报：按钮已移到过程状态行（SANY NEO 后面），这里只把点击往上抛 */
 function onTtsTap() {
   if (!props.ttsEnabled) return;
   emit("tts-click");
@@ -686,7 +686,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           class="ai-bubble-v2__process-status"
           :class="`ai-bubble-v2__process-status--${processStatusPhase}`"
         >
-          <!-- 品牌署名：sani 图标 26×26（52rpx）+ 文案 SANI，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
+          <!-- 品牌署名：SANY NEO 图标 26×26（52rpx）+ 文案 SANY NEO，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
           <image
             v-if="showBrandStatus"
             class="ai-bubble-v2__process-icon-img"
@@ -694,13 +694,13 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
             mode="aspectFit"
           />
           <text class="ai-bubble-v2__process-text">
-            {{ isStopped ? "SANI" : processStatusText }}
+            {{ isStopped ? "SANY NEO" : processStatusText }}
           </text>
-          <!-- 生成中实时秒数（单位 S），紧跟 SANI；可以播报后自动消失，位置让给语音图标 -->
+          <!-- 生成中实时秒数（单位 S），紧跟 SANY NEO；可以播报后自动消失，位置让给语音图标 -->
           <!-- <text v-if="elapsedText" class="ai-bubble-v2__process-elapsed">
             {{ elapsedText }}
           </text> -->
-          <!-- 语音播报按钮：SANI 后面常显（拉流 → spinner，播放 → 声波起伏，其余 → 静态语音图标）；
+          <!-- 语音播报按钮：SANY NEO 后面常显（拉流 → spinner，播放 → 声波起伏，其余 → 静态语音图标）；
                历史回答没有 processStatus（见 isHistoryAnswer），同样要能点播 -->
           <view
             v-if="!isStopped && (props.processStatus?.phase === 'succeeded' || isHistoryAnswer) && props.showActions && props.ttsEnabled"
@@ -785,7 +785,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           </text>
         </view>
         <!-- 底部操作栏（复制 / 分享 / 点赞 / 点踩）已移除：
-             语音播报按钮上移到过程状态行的 SANI 后面，其余动作不再展示 -->
+             语音播报按钮上移到过程状态行的 SANY NEO 后面，其余动作不再展示 -->
       </template>
     </view>
     <!-- 追问属于当前回答，但不放进回答卡片；与卡片保持独立且紧邻的视觉关系。 -->
@@ -1243,7 +1243,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   font-size: 24rpx;
   line-height: 36rpx;
 }
-/* 行高固定，进度显隐不改正文位置；长文案只裁切剩余宽度，图标与 SANI 不收缩。 */
+/* 行高固定，进度显隐不改正文位置；长文案只裁切剩余宽度，图标与 SANY NEO 不收缩。 */
 .ai-bubble-v2__process-subtitle {
   display: flex;
   align-items: center;
@@ -1294,7 +1294,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   font-size: 24rpx;
   line-height: 36rpx;
 }
-/* 完成态品牌图标：26×26（52rpx），与 SANI 文字同排、垂直居中；
+/* 完成态品牌图标：26×26（52rpx），与 SANY NEO 文字同排、垂直居中；
    图标与文字的间距沿用 status 行的 gap，不额外加 margin */
 .ai-bubble-v2__process-icon-img {
   width: 52rpx; // 26px
@@ -1308,7 +1308,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 生成中实时秒数：字号继承品牌行，与 SANI 保持一致。 */
+/* 生成中实时秒数：字号继承品牌行，与 SANY NEO 保持一致。 */
 .ai-bubble-v2__process-elapsed {
   flex-shrink: 0;
   color: #8f8f8f;
@@ -1368,7 +1368,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   padding-top: 24rpx;
 }
 /* 过程状态行内的语音播报按钮（原设计稿 1187:18 Actions Bar 的 TTS）。
-   16×16（32rpx）见 .ai-bubble-v2__action-btn；与 SANI 文字之间留 4px，
+   16×16（32rpx）见 .ai-bubble-v2__action-btn；与 SANY NEO 文字之间留 4px，
    加上状态行本身的 gap 4px，视觉间距 8px，不用 margin 撑 */
 .ai-bubble-v2__process-tts {
   flex-shrink: 0;
@@ -1581,7 +1581,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     color: #5d5d5d;
   }
 
-  // 品牌行「SANI」：深色下固定 #FFFFFF。
+  // 品牌行「SANY NEO」：深色下固定 #FFFFFF。
   // 浅色那套是 background-clip: text 的灰色流光，深底上又暗又花，所以连背景图、
   // -webkit-text-fill-color、动画一起清掉；失败 / 停止两态（红 / 灰文案）保持原色不动。
   .ai-bubble-v2__process-status:not(.ai-bubble-v2__process-status--failed):not(.ai-bubble-v2__process-status--stopped) .ai-bubble-v2__process-text {

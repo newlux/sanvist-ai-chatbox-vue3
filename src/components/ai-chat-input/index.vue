@@ -1207,11 +1207,39 @@ onBeforeUnmount(() => {
   left: 0;
   z-index: 1;
   box-sizing: border-box;
-  background: #fafafa;
+  // 底部整条（输入栏这一行 + 下方提示 + 安全区）：底色之上叠一层「上透明 → 下 50% 蓝」的渐变，
+  // 与录音态底部光晕（.voice-query__glow）同一条色，点击说话这行才不是一条白板。
+  background-color: #fafafa;
+  /**
+   * 渐变画在 ::before 上而不是容器自身的 background：这一层的高度可以独立于容器调
+   * （现在是整条容器高，想和上面胶囊拉开距离就把 height 收掉一截）；
+   * 上沿 0% 全透明，所以收口处不会有硬边。
+   */
+  &::before {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: calc(100% - 0rem);
+    background-image: linear-gradient(180deg, rgba(135, 198, 255, 0) 0%, rgba(135, 198, 255, 0.5) 100%);
+    pointer-events: none;
+  }
+
   uni-image {
     width: 100%;
     height: 100%;
   }
+}
+
+/* 录音面板态不铺这层蓝：面板自带渐变水面，这里不能再叠一层 */
+.chat-input--voice-panel-open::before {
+  content: none;
+}
+
+/* 深色：同一层的范围不变，只换色（上透明 → 底部实色 #0B6EDA），比浅色那档更沉 */
+.chat-input--dark::before {
+  background-image: linear-gradient(180deg, rgba(11, 110, 218, 0) 0%, #0b6eda 100%);
 }
 
 // 紧凑录音态（首页 / 听播 / 异常列表追问）：

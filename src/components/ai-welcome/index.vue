@@ -465,7 +465,18 @@ onBeforeUnmount(() => {
   padding-bottom: calc(30rpx + constant(safe-area-inset-bottom));
   padding-bottom: calc(30rpx + env(safe-area-inset-bottom));
   overflow: hidden;
-  background: #fafafa;
+  // 底部「加号 + 点击说话 + 键盘」这一整条带（含下方免责提示与安全区）叠一层
+  // 「上透明 → 下 50% 蓝」的渐变，与对话页输入栏、录音态底部光晕同一条色。
+  // 只给最下面这一条带铺（background-size），整屏底色仍是纯 #fafafa。
+  // 带高 = 输入条 128rpx + 提示上间距 16rpx + 提示行 34rpx + 根容器底部留白 30rpx = 208rpx，
+  // 再收 32rpx（16px）：渐变上沿落在「底部快捷入口胶囊」下沿再往下 32rpx，
+  // 胶囊那一行与渐变之间留一条纯 #fafafa 的空隙，蓝光不贴到胶囊上。
+  background-color: #fafafa;
+  background-image: linear-gradient(180deg, rgba(135, 198, 255, 0) 0%, rgba(135, 198, 255, 0.5) 100%);
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: 100% 176rpx;
+  background-size: 100% calc(176rpx + env(safe-area-inset-bottom));
   color: #0d0d0d;
   font-family: "PingFang SC", sans-serif;
   transition: background-color 360ms ease;
@@ -797,7 +808,15 @@ onBeforeUnmount(() => {
    只换底色与材质，间距 / 字号 / 圆角与浅色稿一致；
    初始页原来只有一套浅色样式，深色宿主下会先闪一整屏 #FAFAFA 再切到深色对话页。 */
 .welcome--dark {
-  background: #0d0d0d;
+  // 深色同样在底部「加号 + 点击说话 + 键盘」这一条带铺渐变，但换成更深的一档
+  // （上透明 → 底部实色 #0B6EDA）；带高与浅色一致（208rpx − 32rpx，不贴到胶囊下沿），
+  // 深色底用 background-color 写，不能再走 `background` 简写，否则会把渐变一起清掉
+  background-color: #0d0d0d;
+  background-image: linear-gradient(180deg, rgba(11, 110, 218, 0) 0%, #0b6eda 100%);
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: 100% 176rpx;
+  background-size: 100% calc(176rpx + env(safe-area-inset-bottom));
   color: #f2f3f5;
 }
 

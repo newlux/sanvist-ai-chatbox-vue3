@@ -82,8 +82,13 @@ export const useSettingsStore = defineStore("settings", () => {
     if (data.language) void systemStore.setLanguage(toAppLanguage(data.language));
     if (data.appearance) systemStore.setAppearance(data.appearance);
 
-    memoryEnabled.value = Boolean(data.memoryEnabled);
-    pureMode.value = Boolean(data.pureMode);
+    /**
+     * 布尔开关必须按「字段存在才回显」处理：`/settings` 的响应并不总是带全量字段
+     * （`pureMode` 就不一定回传），而 `Boolean(undefined)` 会算成 false，
+     * 于是刚打开纯净模式，PUT 成功后一 apply 就被服务端的「空字段」重新关掉。
+     */
+    if (typeof data.memoryEnabled === "boolean") memoryEnabled.value = data.memoryEnabled;
+    if (typeof data.pureMode === "boolean") pureMode.value = data.pureMode;
     dialogueMode.value = data.dialogueMode === "realtime" ? "realtime" : "push";
     if (typeof data.voiceCode === "string") voiceCode.value = data.voiceCode;
     if (typeof data.speechRate === "number") speechRate.value = data.speechRate;
@@ -126,6 +131,21 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       const data = await updateSettings(patch);
       apply(data);
+      // 响应里没带的字段按本次提交值补齐（与下面 voiceCode / speechRate 同一口径）
+      if (typeof patch.pureMode === "boolean" && typeof data?.pureMode !== "boolean") {
+        pureMode.value = patch.pureMode;
+      }
+      if (typeof patch.memoryEnabled === "boolean" && typeof data?.memoryEnabled !== "boolean") {
+        memoryEnabled.value = patch.memoryEnabled;
+      }
+      /**
+       * 服务端明确把开关改成别的值时以服务端为准（例如被策略收敛），但要留痕：
+       * 若日志里出现这条，说明响应里确实带了 `pureMode` 且和本次提交相反，
+       * 那就是后端没接受这个字段（字段名 / 权限问题），不是前端回显的锅。
+       */
+      if (typeof patch.pureMode === "boolean" && typeof data?.pureMode === "boolean" && data.pureMode !== patch.pureMode) {
+        logger.warn("settings pureMode 被服务端改写", { sent: patch.pureMode, got: data.pureMode });
+      }
       if (patch.voiceCode && !data?.voiceCode) voiceCode.value = patch.voiceCode;
       if (typeof patch.speechRate === "number" && typeof data?.speechRate !== "number") {
         speechRate.value = patch.speechRate;
