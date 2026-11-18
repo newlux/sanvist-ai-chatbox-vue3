@@ -109,6 +109,6 @@ const { t } = useI18n();
   bottom: 0;
   height: 240px;
   pointer-events: none;
-  background: radial-gradient(ellipse 100% 100% at 50% 100%, #1b72cfff, rgba(27, 114, 207, 0));
+  // background: radial-gradient(ellipse 100% 100% at 50% 100%, #1b72cfff, rgba(27, 114, 207, 0));
 }
 </style>

@@ -2307,8 +2307,8 @@ $color-white: #ffffff;
    与一键回底箭头（居中）不冲突；深色页面直接用白色三角 sani-logo.webp */
 .ai-page--pc .pc-corner-logo {
   position: absolute;
-  right: 40px;
-  bottom: 160px;
+  right: 68px;
+  bottom: 44px;
   display: flex;
   z-index: 20;
   align-items: center;

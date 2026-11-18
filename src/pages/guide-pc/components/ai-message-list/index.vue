@@ -1752,11 +1752,15 @@ watch(
           <!-- 对话内容 -->
           <!-- hidden：二维码占位回答这类「已跳转别处」的消息不进列表，索引仍保持原下标 -->
           <!-- id 作为「顶到对话区上方」的定位锚点，见 alignMessageToTop -->
-          <view
+          <template
             v-for="(msg, index) in messages"
+            :key="msg.id"
+          >
+          <!-- 消息行 = 回答气泡 + PC 生成中停止按钮。独立卡片不放进这行（见下）：
+               这行是 display:flex 的行容器（PC 版），卡片若作为它的子元素会被并排挤成半屏 -->
+          <view
             v-show="!msg.hidden"
             :id="chatMessageAnchorDomId(msg?.id ?? `idx-${index}`)"
-            :key="msg.id"
             :class="{
               'chat-box__msg': props.pcLayout,
               'chat-box__msg--user': props.pcLayout && msg.role === 'user',
@@ -1817,6 +1821,10 @@ watch(
             >
               <view class="chat-box__stop-square" />
             </view>
+          </view>
+          <!-- 核对/步骤卡等独立卡片：不放进上面的 flex 消息行（PC 版该行 display:flex，
+               卡片放进会被并排挤成半屏），作为同一条消息的兄弟块、独占一行 -->
+          <template v-if="!msg.hidden">
             <!-- 核对/步骤卡独立成卡，不放进回答气泡；一轮问答一张，多轮各留一张 -->
             <view
               v-for="block in standaloneBlocks(msg, index)"
@@ -1831,6 +1839,7 @@ watch(
                 :compact-guide-card="compactGuideCard"
                 :dark="props.dark"
                 :pc="props.pcLayout"
+                :duration-ms="msg?.durationMs"
                 :tts-enabled="!!msg.ttsEnabled"
                 :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
                 :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
@@ -1859,7 +1868,8 @@ watch(
             >
               <AiBlockRenderer :block="block" :dark="props.dark" @gantt-open="onGanttOpen" />
             </view>
-          </view>
+          </template>
+          </template>
         </view>
         <!-- 顶到上方时垫的空白：内容末尾没有多余余量、滚不到目标落点时补上（见 alignMessageToTop） -->
         <view
@@ -1972,7 +1982,9 @@ watch(
   }
 
   // 生成中停止按钮：80px 圆、#26243A 底、白色 28×28 圆角 8 方块
+  // order: -1 让它排在气泡左侧（DOM 上在气泡之后，flex 顺序默认在右）
   .chat-box__stop {
+    order: -1;
     flex: 0 0 80px;
     width: 80px;
     height: 80px;

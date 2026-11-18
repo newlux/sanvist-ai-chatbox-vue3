@@ -527,6 +527,15 @@ onBeforeUnmount(() => {
             <text class="history-drawer__session-history-label">
               {{ t("guide-pc-history-title") }}
             </text>
+            <!-- PC 车机版：标题行最右侧的关闭弹窗按钮（52×52，无圆形背景）。
+                 默认隐藏，仅 .ai-chat-header--pc 下显示（其它页面不受影响） -->
+            <view class="history-drawer__close-btn" @tap.stop="closeDrawer">
+              <image
+                src="@/assets/img/icon-close.svg"
+                mode="aspectFit"
+                class="history-drawer__close-icon"
+              />
+            </view>
           </view>
           <z-paging
             ref="sessionPaging"
@@ -1449,7 +1458,7 @@ onBeforeUnmount(() => {
 /* 设计稿 309:3052 顶部行：头像 44px（88rpx）+ 间距 14px（28rpx）+ 搜索框 224px（448rpx）= 286px
    头像落在 x=22，比抽屉 18px 内边距再右移 4px（8rpx） */
 .history-drawer__toolbar {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 28rpx;
   padding-left: 8rpx;
@@ -1598,10 +1607,17 @@ onBeforeUnmount(() => {
 /* 设计稿 309:3099「历史对话」小节标题：
    上 24px（48rpx）= 搜索框底(126) → 标题顶(150)；下 12px（24rpx）= 标题底(170) → 首条选中条(182) */
 .history-drawer__session-history {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 48rpx 0 24rpx;
 }
 .history-drawer--batch-delete .history-drawer__session-history {
   padding-top: 0;
+}
+/* 历史抽屉标题行关闭按钮：默认隐藏（仅 PC 车机版 .ai-chat-header--pc 下显示） */
+.history-drawer__close-btn {
+  display: none;
 }
 /* 设计稿 309:3099：14px（28rpx）/ Regular(400) / #5D5D5D，行高 20px（40rpx） */
 .history-drawer__session-history-label {
@@ -2073,5 +2089,26 @@ onBeforeUnmount(() => {
 .ai-chat-header--pc .history-drawer__settings {
   width: 40px;
   height: 40px;
+}
+
+/* 标题行右侧关闭按钮：52×52、无圆形背景、白色 X 线稿（深色抽屉底 #181A1E 上反白更清晰） */
+.ai-chat-header--pc .history-drawer__close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  cursor: pointer;
+
+  &:active {
+    opacity: 0.75;
+  }
+}
+
+.ai-chat-header--pc .history-drawer__close-icon {
+  width: 52px;
+  height: 52px;
+  filter: brightness(0) invert(1);
 }
 </style>

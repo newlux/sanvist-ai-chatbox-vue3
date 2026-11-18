@@ -8,14 +8,17 @@ import { useI18n } from "vue-i18n";
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconRepair from "@/assets/img/icon-repair-dark.svg";
-import saniIcon from "@/assets/img/icon-sani.png";
 import iconRightArrow from "@/assets/img/iocn-right-arrow.png";
 
 import { formatFileSize } from "@/hooks/useComposerAttachments";
 import { getVoiceInputLanguage } from "@/utils/asr/voice-language";
 import { openImagePreview, toInlineImageUrl } from "@/utils/image-preview";
 import { createLogger } from "@/utils/logger";
-import { animateVoiceMessageArrival, readVoiceMessageOrigin, resolveMotionElement } from "@/utils/voice-message-motion";
+import {
+  animateVoiceMessageArrival,
+  readVoiceMessageOrigin,
+  resolveMotionElement,
+} from "@/utils/voice-message-motion";
 import AiContentBlocks from "./AiContentBlocks.vue";
 
 defineOptions({ name: "AiBubbleV2" });
@@ -103,9 +106,15 @@ const logger = createLogger("ai-bubble-v2");
  * 深色只能由它自己按主题换色。这里把深色标记往下传一程：
  * 未 provide 的场景（听播 / 报告 / 分享海报）自动回落浅色稿。
  */
-provide("ai-bubble-dark", computed(() => props.dark));
+provide(
+  "ai-bubble-dark",
+  computed(() => props.dark)
+);
 // PC 车机版标记：各内容块据此用 px 覆盖字号/圆角/内边距（默认关，其余页面不 provide）
-provide("ai-bubble-pc", computed(() => props.pcLayout));
+provide(
+  "ai-bubble-pc",
+  computed(() => props.pcLayout)
+);
 
 async function copyText(text) {
   const value = String(text || "").trim();
@@ -162,9 +171,11 @@ function fileImageSrc(file: ChatMessageAttachment, fileIndex: number) {
  */
 function onPreviewImage(url) {
   const urls = props.attachments
-    .map((item, index) => item?.type === "image"
-      ? item.localPath || fileImageFallback.value[index] || item.previewPath || item.url
-      : "")
+    .map((item, index) =>
+      item?.type === "image"
+        ? item.localPath || fileImageFallback.value[index] || item.previewPath || item.url
+        : ""
+    )
     .filter(Boolean);
   if (!urls.length) return;
   openImagePreview({ urls, current: url });
@@ -191,8 +202,14 @@ const userMenuRef = ref<HTMLElement | { $el?: HTMLElement } | null>(null);
 const userMenuPos = ref({ left: USER_MENU_GAP_PX, top: USER_MENU_GAP_PX });
 
 function clampUserMenuPosition(x: number, y: number, width: number, height: number) {
-  const maxLeft = Math.max(USER_MENU_GAP_PX, window.innerWidth - width - USER_MENU_GAP_PX);
-  const maxTop = Math.max(USER_MENU_GAP_PX, window.innerHeight - height - USER_MENU_GAP_PX);
+  const maxLeft = Math.max(
+    USER_MENU_GAP_PX,
+    window.innerWidth - width - USER_MENU_GAP_PX
+  );
+  const maxTop = Math.max(
+    USER_MENU_GAP_PX,
+    window.innerHeight - height - USER_MENU_GAP_PX
+  );
   userMenuPos.value = {
     left: Math.max(USER_MENU_GAP_PX, Math.min(x, maxLeft)),
     top: Math.max(USER_MENU_GAP_PX, Math.min(y, maxTop)),
@@ -229,11 +246,13 @@ async function onUserMenuCopy() {
 }
 
 const isUser = computed(() => props.role === "user");
-const isStopped = computed(() => props.interrupted || props.processStatus?.phase === "stopped");
+const isStopped = computed(
+  () => props.interrupted || props.processStatus?.phase === "stopped"
+);
 const visibleBlocks = computed(() =>
   props.hideSuggestion
-    ? props.blocks.filter(block => block && block.type !== "suggestion")
-    : props.blocks,
+    ? props.blocks.filter((block) => block && block.type !== "suggestion")
+    : props.blocks
 );
 /**
  * 独立成卡的 block 类型：不套在回答气泡里。
@@ -243,26 +262,40 @@ const visibleBlocks = computed(() =>
  */
 const STANDALONE_BLOCK_TYPES = ["guide-check", "gantt"];
 const contentBlocks = computed(() => {
-  const blocks = visibleBlocks.value
-    .filter(block => block && block.type !== "suggestion" && !STANDALONE_BLOCK_TYPES.includes(block.type));
+  const blocks = visibleBlocks.value.filter(
+    (block) =>
+      block && block.type !== "suggestion" && !STANDALONE_BLOCK_TYPES.includes(block.type)
+  );
   return blocks.length || !props.content
     ? blocks
-    : [{ id: "content-fallback", type: "answer" as const, payload: { content: props.content }, complete: true }];
+    : [
+        {
+          id: "content-fallback",
+          type: "answer" as const,
+          payload: { content: props.content },
+          complete: true,
+        },
+      ];
 });
 const suggestionBlocks = computed(() =>
-  visibleBlocks.value.filter(block => block && block.type === "suggestion"),
+  visibleBlocks.value.filter((block) => block && block.type === "suggestion")
 );
 
 /** 只有独立卡片、没有正文时，气泡不再画白卡外壳（操作栏仍保留），避免留一个空框 */
-const isBareBody = computed(() =>
-  !isUser.value
-  && !contentBlocks.value.length
-  && !props.content
-  // 生成中的思考过程（过程状态行 / 过程副标题 / 等待条）要留在气泡卡片里，
-  // 否则还没吐出正文时卡片外壳被去掉，灰色的思考文案会裸露在卡片外。
-  && !isStopped.value
-  && !(props.loading
-    && (Boolean(props.processStatus) || Boolean(props.processSubtitle?.trim()) || Boolean(props.waitingText))),
+const isBareBody = computed(
+  () =>
+    !isUser.value &&
+    !contentBlocks.value.length &&
+    !props.content &&
+    // 生成中的思考过程（过程状态行 / 过程副标题 / 等待条）要留在气泡卡片里，
+    // 否则还没吐出正文时卡片外壳被去掉，灰色的思考文案会裸露在卡片外。
+    !isStopped.value &&
+    !(
+      props.loading &&
+      (Boolean(props.processStatus) ||
+        Boolean(props.processSubtitle?.trim()) ||
+        Boolean(props.waitingText))
+    )
 );
 
 /**
@@ -274,7 +307,9 @@ const isBareBody = computed(() =>
  * 否则流式过程中正文会先冒出来、收尾时又整块消失，用户看到一段随后被撤掉的正文。
  * 白板的自动弹起不再依赖步骤卡组件挂载，改由页面盯 guide-step 块触发（见 pages/guide、pages/task）。
  */
-const hasGuideStepCard = computed(() => visibleBlocks.value.some(block => block?.type === "guide-step"));
+const hasGuideStepCard = computed(() =>
+  visibleBlocks.value.some((block) => block?.type === "guide-step")
+);
 const hideBody = computed(() => !isUser.value && hasGuideStepCard.value);
 
 /**
@@ -284,7 +319,8 @@ const hideBody = computed(() => !isUser.value && hasGuideStepCard.value);
  * 就按「已完成」渲染同一条品牌行（sani 图标 + SANI + 右侧播报按钮）。
  */
 const isHistoryAnswer = computed(() => {
-  if (isUser.value || props.loading || props.interrupted || props.processStatus) return false;
+  if (isUser.value || props.loading || props.interrupted || props.processStatus)
+    return false;
   if (props.assistantCallbackTitle || hideBody.value) return false;
   return Boolean(props.content) || contentBlocks.value.length > 0;
 });
@@ -294,7 +330,9 @@ const isHistoryAnswer = computed(() => {
  * 不能再补「系统繁忙」兜底提示——内容在气泡外那张卡上。
  */
 const hasStandaloneCard = computed(() =>
-  visibleBlocks.value.some(block => block && STANDALONE_BLOCK_TYPES.includes(block.type)),
+  visibleBlocks.value.some(
+    (block) => block && STANDALONE_BLOCK_TYPES.includes(block.type)
+  )
 );
 
 /**
@@ -305,11 +343,18 @@ const hasStandaloneCard = computed(() =>
  * 带独立卡片（核对卡 / 调度视图入口卡）的那轮也不算。
  */
 const showBusyFallback = computed(
-  () => !props.loading && !isStopped.value && !hideBody.value && !hasStandaloneCard.value && isBareBody.value,
+  () =>
+    !props.loading &&
+    !isStopped.value &&
+    !hideBody.value &&
+    !hasStandaloneCard.value &&
+    isBareBody.value
 );
 
 /** 等待条只用于模型尚未输出时，停止状态统一由品牌行展示。 */
-const showWaiting = computed(() => Boolean(props.waitingText) && props.loading && !isStopped.value);
+const showWaiting = computed(
+  () => Boolean(props.waitingText) && props.loading && !isStopped.value
+);
 
 /**
  * 过程状态行文案随当前语言切换（英文界面下不再出现中文）：
@@ -325,10 +370,36 @@ const processStatusText = computed(() => {
   return "SANI";
 });
 
-/** 失败状态单独显示提示，停止状态复用品牌行。 */
-const showBrandStatus = computed(() => isStopped.value || props.processStatus?.phase !== "failed");
+/**
+ * PC 车机版完成态顶部文案：「✓ 已完成 耗时 X 秒」。
+ * 耗时数据来源：
+ * - 实时对话：工作流结束时由 message_end.metadata.duration_ms 下发（毫秒），
+ *   落进 props.durationMs（见 chatStreamParser / useChatSend 的 durationMs）；
+ * - 历史回答（isHistoryAnswer）不带 processStatus / durationMs，没有耗时数据，
+ *   因此整行不渲染 —— 不会出现「已完成」后面挂着一个空耗时的状态行。
+ */
+const completedDurationSeconds = computed(() => {
+  const fromMs = Number(props.durationMs);
+  if (Number.isFinite(fromMs) && fromMs > 0) return Math.round(fromMs / 1000);
+  const fromStatus = Number(props.processStatus?.elapsedSeconds);
+  return Number.isFinite(fromStatus) && fromStatus > 0 ? Math.round(fromStatus) : 0;
+});
+/** 只有实时对话正常收尾（succeeded）才展示；失败 / 停止 / 历史回答不展示 */
+const showCompletedDuration = computed(
+  () =>
+    props.pcLayout &&
+    !isUser.value &&
+    !isStopped.value &&
+    props.processStatus?.phase === "succeeded" &&
+    completedDurationSeconds.value > 0
+);
+const completedDurationText = computed(() =>
+  completedDurationSeconds.value
+    ? `${t("process-status-succeeded")} ${t("process-duration", { seconds: completedDurationSeconds.value })}`
+    : ""
+);
 
-/** 品牌行的状态修饰类：历史回答按「已完成」渲染，与当前会话里的完成态同一套样式 */
+/** 状态行的状态修饰类：历史回答按「已完成」渲染，与当前会话里的完成态同一套样式 */
 const processStatusPhase = computed(() => {
   if (isStopped.value) return "stopped";
   return props.processStatus?.phase || (isHistoryAnswer.value ? "succeeded" : "");
@@ -376,13 +447,15 @@ watch(
     if (visible) startElapsedTimer();
     else stopElapsedTimer();
   },
-  { immediate: true },
+  { immediate: true }
 );
 
 onBeforeUnmount(stopElapsedTimer);
 
 const showProcessStatus = computed(
-  () => !isUser.value && (isStopped.value || Boolean(processStatusText.value) || isGenerating.value),
+  () =>
+    !isUser.value &&
+    (isStopped.value || Boolean(processStatusText.value) || isGenerating.value)
 );
 
 /**
@@ -405,7 +478,7 @@ function formatProcessSubtitle(value: string) {
   // 「|」是后端约定的「中文 | 英文」分隔符，全角竖线一并认
   const parts = raw
     .split(/[|｜]/)
-    .map(part => part.replace(SUBTITLE_STATUS_SUFFIX, "").trim())
+    .map((part) => part.replace(SUBTITLE_STATUS_SUFFIX, "").trim())
     .filter(Boolean);
   if (!parts.length) return "";
   if (parts.length === 1) return parts[0];
@@ -413,26 +486,40 @@ function formatProcessSubtitle(value: string) {
   // 按「带不带汉字」挑而不按下标：英文段里常混着「正在执行」这类中文状态词（已被上面摘掉），
   // 位置在脏数据下不一定可靠，含不含汉字才是稳定特征。
   const isEnglish = speechLanguage.startsWith("en");
-  const chinese = parts.find(part => /[\u4E00-\u9FFF]/.test(part));
-  const english = parts.find(part => !/[\u4E00-\u9FFF]/.test(part));
+  const chinese = parts.find((part) => /[\u4E00-\u9FFF]/.test(part));
+  const english = parts.find((part) => !/[\u4E00-\u9FFF]/.test(part));
   // 特征匹配优先，挑不到再按约定位置兜底：第 1 段中文、第 2 段英文
-  const picked = isEnglish ? (english ?? parts[1] ?? parts[0]) : (chinese ?? parts[0]);
+  const picked = isEnglish ? english ?? parts[1] ?? parts[0] : chinese ?? parts[0];
   // 排查用语种问题（English 提问却显示中文）时，看这条就能知道是 language 没拿到还是分段不对
-  logger.debug("[process-subtitle] 语种选择", { raw, speechLanguage, isEnglish, picked, parts });
+  logger.debug("[process-subtitle] 语种选择", {
+    raw,
+    speechLanguage,
+    isEnglish,
+    picked,
+    parts,
+  });
   return picked;
 }
 
 const processSubtitleText = computed(() =>
-  formatProcessSubtitle(props.processSubtitle || (isGenerating.value ? props.processStatus?.title : "") || ""),
+  formatProcessSubtitle(
+    props.processSubtitle || (isGenerating.value ? props.processStatus?.title : "") || ""
+  )
 );
-const hasTips = computed(() => contentBlocks.value.some(block => block.type === "tips"));
+const hasTips = computed(() =>
+  contentBlocks.value.some((block) => block.type === "tips")
+);
 const showProcessSubtitle = computed(
-  () => !hasTips.value && !isStopped.value && showProcessStatus.value && Boolean(processSubtitleText.value),
+  () =>
+    !hasTips.value &&
+    !isStopped.value &&
+    showProcessStatus.value &&
+    Boolean(processSubtitleText.value)
 );
 
 /** 维修助理回流卡：轮询中显示「故障诊断中…」并先把已取到的明细摆出来，回流完成后补齐状态文案。 */
 const showAssistantCallbackResult = computed(
-  () => Boolean(props.assistantCallbackTitle) && !props.loading && !props.interrupted,
+  () => Boolean(props.assistantCallbackTitle) && !props.loading && !props.interrupted
 );
 /**
  * 回流卡片副标题：
@@ -441,7 +528,9 @@ const showAssistantCallbackResult = computed(
  *   四项没填全时不许再显示「案例报告生成已完成」（缺的行显示「待识别」）。
  */
 const assistantCallbackStatusText = computed(() =>
-  showAssistantCallbackResult.value ? props.assistantCallbackStatus : processStatusText.value,
+  showAssistantCallbackResult.value
+    ? props.assistantCallbackStatus
+    : processStatusText.value
 );
 
 function onAssistantCallbackOpen() {
@@ -507,15 +596,25 @@ function onTtsTap() {
 
 const bubbleRoot = ref<unknown>(null);
 let cancelVoiceArrival: (() => void) | null = null;
-watch(() => props.asrPending, async (pending, previous) => {
-  if (!isUser.value || pending || !previous) return;
-  const origin = readVoiceMessageOrigin(resolveMotionElement(bubbleRoot.value)?.querySelector(".ai-bubble-v2__asr-label") || null);
-  await nextTick();
-  await nextTick();
-  const body = resolveMotionElement(bubbleRoot.value)?.querySelector<HTMLElement>(".ai-bubble-v2__body") || null;
-  cancelVoiceArrival?.();
-  cancelVoiceArrival = animateVoiceMessageArrival(body, origin);
-}, { flush: "pre" });
+watch(
+  () => props.asrPending,
+  async (pending, previous) => {
+    if (!isUser.value || pending || !previous) return;
+    const origin = readVoiceMessageOrigin(
+      resolveMotionElement(bubbleRoot.value)?.querySelector(".ai-bubble-v2__asr-label") ||
+        null
+    );
+    await nextTick();
+    await nextTick();
+    const body =
+      resolveMotionElement(bubbleRoot.value)?.querySelector<HTMLElement>(
+        ".ai-bubble-v2__body"
+      ) || null;
+    cancelVoiceArrival?.();
+    cancelVoiceArrival = animateVoiceMessageArrival(body, origin);
+  },
+  { flush: "pre" }
+);
 onBeforeUnmount(() => cancelVoiceArrival?.());
 </script>
 
@@ -549,9 +648,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           <view class="ai-bubble-v2-menu__icon">
             <image :src="iconCopy" mode="aspectFit" class="ai-bubble-v2-menu__icon-img" />
           </view>
-          <text class="ai-bubble-v2-menu__text">
-            复制
-          </text>
+          <text class="ai-bubble-v2-menu__text"> 复制 </text>
         </view>
       </view>
     </Teleport>
@@ -617,19 +714,17 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
         <!-- 实时转写直接长在这条气泡里：列表把它顶到头部下沿，不再用 fixed 浮层，
              浮层会压在上一条被顶到顶部的提问气泡上，表现就是两段文字重叠。
              asrTipReady 仍是出场闸门：起飞动效落位前先不铺字，避免跟灵动岛动效打架 -->
-        <view v-if="props.asrPending && props.asrTipReady" class="ai-bubble-v2__asr" aria-label="识别中">
+        <view
+          v-if="props.asrPending && props.asrTipReady"
+          class="ai-bubble-v2__asr"
+          aria-label="识别中"
+        >
           <text class="ai-bubble-v2__asr-label">
             {{ props.content }}
           </text>
-          <text class="ai-bubble-v2__asr-dot">
-            .
-          </text>
-          <text class="ai-bubble-v2__asr-dot">
-            .
-          </text>
-          <text class="ai-bubble-v2__asr-dot">
-            .
-          </text>
+          <text class="ai-bubble-v2__asr-dot"> . </text>
+          <text class="ai-bubble-v2__asr-dot"> . </text>
+          <text class="ai-bubble-v2__asr-dot"> . </text>
         </view>
         <text
           v-else
@@ -646,16 +741,26 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
         <view
           v-if="props.assistantCallbackTitle"
           class="ai-bubble-v2__assistant-callback-card"
-          :class="{ 'ai-bubble-v2__assistant-callback-card--clickable': props.assistantCallbackConversationId }"
+          :class="{
+            'ai-bubble-v2__assistant-callback-card--clickable':
+              props.assistantCallbackConversationId,
+          }"
           @tap="onAssistantCallbackOpen"
         >
           <view class="ai-bubble-v2__assistant-callback-heading">
-            <image class="ai-bubble-v2__assistant-callback-icon" :src="iconRepair" mode="aspectFit" />
+            <image
+              class="ai-bubble-v2__assistant-callback-icon"
+              :src="iconRepair"
+              mode="aspectFit"
+            />
             <view class="ai-bubble-v2__assistant-callback-copy">
               <text class="ai-bubble-v2__assistant-callback-title">
                 {{ props.assistantCallbackTitle }}
               </text>
-              <text v-if="assistantCallbackStatusText" class="ai-bubble-v2__assistant-callback-status">
+              <text
+                v-if="assistantCallbackStatusText"
+                class="ai-bubble-v2__assistant-callback-status"
+              >
                 {{ assistantCallbackStatusText }}
               </text>
             </view>
@@ -688,54 +793,43 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
             </view>
           </view>
         </view>
+        <!-- PC 车机版完成态顶部状态行：✓ 已完成 耗时 X 秒。
+             只渲染实时对话正常收尾（processStatus.phase=succeeded）且有时耗数据的回答，
+             历史回答无耗时数据不占行（见 completedDurationSeconds）。
+             与下面生成中的副标题行互斥：完成态副标题已清空，二者不会同时出现 -->
         <view
-          v-if="showProcessStatus && !props.assistantCallbackTitle"
+          v-if="showCompletedDuration"
+          class="ai-bubble-v2__process-status ai-bubble-v2__process-status--done"
+          :class="`ai-bubble-v2__process-status--${processStatusPhase}`"
+        >
+          <text class="ai-bubble-v2__process-done-check"> ✓ </text>
+          <text class="ai-bubble-v2__process-done-text">
+            {{ completedDurationText }}
+          </text>
+        </view>
+        <!-- PC 车机版：回答卡内不再显示品牌署名（sani logo / SANI 文案），
+             播报按钮下沉到卡片底部免责声明行最左侧；
+             过程状态行只保留副标题（生成中的节点名），无副标题时不占行 -->
+        <view
+          v-if="showProcessSubtitle && !props.assistantCallbackTitle"
           class="ai-bubble-v2__process-status"
           :class="`ai-bubble-v2__process-status--${processStatusPhase}`"
         >
-          <!-- 品牌署名：sani 图标 26×26（52rpx）+ 文案 SANI，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
-          <image
-            v-if="showBrandStatus"
-            class="ai-bubble-v2__process-icon-img"
-            :src="saniIcon"
-            mode="aspectFit"
-          />
-          <text class="ai-bubble-v2__process-text">
-            {{ isStopped ? "SANI" : processStatusText }}
-          </text>
-          <!-- 生成中实时秒数（单位 S），紧跟 SANI；可以播报后自动消失，位置让给语音图标 -->
-          <!-- <text v-if="elapsedText" class="ai-bubble-v2__process-elapsed">
-            {{ elapsedText }}
-          </text> -->
-          <!-- 语音播报按钮：SANI 后面常显（拉流 → spinner，播放 → 声波起伏，其余 → 静态语音图标）；
-               历史回答没有 processStatus（见 isHistoryAnswer），同样要能点播 -->
-          <view
-            v-if="!isStopped && (props.processStatus?.phase === 'succeeded' || isHistoryAnswer) && props.showActions && props.ttsEnabled"
-            class="ai-bubble-v2__action-btn ai-bubble-v2__process-tts"
-            @tap.stop="onTtsTap"
-          >
-            <view v-if="props.ttsLoading" class="ai-bubble-v2__tts-spinner" />
-            <!-- 播放中：蓝色声波条依次起伏，动画从左往右推进 -->
-            <view v-else-if="props.ttsPlaying" class="ai-bubble-v2__tts-wave">
-              <view
-                v-for="index in 4"
-                :key="index"
-                class="ai-bubble-v2__tts-wave-bar"
-                :class="`ai-bubble-v2__tts-wave-bar--${index}`"
-              />
-            </view>
-            <image v-else :src="iconRadioOn" mode="aspectFit" class="ai-bubble-v2__action-icon" />
-          </view>
-          <!-- 进度文案只使用品牌/语音图标右侧的余量，不再占正文上方的一行。 -->
-          <view
-            v-if="showProcessSubtitle"
-            class="ai-bubble-v2__process-subtitle"
-          >
+          <!-- 进度文案只使用副标题节点的余量，不再占正文上方的一行。 -->
+          <view v-if="showProcessSubtitle" class="ai-bubble-v2__process-subtitle">
             <text class="ai-bubble-v2__process-subtitle-label">
               {{ processSubtitleText }}
             </text>
-            <view v-if="isGenerating" class="ai-bubble-v2__process-subtitle-dots" aria-hidden="true">
-              <text v-for="dot in 3" :key="dot" class="ai-bubble-v2__process-subtitle-dot">
+            <view
+              v-if="isGenerating"
+              class="ai-bubble-v2__process-subtitle-dots"
+              aria-hidden="true"
+            >
+              <text
+                v-for="dot in 3"
+                :key="dot"
+                class="ai-bubble-v2__process-subtitle-dot"
+              >
                 .
               </text>
             </view>
@@ -745,18 +839,12 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           v-if="showWaiting && !showProcessStatus && !props.assistantCallbackTitle"
           class="ai-bubble-v2__waiting"
         >
-          <text class="ai-bubble-v2__waiting-mark">
-            ✓
-          </text>
-          <text class="ai-bubble-v2__waiting-label">
-            等待模型响应：
-          </text>
+          <text class="ai-bubble-v2__waiting-mark"> ✓ </text>
+          <text class="ai-bubble-v2__waiting-label"> 等待模型响应： </text>
           <text class="ai-bubble-v2__waiting-query">
             {{ props.waitingText }}
           </text>
-          <text class="ai-bubble-v2__waiting-suffix">
-            努力链接中
-          </text>
+          <text class="ai-bubble-v2__waiting-suffix"> 努力链接中 </text>
         </view>
         <AiContentBlocks
           v-if="!props.assistantCallbackTitle && !hideBody"
@@ -776,35 +864,83 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           @gantt-open="onGanttOpen"
         >
           <template #tip-status="{ status }">
-            <view v-if="formatProcessSubtitle(status)" class="ai-bubble-v2__process-subtitle ai-bubble-v2__tip-status">
+            <view
+              v-if="formatProcessSubtitle(status)"
+              class="ai-bubble-v2__process-subtitle ai-bubble-v2__tip-status"
+            >
               <text class="ai-bubble-v2__process-subtitle-label">
                 {{ formatProcessSubtitle(status) }}
               </text>
-              <view v-if="isGenerating" class="ai-bubble-v2__process-subtitle-dots" aria-hidden="true">
-                <text v-for="dot in 3" :key="dot" class="ai-bubble-v2__process-subtitle-dot">
+              <view
+                v-if="isGenerating"
+                class="ai-bubble-v2__process-subtitle-dots"
+                aria-hidden="true"
+              >
+                <text
+                  v-for="dot in 3"
+                  :key="dot"
+                  class="ai-bubble-v2__process-subtitle-dot"
+                >
                   .
                 </text>
               </view>
             </view>
           </template>
         </AiContentBlocks>
-        <view v-if="isStopped && !props.assistantCallbackTitle" class="ai-bubble-v2__busy-hint">
+        <view
+          v-if="isStopped && !props.assistantCallbackTitle"
+          class="ai-bubble-v2__busy-hint"
+        >
           <text class="ai-bubble-v2__busy-hint-text ai-bubble-v2__stopped-text">
             {{ t("process-status-stopped") }}
           </text>
         </view>
         <!-- 空回答兜底：回复区没有内容时给一句提示，位置就在操作栏上方 -->
-        <view v-if="showBusyFallback && !props.assistantCallbackTitle" class="ai-bubble-v2__busy-hint">
+        <view
+          v-if="showBusyFallback && !props.assistantCallbackTitle"
+          class="ai-bubble-v2__busy-hint"
+        >
           <text class="ai-bubble-v2__busy-hint-text">
             {{ t("ai-busy-retry-later") }}
           </text>
         </view>
-        <!-- 底部操作栏（复制 / 分享 / 点赞 / 点踩）已移除：
-             语音播报按钮上移到过程状态行的 SANI 后面，其余动作不再展示 -->
-        <!-- PC 车机版：回答卡右下「内容由AI生成，请核实重要信息」页脚（Ardot 747340735267872） -->
-        <text v-if="props.pcLayout" class="ai-bubble-v2__disclaimer">
-          {{ t("ai-content-disclaimer") }}
-        </text>
+        <!-- PC 车机版：底部页脚行 = 最左侧语音播报按钮 + 右侧「内容由AI生成，请核实重要信息」
+             （Ardot 747340735267872；播报按钮原在过程状态行 SANI 后，下沉到这里） -->
+        <view
+          v-if="props.pcLayout"
+          class="ai-bubble-v2__disclaimer-row"
+        >
+          <view
+            v-if="
+              !isStopped
+              && (props.processStatus?.phase === 'succeeded' || isHistoryAnswer)
+              && props.showActions
+              && props.ttsEnabled
+            "
+            class="ai-bubble-v2__action-btn ai-bubble-v2__disclaimer-tts"
+            @tap.stop="onTtsTap"
+          >
+            <view v-if="props.ttsLoading" class="ai-bubble-v2__tts-spinner" />
+            <!-- 播放中：蓝色声波条依次起伏，动画从左往右推进 -->
+            <view v-else-if="props.ttsPlaying" class="ai-bubble-v2__tts-wave">
+              <view
+                v-for="index in 4"
+                :key="index"
+                class="ai-bubble-v2__tts-wave-bar"
+                :class="`ai-bubble-v2__tts-wave-bar--${index}`"
+              />
+            </view>
+            <image
+              v-else
+              :src="iconRadioOn"
+              mode="aspectFit"
+              class="ai-bubble-v2__action-icon"
+            />
+          </view>
+          <text class="ai-bubble-v2__disclaimer">
+            {{ t("ai-content-disclaimer") }}
+          </text>
+        </view>
       </template>
     </view>
     <!-- 追问属于当前回答，但不放进回答卡片；与卡片保持独立且紧邻的视觉关系。 -->
@@ -1093,14 +1229,27 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   animation: asr-dot-blink 1.2s ease-in-out infinite;
 }
 
-.ai-bubble-v2__asr-dot:nth-child(2) { animation-delay: 0s; }
-.ai-bubble-v2__asr-dot:nth-child(3) { animation-delay: 0.2s; }
-.ai-bubble-v2__asr-dot:nth-child(4) { animation-delay: 0.4s; }
+.ai-bubble-v2__asr-dot:nth-child(2) {
+  animation-delay: 0s;
+}
+.ai-bubble-v2__asr-dot:nth-child(3) {
+  animation-delay: 0.2s;
+}
+.ai-bubble-v2__asr-dot:nth-child(4) {
+  animation-delay: 0.4s;
+}
 
 @keyframes asr-dot-blink {
-  0%, 20% { opacity: 0.2; }
-  40% { opacity: 1; }
-  100% { opacity: 0.2; }
+  0%,
+  20% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.2;
+  }
 }
 
 /* 长按用户消息弹出的跟随菜单 */
@@ -1299,11 +1448,19 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   opacity: 0.2;
   animation: asr-dot-blink 1.2s ease-in-out infinite;
 }
-.ai-bubble-v2__process-subtitle-dot:nth-child(2) { animation-delay: 0.2s; }
-.ai-bubble-v2__process-subtitle-dot:nth-child(3) { animation-delay: 0.4s; }
+.ai-bubble-v2__process-subtitle-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.ai-bubble-v2__process-subtitle-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
 @keyframes ai-bubble-subtitle-enter {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 /* 状态行里的「✓」：设计稿 1187:17 与文字同色，不单独着色 */
 .ai-bubble-v2__process-icon {
@@ -1335,7 +1492,13 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   white-space: nowrap;
 }
 .ai-bubble-v2__process-status--thinking .ai-bubble-v2__process-text {
-  background-image: linear-gradient(90deg, #8a8a8a 25%, #c9c9c9 45%, #c9c9c9 55%, #8a8a8a 75%);
+  background-image: linear-gradient(
+    90deg,
+    #8a8a8a 25%,
+    #c9c9c9 45%,
+    #c9c9c9 55%,
+    #8a8a8a 75%
+  );
   background-position: 200% 0;
   background-size: 200% 100%;
   background-repeat: repeat;
@@ -1352,10 +1515,16 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   font-size: 22rpx;
   white-space: nowrap;
 }
-.ai-bubble-v2__process-status--failed { color: #d54941; }
+.ai-bubble-v2__process-status--failed {
+  color: #d54941;
+}
 @keyframes ai-bubble-process-shimmer {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
 }
 .ai-bubble-v2__duration {
   color: #bababa;
@@ -1561,130 +1730,130 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     box-shadow: none;
   }
 
-  // ---- 维修助理回流卡：深色稿缺省，按回复卡同一材质（#212121 / 1px #303030）推导 ----
-  .ai-bubble-v2__assistant-callback-card {
-    border-color: #303030;
-    background: #212121;
-  }
+        // ---- 维修助理回流卡：深色稿缺省，按回复卡同一材质（#212121 / 1px #303030）推导 ----
+        .ai-bubble-v2__assistant-callback-card {
+          border-color: #303030;
+          background: #212121;
+        }
 
-  // 图标是写死 #191B27 的深色 svg，深底上看不见；压成黑再反相成白
-  .ai-bubble-v2__assistant-callback-icon {
-    filter: brightness(0) invert(1);
-  }
+        // 图标是写死 #191B27 的深色 svg，深底上看不见；压成黑再反相成白
+        .ai-bubble-v2__assistant-callback-icon {
+          filter: brightness(0) invert(1);
+        }
 
-  .ai-bubble-v2__assistant-callback-title {
-    color: #ffffff;
-  }
+        .ai-bubble-v2__assistant-callback-title {
+          color: #ffffff;
+        }
 
-  // 副标题 / 序号 / 标签：与过程步骤态同一档灰，深底上仍可读
-  .ai-bubble-v2__assistant-callback-status,
-  .ai-bubble-v2__assistant-callback-index,
-  .ai-bubble-v2__assistant-callback-label {
-    color: #8f8f8f;
-  }
+        // 副标题 / 序号 / 标签：与过程步骤态同一档灰，深底上仍可读
+        .ai-bubble-v2__assistant-callback-status,
+        .ai-bubble-v2__assistant-callback-index,
+        .ai-bubble-v2__assistant-callback-label {
+          color: #8f8f8f;
+        }
 
-  // 明细正文：与回复正文同档 80% 白
-  .ai-bubble-v2__assistant-callback-value {
-    color: rgba(255, 255, 255, 0.8);
-  }
+        // 明细正文：与回复正文同档 80% 白
+        .ai-bubble-v2__assistant-callback-value {
+          color: rgba(255, 255, 255, 0.8);
+        }
 
-  // 「看详情」箭头是黑色 png，深底上反相成白色，否则整颗看不见
-  .ai-bubble-v2__assistant-callback-arrow {
-    filter: brightness(0) invert(1);
-  }
+        // 「看详情」箭头是黑色 png，深底上反相成白色，否则整颗看不见
+        .ai-bubble-v2__assistant-callback-arrow {
+          filter: brightness(0) invert(1);
+        }
 
-  // 步骤态 / 分区标签：#5D5D5D（与设计稿同值，显式写一遍，避免被深底吃掉）
-  .ai-bubble-v2__process-status,
-  .ai-bubble-v2__process-icon {
-    color: #5d5d5d;
-  }
+        // 步骤态 / 分区标签：#5D5D5D（与设计稿同值，显式写一遍，避免被深底吃掉）
+        .ai-bubble-v2__process-status,
+        .ai-bubble-v2__process-icon {
+          color: #5d5d5d;
+        }
 
-  // 品牌行「SANI」：深色下固定 #FFFFFF。
-  // 浅色那套是 background-clip: text 的灰色流光，深底上又暗又花，所以连背景图、
-  // -webkit-text-fill-color、动画一起清掉；失败 / 停止两态（红 / 灰文案）保持原色不动。
-  .ai-bubble-v2__process-status:not(.ai-bubble-v2__process-status--failed):not(.ai-bubble-v2__process-status--stopped) .ai-bubble-v2__process-text {
-    color: #ffffff;
-    background-image: none;
-    -webkit-text-fill-color: #ffffff;
-    animation: none;
-  }
+        // 品牌行「SANI」：深色下固定 #FFFFFF。
+        // 浅色那套是 background-clip: text 的灰色流光，深底上又暗又花，所以连背景图、
+        // -webkit-text-fill-color、动画一起清掉；失败 / 停止两态（红 / 灰文案）保持原色不动。
+        .ai-bubble-v2__process-status:not(.ai-bubble-v2__process-status--failed):not(.ai-bubble-v2__process-status--stopped)
+          .ai-bubble-v2__process-text {
+          color: #ffffff;
+          background-image: none;
+          -webkit-text-fill-color: #ffffff;
+          animation: none;
+        }
 
-  // 语音播报图标 1193:5120：全部 #8F8F8F 线框。
-  // 图标是自带颜色的 svg，先压成纯黑再反相到 #8F8F8F；点赞 / 点踩选中的那两颗保留品牌色
-  .ai-bubble-v2__action-btn:not(.ai-bubble-v2__action-btn--liked):not(.ai-bubble-v2__action-btn--disliked) .ai-bubble-v2__action-icon {
-    filter: brightness(0) invert(0.56); // 0.56 × 255 ≈ #8F8F8F
-  }
+        // 语音播报图标 1193:5120：全部 #8F8F8F 线框。
+        // 图标是自带颜色的 svg，先压成纯黑再反相到 #8F8F8F；点赞 / 点踩选中的那两颗保留品牌色
+        .ai-bubble-v2__action-btn:not(.ai-bubble-v2__action-btn--liked):not(.ai-bubble-v2__action-btn--disliked)
+          .ai-bubble-v2__action-icon {
+          filter: brightness(0) invert(0.56); // 0.56 × 255 ≈ #8F8F8F
+        }
 
-  // ---- 发问侧附件（设计稿无此态）：白卡换成回复卡同一材质 ----
-  &.ai-bubble-v2--user .ai-bubble-v2__file-card {
-    border-color: #303030;
-    background: #212121;
-    box-shadow: none;
-  }
+        // ---- 发问侧附件（设计稿无此态）：白卡换成回复卡同一材质 ----
+        &.ai-bubble-v2--user .ai-bubble-v2__file-card {
+          border-color: #303030;
+          background: #212121;
+          box-shadow: none;
+        }
 
-  .ai-bubble-v2__file-name {
-    color: #ffffff;
-  }
+        .ai-bubble-v2__file-name {
+          color: #ffffff;
+        }
 
-  .ai-bubble-v2__file-image {
-    background: #303030;
-  }
+        .ai-bubble-v2__file-image {
+          background: #303030;
+        }
 
-  // 空回答兜底（设计稿无此态）：不铺底，只让文字跟随正文色
-  .ai-bubble-v2__busy-hint {
-    background: transparent;
-  }
+        // 空回答兜底（设计稿无此态）：不铺底，只让文字跟随正文色
+        .ai-bubble-v2__busy-hint {
+          background: transparent;
+        }
 
-  .ai-bubble-v2__busy-hint-text {
-    color: rgba(255, 255, 255, 0.8);
-  }
+        .ai-bubble-v2__busy-hint-text {
+          color: rgba(255, 255, 255, 0.8);
+        }
 
-  .ai-bubble-v2__stopped-text {
-    color: #999999;
-  }
+        .ai-bubble-v2__stopped-text {
+          color: #999999;
+        }
 
-  // 内联追问卡（AskSlotBlock）的深色材质由组件自己按 ai-bubble-dark 处理，
-  // 与「身份选择」那组胶囊（GuideSuggestionBlock）同一套，不再在这里 :deep 覆盖。
-}
+        // 内联追问卡（AskSlotBlock）的深色材质由组件自己按 ai-bubble-dark 处理，
+        // 与「身份选择」那组胶囊（GuideSuggestionBlock）同一套，不再在这里 :deep 覆盖。
+      }
 
-/* ===== PC 车机版（guide-pc）：1920×1080 设计稿，全部 px，1:1 还原 =====
-   只在 .ai-bubble-v2--pc 下覆盖，默认关（其余页面不挂这个类）。
-   设计稿 Ardot 747340735267872：
-   - AI 回复卡 1708 宽 / 圆角 20 / 底 #212833 / padding 46 / gap 12 / 阴影 0 2px 8px rgba(0,0,0,.04)
-   - 过程行 / 免责声明 28px 白 80%；正文 32px 白（markdown 由本地 markdown-renderer 覆盖）
-   - 用户气泡：圆角 39 / 底 #485064 / padding 20 30 / 文字 32px 白 */
-.ai-bubble-v2--pc {
-  // 消息间距：设计稿相邻回复卡 ~45px
-  margin: 22px 0;
+      /* ===== PC 车机版（guide-pc）：1920×1080 设计稿，全部 px，1:1 还原 =====
+        只在 .ai-bubble-v2--pc 下覆盖，默认关（其余页面不挂这个类）。
+        设计稿 Ardot 747340735267872：
+        - AI 回复卡 1708 宽 / 圆角 20 / 底 #212833 / padding 46 / gap 12 / 阴影 0 2px 8px rgba(0,0,0,.04)
+        - 过程行 / 免责声明 28px 白 80%；正文 32px 白（markdown 由本地 markdown-renderer 覆盖）
+        - 用户气泡：圆角 39 / 底 #485064 / padding 20 30 / 文字 32px 白 */
+      .ai-bubble-v2--pc {
+        // 消息间距：设计稿相邻回复卡 ~45px
+        margin: 22px 0;
 
-  // ---- 回复卡 ----
-  &:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
-    padding: 46px;
-    border-color: transparent;
-    border-radius: 20px;
-    background: #212833;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  }
+        // ---- 回复卡 ----
+        &:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
+          padding: 46px;
+          border-color: transparent;
+          border-radius: 20px;
+          background: #212833;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
 
-  // 过程状态行（✓ 已完成 / SANI / 副标题 / 耗时）：28px，白 80%
+        // 过程状态行（仅剩副标题，品牌署名与播报按钮已移走）：28px，白 80%
   .ai-bubble-v2__process-status {
     color: rgba(255, 255, 255, 0.8);
     font-size: 28px;
     line-height: 34px;
     gap: 8px;
-  }
-  .ai-bubble-v2__process-text {
-    font-size: 28px;
-    line-height: 34px;
-  }
-  .ai-bubble-v2__process-icon-img {
-    width: 26px;
-    height: 26px;
+    // 基础样式 height: 52rpx（编译后 26px）装不下 34px 行高的副标题，
+    // 父容器 overflow: hidden 会把副标题上下裁掉；PC 下与行高对齐，避免裁切
+    height: 34px;
   }
   .ai-bubble-v2__process-subtitle {
     color: rgba(255, 255, 255, 0.8);
     font-size: 28px;
     line-height: 34px;
+    // 基础样式 height: 36rpx（编译后 18px）小于 34px 行高，
+    // overflow: hidden 把文字上下裁切；PC 下与行高一致，完整显示
+    height: 34px;
   }
   .ai-bubble-v2__process-duration {
     color: rgba(255, 255, 255, 0.8);
@@ -1692,14 +1861,66 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     line-height: 34px;
   }
 
-  // ---- 免责声明页脚（回答卡右下）----
-  .ai-bubble-v2__disclaimer {
-    display: block;
+  // 完成态顶部状态行「✓ 已完成 耗时 X 秒」：28px 白 80%，与副标题同一行高
+  .ai-bubble-v2__process-done-check {
+    flex-shrink: 0;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 28px;
+    line-height: 34px;
+    letter-spacing: 2px; // 与右侧「已完成」留一点呼吸位
+  }
+  .ai-bubble-v2__process-done-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: clip;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 28px;
+    line-height: 34px;
+  }
+
+  // ---- 免责声明页脚（回答卡底部）：最左侧播报按钮 + 右侧免责文案 ----
+  .ai-bubble-v2__disclaimer-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin-top: 8px;
+  }
+  .ai-bubble-v2__disclaimer-tts {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+  }
+  .ai-bubble-v2__disclaimer-tts .ai-bubble-v2__action-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .ai-bubble-v2__disclaimer-tts .ai-bubble-v2__tts-spinner {
+    width: 24px;
+    height: 24px;
+    border-width: 3px;
+  }
+  .ai-bubble-v2__disclaimer-tts .ai-bubble-v2__tts-wave {
+    width: 28px;
+    height: 28px;
+    gap: 3px;
+  }
+  .ai-bubble-v2__disclaimer-tts .ai-bubble-v2__tts-wave .ai-bubble-v2__tts-wave-bar {
+    width: 3px;
+    height: 20px;
+  }
+  .ai-bubble-v2__disclaimer {
+    flex: 1;
+    min-width: 0;
     color: rgba(255, 255, 255, 0.8);
     font-size: 28px;
     line-height: 34px;
     text-align: right;
+    font-style: italic;
+    font-family: Inter;
+    font-weight: 400;
+    text-decoration-line: none;
   }
 
   // ---- 用户气泡 ----

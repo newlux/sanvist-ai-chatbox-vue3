@@ -46,6 +46,11 @@ const props = defineProps({
   dark: { type: Boolean, default: false },
   /** PC 车机版：用 px 覆盖字号 / 圆角 / 内边距（由消息列表在 pcLayout 时显式传） */
   pc: { type: Boolean, default: false },
+  /**
+   * PC 车机版完成态耗时（毫秒）：由消息列表从这条消息的 durationMs 传入，
+   * 卡片顶部显示「√ 已完成 耗时 X 秒」。仅 PC 版有效，默认关。
+   */
+  durationMs: { type: Number, default: null },
 });
 
 /**
@@ -120,6 +125,22 @@ const summary = computed(() => String(props.payload?.summary || "").trim());
 /** 小结标题（payload.summary_title，如「步骤小结」）：渲染在小结正文上方 */
 const summaryTitle = computed(() => String(props.payload?.summary_title || "").trim());
 const isSummaryMode = computed(() => Boolean(summary.value));
+
+/**
+ * PC 车机版完成态耗时（秒）：卡片顶部替代品牌署名，显示「√ 已完成 耗时 X 秒」。
+ * 耗时数据来自这条回答消息的 durationMs（workflow_finished.elapsed_time，毫秒），
+ * 仅 PC 版且已收尾（有耗时）时展示；没有耗时（生成中 / 历史消息）不占行。
+ */
+const doneSeconds = computed(() => {
+  const fromMs = Number(props.durationMs);
+  return Number.isFinite(fromMs) && fromMs > 0 ? Math.round(fromMs / 1000) : 0;
+});
+const showDoneStatus = computed(() => props.pc && doneSeconds.value > 0);
+const doneStatusText = computed(() =>
+  showDoneStatus.value
+    ? `${t("process-status-succeeded")} ${t("process-duration", { seconds: doneSeconds.value })}`
+    : ""
+);
 const stepIndex = computed(() => Math.max(0, Number(props.payload?.step_index) || 0));
 const stepTotal = computed(() => Math.max(0, Number(props.payload?.step_total) || 0));
 const showStep = computed(() => stepTotal.value > 0 && stepIndex.value > 0);
@@ -261,14 +282,24 @@ function resolveRootElement(): HTMLElement | null {
 
 <template>
   <view ref="rootRef" class="guide-check-block" :class="{ 'guide-check-block--dark': dark, 'guide-check-block--pc': pc }">
-    <!-- 卡片左上角品牌署名：sani logo + SANI + 语音播报控制（与气泡里的完成态同一套观感） -->
-    <view class="guide-check-block__brand">
+    <!-- PC 车机版完成态顶部状态行：√ 已完成 耗时 X 秒。
+         取代原卡片左上角的品牌署名（sani logo + SANI + 播报按钮）；
+         仅 PC 版且已收尾（有时耗数据）时展示，生成中 / 历史消息不占行 -->
+    <view v-if="showDoneStatus" class="guide-check-block__done-status">
+      <text class="guide-check-block__done-check"> √ </text>
+      <text class="guide-check-block__done-text">
+        {{ doneStatusText }}
+      </text>
+    </view>
+    <!-- 非 PC 版（或未收尾）：保留原卡片左上角品牌署名（sani logo + SANI + 语音播报控制） -->
+    <view v-else class="guide-check-block__brand">
       <image class="guide-check-block__brand-icon" :src="saniIcon" mode="aspectFit" />
       <text class="guide-check-block__brand-text">
         SANI
       </text>
+      <!-- PC 车机版顶部品牌行不再挂播报按钮：统一沉到卡片底部免责声明行，与回答气泡同款 -->
       <view
-        v-if="ttsEnabled"
+        v-if="ttsEnabled && !pc"
         class="guide-check-block__action-btn guide-check-block__brand-tts"
         data-share-poster-ignore
         @tap.stop="onTtsTap"
@@ -391,6 +422,32 @@ function resolveRootElement(): HTMLElement | null {
         <image :src="iconShare" mode="aspectFit" class="guide-check-block__action-icon" />
       </view>
     </view>
+
+    <!-- PC 车机版底部页脚行：最左侧语音播报按钮 + 右侧「内容由AI生成，请核实重要信息」，
+         与回答气泡底部免责声明行（ai-bubble-v2__disclaimer-row）同款，补齐分步骤卡片底部缺的
+         播放入口与免责声明。仅 PC 版展示（历史消息 / 完成态 / 生成中都保留这行），
+         播放按钮仅在收尾可播报（showActions && ttsEnabled）时出现，生成中不占按钮位 -->
+    <view v-if="pc" class="guide-check-block__disclaimer-row">
+      <view
+        v-if="showActions && ttsEnabled"
+        class="guide-check-block__action-btn guide-check-block__disclaimer-tts"
+        @tap.stop="onTtsTap"
+      >
+        <view v-if="ttsLoading" class="guide-check-block__tts-spinner" />
+        <view v-else-if="ttsPlaying" class="guide-check-block__tts-wave">
+          <view
+            v-for="index in 4"
+            :key="index"
+            class="guide-check-block__tts-wave-bar"
+            :class="`guide-check-block__tts-wave-bar--${index}`"
+          />
+        </view>
+        <image v-else :src="iconRadioOn" mode="aspectFit" class="guide-check-block__action-icon" />
+      </view>
+      <text class="guide-check-block__disclaimer">
+        {{ t("ai-content-disclaimer") }}
+      </text>
+    </view>
   </view>
 </template>
 
@@ -411,6 +468,34 @@ function resolveRootElement(): HTMLElement | null {
   flex-direction: column;
   box-sizing: border-box;
   width: 100%;
+}
+
+/* PC 车机版完成态顶部状态行：√ 已完成 耗时 X 秒（取代品牌署名，见模板） */
+.guide-check-block__done-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20rpx;
+}
+
+.guide-check-block__done-check {
+  flex-shrink: 0;
+  color: #1a1a1a;
+  font-size: 26rpx;
+  line-height: 36rpx;
+  letter-spacing: 2px;
+  font-family: "Source Han Sans CN", sans-serif, "PingFang SC";
+}
+
+.guide-check-block__done-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+  color: #1a1a1a;
+  font-size: 26rpx;
+  line-height: 36rpx;
 }
 
 /* 左上角品牌署名：sani logo + SANI + 播报按钮（与气泡完成态同一套观感） */
@@ -849,6 +934,17 @@ function resolveRootElement(): HTMLElement | null {
 
 /* ===== PC 车机版：px 覆盖（设计稿 Ardot 747340735267872）===== */
 .guide-check-block--pc {
+  /* 完成态顶部状态行：28px 白 80%（与气泡完成态 / 免责声明同一档材质） */
+  .guide-check-block__done-status {
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .guide-check-block__done-check,
+  .guide-check-block__done-text {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 28px;
+    line-height: 34px;
+  }
   .guide-check-block__brand-icon {
     width: 26px;
     height: 26px;
@@ -870,6 +966,17 @@ function resolveRootElement(): HTMLElement | null {
     font-size: 32px !important;
     line-height: 44px !important;
   }
+  /* PC 版小结：基础 `:deep(p/li)` 的 30rpx !important 会压过 markdown 行内 32px，
+     这里补回与正文同尺寸的 px 覆盖，避免小结在车机上显得格外小 */
+  .guide-check-block__summary :deep(p),
+  .guide-check-block__summary :deep(li) {
+    font-size: 32px !important;
+    line-height: 44px !important;
+  }
+  .guide-check-block__summary-title {
+    font-size: 32px;
+    line-height: 44px;
+  }
   .guide-check-block__step-title {
     font-size: 30px;
     line-height: 40px;
@@ -890,6 +997,49 @@ function resolveRootElement(): HTMLElement | null {
   .guide-check-block__status {
     font-size: 24px;
     line-height: 32px;
+  }
+
+  /* PC 版底部页脚行：最左侧播报按钮 + 右侧免责声明，与回答气泡（ai-bubble-v2__disclaimer-row）同款 */
+  .guide-check-block__disclaimer-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .guide-check-block__disclaimer-tts {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+  }
+  .guide-check-block__disclaimer-tts .guide-check-block__action-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .guide-check-block__disclaimer-tts .guide-check-block__tts-spinner {
+    width: 24px;
+    height: 24px;
+    border-width: 3px;
+  }
+  .guide-check-block__disclaimer-tts .guide-check-block__tts-wave {
+    width: 28px;
+    height: 28px;
+    gap: 3px;
+  }
+  .guide-check-block__disclaimer-tts .guide-check-block__tts-wave .guide-check-block__tts-wave-bar {
+    width: 3px;
+    height: 20px;
+  }
+  .guide-check-block__disclaimer {
+    flex: 1;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 28px;
+    line-height: 34px;
+    text-align: right;
+    font-style: italic;
+    font-family: Inter;
+    font-weight: 400;
+    text-decoration-line: none;
   }
 }
 </style>

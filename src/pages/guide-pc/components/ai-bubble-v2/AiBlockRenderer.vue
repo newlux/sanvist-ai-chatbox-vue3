@@ -97,6 +97,11 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  /** PC 车机版完成态耗时（毫秒）：核对卡顶部显示「√ 已完成 耗时 X 秒」 */
+  durationMs: {
+    type: Number,
+    default: null,
+  },
 });
 
 const emit = defineEmits([
@@ -244,6 +249,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     :compact="compactGuideCard"
     :dark="dark"
     :pc="pc"
+    :duration-ms="durationMs"
     :tts-enabled="ttsEnabled"
     :tts-loading="ttsLoading"
     :tts-playing="ttsPlaying"
