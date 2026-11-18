@@ -703,7 +703,18 @@ export function extractDifyHistoryBlocks(value: unknown): DifyHistoryBlockData[]
       logger.warn("忽略历史中无法解析的协议块", { tag: match[1], error });
     }
   }
-  appendAnswer(source.slice(cursor));
+  /**
+   * 未闭合的协议标签：后端偶发只发 `<COMPONENT>` 不发 `</COMPONENT>`（如 voice 播报稿）。
+   * 正则只认成对标签，未闭合那段会落进「剩余正文」——整段 JSON 就被当正文渲染出来
+   * （气泡里出现 `<COMPONENT>{"scene":"guide","type":"voice",…}`）。
+   * 这里从标签起整段丢弃：协议内容是给机器读的，任何情况下都不该显示。
+   */
+  const tail = source.slice(cursor);
+  const danglingAt = tail.search(/<(SANVIST|ASK|GUIDE|COMPONENT|TIPS)>/i);
+  // 命中未闭合标签也算「命中过协议」：否则下面会回落成原文，JSON 照样泄漏
+  if (danglingAt >= 0) foundProtocol = true;
+  appendAnswer(danglingAt < 0 ? tail : tail.slice(0, danglingAt));
+
   const result: DifyHistoryBlockData[] = [];
   let report: ReturnType<typeof parseWorkReportTag> | undefined;
   /** 历史里的 `<REPORT_STYLE style="…">`：同样还原成听汇报入口卡（卡上带风格码） */

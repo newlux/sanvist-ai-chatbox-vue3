@@ -2,7 +2,9 @@
 import type { AskSlotOption, AskSlotPayload } from '@/api/chat/types';
 import type { ChatScene } from '@/utils/session-scene';
 
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue';
+
+import AiBlockRenderer from '@/components/ai-bubble-v2/AiBlockRenderer.vue';
 
 import heySaniUrl from '@/assets/img/hey-sani.svg';
 import taskPcIconCancel from '@/assets/img/task-pc-icon-cancel.svg';
@@ -41,6 +43,8 @@ import { stripOptionPrefix } from '@/utils/option-label';
 defineOptions({ name: 'TaskPcPage' });
 
 const chatScope = provideChatScope('task-pc');
+/** 块组件（图表 / 指标 / 参考来源 / 推荐问题 …）复用 task 页那一套，卡片是深色底，走深色稿 */
+provide('ai-bubble-dark', computed(() => true));
 const chatStore = useChatStore(chatScope);
 const realtimeTts = useRealtimeTts(chatScope);
 
@@ -89,13 +93,20 @@ const { voiceQueryActive, voiceLevel, startVoiceQuery, stopVoiceQuery, cancelVoi
   },
 });
 
-/** 有没有对话内容：决定渲染海报态还是对话态 */
+/** 有没有对话内容 */
 const hasMessages = computed(() => chatStore.messages.length > 0);
 
+/**
+ * 是否已经进入对话页：点欢迎帧的 logo 立刻切过去，不等第一条消息落地。
+ * 收音字幕要落在对话流里（下一条消息的位置），所以必须先让列表渲染出来。
+ */
+const chatOpen = ref(false);
+const inChat = computed(() => chatOpen.value || hasMessages.value);
+
 /** 胶囊只在对话态出现：海报态顶部不放浮层；对话态收音中也留着，用来显示「正在收听」 */
-const showCapsule = computed(() => hasMessages.value);
-/** 右下角 logo：收音中 / 有对话时常驻，是再次收音的入口 */
-const showDockLogo = computed(() => voiceQueryActive.value || hasMessages.value);
+const showCapsule = computed(() => inChat.value);
+/** 右下角 logo：收音中 / 对话态常驻，是再次收音的入口 */
+const showDockLogo = computed(() => voiceQueryActive.value || inChat.value);
 
 /** 光晕强度跟着麦克风音量走，静静地呼吸 */
 const glowStyle = computed(() => ({
@@ -108,24 +119,48 @@ const ttsSpeaking = computed(() => realtimeTts.playing.value);
 /**
  * 光晕的亮灭时序（需求口径）：
  * 点 logo 开始收音 → 亮；收音结束、思考中 → 灭；回答出现开始播报 → 再亮；播报结束 → 灭。
- * 海报态（还没有对话）保留设计稿里那层常驻的底部光晕，不受这条规则影响。
+ * 欢迎帧（还没进入对话）保留设计稿里那层常驻的底部光晕，不受这条规则影响。
  */
-const glowOn = computed(() => !hasMessages.value || voiceQueryActive.value || ttsSpeaking.value);
+const glowOn = computed(() => !inChat.value || voiceQueryActive.value || ttsSpeaking.value);
 
 /* ------------------------------ 消息渲染 ------------------------------ */
 
 type MessageRow = (typeof chatStore.messages)[number];
 
 /**
- * 只渲染设计稿里出现的块：正文 / 表格 / 图片 / 追问卡（ask-slot，选项胶囊单独渲染）。
- * 调度视图卡（gantt）按需求不展示；voice 只是播报稿，不进回答流程。
+ * 本页手写渲染的块：设计稿在这几类上定制过样式（大字号正文 / 表格 / 图片 / 选项胶囊 / 过程提示）。
+ * 其余要素（图表 / 指标 / 参考来源 / 推荐问题 / 视频 / 思考过程 / 错误提示）直接复用 task 页的块组件，
+ * 见 extraBlocks。
  */
+const CUSTOM_BLOCK_TYPES = new Set(['answer', 'tips', 'table', 'image', 'ask-slot']);
+
+/**
+ * 车机屏不展示的块：
+ * - voice：只是这一轮的播报稿，不进回答流程（播报链照旧读它）；
+ * - gantt：调度视图卡按需求不展示；
+ * - report-card / assistant-navigation：跳转类入口卡，车机端点了要开 WebView / 播报页，暂不接管；
+ * - guide-*：作业指导专属的步骤卡，任务协同不下发，避免误渲染出带按钮的空卡。
+ */
+const HIDDEN_BLOCK_TYPES = new Set([
+  'voice',
+  'gantt',
+  'report-card',
+  'assistant-navigation',
+  'guide-step',
+  'guide-lead',
+  'guide-suggestion',
+  'guide-check',
+]);
+
 function contentBlocks(message: MessageRow) {
-  return (message.blocks || []).filter((block) => {
-    if (block.type === 'gantt')
-      return false;
-    return block.type === 'answer' || block.type === 'table' || block.type === 'image' || block.type === 'ask-slot';
-  });
+  return (message.blocks || []).filter(block => !HIDDEN_BLOCK_TYPES.has(block.type));
+}
+
+/** 交给通用块组件渲染的那部分（与 task 页同一套 AiBlockRenderer） */
+function extraBlocks(message: MessageRow) {
+  return (message.blocks || []).filter(
+    block => !CUSTOM_BLOCK_TYPES.has(block.type) && !HIDDEN_BLOCK_TYPES.has(block.type),
+  );
 }
 
 /** 追问卡（选项胶囊）在车机屏上的展示数据 */
@@ -287,12 +322,48 @@ function cancelEdit() {
   editingText.value = '';
 }
 
+/**
+ * 协议标签源码（成对或未闭合）一律不显示。
+ * 正常解析不会留下这些源码，这里是车机屏的兜底：历史里已有的脏数据（后端偶尔不发
+ * `</COMPONENT>`）不得以 `<COMPONENT>{"scene":"guide",…}` 的形式出现在回答里。
+ */
+const PROTOCOL_SOURCE = /<(SANVIST|ASK|GUIDE|COMPONENT|TIPS)>[\s\S]*?(?:<\/\1>|$)/gi;
+
+function stripProtocolSource(text: string) {
+  return text.replace(PROTOCOL_SOURCE, '').trim();
+}
+
+/**
+ * voice 块的文本只用来播报：后端常把同一句播报稿也写进 answer 开头（「本轮的具体情况已经整理好。」
+ * 这类导语），task 页由 AiContentBlocks 的 stripVoiceFromAnswers 剔掉，本页自己拼正文，
+ * 不补这一步就会在回答最上面多出一行播报稿。
+ */
+function stripVoiceEcho(text: string, voices: string[]) {
+  if (!text || !voices.length)
+    return text;
+  let result = text;
+  voices.forEach((voiceText) => {
+    const index = result.indexOf(voiceText);
+    if (index >= 0)
+      result = result.slice(0, index) + result.slice(index + voiceText.length);
+  });
+  return result.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** voice 块里的播报稿文本（voice 块本身不渲染，只用来播报 + 从正文里剔重） */
+function voiceTexts(message: MessageRow) {
+  return (message.blocks || [])
+    .filter(block => block.type === 'voice')
+    .map(block => String(block.payload?.text || '').trim())
+    .filter(Boolean);
+}
+
 function answerText(message: MessageRow) {
-  return contentBlocks(message)
+  const text = stripProtocolSource(contentBlocks(message)
     .filter(block => block.type === 'answer')
     .map(block => String(block.payload?.content || ''))
-    .join('\n')
-    .trim();
+    .join('\n'));
+  return stripVoiceEcho(text, voiceTexts(message));
 }
 
 function tableBlock(message: MessageRow) {
@@ -316,13 +387,6 @@ function imageUrl(message: MessageRow) {
   return String(first?.url || '');
 }
 
-/** 「已完成 / 输出中」状态行 */
-function statusText(message: MessageRow) {
-  if (message.loading) return '正在输出';
-  if (message.interrupted) return '已停止';
-  return '✓ 已完成';
-}
-
 /** 耗时：与设计稿一致保留一位小数 */
 function durationText(message: MessageRow) {
   const ms = Number(message.durationMs || 0);
@@ -330,10 +394,29 @@ function durationText(message: MessageRow) {
   return `耗时${(ms / 1000).toFixed(2)}秒`;
 }
 
-/** 步骤行（调用Ai运营助手 / 拉取数据…）：接口下发的过程文案 */
-function stepTexts(message: MessageRow) {
-  const subtitle = String(message.processSubtitle || '').trim();
-  return subtitle ? [subtitle] : [];
+/**
+ * 过程提示（tips 块）：先显示，正文一出现就退场。
+ *
+ * 解析层本来就会在有最终回复时把 tips 块整块删掉（chatStreamParser 的 applyEventToBlocks /
+ * message_end），这里再按「正文是否已有内容」判一次：块还没被删的那一拍也不会和正文同时出现。
+ */
+function tipTexts(message: MessageRow) {
+  const blocks = message.blocks || [];
+  const hasAnswer = blocks.some(block => block.type === 'answer' && String(block.payload?.content || '').trim());
+  if (hasAnswer)
+    return [];
+  return blocks
+    .filter(block => block.type === 'tips')
+    .map(block => String(block.payload?.content || '').trim())
+    .filter(Boolean);
+}
+
+/** 推荐问题胶囊（suggestion 块）：点一条就当作一次新提问发出去，与 task 页同口径 */
+function onSuggestionTap(text: string) {
+  const question = String(text || '').trim();
+  if (!question || chatStore.isLoading)
+    return;
+  void sendMessage({ text: question });
 }
 
 function messageDomId(id: string) {
@@ -370,9 +453,14 @@ watch(
     chatStore.messages[chatStore.messages.length - 1]?.loading,
   ],
   () => {
-    if (hasMessages.value) scrollToBottom();
+    if (inChat.value) scrollToBottom();
   },
 );
+
+// 识别文字是往一条「输入框」里增长的：跟着滚到底，否则说着说着就被顶出可视区
+watch([liveText, voiceQueryActive], () => {
+  if (inChat.value) scrollToBottom();
+});
 
 /* ------------------------------ 收音 ------------------------------ */
 
@@ -384,10 +472,15 @@ function toggleVoice() {
   startVoiceQuery();
 }
 
-/** 海报 logo 只负责「开始收音」：收音中海报还在（压暗），别让误触把这一轮掐掉 */
+/**
+ * 欢迎帧 logo：先切到对话页，再开始收音。
+ * 识别文字要落在对话流里（下一条消息的位置），所以等列表渲染出来再开麦；
+ * 收音中已经在响了就别重开，免得把这一轮掐掉。
+ */
 function startListening() {
+  chatOpen.value = true;
   if (voiceQueryActive.value) return;
-  startVoiceQuery();
+  nextTick(() => startVoiceQuery());
 }
 
 onMounted(() => {
@@ -414,8 +507,8 @@ onBeforeUnmount(() => {
       </text>
     </view>
 
-    <!-- 海报态：hey, SANI 字标 → 大 logo → 随时为你而来 → 描述；点 logo 才开始收音 -->
-    <view v-if="!hasMessages" class="task-pc__idle">
+    <!-- 欢迎帧：hey, SANI 字标 → 大 logo → 随时为你而来 → 描述；点 logo 进入对话页并开始收音 -->
+    <view v-if="!inChat" class="task-pc__idle">
       <image class="task-pc__idle-hey" :src="heySaniUrl" mode="aspectFit" />
       <image class="task-pc__idle-logo" :src="logoUrl" mode="aspectFit" @click="startListening" />
       <text class="task-pc__idle-title">
@@ -483,18 +576,16 @@ onBeforeUnmount(() => {
           <!-- AI 回答：深色卡片 -->
           <template v-else>
             <view class="task-pc__ai-card">
-              <view class="task-pc__ai-status">
-                <text class="task-pc__ai-status-done">
-                  {{ statusText(message) }}
-                </text>
-                <text v-if="durationText(message)" class="task-pc__ai-status-time">
+              <view v-if="durationText(message)" class="task-pc__ai-status">
+                <text class="task-pc__ai-status-time">
                   {{ durationText(message) }}
                 </text>
               </view>
 
               <view class="task-pc__ai-body">
-                <text v-for="(step, index) in stepTexts(message)" :key="`step-${index}`" class="task-pc__ai-step">
-                  {{ step }}
+                <!-- 过程提示（tips）：只在生成期间出现，正式回复一到解析层就把它删掉 -->
+                <text v-for="(tip, index) in tipTexts(message)" :key="`tip-${index}`" class="task-pc__ai-step">
+                  {{ tip }}
                 </text>
 
                 <text v-if="answerText(message)" class="task-pc__ai-answer">
@@ -532,6 +623,17 @@ onBeforeUnmount(() => {
                   :src="imageUrl(message)"
                   mode="widthFix"
                 />
+
+                <!-- 其余要素与 task 页同一套块组件：图表 / 指标 / 参考来源 / 推荐问题 / 视频 / 思考过程 / 错误提示 -->
+                <view v-if="extraBlocks(message).length" class="task-pc__ai-extra">
+                  <AiBlockRenderer
+                    v-for="block in extraBlocks(message)"
+                    :key="block.id"
+                    :block="block"
+                    :loading="message.loading"
+                    @suggestion-tap="onSuggestionTap"
+                  />
+                </view>
 
                 <!-- 追问卡：选项胶囊，点一项即当作一次新提问发出去（与任务协同页同一套口径） -->
                 <view v-if="askSlotView(message)" class="task-pc__ask">
@@ -579,18 +681,20 @@ onBeforeUnmount(() => {
           </template>
         </view>
 
+        <!-- 收音中：识别出来的文字直接长成一条用户气泡（与真实提问同一套样式），说完自动发出去 -->
+        <view v-if="voiceQueryActive && liveText" class="task-pc__row task-pc__row--user">
+          <view class="task-pc__bubble">
+            <text class="task-pc__bubble-text">
+              {{ liveText }}
+            </text>
+          </view>
+        </view>
+
         <!-- 滚动锚点：两个交替使用 -->
         <view id="task-pc-anchor-a" class="task-pc__anchor" />
         <view id="task-pc-anchor-b" class="task-pc__anchor" />
       </view>
     </scroll-view>
-
-    <!-- 收音实时字幕 -->
-    <view v-if="voiceQueryActive && liveText" class="task-pc__live">
-      <text class="task-pc__live-text">
-        {{ liveText }}
-      </text>
-    </view>
 
     <!-- 底部蓝色光晕：只在收音中 / 播报中亮起（见 glowOn），思考中保持熄灭 -->
     <view class="task-pc__glow" :class="{ 'is-on': glowOn }" />
@@ -828,14 +932,10 @@ onBeforeUnmount(() => {
   margin-bottom: 12px;
 }
 
-.task-pc__ai-status-done,
 .task-pc__ai-status-time {
   font-size: 28px;
   line-height: 34px;
   color: var(--task-pc-text);
-}
-
-.task-pc__ai-status-time {
   opacity: 0.72;
 }
 
@@ -850,6 +950,56 @@ onBeforeUnmount(() => {
   line-height: 39px;
   color: var(--task-pc-text);
   opacity: 0.86;
+}
+
+/* 通用块容器：图表 / 指标 / 参考来源 / 推荐问题 / 视频 / 思考过程 / 错误提示，与 task 页同一套组件。
+   这里只补两件事：
+   1. 统一竖向间距；
+   2. 把仍是浅色硬编码的块（指标 / 错误 / 工具调用 / 状态）改成深色卡里的材质 ——
+      这几个组件没有 dark 分支，白底在车机深色卡里像贴上去的纸片 */
+.task-pc__ai-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.task-pc__ai-extra :deep(.metric-block),
+.task-pc__ai-extra :deep(.error-block),
+.task-pc__ai-extra :deep(.tool-call-block) {
+  padding: 24px 28px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 6%);
+  color: var(--task-pc-text);
+}
+
+.task-pc__ai-extra :deep(.metric-block__label),
+.task-pc__ai-extra :deep(.metric-block__unit),
+.task-pc__ai-extra :deep(.metric-block__trend),
+.task-pc__ai-extra :deep(.error-block__message),
+.task-pc__ai-extra :deep(.tool-call-block__title),
+.task-pc__ai-extra :deep(.tool-call-block__name),
+.task-pc__ai-extra :deep(.tool-call-block__args) {
+  color: rgb(255 255 255 / 62%);
+}
+
+.task-pc__ai-extra :deep(.metric-block__value) {
+  color: var(--task-pc-text);
+}
+
+.task-pc__ai-extra :deep(.status-block) {
+  border: 1px solid rgb(255 255 255 / 12%);
+  background: rgb(255 255 255 / 8%);
+  color: rgb(255 255 255 / 70%);
+}
+
+/* 图表：组件用 aspect-ratio 4:3 撑高度，车机卡片宽 1600+ 时会算出上千像素高、一张图占满屏，
+   这里改成固定高度（echarts 按容器尺寸重新布局） */
+.task-pc__ai-extra :deep(.chart-block__canvas) {
+  height: 380px;
+  min-height: 0;
+  aspect-ratio: auto;
 }
 
 .task-pc__ai-answer {
@@ -1026,29 +1176,10 @@ onBeforeUnmount(() => {
   height: 1px;
 }
 
-/* ------------------------------ 收音字幕 ------------------------------ */
-/* 收音时识别出来的文字：套一个带边框的胶囊，和下方 AI 回答卡片（#212834 深色大卡）区分开。
-   底色沿用顶部状态胶囊 #262438，边框只做一条浅描边，压在光晕之上也不抢内容 */
-.task-pc__live {
-  position: absolute;
-  bottom: 260px;
-  left: 50%;
-  z-index: 4;
-  box-sizing: border-box;
-  max-width: 1400px;
-  padding: 18px 36px;
-  border: 1px solid rgb(255 255 255 / 20%);
-  border-radius: 28px;
-  background: rgb(38 36 56 / 88%);
-  transform: translateX(-50%);
-}
+/* ------------------------------ 收音识别文本 ------------------------------ */
+/* 识别中的文字直接复用用户气泡（.task-pc__bubble + .task-pc__bubble-text），
+   视觉上就是「这条提问马上要发出去」，发送后由真实消息无缝接上，没有独立样式 */
 
-.task-pc__live-text {
-  font-size: 32px;
-  line-height: 46px;
-  color: rgb(255 255 255 / 88%);
-  text-align: center;
-}
 
 /* ------------------------------ 底部光晕 ------------------------------ */
 /**
