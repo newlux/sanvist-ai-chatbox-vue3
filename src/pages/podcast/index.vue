@@ -1508,6 +1508,7 @@ onBeforeUnmount(() => {
       'podcast-page--mix-fold-18': isMixFold18,
       'podcast-page--preference-dark': preferenceDark,
       'podcast-page--dark': pageDark,
+      'podcast-page--ios': systemStore.isIOS,
     }"
     :style="safeAreaStyle"
   >
@@ -1749,6 +1750,13 @@ onBeforeUnmount(() => {
   /* 浅色稿 195:1927 画板底色 #FAFAFA */
   background: #fafafa;
   overflow: hidden;
+}
+
+/* iOS 专用：播报头像画布（scale 1.2）顶部还会越过内容区约 14px，落到这一层上。
+   iOS 会把这段外溢连同三角形光晕一起裁平，安卓不会；只放开 iOS，安卓保持原样。
+   播报头部自身 z-index: 5，放开的只是「被裁掉」的部分，不会盖住返回按钮的可点区域。 */
+.podcast-page--ios .podcast-page__chat {
+  overflow: visible;
 }
 
 /* 切到洞察时，播报内容原地淡出：只改透明度，保证头像形变起点不位移 */

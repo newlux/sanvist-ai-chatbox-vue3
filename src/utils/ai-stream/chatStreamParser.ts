@@ -355,10 +355,20 @@ function reduceEventToBlocks(
       let rebuilt: AiBlock[] = buildInitialBlocks();
       let assistantScene: string | undefined;
       let languageSwitch: string | undefined;
+      let speechText: string | undefined;
       for (const item of sourceEvents) {
         const update = applyEventToBlocks(rebuilt, item);
         if (update.assistantScene) assistantScene = update.assistantScene;
         if (update.languageSwitch) languageSwitch = update.languageSwitch;
+        // 嵌套的 speech（voice 导语只在 outputs.answer 里出现时）要把播报稿带出重建，
+        // 否则这一轮的快照丢了 speechText，导语只剩显示、不播报。
+        // 多条导语按 streamConsumer 同一规则合稿（新稿以旧稿为前缀 → 覆盖，否则追加），
+        // 只带最后一条会被外层「非前缀即追加」再拼一次，播报稿就多出一段。
+        if (update.speechText) {
+          speechText = speechText && !update.speechText.startsWith(speechText)
+            ? speechText + update.speechText
+            : update.speechText;
+        }
         rebuilt = update.blocks;
       }
       // 重建序列没有任何可展示块（如 outputs.answer 只剩播报层）时保留原块，避免丢内容
@@ -369,6 +379,7 @@ function reduceEventToBlocks(
         receivedContent: true,
         ...(assistantScene ? { assistantScene } : {}),
         ...(languageSwitch ? { languageSwitch } : {}),
+        ...(speechText ? { speechText } : {}),
       };
     }
     case "message_end":

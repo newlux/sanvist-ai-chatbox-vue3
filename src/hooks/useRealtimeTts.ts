@@ -24,18 +24,29 @@ function guessAudioMime(base64: string) {
 }
 
 function extractAnswerText(message: UiChatMessage, stepId = ""): string {
+  const blocks = message.blocks || [];
+  /**
+   * 分步骤卡（guide-check）消息：播报语义是「念卡片当前步骤内容」，不是 voice 导语。
+   * 新手（分步骤）模式下消息上残留的 speechText 是老师傅导语（`<COMPONENT type=voice>`），
+   * 若按 speech 短路返回，会把导语念出来、且永远轮不到下面的 guide-check 步骤兜底——
+   * 表现为「播报 voice 导语、切换步骤也念同一句」。
+   * 这类消息的 voice 导语在 sendAiFlow 已按新手身份过滤（见 useChatSend filterNoviceVoice），
+   * 但消息对象上的 speechText 可能来自历史/其他链路，这里统一跳过，只念步骤卡内容。
+   * 仅按「消息含分步骤卡」判断，不影响首页 / 任务协同的普通 voice 播报。
+   */
+  const hasStepCards = blocks.some(block => block.type === "guide-check" || block.type === "guide-step");
   /**
    * 本轮下发了播报稿（`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>`）：
    * 只念它，标签外的正文不参与播报 —— 与流式听播（useChatSend 的 answer delta）同一口径。
+   * 分步骤卡消息除外（见上），否则步骤卡内容永远播不出来。
    */
   const speech = String(message.speechText || "").trim();
-  if (speech) return speech;
+  if (speech && !hasStepCards) return speech;
   /**
    * 没有播报稿就不播：产品口径是「只念 `<COMPONENT type=voice>` 的 data.text」，
    * 不再兜底把气泡正文（answer 块 / message.content）整段念一遍。
    * 下面只保留「要念的文本不在正文里」的卡片台词。
    */
-  const blocks = message.blocks || [];
   /**
    * 开场引导卡（guide-lead，scene=guide / type=lead）：「你好，我是 SANI…」这段正文是整块下发的，
    * 不经过 answer delta（流式喂数拿不到），只存在于卡片的 text 上。

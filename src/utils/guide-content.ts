@@ -2,7 +2,9 @@ import { openImagePreview } from "@/utils/image-preview";
 
 /** DOM id 里只留 [A-Za-z0-9_-]：id 会被拼进 `#id` 选择器，点号、冒号等字符会破坏选择器 */
 function sanitizeDomId(value: unknown): string {
-  return String(value ?? "").trim().replace(/[^\w-]/g, "_");
+  return String(value ?? "")
+    .trim()
+    .replace(/[^\w-]/g, "_");
 }
 
 /**
@@ -58,7 +60,7 @@ export function openGuideResource(value: unknown) {
 
   uni.setClipboardData({
     data: url,
-    success: () => uni.showToast({ title: "链接已复制", icon: "none" }),
+    success: () => uni.showToast({ title: "文件过大，请复制链接后在浏览器打开", icon: "none" }),
   });
 }
 
@@ -71,7 +73,8 @@ export function copyGuideResource(value: unknown) {
   if (!url) return;
   uni.setClipboardData({
     data: url,
-    success: () => uni.showToast({ title: "链接已复制", icon: "none", duration: 1500 }),
+    success: () =>
+      uni.showToast({ title: "文件过大，请复制链接后在浏览器打开", icon: "none", duration: 1500 }),
     fail: () => uni.showToast({ title: "复制失败，请重试", icon: "none", duration: 1500 }),
   });
 }

@@ -1,7 +1,7 @@
 import type { NativePhoneInfo } from "@/utils/platform/mpaas";
 
 import { createLogger } from "@/utils/logger";
-import { getPhoneInfo, isMpaasReady } from "@/utils/platform/mpaas";
+import { getPhoneInfo, isMpaasReady, waitForMpaas } from "@/utils/platform/mpaas";
 
 const logger = createLogger("landscape-device");
 
@@ -46,9 +46,11 @@ const NO_LANDSCAPE_TOKENS = new Set([
   "coocaa",
   "ik3576s_u",
   // 竖屏一体机（model ZC-H358S / device·product rk3588s_t / Android 13）
-  // 只收机型与设备代号，不收 brand rockchip —— 那是芯片厂，会误伤其它 RK3588 板子
   "zc-h358s",
   "rk3588s_t",
+  // brand rockchip：RK3588 系板子的芯片厂标识。机型 / 设备代号没对齐的批次靠它兜底，
+  // 代价是会连带命中其它 RK3588 板子 —— 业务确认这批机器统一按横屏画布处理，故一并纳入
+  "rockchip",
 ]);
 
 /** 参与比对的字段：品牌 / 厂商 / 机型 / 设备代号 / 产品名 */
@@ -68,13 +70,28 @@ let phoneInfoTask: Promise<NativePhoneInfo | null> | null = null;
 /** 已经拿到的设备信息；还没回来（未开始 / 请求中）是 undefined，取不到是 null */
 let phoneInfoValue: NativePhoneInfo | null | undefined;
 
-/** 预热设备信息（App 启动时调一次，调度视图判定就不用再等原生调用） */
+/** 预热时最多等 bridge 注入多久（App 启动那一拍桥常常还没到） */
+const PHONE_INFO_BRIDGE_WAIT_MS = 600;
+
+/**
+ * 预热设备信息（App 启动时调一次，调度视图判定就不用再等原生调用）。
+ *
+ * 两个坑都在这：
+ * 1. bridge 是异步注入的，App 启动那一刻直接调 getPhoneInfo 会失败（返回 null），
+ *    所以先等 bridge 就绪再取；
+ * 2. **拿到 null 不能缓存**。之前这里把 null 也当结果永久缓存下来，之后横屏判定
+ *    永远认为「这是普通手机」—— 表现就是智慧屏 / 一体机明明在机型表里，
+ *    甘特图还是按横屏容器打开。取不到就把任务清掉，下次进调度视图重新取一次。
+ */
 export function warmPhoneInfo() {
   if (!phoneInfoTask) {
-    phoneInfoTask = getPhoneInfo().then((info) => {
+    phoneInfoTask = (async () => {
+      if (!isMpaasReady()) await waitForMpaas(PHONE_INFO_BRIDGE_WAIT_MS);
+      const info = await getPhoneInfo();
       phoneInfoValue = info;
+      if (!info) phoneInfoTask = null;
       return info;
-    });
+    })();
   }
   return phoneInfoTask;
 }
@@ -102,7 +119,25 @@ export async function resolveNativeLandscapeDevice(timeoutMs = DEVICE_DECISION_T
     warmPhoneInfo(),
     new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs)),
   ]);
-  return isNativeLandscapeDevice(info);
+  const nativeLandscape = isNativeLandscapeDevice(info);
+  /**
+   * 真机排查专用：方向判定是在**主工程**做的，离线包容器内部看不到，
+   * 用户只看得到「甘特图还是横的」。这条日志把三个关键字段一起打出来，
+   * 配合 `[gantt-offline] 离线包：开始打开甘特图` 里的 landscape 值就能定位是
+   * 「机型没命中」还是「宿主没按 landscape 参数转屏」。用 console.log 而不是 logger，
+   * 生产产物里 logger.info 会被日志级别过滤掉。
+   */
+  console.log("[landscape-device] 原生机型判定", {
+    nativeLandscape,
+    model: info?.model,
+    device: info?.device,
+    product: info?.product,
+    brand: info?.brand,
+    hasInfo: Boolean(info),
+    // 当前 WebView 的宽高比：宽度 > 高度说明容器本身就是横的（设备物理横屏 / 宿主没转）
+    viewport: typeof window === "undefined" ? "" : `${window.innerWidth}x${window.innerHeight}`,
+  });
+  return nativeLandscape;
 }
 
 /**

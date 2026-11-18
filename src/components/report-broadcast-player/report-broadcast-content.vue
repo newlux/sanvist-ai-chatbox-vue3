@@ -40,6 +40,8 @@ const { t } = useI18n();
  */
 const systemStore = useSystemStore();
 const isDark = computed(() => systemStore.isDark);
+/** iOS 裁剪口径与安卓不同，头像画布的外溢光晕要单独放开（见样式里的 --ios 块） */
+const isIOS = computed(() => systemStore.isIOS);
 /**
  * 头像位动图：深浅各一套 tell（light 480×480 / dark 600×600 画布，图案约占画布 40.5%、居中），
  * 与对话页灵动岛「回答 / 播报」用的是同一组素材。
@@ -250,6 +252,7 @@ onBeforeUnmount(() => {
     :class="{
       'report-broadcast-content--dark': isDark,
       'report-broadcast-content--light': !isDark,
+      'report-broadcast-content--ios': isIOS,
       'report-broadcast-content--reading': !qaVisible && !voiceRecording,
     }"
   >
@@ -363,6 +366,17 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
+}
+
+/**
+ * iOS 专用：头像画布（浅色 480rpx / 深色 600rpx，scale 1.2）以头像位中心摆放，
+ * 顶部会溢出内容区约 64px，三角形外圈的动态光晕正好落在这段外溢区域里。
+ * Android WebView 不按 overflow:hidden 的祖先盒裁这层，光晕完整；
+ * iOS WebKit 会沿着内容区上边缘把它切平（截图里的平口）。
+ * 这里只放开 iOS 的裁剪：字幕区自己带 overflow:hidden，正文不会被带出来。
+ */
+.report-broadcast-content--ios {
+  overflow: visible;
 }
 /* 底部提示：内容由AI生成，请核实重要信息。
    与对话页输入栏下方那句 `.chat-input__footer` 同一套排版（12px / #BABABA / 居中 / 距底 15px），
