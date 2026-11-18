@@ -281,9 +281,6 @@ onBeforeUnmount(() => {
     :class="{ 'welcome--leaving': leaving, 'welcome--landed': landed, 'welcome--dark': dark }"
     :style="safeAreaStyle"
   >
-    <!-- 底部渐变带的水印底纹（back-triangle-mark）：高度跟渐变带一致，宽度铺满 -->
-    <view class="welcome__bottom-mark" aria-hidden="true" />
-
     <view class="welcome__hero">
       <!-- 标题行「Hey,SANI」：直接用设计导出的整行字标 hey-sani.svg（126×37），深浅色同一张 -->
       <view class="welcome__title">
@@ -502,34 +499,6 @@ onBeforeUnmount(() => {
   // 中间那枚半圆只有深色模式才铺（浅色按要求去掉白底），声明见下方 .welcome--dark::before
 }
 
-/**
- * 底部渐变带的水印底纹（back-triangle-mark.png，浅灰三角、自带透明度）。
- * 范围 = 渐变带本身（176rpx + 安全区）。
- *
- * 素材是按 1920×1080 的画布出的一整幅（1994×906，横跨整个 1920 宽）。
- * 这里要的就是「整幅压进这一条带」的效果：`100% 100%` —— 横向 1994 → 视口宽
- * （左右两边一起往中间压），纵向 906 → 带高，不裁切、不留空。
- * 所以三角会跟着横向压窄，这是 1920 稿整体缩到手机宽度的正常形变，不是素材被裁。
- *
- * 注意：不要再改成 `xxx% auto` —— 那会变成「等比放大后居中裁左右」，
- * 只露中间一块，和设计要的「整幅挤压」不是一回事。
- * 深色模式沿用同一张（透明度自带，叠在深蓝渐变上同样可见）。
- */
-.welcome__bottom-mark {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: -1;
-  height: 176rpx;
-  height: calc(176rpx + env(safe-area-inset-bottom));
-  background-image: url("@/assets/img/back-triangle-mark.png");
-  background-repeat: no-repeat;
-  background-position: center bottom;
-  background-size: 100% 100%;
-  pointer-events: none;
-}
-
 /* 起飞态：底色让位（下面的对话页露出来），文字与输入条先淡出，只有 logo 继续往上滑 */
 .welcome--leaving {
   background: transparent;
@@ -545,8 +514,7 @@ onBeforeUnmount(() => {
 .welcome--leaving .welcome__nav,
 .welcome--leaving .welcome__caption,
 .welcome--leaving .welcome__composer,
-.welcome--leaving .welcome__disclaimer,
-.welcome--leaving .welcome__bottom-mark {
+.welcome--leaving .welcome__disclaimer {
   opacity: 0;
   transition: opacity 240ms ease;
 }
@@ -962,16 +930,6 @@ onBeforeUnmount(() => {
 /* 起飞时深色那枚半圆也一起收掉（优先级要压过上面的 .welcome--dark::before） */
 .welcome--dark.welcome--leaving::before {
   content: none;
-}
-
-/* 底部底纹反相 + 提亮：素材是「纯黑三角 + 8% 左右的透明度」，
-   浅底上是压深一点点，深底上（#0D0D0D / #0B6EDA）等于没有。
-   invert 后变成同透明度的白三角；单层 8% 在深蓝上仍偏淡，所以同一张再叠一层，
-   合成后约 15%（1 − 0.92²），亮度差不多翻倍。要更亮就再叠一层。
-   注意：白三角再套 brightness 是没用的（255 已经到顶），只能靠叠层加透明度 */
-.welcome--dark .welcome__bottom-mark {
-  filter: invert(1);
-  background-image: url("@/assets/img/back-triangle-mark.png"), url("@/assets/img/back-triangle-mark.png");
 }
 
 /* 标题行深色稿不需要额外覆盖：hey-sani.svg 深浅色共用同一张 */

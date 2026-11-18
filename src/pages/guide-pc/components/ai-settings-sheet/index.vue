@@ -192,6 +192,9 @@ function selectLanguage(value: AppLanguage) {
              写回走 settingsStore.setDialogueMode，分段样式复用 .settings-sheet__segment-item--text -->
       </view>
 
+      <!-- 品牌署名：固定在「语言」下方一行，属于品牌名，中英文都不翻译 -->
+      <text class="settings-sheet__powered">Powered by IROOTECH</text>
+
       <!-- 设计稿 54:954：《个人信息清单》《三方信息共享清单》14px Medium #1166D6
            暂时隐藏，需要恢复时取消注释即可（样式 .settings-sheet__links 保留） -->
       <!-- <text class="settings-sheet__links">{{ t("settings-privacy-links") }}</text> -->
@@ -359,6 +362,17 @@ function selectLanguage(value: AppLanguage) {
   flex-shrink: 0;
 }
 
+/* 品牌署名：语言行下面一行 12px（24rpx）灰字，居中；
+   与卡片二间距 16px（32rpx），行高 17px（34rpx） */
+.settings-sheet__powered {
+  margin-top: 32rpx;
+  color: #8e8e8e;
+  font-size: 24rpx;
+  font-weight: 400;
+  line-height: 34rpx;
+  text-align: center;
+}
+
 /* 设计稿 54:954：14px（28rpx）/ Medium(500) / #1166D6，行高 20px（40rpx），
    与卡片二间距 20px（40rpx），左对齐 */
 .settings-sheet__links {
@@ -390,6 +404,11 @@ function selectLanguage(value: AppLanguage) {
 
   .settings-sheet__label {
     color: #ffffff;
+  }
+
+  // 品牌署名：深底上用一档更暗的灰，不和正文抢
+  .settings-sheet__powered {
+    color: #6b6b6b;
   }
 
   // 记忆 / 纯净模式 / 外观 / 声音 / 语言 / 对话 / 箭头都是纯黑矢量，深底下反相成白

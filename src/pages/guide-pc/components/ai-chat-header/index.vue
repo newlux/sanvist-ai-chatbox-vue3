@@ -664,6 +664,11 @@ onBeforeUnmount(() => {
             />
           </view>
 
+          <!-- 品牌署名：新建对话按钮正下方一行，属于品牌名，中英文都不翻译 -->
+          <view class="history-drawer__powered">
+            <text class="history-drawer__powered-text">Powered by IROOTECH</text>
+          </view>
+
           <view v-if="editingMode" class="history-drawer__multi-footer">
             <view class="history-drawer__multi-btn" @tap="cancelMultiSelect">
               <text class="history-drawer__multi-btn-text">
@@ -1582,8 +1587,23 @@ onBeforeUnmount(() => {
   height: 52rpx;
   flex-shrink: 0;
 }
+/* 品牌署名：新建对话按钮下面一行 12px（24rpx）灰字，整行水平居中；
+   按钮与 footer 之间已有 18rpx，这里只补到抽屉底部的 18rpx 间距 */
+.history-drawer__powered {
+  display: flex;
+  justify-content: center;
+  padding-bottom: 18rpx;
+  text-align: center;
+}
+.history-drawer__powered-text {
+  color: #999999;
+  font-size: 24rpx;
+  font-weight: 400;
+  line-height: 34rpx;
+}
 .history-drawer--batch-delete .history-drawer__toolbar,
-.history-drawer--batch-delete .history-drawer__footer {
+.history-drawer--batch-delete .history-drawer__footer,
+.history-drawer--batch-delete .history-drawer__powered {
   display: none;
 }
 /* 设计稿 309:3071：136×44（272×88rpx）/ 圆角 10px（20rpx）/ 白底 + 1px（2rpx）#E0E0E0 描边 */
@@ -1892,6 +1912,11 @@ onBeforeUnmount(() => {
 
   .history-drawer__new-conversation-item-label {
     color: #ffffff;
+  }
+
+  // 品牌署名：深底上用一档灰，不和按钮文案抢
+  .history-drawer__powered-text {
+    color: #8f8f8f;
   }
 
   // 加号 / 齿轮图标都是深色线条，深底反相成白（1193:3859 / 1193:3879）

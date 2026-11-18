@@ -815,9 +815,6 @@ onBeforeUnmount(() => {
     }"
     :style="inputLiftStyle"
   >
-    <!-- 底部渐变带的水印底纹（back-triangle-mark）：范围与 ::before 的渐变一致 -->
-    <view class="chat-input__bottom-mark" aria-hidden="true" />
-
     <!-- 键盘弹起时的空白区兜底：点一下收键盘，否则编辑识别结果时没有退出口 -->
     <view
       v-if="showKeyboardMask"
@@ -1236,47 +1233,9 @@ onBeforeUnmount(() => {
   }
 }
 
-/**
- * 底部渐变带的水印底纹（back-triangle-mark.png，浅灰三角、自带透明度）。
- * 范围与 ::before 的渐变层完全重合：容器整条高度。
- *
- * 素材是按 1920×1080 的画布出的一整幅（1994×906，横跨整个 1920 宽）。
- * 这里要的就是「整幅压进这一条带」的效果：`100% 100%` —— 横向 1994 → 视口宽
- * （左右两边一起往中间压），纵向 906 → 容器高，不裁切、不留空。
- *
- * 注意：不要再改成 `xxx% auto` —— 那会变成「等比放大后居中裁左右」，
- * 只露中间一块，和设计要的「整幅挤压」不是一回事。
- * 排在 ::before 之后的同级节点 → 压在渐变之上、输入栏与提示文字之下。
- */
-.chat-input__bottom-mark {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 100%;
-  background-image: url("@/assets/img/back-triangle-mark.png");
-  background-repeat: no-repeat;
-  background-position: center bottom;
-  background-size: 100% 100%;
-  pointer-events: none;
-}
-
-/* 录音面板态整条让位给面板，底纹一起收掉 */
-.chat-input--voice-panel-open .chat-input__bottom-mark {
-  display: none;
-}
-
 /* 深色：同一层的范围不变，只换色（上透明 → 底部实色 #0B6EDA），比浅色那档更沉 */
 .chat-input--dark::before {
   background-image: linear-gradient(180deg, rgba(11, 110, 218, 0) 0%, #0b6eda 100%);
-}
-
-/* 底部底纹反相 + 提亮：素材是「纯黑三角 + 8% 左右的透明度」，
-   深底（#0D0D0D / #0B6EDA）上几乎看不见；invert 后是白三角，
-   单层仍偏淡，同一张再叠一层后合成约 15%（1 − 0.92²），亮度差不多翻倍 */
-.chat-input--dark .chat-input__bottom-mark {
-  filter: invert(1);
-  background-image: url("@/assets/img/back-triangle-mark.png"), url("@/assets/img/back-triangle-mark.png");
 }
 
 /* 深色下中间那枚半圆与浅色同一口径（62% 白 / 即 #ffffff9e）：压在 #0B6EDA 的渐变上成一团柔光 */
