@@ -1,0 +1,278 @@
+<script setup lang="ts">
+import type {
+  AskSlotOption,
+  AskSlotPayload,
+  AskSlotSubmitPayload,
+  AssistantNavigationAction,
+  AssistantNavigationPayload,
+  GanttViewPayload,
+  GuideStepPayload,
+  GuideStepSelectEvent,
+} from "@/api/chat/types";
+import AnswerBlock from "./blocks/AnswerBlock.vue";
+import AskSlotBlock from "./blocks/AskSlotBlock.vue";
+import AssistantNavigationBlock from "./blocks/AssistantNavigationBlock.vue";
+import ChartBlock from "./blocks/ChartBlock.vue";
+import ErrorBlock from "./blocks/ErrorBlock.vue";
+import GanttBlock from "./blocks/GanttBlock.vue";
+import GuideCheckBlock from "./blocks/GuideCheckBlock.vue";
+import GuideImageBlock from "./blocks/GuideImageBlock.vue";
+import GuideLeadBlock from "./blocks/GuideLeadBlock.vue";
+import GuideSourceBlock from "./blocks/GuideSourceBlock.vue";
+import GuideStepBlock from "./blocks/GuideStepBlock.vue";
+import GuideSuggestionBlock from "./blocks/GuideSuggestionBlock.vue";
+import GuideVideoBlock from "./blocks/GuideVideoBlock.vue";
+import MetricBlock from "./blocks/MetricBlock.vue";
+import ReportCardBlock from "./blocks/ReportCardBlock.vue";
+import StatusBlock from "./blocks/StatusBlock.vue";
+import SuggestionBlock from "./blocks/SuggestionBlock.vue";
+import TableBlock from "./blocks/TableBlock.vue";
+import ThinkBlock from "./blocks/ThinkBlock.vue";
+import ToolCallBlock from "./blocks/ToolCallBlock.vue";
+import VoiceBlock from "./blocks/VoiceBlock.vue";
+
+defineOptions({
+  name: "AiBlockRenderer",
+});
+
+defineProps({
+  block: {
+    type: Object,
+    required: true,
+  },
+  forceThinkingExpanded: {
+    type: Boolean,
+    default: false,
+  },
+  embedded: {
+    type: Boolean,
+    default: false,
+  },
+  loading: {
+    type: Boolean,
+    default: false,
+  },
+  /**
+   * 卡片在 DOM 上的 id 覆盖值（默认用 block.id）。
+   * 核对卡由消息列表独立渲染，block id 只按内容生成、多轮之间会重复，
+   * 消息列表会传入「并进消息 id」后的唯一 id，滚动定位才能指到是哪一轮的卡。
+   */
+  domId: {
+    type: String,
+    default: "",
+  },
+  /** 核对卡底部动作区：生成中 / 被中断时不展示 */
+  showCardActions: {
+    type: Boolean,
+    default: true,
+  },
+  /** 核对卡精简版：不画动作区、状态行、参考来源（作业协同 / 作业指导页用） */
+  compactGuideCard: {
+    type: Boolean,
+    default: false,
+  },
+  /** 播报状态（由消息列表按这一轮消息透传，卡片只负责画图标） */
+  ttsEnabled: {
+    type: Boolean,
+    default: false,
+  },
+  ttsLoading: {
+    type: Boolean,
+    default: false,
+  },
+  ttsPlaying: {
+    type: Boolean,
+    default: false,
+  },
+  /**
+   * 深色：气泡内部由 ai-bubble-dark provide 管，这个开关是给「独立于气泡」的卡片用的
+   * （消息列表里单独渲染的调度视图入口卡，见 ai-message-list 的 ganttBlocks）。
+   */
+  dark: {
+    type: Boolean,
+    default: false,
+  },
+  /** PC 车机版：独立于气泡的卡片据此用 px 覆盖（默认关） */
+  pc: {
+    type: Boolean,
+    default: false,
+  },
+  /** PC 车机版完成态耗时（毫秒）：核对卡顶部显示「√ 已完成 耗时 X 秒」 */
+  durationMs: {
+    type: Number,
+    default: null,
+  },
+});
+
+const emit = defineEmits([
+  "suggestion-tap",
+  "ask-slot-open",
+  "ask-slot-pick",
+  "ask-slot-submit",
+  "assistant-navigation-open",
+  "assistant-navigation-confirm",
+  "guide-step-open",
+  "guide-check-step-select",
+  "guide-check-finish",
+  "card-ready",
+  "gantt-open",
+  "tts-click",
+  "copy-click",
+  "share-click",
+]);
+
+function onSuggestionTap(suggestion: unknown) {
+  emit("suggestion-tap", suggestion);
+}
+
+function onAskSlotOpen(payload: AskSlotPayload) {
+  emit("ask-slot-open", payload);
+}
+
+/** 内联追问卡点选项：整条塞回页面，由页面把选项文字再发一次给 chat-messages */
+function onAskSlotPick(payload: { slot: AskSlotPayload; option: AskSlotOption }) {
+  emit("ask-slot-pick", payload);
+}
+
+/** 内联追问卡（多选）确认提交：与底部抽屉 submit 同一份 payload */
+function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
+  emit("ask-slot-submit", payload);
+}
+
+/** 跳转确认块（配件助手）：块自身不占位，只在 auto_open 时把 payload 往上抛给页面开弹框 */
+function onAssistantNavigationOpen(payload: AssistantNavigationPayload) {
+  emit("assistant-navigation-open", payload);
+}
+
+/** 内联跳转卡（维修助理）选了某个进入方式：整包继续上抛，由页面落盘上下文并跳转 */
+function onAssistantNavigationConfirm(payload: AssistantNavigationPayload, action: AssistantNavigationAction) {
+  emit("assistant-navigation-confirm", payload, action);
+}
+
+/** 点调度视图入口卡：整包数据继续往上抛，由页面存数据并跳横屏调度视图 */
+function onGanttOpen(payload: GanttViewPayload) {
+  emit("gantt-open", payload);
+}
+
+function onGuideStepOpen(payload: GuideStepPayload, auto = false) {
+  emit("guide-step-open", payload, auto);
+}
+
+/** 点核对卡步骤条某一段：把步数（1 起）+ step_id 继续往上抛，由页面切步骤并打开底部白板 */
+function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
+  emit("guide-check-step-select", payload);
+}
+
+/** 最后一步确认完：继续往上抛，由消息列表切到「小结 + 推荐问题」完成态 */
+function onGuideCheckFinish() {
+  emit("guide-check-finish");
+}
+
+/** 核对卡挂载完成：继续往上抛，页面据此把这张卡滚到对话区顶部 */
+function onGuideCheckReady() {
+  emit("card-ready");
+}
+
+/** 核对卡动作区：播报 / 复制 / 分享都由页面复用现成能力，这里只透传。完成态带小结文本上来 */
+function onGuideCheckTts(text?: string) {
+  emit("tts-click", text);
+}
+
+function onGuideCheckCopy(payload: { text: string }) {
+  emit("copy-click", payload);
+}
+
+function onGuideCheckShare(payload: { element: HTMLElement | null }) {
+  emit("share-click", payload);
+}
+</script>
+
+<template>
+  <AnswerBlock
+    v-if="block.type === 'answer' || block.type === 'tips'"
+    :content="block.payload.content || ''"
+    :streaming="!block.complete"
+    :embedded="embedded"
+  />
+  <ThinkBlock
+    v-else-if="block.type === 'think'"
+    :content="block.payload.content || ''"
+    :steps="block.payload.steps || []"
+    :complete="block.complete"
+    :force-expanded="forceThinkingExpanded"
+  />
+  <StatusBlock v-else-if="block.type === 'status'" :payload="block.payload" />
+  <ToolCallBlock v-else-if="block.type === 'tool_call'" :payload="block.payload" :complete="block.complete" />
+  <ChartBlock
+    v-else-if="block.type === 'chart'"
+    :block-id="block.id"
+    :option="block.payload.option"
+    :layout="block.payload.layout"
+    :embedded="embedded"
+  />
+  <AskSlotBlock
+    v-else-if="block.type === 'ask-slot'"
+    :payload="block.payload"
+    :disabled="loading"
+    @open="onAskSlotOpen"
+    @pick="onAskSlotPick"
+    @submit="onAskSlotSubmit"
+  />
+  <!-- 跳转确认块（navigation 积木）：维修助理就地内联成卡；配件助手只做 auto_open 触发，不占视觉位置 -->
+  <AssistantNavigationBlock
+    v-else-if="block.type === 'assistant-navigation'"
+    :payload="block.payload"
+    @open="onAssistantNavigationOpen"
+    @confirm="onAssistantNavigationConfirm"
+  />
+  <GuideStepBlock v-else-if="block.type === 'guide-step'" :payload="block.payload" @open="onGuideStepOpen" />
+  <!-- 开场引导卡（scene=guide / type=lead）：一段开场白 + 一轮单选，点选项直接发出 -->
+  <GuideLeadBlock
+    v-else-if="block.type === 'guide-lead'"
+    :payload="block.payload"
+    @pick="onSuggestionTap"
+  />
+  <!-- 多轮追问卡：与步骤卡分开渲染（并行分支 vs 按序推进） -->
+  <!-- 追问卡：内容就地渲染，点选项当作用户提问发出去（不再弹底部白板） -->
+  <GuideSuggestionBlock
+    v-else-if="block.type === 'guide-suggestion'"
+    :payload="block.payload"
+    :dark="dark"
+    @pick="onSuggestionTap"
+  />
+  <!-- id 落在根节点上：步骤卡片翻页时按它做 scroll-into-view 定位 -->
+  <GuideCheckBlock
+    v-else-if="block.type === 'guide-check'"
+    :id="domId || block.id"
+    :payload="block.payload"
+    :show-actions="showCardActions"
+    :compact="compactGuideCard"
+    :dark="dark"
+    :pc="pc"
+    :duration-ms="durationMs"
+    :tts-enabled="ttsEnabled"
+    :tts-loading="ttsLoading"
+    :tts-playing="ttsPlaying"
+    @select-step="onGuideCheckStepSelect"
+    @finish="onGuideCheckFinish"
+    @card-ready="onGuideCheckReady"
+    @pick="onSuggestionTap"
+    @tts-click="onGuideCheckTts"
+    @copy-click="onGuideCheckCopy"
+    @share-click="onGuideCheckShare"
+  />
+  <TableBlock v-else-if="block.type === 'table'" :payload="block.payload" />
+  <!-- 听汇报入口卡（<WORK_REPORT> / <REPORT_STYLE> 命中后追加）：不再自动跳播报页，点卡片才跳 -->
+  <ReportCardBlock v-else-if="block.type === 'report-card'" :payload="block.payload" :dark="dark" />
+  <!-- 调度视图入口卡（COMPONENT scene=task / type=gantt）：点它跳横屏调度视图并带上整包数据 -->
+  <GanttBlock v-else-if="block.type === 'gantt'" :payload="block.payload" :dark="dark" @open="onGanttOpen" />
+  <MetricBlock v-else-if="block.type === 'metric'" :payload="block.payload" />
+  <GuideImageBlock v-else-if="block.type === 'image'" :payload="block.payload" />
+  <GuideVideoBlock v-else-if="block.type === 'video'" :payload="block.payload" />
+  <GuideSourceBlock v-else-if="block.type === 'source'" :payload="block.payload" />
+  <!-- 老师傅导语（voice）：一句普通正文，显示在回答内容顶部，参与播报。
+     answer 正文里若后端重复下发了同一句导语，由 AiContentBlocks 剔除，避免显示两次 -->
+  <VoiceBlock v-else-if="block.type === 'voice'" :payload="block.payload" />
+  <ErrorBlock v-else-if="block.type === 'error'" :payload="block.payload" />
+  <SuggestionBlock v-else-if="block.type === 'suggestion'" :payload="block.payload" @suggestion-tap="onSuggestionTap" />
+</template>
