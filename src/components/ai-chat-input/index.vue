@@ -815,13 +815,8 @@ onBeforeUnmount(() => {
     }"
     :style="inputLiftStyle"
   >
-    <!-- 底部渐变带里的品牌三角底纹（icon-sani）：
-         格子 flex 换行铺满整条渐变带，格子尺寸 = 三角尺寸、gap = 三角间距，两者独立可调。
-         96 个格子是按「20rpx 宽 + 20rpx 间距」算的（750rpx 一行 19 枚）；
-         之后若把三角或间距改大，这个数量要跟着放大，否则底部会留空 -->
-    <view class="chat-input__brand-pattern" aria-hidden="true">
-      <view v-for="index in 96" :key="index" class="chat-input__brand-pattern-cell" />
-    </view>
+    <!-- 底部渐变带的水印底纹（back-triangle-mark）：范围与 ::before 的渐变一致 -->
+    <view class="chat-input__bottom-mark" aria-hidden="true" />
 
     <!-- 键盘弹起时的空白区兜底：点一下收键盘，否则编辑识别结果时没有退出口 -->
     <view
@@ -1242,53 +1237,46 @@ onBeforeUnmount(() => {
 }
 
 /**
- * 渐变带里的品牌三角底纹（播报那排「SANY NEO」签名上的 icon-sani）。
+ * 底部渐变带的水印底纹（back-triangle-mark.png，浅灰三角、自带透明度）。
+ * 范围与 ::before 的渐变层完全重合：容器整条高度。
  *
- * 不用 `background-repeat` 平铺，是因为平铺的间隔必须等于图片尺寸 —— 想「三角左右变窄」
- * 只能缩 tile，缩了间距也跟着缩，两个诉求绑死。改成一格一个节点后：
- *   width / height → 只管三角本身的宽高；
- *   gap → 只管三角之间的间距。
- * 层级：它是同级节点、排在 ::before（渐变）之后 → 压在渐变之上；
- * dock 的 z-index 是 2，所以输入栏与提示文字仍在它上面。
+ * 素材是按 1920×1080 的画布出的一整幅（1994×906，横跨整个 1920 宽）。
+ * 这里要的就是「整幅压进这一条带」的效果：`100% 100%` —— 横向 1994 → 视口宽
+ * （左右两边一起往中间压），纵向 906 → 容器高，不裁切、不留空。
+ *
+ * 注意：不要再改成 `xxx% auto` —— 那会变成「等比放大后居中裁左右」，
+ * 只露中间一块，和设计要的「整幅挤压」不是一回事。
+ * 排在 ::before 之后的同级节点 → 压在渐变之上、输入栏与提示文字之下。
  */
-.chat-input__brand-pattern {
+.chat-input__bottom-mark {
   position: absolute;
   right: 0;
   bottom: 0;
   left: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  gap: 20rpx;
   height: 100%;
-  overflow: hidden;
-  opacity: 0.14;
+  background-image: url("@/assets/img/back-triangle-mark.png");
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: 100% 100%;
   pointer-events: none;
 }
 
-/**
- * 一格一枚三角：20rpx 宽 × 28rpx 高 —— 横向比纵向更收，视觉上更「尖」。
- * 这里用 `background-size: 100% 100%` 把切图撑满格子（不是 contain），
- * 就是为了做到「左右更窄、上下不变」这种非等比收窄。
- */
-.chat-input__brand-pattern-cell {
-  flex: none;
-  width: 20rpx; // 10px
-  height: 28rpx; // 14px
-  background-image: url("@/assets/img/icon-sani.png");
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 100% 100%;
-}
-
 /* 录音面板态整条让位给面板，底纹一起收掉 */
-.chat-input--voice-panel-open .chat-input__brand-pattern {
+.chat-input--voice-panel-open .chat-input__bottom-mark {
   display: none;
 }
 
 /* 深色：同一层的范围不变，只换色（上透明 → 底部实色 #0B6EDA），比浅色那档更沉 */
 .chat-input--dark::before {
   background-image: linear-gradient(180deg, rgba(11, 110, 218, 0) 0%, #0b6eda 100%);
+}
+
+/* 底部底纹反相 + 提亮：素材是「纯黑三角 + 8% 左右的透明度」，
+   深底（#0D0D0D / #0B6EDA）上几乎看不见；invert 后是白三角，
+   单层仍偏淡，同一张再叠一层后合成约 15%（1 − 0.92²），亮度差不多翻倍 */
+.chat-input--dark .chat-input__bottom-mark {
+  filter: invert(1);
+  background-image: url("@/assets/img/back-triangle-mark.png"), url("@/assets/img/back-triangle-mark.png");
 }
 
 /* 深色下中间那枚半圆与浅色同一口径（62% 白 / 即 #ffffff9e）：压在 #0B6EDA 的渐变上成一团柔光 */
@@ -1925,7 +1913,7 @@ onBeforeUnmount(() => {
 
 /* ==========================================================================
    「按住说话」框：设计稿 1204:337 Toolbar
-   375×44 → 750×88rpx；圆角 45 → 90rpx；底 #F3F3F3（与加号 / 键盘圆钮同档）；
+   375×44 → 750×88rpx；圆角 45 → 90rpx；底 #FAFAFA（与加号 / 键盘圆钮同色）；
    文案 14px / 行高 20px / #8E8E8E / Regular；
    整块就是录音手势区（按下即录、上滑取消、松手识别）
    ========================================================================== */
@@ -1939,7 +1927,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   box-sizing: border-box;
   border-radius: 90rpx; // 45px
-  background: rgba(13, 13, 13, 0.0361); // 3.61% 黑：叠在 #FAFAFA 上即截图实测的 #F1F1F1
+  background: #fafafa; // 与加号 / 键盘圆钮同一个色值
   touch-action: none; /* 长按时禁用滚动/缩放，pointer 事件不被默认手势劫持 */
   -webkit-user-select: none;
   user-select: none;
@@ -1961,7 +1949,7 @@ onBeforeUnmount(() => {
 
 /* 声波芯片（实时语音）：截图 x450..526 / y352..409 → 48×36px 胶囊（圆角 18px），
    右内边距 8px、垂直居中；图标 20px 6 段声波。
-   底色必须常驻：芯片原本跟「点击说话」胶囊同色（#F1F1F1 / 深色 #212121），
+   底色必须常驻：芯片原本跟「点击说话」胶囊同色（#FAFAFA / 深色 #212121），
    不铺底时会和胶囊连成一片，看着就像图标裸贴在胶囊右边缘外面、没有被框包住；
    这里给它一块和右侧键盘圆钮同级的可见圆角块，图标才像"被这个框包着"。
    触发后只换图标色（蓝色声波），底色仍在（深色底下再提亮一档做反馈） */
@@ -2020,7 +2008,7 @@ onBeforeUnmount(() => {
   flex: 0 0 88rpx;
   padding: 0;
   border-radius: 50%;
-  background: rgba(13, 13, 13, 0.0361); // 3.61% 黑，叠在 #FAFAFA 上即截图实测的 #F1F1F1
+  background: #fafafa; // 与加号 / 「点击说话」胶囊同一个色值
 }
 
 /* 键盘图标 20×20 */
@@ -2075,12 +2063,14 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
-// 加号：设计稿 1204:337 左侧加号 44×44（图标 icon-plus.svg 自带 3.61% 圆底与 #0D0D0D 十字）
+// 加号：设计稿 1204:337 左侧加号 44×44（圆底 #FAFAFA，与右侧「按住说话」胶囊、
+// 键盘钮同一个色值；底色由 CSS 给，icon-plus.svg 只留 #0D0D0D 的十字）
 .input-bar__plus {
   width: 88rpx;
   height: 88rpx;
   flex: 0 0 88rpx;
-  background: transparent;
+  border-radius: 50%;
+  background: #fafafa;
 }
 
 .chat-input .input-bar__plus image {
@@ -2088,10 +2078,10 @@ onBeforeUnmount(() => {
   height: 88rpx;
 }
 
-// 语音/键盘是纯图标，底色由 CSS 给，留出内边距（与语音态胶囊 / 加号同档：3.61% 黑）
+// 语音/键盘是纯图标，底色由 CSS 给，留出内边距（与语音态胶囊 / 加号同色 #FAFAFA）
 .input-bar__mode {
   padding: 18rpx;
-  background: rgba(13, 13, 13, 0.0361);
+  background: #fafafa;
 }
 
 // 发送与停止本身就是实心图标，不再加底色
@@ -2228,7 +2218,7 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
-/* 加号：与首次的加号同尺寸（44px 圆底由 icon-plus.svg 自带） */
+/* 加号：与首次的加号同尺寸（44px 圆底由 CSS 底色给，图标只画十字） */
 .chat-input .input-bar--plain .input-bar__plus {
   width: 88rpx;
   height: 88rpx;
@@ -2394,7 +2384,7 @@ onBeforeUnmount(() => {
     background: #212121;
   }
 
-  // 加号：底色由 icon-plus.svg 自带（3.61% 圆底），深色下补成设计稿的 #212121 实心圆
+  // 加号：圆底与「按住说话」胶囊同色 #212121，图标只反相十字
   .input-bar__plus {
     border-radius: 50%;
     background: #212121;

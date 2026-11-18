@@ -281,14 +281,8 @@ onBeforeUnmount(() => {
     :class="{ 'welcome--leaving': leaving, 'welcome--landed': landed, 'welcome--dark': dark }"
     :style="safeAreaStyle"
   >
-    <!-- 底部渐变带里的品牌三角底纹（icon-sani）：
-         格子按 flex 换行铺满整条渐变带，格子尺寸 = 三角尺寸、格子间距 = 三角间距，
-         两者互相独立，改宽窄 / 改疏密不用联调。
-         96 个格子是按「20rpx 宽 + 20rpx 间距」算的：750rpx 一行 19 枚、176rpx 高 4 行；
-         之后若把三角或间距改大，这个数量要跟着放大，否则底部会留空 -->
-    <view class="welcome__brand-pattern" aria-hidden="true">
-      <view v-for="index in 96" :key="index" class="welcome__brand-pattern-cell" />
-    </view>
+    <!-- 底部渐变带的水印底纹（back-triangle-mark）：高度跟渐变带一致，宽度铺满 -->
+    <view class="welcome__bottom-mark" aria-hidden="true" />
 
     <view class="welcome__hero">
       <!-- 标题行「Hey,SANI」：直接用设计导出的整行字标 hey-sani.svg（126×37），深浅色同一张 -->
@@ -355,12 +349,13 @@ onBeforeUnmount(() => {
          语音态中间是「点击说话」；点键盘后在原地换成文本输入框（不离开初始页），
          填完点右侧发送才抛 send-text 交给父页面 -->
     <view class="welcome__composer">
-      <image
-        class="welcome__composer-plus"
-        @tap.stop="showAttachmentComingSoon"
-        src="@/assets/img/icon-plus.svg"
-        mode="aspectFit"
-      />
+      <view class="welcome__composer-plus" @tap.stop="showAttachmentComingSoon">
+        <image
+          class="welcome__composer-plus-icon"
+          src="@/assets/img/icon-plus.svg"
+          mode="aspectFit"
+        />
+      </view>
       <view
         v-if="textMode"
         class="welcome__composer-field"
@@ -508,45 +503,31 @@ onBeforeUnmount(() => {
 }
 
 /**
- * 渐变带里的品牌三角底纹（播报那排「SANY NEO」签名上的 icon-sani）。
+ * 底部渐变带的水印底纹（back-triangle-mark.png，浅灰三角、自带透明度）。
+ * 范围 = 渐变带本身（176rpx + 安全区）。
  *
- * 不用 `background-repeat` 平铺，是因为平铺的间隔必须等于图片尺寸 —— 想「三角左右变窄」
- * 只能缩 tile，缩了间距也跟着缩，两个诉求绑死。改成一格一个节点后：
- *   width / height → 只管三角本身的宽高；
- *   gap → 只管三角之间的间距；
- *   96 个格子足够铺满 750rpx × (176rpx + 安全区)，多出的由 overflow: hidden 裁掉。
- * z-index: -1 与半圆同层 —— 压在渐变之上、正文与输入条之下。
+ * 素材是按 1920×1080 的画布出的一整幅（1994×906，横跨整个 1920 宽）。
+ * 这里要的就是「整幅压进这一条带」的效果：`100% 100%` —— 横向 1994 → 视口宽
+ * （左右两边一起往中间压），纵向 906 → 带高，不裁切、不留空。
+ * 所以三角会跟着横向压窄，这是 1920 稿整体缩到手机宽度的正常形变，不是素材被裁。
+ *
+ * 注意：不要再改成 `xxx% auto` —— 那会变成「等比放大后居中裁左右」，
+ * 只露中间一块，和设计要的「整幅挤压」不是一回事。
+ * 深色模式沿用同一张（透明度自带，叠在深蓝渐变上同样可见）。
  */
-.welcome__brand-pattern {
+.welcome__bottom-mark {
   position: absolute;
   right: 0;
   bottom: 0;
   left: 0;
   z-index: -1;
-  display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  gap: 20rpx;
   height: 176rpx;
   height: calc(176rpx + env(safe-area-inset-bottom));
-  overflow: hidden;
-  opacity: 0.14;
-  pointer-events: none;
-}
-
-/**
- * 一格一枚三角：20rpx 宽 × 28rpx 高 —— 横向比纵向更收，视觉上更「尖」。
- * 这里用 `background-size: 100% 100%` 把切图撑满格子（不是 contain），
- * 就是为了做到「左右更窄、上下不变」这种非等比收窄。
- */
-.welcome__brand-pattern-cell {
-  flex: none;
-  width: 20rpx; // 10px
-  height: 28rpx; // 14px
-  background-image: url("@/assets/img/icon-sani.png");
+  background-image: url("@/assets/img/back-triangle-mark.png");
   background-repeat: no-repeat;
-  background-position: center;
+  background-position: center bottom;
   background-size: 100% 100%;
+  pointer-events: none;
 }
 
 /* 起飞态：底色让位（下面的对话页露出来），文字与输入条先淡出，只有 logo 继续往上滑 */
@@ -564,13 +545,8 @@ onBeforeUnmount(() => {
 .welcome--leaving .welcome__nav,
 .welcome--leaving .welcome__caption,
 .welcome--leaving .welcome__composer,
-.welcome--leaving .welcome__disclaimer {
-  opacity: 0;
-  transition: opacity 240ms ease;
-}
-
-/* 起飞时底纹跟着底色一起收掉，不留一层三角压在对话页底部 */
-.welcome--leaving .welcome__brand-pattern {
+.welcome--leaving .welcome__disclaimer,
+.welcome--leaving .welcome__bottom-mark {
   opacity: 0;
   transition: opacity 240ms ease;
 }
@@ -758,14 +734,27 @@ onBeforeUnmount(() => {
   transition: opacity 240ms ease;
 }
 
-/* 加号：icon-plus.svg 自带 44×44 圆底（#0D0D0D 3.61%）与十字 */
+/* 加号：44×44 圆钮，实色 #FAFAFA，与「点击说话」胶囊 / 键盘钮同一材质。
+   圆底曾经画在 icon-plus.svg 里（#0D0D0D 3.61% 半透明），叠的底色一变就跟着偏色，
+   现在底板交给 CSS、图标只留十字，深浅色各给一套底色 */
 .welcome__composer-plus {
+  display: flex;
   flex: 0 0 88rpx;
   width: 88rpx; // 44px
   height: 88rpx;
+  align-items: center;
+  justify-content: center;
+  border-radius: 90rpx;
+  background: #fafafa;
 }
 
-/* 中间的「点击说话」胶囊：44px 高 / 圆角 45px / #0D0D0D 3.61%（叠在 #FAFAFA 上渲染为 #F1F1F1）
+.welcome__composer-plus-icon {
+  width: 88rpx; // 44px，字面十字 16px 与原图一致
+  height: 88rpx;
+}
+
+/* 中间的「点击说话」胶囊：44px 高 / 圆角 45px / 实色 #FAFAFA
+   —— 与加号、键盘钮同一材质（三块都取同一个色值，避免深浅不一）。
    截图实测：胶囊 x184..539（≈218px 宽）、y345..416（44px 高），右侧内嵌声波芯片 */
 .welcome__composer-voice {
   position: relative;
@@ -778,7 +767,7 @@ onBeforeUnmount(() => {
   padding: 0 120rpx 0 36rpx; // 左 18px（截图文字起于 x213）；右留出声波芯片 96rpx + 16rpx
   box-sizing: border-box;
   border-radius: 90rpx;
-  background: rgba(13, 13, 13, 0.0361);
+  background: #fafafa;
 }
 
 /* 文案色取截图最暗像素 #5E5E5E（14px Regular，左对齐起排） */
@@ -833,7 +822,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(13, 13, 13, 0.0361);
+  background: #fafafa; // 与胶囊 / 加号同一个色值
 }
 
 .welcome__composer-kb-icon {
@@ -851,7 +840,7 @@ onBeforeUnmount(() => {
   padding: 0 28rpx; // 14px，与问答页文本胶囊的左内边距接近
   box-sizing: border-box;
   border-radius: 90rpx;
-  background: rgba(13, 13, 13, 0.0361);
+  background: #fafafa; // 与「点击说话」胶囊同一个色值，不再用 3.61% 半透明（会在蓝渐变上偏色）
 }
 
 .welcome__composer-field--with-wave {
@@ -901,7 +890,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex: none;
   justify-content: center;
-  margin-top: 16rpx; // 8px，与问答页 .chat-input__footer 的上间距一致
+  // margin-top: 16rpx; // 8px，与问答页 .chat-input__footer 的上间距一致
   padding: 0 40rpx;
   transition: opacity 240ms ease;
 }
@@ -975,13 +964,25 @@ onBeforeUnmount(() => {
   content: none;
 }
 
+/* 底部底纹反相 + 提亮：素材是「纯黑三角 + 8% 左右的透明度」，
+   浅底上是压深一点点，深底上（#0D0D0D / #0B6EDA）等于没有。
+   invert 后变成同透明度的白三角；单层 8% 在深蓝上仍偏淡，所以同一张再叠一层，
+   合成后约 15%（1 − 0.92²），亮度差不多翻倍。要更亮就再叠一层。
+   注意：白三角再套 brightness 是没用的（255 已经到顶），只能靠叠层加透明度 */
+.welcome--dark .welcome__bottom-mark {
+  filter: invert(1);
+  background-image: url("@/assets/img/back-triangle-mark.png"), url("@/assets/img/back-triangle-mark.png");
+}
+
 /* 标题行深色稿不需要额外覆盖：hey-sani.svg 深浅色共用同一张 */
 
-/* 输入条控件的材质换成「白色 8%」：浅色稿的 #0D0D0D 3.61% 在深底上等于没有 */
+/* 输入条控件的材质换成「白色 8%」：浅色稿的 #F1F1F1 在深底上等于没有。
+   加号圆钮也在这一组里，四块（加号 / 胶囊 / 文本框 / 键盘钮）始终同色 */
+.welcome--dark .welcome__composer-plus,
 .welcome--dark .welcome__composer-voice,
 .welcome--dark .welcome__composer-field,
 .welcome--dark .welcome__composer-kb {
-  background: rgba(255, 255, 255, 0.08);
+  background: #262628
 }
 
 /* 文本态有内容的发送钮是实心图标，不跟着铺底板 */
@@ -1011,8 +1012,8 @@ onBeforeUnmount(() => {
   color: #6b6b6b; // 与问答页深色 placeholder 同色
 }
 
-/* 加号 / 键盘图标本身是深色图形：深底上反色，圆底与十字一起变浅 */
-.welcome--dark .welcome__composer-plus,
+/* 加号 / 键盘图标本身是深色图形：深底上只反色图标（圆底由上面的背景给，不参与反相） */
+.welcome--dark .welcome__composer-plus-icon,
 .welcome--dark .welcome__composer-kb-icon {
   filter: invert(1);
 }
