@@ -524,6 +524,7 @@ onBeforeUnmount(() => {
       v-else-if="listReady"
       class="task-pc__chat"
       scroll-y
+      :show-scrollbar="false"
       :scroll-into-view="scrollAnchor"
       :scroll-with-animation="true"
     >
@@ -825,6 +826,27 @@ onBeforeUnmount(() => {
   margin-top: 170px;
   overflow: hidden;
   box-sizing: border-box;
+  /* 隐藏滚动条：H5 下 class 落在 uni-scroll-view 根节点，真正滚动的是内层 .uni-scroll-view，
+     两层都要写；`show-scrollbar=false` 只在部分容器生效，CSS 兜底保证桌面浏览器也不露条 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  :deep(.uni-scroll-view) {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  :deep(.uni-scroll-view)::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
 }
 
 .task-pc__chat-inner {
