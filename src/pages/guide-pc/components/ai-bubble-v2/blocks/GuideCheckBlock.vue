@@ -283,7 +283,7 @@ function resolveRootElement(): HTMLElement | null {
 <template>
   <view ref="rootRef" class="guide-check-block" :class="{ 'guide-check-block--dark': dark, 'guide-check-block--pc': pc }">
     <!-- PC 车机版完成态顶部状态行：√ 已完成 耗时 X 秒。
-         取代原卡片左上角的品牌署名（sani logo + SANI + 播报按钮）；
+         取代原卡片左上角的品牌署名（sani logo + NEO + 播报按钮）；
          仅 PC 版且已收尾（有时耗数据）时展示，生成中 / 历史消息不占行 -->
     <view v-if="showDoneStatus" class="guide-check-block__done-status">
       <text class="guide-check-block__done-check"> √ </text>
@@ -291,11 +291,11 @@ function resolveRootElement(): HTMLElement | null {
         {{ doneStatusText }}
       </text>
     </view>
-    <!-- 非 PC 版（或未收尾）：保留原卡片左上角品牌署名（sani logo + SANI + 语音播报控制） -->
+    <!-- 非 PC 版（或未收尾）：保留原卡片左上角品牌署名（sani logo + NEO + 语音播报控制） -->
     <view v-else class="guide-check-block__brand">
       <image class="guide-check-block__brand-icon" :src="saniIcon" mode="aspectFit" />
       <text class="guide-check-block__brand-text">
-        SANI
+        NEO
       </text>
       <!-- PC 车机版顶部品牌行不再挂播报按钮：统一沉到卡片底部免责声明行，与回答气泡同款 -->
       <view
@@ -412,7 +412,7 @@ function resolveRootElement(): HTMLElement | null {
     </text>
 
     <!-- 动作区：复制 / 分享，与回答气泡的操作栏同一套图标与观感；精简版整块不画。
-         播报按钮已上移到卡片左上角的 SANI 后面（与气泡完成态一致）；
+         播报按钮已上移到卡片左上角的 NEO 后面（与气泡完成态一致）；
          data-share-poster-ignore 让分享截图时把这一行摘掉，海报里只有卡片内容 -->
     <view v-if="showActions && !compact" class="guide-check-block__actions" data-share-poster-ignore>
       <view class="guide-check-block__action-btn" @tap.stop="onCopyTap">
@@ -498,7 +498,7 @@ function resolveRootElement(): HTMLElement | null {
   line-height: 36rpx;
 }
 
-/* 左上角品牌署名：sani logo + SANI + 播报按钮（与气泡完成态同一套观感） */
+/* 左上角品牌署名：sani logo + NEO + 播报按钮（与气泡完成态同一套观感） */
 .guide-check-block__brand {
   display: flex;
   align-items: center;

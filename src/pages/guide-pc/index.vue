@@ -1381,7 +1381,7 @@ const voiceHoldCancelPending = ref(false);
       @voice-tap="onPcCapsuleVoice"
     />
 
-    <!-- 欢迎层：与首页初始页同款（Hey,SANI + logo + 点击说话 / 键盘）；
+    <!-- 欢迎层：与首页初始页同款（Hey,NEO + logo + 点击说话 / 键盘）；
          起飞动画期间继续挂载，logo 滑到顶部灵动岛再收起 -->
     <!-- PC 车机版待机页：居中 logo / 文案，点击整块收起并开始说话（见 onPcWelcomeStart） -->
     <PcWelcome

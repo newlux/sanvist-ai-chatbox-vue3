@@ -4,7 +4,7 @@ import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
 import saniLogoWebp from "@/assets/img/sani-logo.webp";
-import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
+import AiSettingsSheet from "../ai-settings-sheet/index.vue";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useSystemStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
@@ -108,6 +108,15 @@ const settingsLanguage = computed<"zh_CN" | "en_US">({
   get: () => (isEnglishLocale.value ? "en_US" : "zh_CN"),
   set: (value) => {
     if (String(locale.value) === value) return;
+    /**
+     * PC 端（guide-pc）语言切换修复：
+     * 场景页内嵌 iframe 存在「两个 i18n 实例」——`systemStore.setLanguage` 里 `setLocale`
+     * 更新的是 `import i18n` 的实例（A），而本页组件 `useI18n()` 注入的是另一个实例（B，
+     * `hasRoot=false`，不会跟随 A 更新）。只调 setLanguage 时 B 不切，界面文案不变。
+     * 这里先直接写本页组件实际使用的 composer（`locale` 即 B），让 guide-pc 立即切语言，
+     * 再调 setLanguage 更新 header / 持久化 / A 实例，两边一致。
+     */
+    locale.value = value;
     void systemStore.setLanguage(value);
   },
 });
@@ -739,7 +748,8 @@ onBeforeUnmount(() => {
         </view>
       </view>
 
-      <!-- 设计稿 722:2800「设置」：历史抽屉底部齿轮点开的弹层，语言切换在这里 -->
+      <!-- 设计稿 722:2800「设置」：历史抽屉底部齿轮点开的弹层，语言切换在这里。
+           PC 车载端专用副本（components/ai-settings-sheet）已隐藏「外观」这一项 -->
       <AiSettingsSheet
         v-model:visible="isSettingsSheetOpen"
         v-model:language="settingsLanguage"
@@ -2083,6 +2093,12 @@ onBeforeUnmount(() => {
 .ai-chat-header--pc .history-drawer__new-conversation-item-label {
   color: #ffffff !important;
   font-size: 28px;
+}
+
+/* 加号图标 30×30（1920×1080 设计稿；PC 车机版全部用 px，基类 36rpx 在 PC 下偏小） */
+.ai-chat-header--pc .history-drawer__new-conversation-item-icon {
+  width: 30px;
+  height: 30px;
 }
 
 /* 齿轮图标 40px */
