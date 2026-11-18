@@ -405,24 +405,29 @@ const CONTAINER_CLOSE_ORDER: Record<CloseContainerPrefer, CloseContainerPrefer[]
  * 关闭当前容器 / 回宿主首页（退出、回主页按钮的统一出口）。
  *
  * 与甘特离线包（sanvist-gantt-offline 的 `utils/platform/mpaas.ts`）同一套退出流程，
- * 顺序由 `prefer` 决定，失败一路降级，最后 `history.back` 兜底：
- * - `"popWindow"`（默认，首页口径）：popWindow → closeMiniPro → history.back；
- * - `"closeMiniPro"`（退出小程序口径）：closeMiniPro → popWindow → history.back；
- * - `"goHome"`（作业指导 / 任务协同的回主页口径）：goHome → popWindow → history.back。
+ * 顺序由 `prefer` 决定，失败一路降级：
+ * - `"popWindow"`（默认，首页口径）：popWindow → closeMiniPro；
+ * - `"closeMiniPro"`（退出小程序口径）：closeMiniPro → popWindow；
+ * - `"goHome"`（作业指导 / 任务协同 / 首页回主页口径）：goHome → popWindow。
+ *
+ * 返回是否已交给宿主（true = 原生出口已受理）。
+ * 全部不可用时这里**不再** `history.back()`：单页 WebView 里 back 可能落到一个空白文档，
+ * 表现就是「点了房子停在白屏、退不回来」。兜底交给调用方按 uni 页面栈处理
+ * （见 `utils/exit-mini-program`）。
  */
-export async function closeContainer(prefer: CloseContainerPrefer = "popWindow"): Promise<void> {
+export async function closeContainer(prefer: CloseContainerPrefer = "popWindow"): Promise<boolean> {
   const order = CONTAINER_CLOSE_ORDER[prefer] || CONTAINER_CLOSE_ORDER.popWindow;
 
   for (const api of order) {
     try {
       await callNative(api, {}, { timeoutMs: CONTAINER_CLOSE_APIS[api].timeoutMs, silentTimeout: true });
-      return;
+      return true;
     } catch (error) {
       logger.warn(`${api} 不可用，尝试下一种退出方式`, error);
     }
   }
 
-  if (typeof history !== "undefined") history.back();
+  return false;
 }
 
 /**

@@ -1704,13 +1704,17 @@ async function goToChat(options?: { holdMs?: number }) {
 }
 
 /**
- * 头部右上角那颗房子按钮：关闭当前小程序（交回宿主）。
- * 游客态的听播临时态由本页自己收掉，其余（清身份 / 清听播存储 / popWindow / 退栈兜底）
+ * 头部右上角那颗房子按钮：回宿主首页。
+ *
+ * 走 `"goHome"` 口径（goHome → popWindow），与作业指导 / 任务协同同一套：
+ * 这两页点房子是正常的，而首页原来走的是 popWindow（只关当前 webview），
+ * 宿主背后没有可回退的原生页时会被关成一片白屏。
+ * 游客态的听播临时态由本页自己收掉，其余（清身份 / 清听播存储 / 退栈兜底）
  * 与作业指导、任务协同页共用一份实现，见 utils/exit-mini-program。
  */
 function backToWelcome() {
   if (userStore.isVisitor) listenBroadcast.value = null;
-  exitMiniProgram();
+  exitMiniProgram("goHome");
 }
 
 /**

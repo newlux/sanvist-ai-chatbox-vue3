@@ -49,7 +49,7 @@ export function isAsrStreamSupported() {
 export function buildAsrStreamUrl(language = "zh") {
   const base = new URL(getRequestBaseURL());
   base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
-  base.pathname = `${base.pathname.replace(/\/+$/, "")}/speech/asr/stream`;
+  base.pathname = `${base.pathname.replace(/\/+$/, "")}/websocket/asr/stream`;
   base.search = "";
   base.searchParams.set("language", language);
 

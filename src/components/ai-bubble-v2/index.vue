@@ -1589,6 +1589,8 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     background-image: none;
     -webkit-text-fill-color: #ffffff;
     animation: none;
+    font-weight: 700;
+    font-size: 26rpx;
   }
 
   // 语音播报图标 1193:5120：全部 #8F8F8F 线框。

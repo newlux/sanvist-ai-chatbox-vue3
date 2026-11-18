@@ -815,6 +815,14 @@ onBeforeUnmount(() => {
     }"
     :style="inputLiftStyle"
   >
+    <!-- 底部渐变带里的品牌三角底纹（icon-sani）：
+         格子 flex 换行铺满整条渐变带，格子尺寸 = 三角尺寸、gap = 三角间距，两者独立可调。
+         96 个格子是按「20rpx 宽 + 20rpx 间距」算的（750rpx 一行 19 枚）；
+         之后若把三角或间距改大，这个数量要跟着放大，否则底部会留空 -->
+    <view class="chat-input__brand-pattern" aria-hidden="true">
+      <view v-for="index in 96" :key="index" class="chat-input__brand-pattern-cell" />
+    </view>
+
     <!-- 键盘弹起时的空白区兜底：点一下收键盘，否则编辑识别结果时没有退出口 -->
     <view
       v-if="showKeyboardMask"
@@ -1226,20 +1234,68 @@ onBeforeUnmount(() => {
     pointer-events: none;
   }
 
+  // 中间那枚半圆只有深色模式才有（见下方 .chat-input--dark::after），浅色不铺白底
   uni-image {
     width: 100%;
     height: 100%;
   }
 }
 
-/* 录音面板态不铺这层蓝：面板自带渐变水面，这里不能再叠一层 */
-.chat-input--voice-panel-open::before {
-  content: none;
+/**
+ * 渐变带里的品牌三角底纹（播报那排「SANY NEO」签名上的 icon-sani）。
+ *
+ * 不用 `background-repeat` 平铺，是因为平铺的间隔必须等于图片尺寸 —— 想「三角左右变窄」
+ * 只能缩 tile，缩了间距也跟着缩，两个诉求绑死。改成一格一个节点后：
+ *   width / height → 只管三角本身的宽高；
+ *   gap → 只管三角之间的间距。
+ * 层级：它是同级节点、排在 ::before（渐变）之后 → 压在渐变之上；
+ * dock 的 z-index 是 2，所以输入栏与提示文字仍在它上面。
+ */
+.chat-input__brand-pattern {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 20rpx;
+  height: 100%;
+  overflow: hidden;
+  opacity: 0.14;
+  pointer-events: none;
+}
+
+/**
+ * 一格一枚三角：20rpx 宽 × 28rpx 高 —— 横向比纵向更收，视觉上更「尖」。
+ * 这里用 `background-size: 100% 100%` 把切图撑满格子（不是 contain），
+ * 就是为了做到「左右更窄、上下不变」这种非等比收窄。
+ */
+.chat-input__brand-pattern-cell {
+  flex: none;
+  width: 20rpx; // 10px
+  height: 28rpx; // 14px
+  background-image: url("@/assets/img/icon-sani.png");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+}
+
+/* 录音面板态整条让位给面板，底纹一起收掉 */
+.chat-input--voice-panel-open .chat-input__brand-pattern {
+  display: none;
 }
 
 /* 深色：同一层的范围不变，只换色（上透明 → 底部实色 #0B6EDA），比浅色那档更沉 */
 .chat-input--dark::before {
   background-image: linear-gradient(180deg, rgba(11, 110, 218, 0) 0%, #0b6eda 100%);
+}
+
+/* 深色下中间那枚半圆与浅色同一口径（62% 白 / 即 #ffffff9e）：压在 #0B6EDA 的渐变上成一团柔光 */
+.chat-input--dark::after {
+  fill: rgba(255, 255, 255, 0.62);
+  filter: blur(76rpx);
+  bottom: -172rpx;
 }
 
 // 紧凑录音态（首页 / 听播 / 异常列表追问）：

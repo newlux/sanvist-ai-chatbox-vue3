@@ -206,9 +206,9 @@ onBeforeUnmount(() => {
     >
       <!-- 291:7291 个性觉醒：黑底 + 标题（底层） -->
       <view class="persona-awakening__backdrop">
-        <!-- 291:7292 随时为你而来 -->
+        <!-- 291:7292 随时，为你而在 -->
         <!-- eslint-disable-next-line vue/singleline-html-element-content-newline -->
-        <text class="persona-awakening__title">随时为你而来</text>
+        <text class="persona-awakening__title">随时，为你而在</text>
       </view>
 
       <!-- 291:7290 中间图标 254 × 254：两层叠图，语音播报时交叉淡入 tell-dark.webp -->

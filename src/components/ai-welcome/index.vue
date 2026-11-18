@@ -80,7 +80,7 @@ const { safeAreaStyle } = useSafeArea();
 
 /**
  * 「Hey,SANI」整行字标：直接用设计导出的整行图，不再用文字 + background-clip 拼。
- * 浅色 / 深色统一用同一张 hey-sani.svg（106×24），不再按主题切图。
+ * 浅色 / 深色统一用同一张 hey-sani.svg（126×37），不再按主题切图。
  */
 
 /**
@@ -281,8 +281,17 @@ onBeforeUnmount(() => {
     :class="{ 'welcome--leaving': leaving, 'welcome--landed': landed, 'welcome--dark': dark }"
     :style="safeAreaStyle"
   >
+    <!-- 底部渐变带里的品牌三角底纹（icon-sani）：
+         格子按 flex 换行铺满整条渐变带，格子尺寸 = 三角尺寸、格子间距 = 三角间距，
+         两者互相独立，改宽窄 / 改疏密不用联调。
+         96 个格子是按「20rpx 宽 + 20rpx 间距」算的：750rpx 一行 19 枚、176rpx 高 4 行；
+         之后若把三角或间距改大，这个数量要跟着放大，否则底部会留空 -->
+    <view class="welcome__brand-pattern" aria-hidden="true">
+      <view v-for="index in 96" :key="index" class="welcome__brand-pattern-cell" />
+    </view>
+
     <view class="welcome__hero">
-      <!-- 标题行「Hey,SANI」：直接用设计导出的整行字标 hey-sani.svg（106×24），深浅色同一张 -->
+      <!-- 标题行「Hey,SANI」：直接用设计导出的整行字标 hey-sani.svg（126×37），深浅色同一张 -->
       <view class="welcome__title">
         <image class="welcome__title-img" :src="heySani" mode="aspectFit" />
       </view>
@@ -319,6 +328,20 @@ onBeforeUnmount(() => {
             @error="onListenLogoError"
           />
         </view>
+      </view>
+
+      <!-- 品牌文案组：图标下方「随时，为你而在」+ 两行灰字，
+           文案沿用引导页那套 i18n（init-brand-slogan / init-brand-desc-1 / -2） -->
+      <view class="welcome__caption">
+        <text class="welcome__slogan">
+          {{ t("init-brand-slogan") }}
+        </text>
+        <text class="welcome__desc">
+          {{ t("init-brand-desc-1") }}
+        </text>
+        <text class="welcome__desc">
+          {{ t("init-brand-desc-2") }}
+        </text>
       </view>
     </view>
 
@@ -480,6 +503,50 @@ onBeforeUnmount(() => {
   color: #0d0d0d;
   font-family: "PingFang SC", sans-serif;
   transition: background-color 360ms ease;
+
+  // 中间那枚半圆只有深色模式才铺（浅色按要求去掉白底），声明见下方 .welcome--dark::before
+}
+
+/**
+ * 渐变带里的品牌三角底纹（播报那排「SANY NEO」签名上的 icon-sani）。
+ *
+ * 不用 `background-repeat` 平铺，是因为平铺的间隔必须等于图片尺寸 —— 想「三角左右变窄」
+ * 只能缩 tile，缩了间距也跟着缩，两个诉求绑死。改成一格一个节点后：
+ *   width / height → 只管三角本身的宽高；
+ *   gap → 只管三角之间的间距；
+ *   96 个格子足够铺满 750rpx × (176rpx + 安全区)，多出的由 overflow: hidden 裁掉。
+ * z-index: -1 与半圆同层 —— 压在渐变之上、正文与输入条之下。
+ */
+.welcome__brand-pattern {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 20rpx;
+  height: 176rpx;
+  height: calc(176rpx + env(safe-area-inset-bottom));
+  overflow: hidden;
+  opacity: 0.14;
+  pointer-events: none;
+}
+
+/**
+ * 一格一枚三角：20rpx 宽 × 28rpx 高 —— 横向比纵向更收，视觉上更「尖」。
+ * 这里用 `background-size: 100% 100%` 把切图撑满格子（不是 contain），
+ * 就是为了做到「左右更窄、上下不变」这种非等比收窄。
+ */
+.welcome__brand-pattern-cell {
+  flex: none;
+  width: 20rpx; // 10px
+  height: 28rpx; // 14px
+  background-image: url("@/assets/img/icon-sani.png");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
 }
 
 /* 起飞态：底色让位（下面的对话页露出来），文字与输入条先淡出，只有 logo 继续往上滑 */
@@ -488,10 +555,22 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+/* 起飞时底部光晕与半圆一起收掉，否则会留一块白斑压在对话页底部 */
+.welcome--leaving::before {
+  content: none;
+}
+
 .welcome--leaving .welcome__title,
 .welcome--leaving .welcome__nav,
+.welcome--leaving .welcome__caption,
 .welcome--leaving .welcome__composer,
 .welcome--leaving .welcome__disclaimer {
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+/* 起飞时底纹跟着底色一起收掉，不留一层三角压在对话页底部 */
+.welcome--leaving .welcome__brand-pattern {
   opacity: 0;
   transition: opacity 240ms ease;
 }
@@ -509,7 +588,8 @@ onBeforeUnmount(() => {
 
 /* ===== 标题行「Hey,SANI」=====
    整行直接贴设计导出的字标（颜色、渐变、字距都在图里，不再用文字 + background-clip 拼）：
-   hey-sani.svg：106×24 → 212×48rpx，深浅色共用同一张，不再按主题切图。 */
+   hey-sani.svg 自身就是 126×37px（viewBox 同尺寸），这里按 1px = 2rpx 铺满 252×74rpx，
+   深浅色共用同一张，不再按主题切图。 */
 .welcome__title {
   display: flex;
   align-items: center;
@@ -518,8 +598,8 @@ onBeforeUnmount(() => {
 }
 
 .welcome__title-img {
-  width: 212rpx; // 106px
-  height: 48rpx; // 24px
+  width: 252rpx; // 126px
+  height: 74rpx; // 37px
 }
 
 .welcome__logo {
@@ -620,6 +700,37 @@ onBeforeUnmount(() => {
    落位处即使有 1-2px 误差也看不出来，不会出现「冲过头再往下掉」 */
 .welcome--landed .welcome__logo-fly {
   opacity: 0;
+}
+
+/* ===== 图标下方的品牌文案组（浅色稿：标语 #0D0D0D 加粗 + 两行 #8E8E8E）=====
+   与图标之间：logo 盒内边距 24rpx + hero gap 10rpx + 这里 50rpx ≈ 84rpx（42px），
+   对齐设计里「三角底 → 标语顶」的留白 */
+.welcome__caption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx; // 2px
+  transition: opacity 240ms ease;
+}
+
+.welcome__slogan {
+  color: #0d0d0d;
+  font-size: 36rpx; // 17px
+  font-weight: 500;
+  line-height: 48rpx; // 24px
+  text-align: center;
+  // 标语单独上提 10rpx（5px）：用 transform 而不是 margin —— 位移不参与布局，
+  // 下面两行描述的位置一点也不动
+  transform: translateY(-10rpx);
+}
+
+.welcome__desc {
+  max-width: 560rpx; // 280px
+  color: #8e8e8e;
+  font-size: 26rpx; // 16px
+  font-weight: 400;
+  line-height: 48rpx; // 24px
+  text-align: center;
 }
 
 /* 快捷入口槽位：胶囊导航自带底色 / 内边距 / 高度，这里只负责在 flex 列里占一行 */
@@ -818,11 +929,50 @@ onBeforeUnmount(() => {
   background-size: 100% 176rpx;
   background-size: 100% calc(176rpx + env(safe-area-inset-bottom));
   color: #f2f3f5;
+
+  /**
+   * 深色专有的中间那枚半圆：直径 600rpx、弧顶朝上，62% 白（即 #ffffff9e）。
+   * 只有深色铺，浅色不铺白底。
+   *
+   * 几个必要项写全：没有 `content` 伪元素根本不会生成盒子（只有颜色 / blur 是画不出来的）；
+   * `fill` 是 SVG 属性，对伪元素无效，底色要用 `background-color`。
+   * z-index: -1 让它压在渐变之上、输入条与提示文字之下；blur 把边缘糊开成一团柔光。
+   */
+  &::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    bottom: -230rpx;
+    left: 50%;
+    width: 600rpx;
+    height: 300rpx;
+    background-color: rgba(255, 255, 255, 0.62);
+    border-radius: 300rpx 300rpx 0 0;
+    filter: blur(76rpx);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  /* 文案组反白：标语纯白、两行描述 45% 白（与引导页 gi--dark 同一口径），深底上才读得清 */
+  .welcome__slogan {
+    color: #ffffff;
+    // 深色稿标语不动（上提只针对浅色）
+    transform: none;
+  }
+
+  .welcome__desc {
+    color: rgba(255, 255, 255, 0.45);
+  }
 }
 
 /* 起飞态仍然要让位给下面的问答页：深色底不能把它盖住 */
 .welcome--dark.welcome--leaving {
   background: transparent;
+}
+
+/* 起飞时深色那枚半圆也一起收掉（优先级要压过上面的 .welcome--dark::before） */
+.welcome--dark.welcome--leaving::before {
+  content: none;
 }
 
 /* 标题行深色稿不需要额外覆盖：hey-sani.svg 深浅色共用同一张 */
