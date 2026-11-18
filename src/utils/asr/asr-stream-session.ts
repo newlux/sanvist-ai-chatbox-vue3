@@ -12,6 +12,11 @@ const FINAL_TIMEOUT_MS = 8_000;
 const MAX_SESSION_MS = 118_000;
 /** ready 之前的音频先攒着：网关自己也会缓存 3s，前端再兜一层，避免「刚连上就说」丢字 */
 const MAX_PRESTART_FRAMES = 30;
+/**
+ * 录音已经结束、链路却还没 ready 时的握手宽限（ms）。
+ * 宽限内 ready 就把积压音频补发完立刻收尾；超时才判「未连接」。
+ */
+const FINISH_READY_GRACE_MS = 1_200;
 
 export interface AsrStreamHandlers {
   onReady?: () => void;
@@ -101,6 +106,9 @@ export function openAsrStreamSession(
   let readyTimer: ReturnType<typeof setTimeout> | null = null;
   let finalTimer: ReturnType<typeof setTimeout> | null = null;
   let maxTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 录音停了但链路还没 ready：等握手宽限 / 等 ready 事件到达后再补发 finish */
+  let finishPending = false;
+  let finishGraceTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** 推流统计：整轮推了多少帧 / 多少字节，收尾时一条日志交代清楚 */
   let sentFrames = 0;
@@ -125,6 +133,10 @@ export function openAsrStreamSession(
       clearTimeout(maxTimer);
       maxTimer = null;
     }
+    if (finishGraceTimer) {
+      clearTimeout(finishGraceTimer);
+      finishGraceTimer = null;
+    }
   };
 
   const closeSocket = () => {
@@ -140,13 +152,36 @@ export function openAsrStreamSession(
       events: eventCount,
       buffered: backlog.length,
     });
+    const target = socket;
+    socket = null;
+    if (!target) return;
+    /**
+     * 连接还停在 CONNECTING 时直接 close()，浏览器会甩一条
+     * "WebSocket is closed before the connection is established"（连接超时、连点停止、页面卸载都会碰到）。
+     * 这里把关闭挂到 onopen / onerror 上：等连接有结果的那一拍立刻关，
+     * 既不建立一条没人用的链路，也不再往控制台喷这条噪音。
+     */
+    if (target.readyState === WebSocket.CONNECTING) {
+      target.onopen = () => {
+        try {
+          target.close();
+        }
+        catch {}
+      };
+      target.onerror = () => {
+        try {
+          target.close();
+        }
+        catch {}
+      };
+      return;
+    }
     try {
-      socket?.close();
+      target.close();
     }
     catch (error) {
       logger.warn("close socket failed", error);
     }
-    socket = null;
   };
 
   const fail = (message: string) => {
@@ -169,6 +204,30 @@ export function openAsrStreamSession(
   const sendFinish = () => {
     if (closed || settled) {
       logger.debug("[asr-stream] 跳过 finish", { closed, settled });
+      return;
+    }
+    /**
+     * 链路还没 ready（socket 仍在 CONNECTING）时不能 send：会抛
+     * `InvalidStateError: Failed to execute 'send': Still in CONNECTING state`。
+     *
+     * 这时录音可能已经结束了，但握手 / 服务端 ready 只是慢了一拍。给一个短宽限：
+     * - 宽限内 ready 到了 → ready 分支补发完积压音频后立刻把 finish 发出去（见 onmessage 的 ready 处理）；
+     * - 宽限到期还没 ready → 按「未连接」收尾，端上给可读提示，而不是抛一条底层异常。
+     */
+    if (!ready) {
+      if (!finishPending) {
+        finishPending = true;
+        logger.info("[asr-stream] 录音已结束但链路未就绪，等待握手", {
+          ms: elapsed(),
+          readyState: socket?.readyState,
+          buffered: backlog.length,
+        });
+        finishGraceTimer = setTimeout(() => {
+          finishGraceTimer = null;
+          if (closed || settled) return;
+          fail("语音识别未连接");
+        }, FINISH_READY_GRACE_MS);
+      }
       return;
     }
     logger.info("[asr-stream] 发送 finish（录音结束）", {
@@ -280,6 +339,16 @@ export function openAsrStreamSession(
         }
       }
       if (flushed) logger.info("[asr-stream] 已补发积压音频", { flushed, ms: elapsed() });
+      // 录音在 ready 之前就结束了：积压音频刚补发完，这里把 finish 补上，
+      // 否则这一轮会被白丢（旧写法在 CONNECTING 时 send，直接抛 InvalidStateError）
+      if (finishPending) {
+        finishPending = false;
+        if (finishGraceTimer) {
+          clearTimeout(finishGraceTimer);
+          finishGraceTimer = null;
+        }
+        sendFinish();
+      }
       return;
     }
 
