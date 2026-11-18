@@ -248,9 +248,11 @@ function onSubmit() {
 
 <style scoped lang="scss">
 /* ===================== 录音中底部底色 =====================
-   设计稿给的是 180deg 的纵向过渡（上 → 下）：
-   浅色 rgb(135,198,255) / 深色 rgb(15,126,238)，都是 0% 全透明 → 100% 50% 不透明度，
-   越靠底部越实，往上自然淡出到页面底色，不留硬边。
+   取「和底部输入栏 / 初始页同一条渐变」，两处必须逐字一致（改一处就同步另一处）：
+   - `.welcome`（初始页底部带）与 `.chat-input::before`（问答页底部带）：
+     浅色 rgba(135,198,255) 0 → 50%，深色 rgba(11,110,218) 0 → #0B6EDA 100%；
+   - 这里录音态同样用这一条，只靠 alpha 收边，不会像「模糊层 + overflow 裁」那样切出硬线。
+   以前深色单独写过 #0F7EEE + 50%，比底部那条更亮更淡，点「点击说话」时底色会跳一下。
 
    bottom: 0 而不是 safe-area：底色要贴到屏幕最下沿，
    胶囊与提示语各自带 safe-area 上移，不受影响。 */
@@ -262,14 +264,14 @@ function onSubmit() {
   z-index: 1000; // 压在胶囊（1001）之下、内容之上
   // 高度对齐「录音视觉态」：和胶囊垫底层同高（安全区 + 胶囊带），不往正文区多铺
   height: calc(env(safe-area-inset-bottom) + 230rpx);
-  background: linear-gradient(180deg, rgb(135 198 255 / 0%) 0%, rgb(135 198 255 / 50%) 100%);
+  background: linear-gradient(180deg, rgba(135, 198, 255, 0) 0%, rgba(135, 198, 255, 0.5) 100%);
   pointer-events: none;
   animation: voice-query-glow-in 260ms ease-out both;
 }
 
-/* 深色外观：设计稿深色态给的是 #0F7EEE 的透明到半透明过渡（180deg：上透明 → 下 50%） */
+/* 深色：与底部输入栏 / 初始页同一条（上透明 → 底部实色 #0B6EDA），不再单独用 #0F7EEE */
 .voice-query__glow--dark {
-  background: linear-gradient(180deg, rgb(15 126 238 / 0%) 0%, rgb(15 126 238 / 50%) 100%);
+  background: linear-gradient(180deg, rgba(11, 110, 218, 0) 0%, #0b6eda 100%);
 }
 
 /* 与胶囊的散开动画同步浮现；静态终态与设计稿完全一致 */
