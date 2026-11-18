@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AskSlotOption, AskSlotPayload } from '@/api/chat/types';
 import type { ChatScene } from '@/utils/session-scene';
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -14,6 +15,7 @@ import { useChatSend } from '@/hooks/useChatSend';
 import { useRealtimeTts } from '@/hooks/useRealtimeTts';
 import { useVoiceQuery } from '@/hooks/useVoiceQuery';
 import { provideChatScope, useChatStore } from '@/stores';
+import { stripOptionPrefix } from '@/utils/option-label';
 
 /**
  * 车载端（大屏）任务协同页（Ardot file 743688427371853 / 车载端页面）。
@@ -25,7 +27,8 @@ import { provideChatScope, useChatStore } from '@/stores';
  * 交互（与需求对齐）：
  * 1. 进页面先停在海报态：中间品牌区（hey, SANI → logo → 随时为你而来 → 描述）、底部蓝色光晕；
  *    海报态顶部**不出现**胶囊，也**不自动收音**——只有点中间的 logo 才开始这一轮；
- * 2. 开始收音：光晕进入呼吸动画、品牌区压暗、logo 收到右下角；
+ * 2. 底部光晕只在「收音中」和「播报中」亮（见 glowOn）：点 logo 开始收音亮起、进入呼吸动画，
+ *    收音结束后的思考阶段熄灭，回答开始播报时再亮，播报结束熄灭；
  * 3. 点右下角 logo 可再次收音；进入对话后顶部胶囊（logo + 我在，你说）才出现，
  *    本轮还在跑时文案切换为「正在思考」/「正在回答」（见 capsuleText）；
  * 4. 本轮思考中，提问左侧是「暂停」圆钮（设计稿 78 圆 / #262438）；答完或被暂停后
@@ -52,7 +55,7 @@ const TASK_SANDBOX_CODE = String(import.meta.env.VITE_TASK_SANDBOX_CODE || '').t
 const liveText = ref('');
 const listReady = ref(false);
 
-const { sendMessage, stopGenerating } = useChatSend(chatScope, {
+const { sendMessage, stopGenerating, sendAskSlotSelection } = useChatSend(chatScope, {
   scene: TASK_SCENE,
   // 任务协同不区分新老手，不做「新手隐藏老师傅导语」的过滤（与 pages/task 同口径）
   hideNoviceVoice: false,
@@ -99,17 +102,97 @@ const glowStyle = computed(() => ({
   '--task-pc-glow-level': String(0.35 + Math.min(voiceLevel.value, 1) * 0.65),
 }));
 
+/** 正在播报回答（自动播报 / 点喇叭手动播报都算） */
+const ttsSpeaking = computed(() => realtimeTts.playing.value);
+
+/**
+ * 光晕的亮灭时序（需求口径）：
+ * 点 logo 开始收音 → 亮；收音结束、思考中 → 灭；回答出现开始播报 → 再亮；播报结束 → 灭。
+ * 海报态（还没有对话）保留设计稿里那层常驻的底部光晕，不受这条规则影响。
+ */
+const glowOn = computed(() => !hasMessages.value || voiceQueryActive.value || ttsSpeaking.value);
+
 /* ------------------------------ 消息渲染 ------------------------------ */
 
 type MessageRow = (typeof chatStore.messages)[number];
 
-/** 只渲染设计稿里出现的块：正文 / 表格 / 图片。调度视图卡（gantt）按需求不展示 */
+/**
+ * 只渲染设计稿里出现的块：正文 / 表格 / 图片 / 追问卡（ask-slot，选项胶囊单独渲染）。
+ * 调度视图卡（gantt）按需求不展示；voice 只是播报稿，不进回答流程。
+ */
 function contentBlocks(message: MessageRow) {
   return (message.blocks || []).filter((block) => {
     if (block.type === 'gantt')
       return false;
-    return block.type === 'answer' || block.type === 'table' || block.type === 'image';
+    return block.type === 'answer' || block.type === 'table' || block.type === 'image' || block.type === 'ask-slot';
   });
+}
+
+/** 追问卡（选项胶囊）在车机屏上的展示数据 */
+interface AskSlotView {
+  payload: AskSlotPayload;
+  title: string;
+  description: string;
+  options: AskSlotOption[];
+  key: string;
+}
+
+/**
+ * 把 ask-slot 块归一成可渲染的选项组：
+ * - 多步骤表单（带 slots / input_type=text）在车机屏上不做，只处理「选择题」；
+ * - 没有选项的卡片（纯文本题）也不渲染；
+ * - 结果按消息缓存，模板里多处取同一份，避免每次重算。
+ */
+const askSlotCache = new WeakMap<object, AskSlotView | null>();
+
+function askSlotView(message: MessageRow): AskSlotView | null {
+  if (askSlotCache.has(message))
+    return askSlotCache.get(message) || null;
+  const block = (message.blocks || []).find(item => item.type === 'ask-slot');
+  const payload = block?.payload as AskSlotPayload | undefined;
+  let view: AskSlotView | null = null;
+  if (payload) {
+    // 文案先剥掉后端可能自带的「A |」序号：序号由左侧字母统一画，否则会显示成「A ｜ A | 全部任务」
+    const options = (payload.options || [])
+      .filter(option => option && String(option.label || '').trim())
+      .map(option => ({ ...option, label: stripOptionPrefix(String(option.label || '')) }));
+    const isForm = Array.isArray(payload.slots) && payload.slots.length > 0;
+    const isText = Boolean(payload.input_type) && payload.input_type !== 'choice';
+    if (options.length && !isForm && !isText) {
+      view = {
+        payload,
+        title: String(payload.title || payload.original_query || '').trim(),
+        description: String(payload.description || '').trim(),
+        options,
+        key: String(message.id || ''),
+      };
+    }
+  }
+  askSlotCache.set(message, view);
+  return view;
+}
+
+/** 已经作答过的追问卡：同一张卡只发一次，避免连点重复提问 */
+const answeredSlots = ref<string[]>([]);
+
+function isSlotAnswered(key: string) {
+  return answeredSlots.value.includes(key);
+}
+
+/** 选项序号：A / B / C…（与身份选择那组胶囊同一套写法） */
+function slotOptionLetter(index: number) {
+  return String.fromCharCode(65 + index);
+}
+
+/**
+ * 点选项：单选 / 多选都是「点哪项就发哪项」，与任务协同页（pages/task 的 onAskSlotPick）同一套口径。
+ */
+function onSlotOptionTap(message: MessageRow, option: AskSlotOption) {
+  const view = askSlotView(message);
+  if (!view || isSlotAnswered(view.key))
+    return;
+  answeredSlots.value = [...answeredSlots.value, view.key];
+  sendAskSlotSelection({ slot: view.payload, selectedOptions: [option] });
 }
 
 /** 正在跑的这一轮 AI 消息：顶栏状态文案跟着它走（结束 / 被停止时自动回落） */
@@ -449,6 +532,33 @@ onBeforeUnmount(() => {
                   :src="imageUrl(message)"
                   mode="widthFix"
                 />
+
+                <!-- 追问卡：选项胶囊，点一项即当作一次新提问发出去（与任务协同页同一套口径） -->
+                <view v-if="askSlotView(message)" class="task-pc__ask">
+                  <text v-if="askSlotView(message)?.title" class="task-pc__ask-title">
+                    {{ askSlotView(message)?.title }}
+                  </text>
+                  <text v-if="askSlotView(message)?.description" class="task-pc__ask-desc">
+                    {{ askSlotView(message)?.description }}
+                  </text>
+                  <view class="task-pc__ask-options">
+                    <view
+                      v-for="(option, index) in askSlotView(message)?.options"
+                      :key="String(option.value)"
+                      class="task-pc__ask-option"
+                      :class="{ 'is-answered': isSlotAnswered(askSlotView(message)?.key || '') }"
+                      @click="onSlotOptionTap(message, option)"
+                    >
+                      <text class="task-pc__ask-letter">
+                        {{ slotOptionLetter(index) }}
+                      </text>
+                      <view class="task-pc__ask-divider" />
+                      <text class="task-pc__ask-text">
+                        {{ option.label }}
+                      </text>
+                    </view>
+                  </view>
+                </view>
               </view>
 
               <!-- 底部一行：左喇叭（播报这段回答），右 AI 声明 -->
@@ -482,8 +592,8 @@ onBeforeUnmount(() => {
       </text>
     </view>
 
-    <!-- 底部蓝色光晕（收音时进入呼吸动画） -->
-    <view class="task-pc__glow" />
+    <!-- 底部蓝色光晕：只在收音中 / 播报中亮起（见 glowOn），思考中保持熄灭 -->
+    <view class="task-pc__glow" :class="{ 'is-on': glowOn }" />
 
     <!-- 右下角 logo：收音中 / 有对话时常驻，点一下又开始收音 -->
     <view v-if="showDockLogo" class="task-pc__dock" @click="toggleVoice">
@@ -782,6 +892,82 @@ onBeforeUnmount(() => {
   border-radius: 12px;
 }
 
+/* ------------------------------ 追问卡（选项胶囊） ------------------------------ */
+/* 深色卡里排选项：材质沿用移动端追问卡的深色胶囊（半透明白底 + 浅描边 + 全圆角），
+   车机屏宽，选项横向排、放不下自动换行；点了以后整组置灰，避免同一张卡重复提问 */
+.task-pc__ask {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  margin-top: 20px;
+}
+
+.task-pc__ask-title {
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 46px;
+  color: var(--task-pc-text);
+}
+
+.task-pc__ask-desc {
+  margin-top: -8px;
+  font-size: 26px;
+  line-height: 36px;
+  color: rgb(255 255 255 / 55%);
+}
+
+/* 竖向排列、左对齐、每项按内容撑宽（与移动端追问卡同一套排法） */
+.task-pc__ask-options {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.task-pc__ask-option {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 16px 32px;
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 8%);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+
+.task-pc__ask-option:hover {
+  border-color: rgb(255 255 255 / 40%);
+  background: rgb(255 255 255 / 14%);
+}
+
+.task-pc__ask-option.is-answered {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.task-pc__ask-letter {
+  font-size: 28px;
+  line-height: 40px;
+  color: rgb(255 255 255 / 70%);
+}
+
+.task-pc__ask-divider {
+  width: 1px;
+  height: 26px;
+  margin: 0 18px;
+  background: rgb(255 255 255 / 24%);
+}
+
+.task-pc__ask-text {
+  font-size: 30px;
+  line-height: 42px;
+  color: var(--task-pc-text);
+  word-break: break-word;
+}
+
 .task-pc__ai-footer {
   display: flex;
   align-items: center;
@@ -841,12 +1027,19 @@ onBeforeUnmount(() => {
 }
 
 /* ------------------------------ 收音字幕 ------------------------------ */
+/* 收音时识别出来的文字：套一个带边框的胶囊，和下方 AI 回答卡片（#212834 深色大卡）区分开。
+   底色沿用顶部状态胶囊 #262438，边框只做一条浅描边，压在光晕之上也不抢内容 */
 .task-pc__live {
   position: absolute;
   bottom: 260px;
   left: 50%;
   z-index: 4;
+  box-sizing: border-box;
   max-width: 1400px;
+  padding: 18px 36px;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 28px;
+  background: rgb(38 36 56 / 88%);
   transform: translateX(-50%);
 }
 
@@ -864,6 +1057,9 @@ onBeforeUnmount(() => {
  * 层叠要点：光晕压在内容之上（z-index 高于对话区），背景模糊才有东西可糊——
  * 放在内容下面的话背后只有页面底色，糊出来是一片纯色，没有发光感。
  * 边缘用 radial mask 化开成光晕，避免露出 1680 宽的矩形硬边；交互继续穿透（pointer-events: none）。
+ *
+ * 亮灭由 `.is-on` 控制（见 glowOn）：默认全透明，只有收音中 / 播报中才淡入，
+ * 思考阶段与「我在，你说」空闲态都保持熄灭。
  */
 .task-pc__glow {
   position: absolute;
@@ -875,27 +1071,37 @@ onBeforeUnmount(() => {
   background: #0277f4;
   backdrop-filter: blur(70px);
   -webkit-backdrop-filter: blur(70px);
-  opacity: calc(0.72 + var(--task-pc-glow-level) * 0.24);
-  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.32s ease;
+  /* 必须常驻独立合成层：车机 WebView 里 scroll-view 的原生滚动层会压在普通兄弟元素之上，
+     光晕只有等到某次内容 / 动画重绘（例如收音时呼吸动画变快）才会被画到上层，
+     空闲态（我在，你说）就会整块看不见。translate3d + will-change 把它钉在合成层里 */
+  transform: translate3d(-50%, 0, 0);
+  will-change: transform, opacity;
+  backface-visibility: hidden;
   pointer-events: none;
   animation: task-pc-glow-breathe 5.2s ease-in-out infinite;
   -webkit-mask-image: radial-gradient(74% 96% at 50% 100%, #000 0%, rgb(0 0 0 / 88%) 58%, rgb(0 0 0 / 34%) 80%, transparent 96%);
   mask-image: radial-gradient(74% 96% at 50% 100%, #000 0%, rgb(0 0 0 / 88%) 58%, rgb(0 0 0 / 34%) 80%, transparent 96%);
 }
 
+/* 收音中 / 播报中才亮：亮度跟麦克风音量走，呼吸节奏比空闲时快 */
+.task-pc__glow.is-on {
+  opacity: calc(0.72 + var(--task-pc-glow-level) * 0.24);
+}
+
 .task-pc.is-listening .task-pc__glow {
-  // opacity: calc(0.6 + var(--task-pc-glow-level) * 0.38);
   animation-duration: 2.4s;
 }
 
 @keyframes task-pc-glow-breathe {
   0%,
   100% {
-    transform: translateX(-50%) scale(1);
+    transform: translate3d(-50%, 0, 0) scale(1);
   }
 
   50% {
-    transform: translateX(-50%) scale(1.06);
+    transform: translate3d(-50%, 0, 0) scale(1.06);
   }
 }
 

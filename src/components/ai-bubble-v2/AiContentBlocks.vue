@@ -2,6 +2,7 @@
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import type { AiBlock } from "@/utils/ai-stream/chatStreamParser";
 import { computed } from "vue";
+import { useChatScope } from "@/stores";
 import { expandChartFences, expandMarkdownTables } from "@/utils/ai-stream";
 import AiBlockRenderer from "./AiBlockRenderer.vue";
 import AnswerGroupBlock from "./blocks/AnswerGroupBlock.vue";
@@ -74,6 +75,15 @@ const lastTipId = computed(() => {
 });
 
 /**
+ * 任务协同（scope=task）：`<COMPONENT scene=guide type=voice>` 只是这一轮的播报稿，
+ * 不能进回答流程，渲染前直接摘掉；作业指导 / 首页仍保留老师傅导语的展示（VoiceBlock）。
+ *
+ * 只在渲染层过滤：store 里的 voice 块照旧保留，播报链（useRealtimeTts / collectAnswerText
+ * 按块取文本，且有 speechText 时优先用它）不受影响。
+ */
+const renderVoiceBlock = useChatScope() !== "task";
+
+/**
  * 追问卡（ask-slot）固定排在回答最底部。
  *
  * 块顺序来自流式事件顺序：后端有时先推 ask_slot、再吐正文，blocks 里就成了
@@ -99,14 +109,16 @@ const renderItems = computed(() => {
     normalizedBlocks.value.filter(block => block.type !== "voice"),
     voiceTexts,
   );
+  // 任务协同不渲染 voice 块，但它们仍先用上面的 stripVoiceFromAnswers 把正文里重复的导语剔掉
+  const visibleVoiceBlocks = renderVoiceBlock ? voiceBlocks : [];
   const slotBlocks = rest.filter(block => block.type === "ask-slot");
   const contentBlocks = rest.filter(block => block.type !== "ask-slot");
 
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
   // 避免展示「输出结果」标题和分隔线；chart 内容本身仍由 AiBlockRenderer 渲染
-  if (props.noAnswerGroup) return [...voiceBlocks, ...contentBlocks, ...slotBlocks];
+  if (props.noAnswerGroup) return [...visibleVoiceBlocks, ...contentBlocks, ...slotBlocks];
 
-  const items: any[] = [...voiceBlocks];
+  const items: any[] = [...visibleVoiceBlocks];
   let group = [];
 
   function appendGroup() {
