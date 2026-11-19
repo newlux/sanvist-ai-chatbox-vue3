@@ -64,10 +64,8 @@ const { t } = useI18n();
   }
 }
 
-/* 「Hey, SANI」30px 白（设计稿宽 122） */
 .pc-welcome__title {
-  width: 122px;
-  height: 34px;
+  height: 55px;
   display: block;
 }
 
