@@ -222,12 +222,7 @@ const isTtsPlaying = computed(() =>
   Boolean(realtimeTts.playing.value)
   || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
 );
-/**
- * 播报声纹的弧段端点（与首页 pages/index 的 TTS_RIPPLE_APPEARANCE 同一套参数）：
- * 120 → 60 走 3/4 圈，左 → 底 → 右，顶部留 60° 缺口；
- * colorSpeed 归零：颜色固定成「左紫 → 蓝 → 蓝紫 → 右粉」，不随动画旋转。
- */
-const TTS_RIPPLE_APPEARANCE = { startAngle: 120, endAngle: 60, colorSpeed: 0 };
+ 
 const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
   // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
