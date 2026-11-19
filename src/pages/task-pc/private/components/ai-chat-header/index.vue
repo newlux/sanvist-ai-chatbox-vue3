@@ -926,6 +926,7 @@ onBeforeUnmount(() => {
             :auto="false"
             :fixed="false"
             :use-page-scroll="false"
+            :show-scrollbar="false"
             :default-page-size="20"
             :refresher-enabled="false"
             :loading-more-enabled="true"
@@ -1137,6 +1138,17 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
+.history-drawer,
+.history-drawer :deep(*) {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
 .ai-chat-header {
   position: relative;
   flex: 0 0 auto;

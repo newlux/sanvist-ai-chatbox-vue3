@@ -42,10 +42,10 @@ import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
 import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
 import AudioRipple from "@/components/audio-ripple/index.vue";
 import AiChatHeader from "@/pages/task-pc/private/components/ai-chat-header/index.vue";
-import AiChatInput from "@/components/ai-chat-input/index.vue";
+import AiChatInput from "@/pages/task-pc/private/components/ai-chat-input/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
-import AiMessageList from "@/components/ai-message-list/index.vue";
+import AiMessageList from "@/pages/task-pc/private/components/ai-message-list/index.vue";
 import AiPartsJumpSheet from "@/components/ai-parts-jump-sheet/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
@@ -233,6 +233,7 @@ const sharePosterWrap = ref<unknown>(null);
 const chatInputRef = ref<{
   appendAttachments?: (meta: ChatMessageAttachment[]) => void;
   focusTextInput?: () => void;
+  cancelDuplexPress?: () => void;
 } | null>(null);
 const shareSheetBottomInset = ref("");
 const pageStage = ref<"welcome" | "chat">("welcome");
@@ -322,6 +323,7 @@ const {
   stopGenerating,
   cancelActiveStream,
 } = useChatSend(chatScope, {
+  hideNoviceVoice: false,
   scene: "TASK",
   user: TASK_PC_DEVICE_NO,
   getExtraInputs: () => ({ deviceModel: TASK_PC_DEVICE_MODEL }),
@@ -2160,6 +2162,7 @@ onShow(() => {
 // 离开页面时停止自动听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
 // useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
+  chatInputRef.value?.cancelDuplexPress?.();
   // 遥控器按键还给系统：被压栈后继续拦截，子页面与系统返回键都会失灵
   remoteKeyActive.value = false;
   realtimeTts.stop();
@@ -2594,8 +2597,25 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
 </template>
 
 <style lang="scss" scoped>
+/* 隐藏滚动条外观，滚动容器继续响应触摸、鼠标和滚轮。 */
+.ai-page,
+.ai-page :deep(*) {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
 /* 车载屏回答采用独立深色卡片，样式仅作用于本页的消息列表。 */
 .task-pc-messages {
+  :deep(.ai-bubble-v2__busy-hint-text) {
+    font-size: 36rpx;
+    line-height: 1.6;
+  }
+
   :deep(.ai-bubble-v2--user .ai-bubble-v2__body) {
     border-color: #4b5568;
     background: #4b5568;
@@ -2609,10 +2629,15 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
   :deep(.table-block),
   :deep(.table-block__table),
   :deep(.table-block__cell),
-  :deep(.table-block .table-block__row--head .table-block__cell),
   :deep(.markdown-renderer table),
-  :deep(.markdown-renderer th),
   :deep(.markdown-renderer td) {
+    background: transparent !important;
+    border-color: #596579 !important;
+    color: #f4f6fa !important;
+  }
+
+  :deep(.table-block .table-block__row--head .table-block__cell),
+  :deep(.markdown-renderer th) {
     background: #3b4658 !important;
     border-color: #596579 !important;
     color: #f4f6fa !important;
@@ -2660,8 +2685,12 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
     color: #f4f6fa;
   }
 
+  :deep(.ai-bubble-v2) {
+    margin: 0;
+  }
+
   :deep(.ai-bubble-v2--user) {
-    margin-bottom: 48rpx;
+    margin: 64rpx 0;
   }
 
   :deep(.ai-bubble-v2--user .ai-bubble-v2__user-content),
