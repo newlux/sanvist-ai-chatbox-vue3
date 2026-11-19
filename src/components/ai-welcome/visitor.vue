@@ -1569,8 +1569,8 @@ onMounted(async () => {
       <view class="welcome-visitor__caption" @tap.stop="onCaptionTap">
         <text class="welcome-visitor__slogan">随时，为你而在</text>
         <view class="welcome-visitor__desc">
-          <text class="welcome-visitor__desc-line">你的三一设备伙伴。</text>
-          <text class="welcome-visitor__desc-line">把问题交给我，把时间留给工作。</text>
+          <text class="welcome-visitor__desc-line">你的三一设备伙伴</text>
+          <text class="welcome-visitor__desc-line">把问题交给我，把时间留给工作</text>
         </view>
       </view>
     </view>

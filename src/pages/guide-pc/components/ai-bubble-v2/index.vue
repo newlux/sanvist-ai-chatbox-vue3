@@ -1406,7 +1406,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   height: 52rpx;
   min-width: 0;
   overflow: hidden;
-  color: #5d5d5d;
+  color: #0d0d0d;
   font-size: 24rpx;
   line-height: 36rpx;
 }

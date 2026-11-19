@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import iconWaveBlueDark from "@/assets/img/icon-voice-wave-blue-dark.svg";
@@ -11,10 +12,15 @@ import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
 import { usePressDelay } from "@/hooks/usePressDelay";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { useSettingsStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { getMicrophoneVolume } from "@/utils/platform/mpaas";
 
 const logger = createLogger("chat-input");
+
+/** 纯净模式（设置弹层里那个）：开着时底部没有快捷入口，渐变的 ::before 可以再往下多铺一截 */
+const settingsStore = useSettingsStore();
+const { pureMode } = storeToRefs(settingsStore);
 
 const props = defineProps({
   duplexEnabled: { type: Boolean, default: false },
@@ -856,6 +862,7 @@ onBeforeUnmount(() => {
       'chat-input--voice-panel-open': isVoicePanelOpen,
       'chat-input--dark': dark,
       'chat-input--query-active': voiceQueryActive,
+      'chat-input--pure': pureMode,
     }"
     :style="inputLiftStyle"
   >
@@ -1217,8 +1224,9 @@ onBeforeUnmount(() => {
           />
           <image v-else src="@/assets/img/icon-mic-red.svg" mode="aspectFit" />
         </view>
+        <!-- 停止键：圆底由 CSS 给（与加号圆钮同一档），中间白色圆角方块也由 CSS 画 -->
         <view v-else-if="isLoading" class="input-bar__stop" @tap="emit('stop')">
-          <image src="@/assets/img/icon-stop-circle.svg" mode="aspectFit" />
+          <view class="input-bar__stop-square" />
         </view>
         <view v-else class="input-bar__send" @touchstart.stop.prevent="onTrySend" @tap.stop="onTrySend">
           <!-- 文本态：黑圆上箭头；语音态保持原红色发送 -->
@@ -1279,7 +1287,13 @@ onBeforeUnmount(() => {
 
 /* 深色：同一层的范围不变，只换色（上透明 → 底部实色 #0B6EDA），比浅色那档更沉 */
 .chat-input--dark::before {
-  background-image: linear-gradient(180deg, rgba(11, 110, 218, 0) 0%, #0b6eda 100%);
+  background-image: linear-gradient(180deg, rgba(0, 115, 255, 0) 0%, rgba(59, 142, 229, 0.7) 74.04%, #9DCBFC 100%)
+}
+
+/* 纯净模式：底部不再有快捷入口胶囊，渐变层往下多铺 4rem（即 calc(100% - -4rem)），
+   浅色 / 深色同一口径；关闭纯净模式仍是基类的 calc(100% - 0rem) */
+.chat-input--pure::before {
+  height: calc(100% - -4rem);
 }
 
 /* 深色下中间那枚半圆与浅色同一口径（62% 白 / 即 #ffffff9e）：压在 #0B6EDA 的渐变上成一团柔光 */
@@ -1942,11 +1956,13 @@ onBeforeUnmount(() => {
   padding: 0 120rpx 0 36rpx; // 左 18px（截图文字起于 x213）；右留出芯片 96rpx + 16rpx
 }
 
+/* 「点击说话」/「按住说话」文案：压在这条蓝色渐变上，浅色稿也用纯白 #FFFFFF
+   （设计截图给的是 #5E5E5E，实测在渐变上偏暗；生成中的置灰态见 --disabled） */
 .input-bar__hold-label {
   font-size: 28rpx; // 14px
   font-weight: 400;
   line-height: 40rpx; // 20px
-  color: #5e5e5e; // 截图最深像素 #5E5E5E
+  color: #ffffff;
   text-align: center;
 }
 
@@ -1988,9 +2004,7 @@ onBeforeUnmount(() => {
   pointer-events: auto;
 }
 
-.input-bar__hold--disabled .input-bar__hold-label {
-  color: #bababa;
-}
+/* 禁用态只说「点不动」，文案颜色不降级：与常态一样是纯白 #FFFFFF（原来是 #BABABA） */
 
 /* 识别中：同一块框内换文案，沿用原来的提示色 */
 .input-bar__hold-hint {
@@ -2042,9 +2056,11 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
+/* 「请输入内容」占位：压在这条蓝色渐变上，浅色也用纯白 #FFFFFF（原来是 #BABABA）；
+   深色同值，见 .chat-input--dark 里的同一组规则 */
 .input-bar__placeholder {
   font-size: 24rpx;
-  color: #bababa;
+  color: #ffffff;
 }
 
 // 胶囊内的圆形按钮
@@ -2088,7 +2104,7 @@ onBeforeUnmount(() => {
   background: #0d0d0d30;
 }
 
-// 发送与停止本身就是实心图标，不再加底色
+// 发送与停止都只做对齐；发送不加底，停止的圆底在下面单独给（与加号同一档）
 .input-bar__send,
 .input-bar__stop {
   flex: 0 0 auto;
@@ -2102,18 +2118,24 @@ onBeforeUnmount(() => {
   height: 68rpx;
 }
 
-/* 停止按钮：参考图是「#0D0D0D 实心圆 35px + 白色 12px 圆角方块」，由 icon-stop-circle.svg 自带，
-   这里只给 35px 的方形落位，与语音态 44px 的键盘钮共用同一行的 10px 间距 */
+/* 停止按钮：35px（70rpx）圆 + 中间白色圆角方块。
+   圆底改由 CSS 给（浅色 #0D0D0D30 / 深色 #FFFFFF30），与左侧加号圆钮同一档材质；
+   原来贴 icon-stop-circle.svg 的整圆图，那张图的圆底固定 #0D0D0D30，深色下和加号对不上 */
 .input-bar__stop {
   flex: 0 0 70rpx;
   width: 70rpx; /* 35px */
   height: 70rpx;
   margin-right: 0;
+  border-radius: 50%;
+  background: #0d0d0d30;
 }
 
-.input-bar__stop image {
-  width: 70rpx;
-  height: 70rpx;
+/* 白色方块：原图 44px 画布里是 12px 方块 / 2px 圆角，换算到 70rpx 显示约 19rpx / 3rpx */
+.input-bar__stop-square {
+  width: 19rpx;
+  height: 19rpx;
+  border-radius: 3rpx;
+  background: #ffffff;
 }
 
 /* 停止、发送与输入模式切换共用同一按钮位。 */
@@ -2291,7 +2313,7 @@ onBeforeUnmount(() => {
 
 .chat-input .input-bar--plain .input-bar__placeholder {
   font-size: 28rpx;
-  color: #8e8e8e;
+  color: #ffffff; // 与普通态同色，只有字号不同
 }
 
 /* 右侧切换钮：画在灰色胶囊内部右侧，不额外占列
@@ -2309,6 +2331,17 @@ onBeforeUnmount(() => {
   padding: 0;
   background: transparent;
   transform: translateY(-50%);
+}
+
+/* 麦克风钮的圆底与左侧加号圆钮同一档：#0D0D0D30（深色 #FFFFFF30），
+   压在灰胶囊上自然深一档，是「胶囊里另起一枚圆」而不是光秃秃一个图标；
+   发送钮（--send）保持透明，不加底色 */
+.chat-input .input-bar--plain:not(.input-bar--duplex) .input-bar__mode {
+  background: #0d0d0d30;
+}
+
+.chat-input--dark .input-bar--plain:not(.input-bar--duplex) .input-bar__mode {
+  background: #ffffff30;
 }
 
 .chat-input .input-bar--plain .input-bar__send image {
@@ -2395,13 +2428,14 @@ onBeforeUnmount(() => {
     background: #ffffff30;
   }
 
-  // 「按住说话」文案：深底改白；生成中置灰态压到 #8F8F8F，避免白字看起来还能点
-  .input-bar__hold-label {
-    color: #ffffff;
+  // 停止键的圆底与加号同一档 #FFFFFF30（方块仍是白色）
+  .input-bar__stop {
+    background: #ffffff30;
   }
 
-  .input-bar__hold--disabled .input-bar__hold-label {
-    color: #8f8f8f;
+  // 「按住说话」文案：深底纯白；生成中的禁用态同样是白色（不再压灰）
+  .input-bar__hold-label {
+    color: #ffffff;
   }
 
   .input-bar__hold-hint {
@@ -2417,7 +2451,7 @@ onBeforeUnmount(() => {
     background: #ffffff20;
   }
 
-  // 输入文字 / 占位
+  // 输入文字 / 占位：深底上「请输入内容」也用纯白 #FFFFFF（原来是 #6B6B6B，压在蓝渐变上看不清）
   .input-bar__textarea,
   .input-bar.input-bar--plain .input-bar__textarea {
     color: #ffffff;
@@ -2425,24 +2459,21 @@ onBeforeUnmount(() => {
 
   .input-bar__placeholder,
   .input-bar.input-bar--plain .input-bar__placeholder {
-    color: #6b6b6b;
+    color: #ffffff;
   }
 
-  // 加号 / 键盘图标素材本身就是白色，浅深两色都保持白色，不参与反相。
-  // 只有「深色线条」的发送 / 停止需要反成白线；
+  // 加号 / 键盘图标素材本身就是白色，浅深两色都保持本色，不参与反相。
+  // 只有「深色线条」的文本态发送（icon-send-up.svg）需要反成白线；
   // 语音态发送是品牌红 #C8201E，声波钮是彩色渐变图标，都不跟着反相
-  .input-bar__stop image,
   .input-bar.input-bar--text .input-bar__send image {
     filter: invert(1);
   }
 }
 
+/* 右侧麦克风图标（icon-mic-red.svg）素材本身就是白色线条：
+   深色 / 浅色都保持白色，不再压成 #0D0D0D（原来那条 brightness(0) invert(5.1%) 会把它染黑） */
 .input-bar__mode--mic image {
-  filter: brightness(0) invert(5.1%);
-}
-
-.chat-input--dark .input-bar__mode--mic image {
-  filter: brightness(0) invert(1);
+  filter: none;
 }
 
 .input-bar__duplex--starting {

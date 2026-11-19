@@ -1349,7 +1349,7 @@ onBeforeUnmount(() => {
 
 /* 深色：同一层的范围不变，只换色（上透明 → 底部实色 #0B6EDA），比浅色那档更沉 */
 .chat-input--dark::before {
-  background-image: linear-gradient(180deg, rgba(11, 110, 218, 0) 0%, #0b6eda 100%);
+  background-image: linear-gradient(180deg, rgba(0, 115, 255, 0) 0%, rgba(59, 142, 229, 0.7) 74.04%, #9DCBFC 100%)
 }
 
 /* 深色下中间那枚半圆与浅色同一口径（62% 白 / 即 #ffffff9e）：压在 #0B6EDA 的渐变上成一团柔光 */

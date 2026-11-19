@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { storeToRefs } from "pinia";
 import { computed, getCurrentInstance, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import closeRecordingIcon from "@/assets/img/icon-close-recording.svg";
+import recordingSendIcon from "@/assets/img/icon-recording-send.svg";
+import { useSettingsStore } from "@/stores";
 
 /**
  * 语音提问底部条 —— 还原 Ardot「起始态 • 唤醒-智能体移动到顶部」(70:1614) 的 Voice Pill。
@@ -38,6 +41,9 @@ const emit = defineEmits<{
   (e: "cancel"): void;
   (e: "submit"): void;
 }>();
+
+/** 纯净模式：底部没有快捷入口胶囊，录音态的光晕可以再往上多铺一截（与输入栏同口径） */
+const { pureMode } = storeToRefs(useSettingsStore());
 
 /**
  * 声纹高度权重的取池（rpx）：数值取自设计稿那段声纹的高低起伏形态。
@@ -180,10 +186,15 @@ function onSubmit() {
 </script>
 
 <template>
-  <!-- ===== 录音中底部底色：设计稿给的是 180deg 的透明→半透明过渡
-       （浅色 #87C6FF、深色 #0F7EEE，均为上 0% → 下 50% 不透明度） =====
+  <!-- ===== 录音中底部底色：与未录音态输入栏的底部带逐字同一条渐变
+       （浅色 #87C6FF 0 → 50%，深色 rgba(0,115,255,0) → rgba(59,142,229,0.7) 74.04% → #9DCBFC）=====
        单层纯渐变就够：靠 alpha 收边，不会像「模糊层 + overflow 裁」那样切出硬线 -->
-  <view v-if="!useHoldBackdrop" class="voice-query__glow" :class="{ 'voice-query__glow--dark': dark }" aria-hidden="true" />
+  <view
+    v-if="!useHoldBackdrop"
+    class="voice-query__glow"
+    :class="{ 'voice-query__glow--dark': dark, 'voice-query__glow--pure': pureMode }"
+    aria-hidden="true"
+  />
 
   <!-- ===== 胶囊后面的垫底渐隐 =====
        输入栏有一条不透明的底，正文滚到它后面就被挡住了；录音条只有一枚半透明胶囊，
@@ -225,13 +236,15 @@ function onSubmit() {
       </text>
     </view>
 
-    <!-- 设计稿 70:1657 Group 110：36×36 白色圆 + 上箭头（点按结束录音） -->
+    <!-- 设计稿 70:1657 Group 110：48×36 半透明白胶囊 + 上箭头（点按结束录音）。
+         底色改用导出的整块图标 icon-recording-send.svg（48×36，白 20% + r18），容器不再铺底色 -->
     <view
       class="voice-query__submit"
       :class="{ 'voice-query__submit--busy': busy }"
       :aria-disabled="busy"
       @tap.stop="onSubmit"
     >
+      <image class="voice-query__submit-bg" :src="recordingSendIcon" mode="aspectFit" />
       <view class="voice-query__arrow">
         <view class="voice-query__arrow-head" />
         <view class="voice-query__arrow-stem" />
@@ -248,9 +261,10 @@ function onSubmit() {
 
 <style scoped lang="scss">
 /* ===================== 录音中底部底色 =====================
-   取「和底部输入栏 / 初始页同一条渐变」，两处必须逐字一致（改一处就同步另一处）：
-   - `.welcome`（初始页底部带）与 `.chat-input::before`（问答页底部带）：
-     浅色 rgba(135,198,255) 0 → 50%，深色 rgba(11,110,218) 0 → #0B6EDA 100%；
+   取「和底部输入栏同一条渐变」，两处必须逐字一致（改一处就同步另一处）：
+   - `.chat-input::before`（问答页底部带）：
+     浅色 rgba(135,198,255) 0 → 50%，
+     深色 rgba(0,115,255,0) → rgba(59,142,229,0.7) 74.04% → #9DCBFC 100%；
    - 这里录音态同样用这一条，只靠 alpha 收边，不会像「模糊层 + overflow 裁」那样切出硬线。
    以前深色单独写过 #0F7EEE + 50%，比底部那条更亮更淡，点「点击说话」时底色会跳一下。
 
@@ -269,9 +283,17 @@ function onSubmit() {
   animation: voice-query-glow-in 260ms ease-out both;
 }
 
-/* 深色：与底部输入栏 / 初始页同一条（上透明 → 底部实色 #0B6EDA），不再单独用 #0F7EEE */
+/* 深色：逐字对齐底部输入栏 .chat-input--dark::before 那条
+   （rgba(0,115,255,0) → rgba(59,142,229,0.7) 74.04% → #9DCBFC），
+   录音态与未录音态的底色必须完全一致，点「点击说话」时不能跳色 */
 .voice-query__glow--dark {
-  background: linear-gradient(180deg, rgba(11, 110, 218, 0) 0%, #0b6eda 100%);
+  background: linear-gradient(180deg, rgba(0, 115, 255, 0) 0%, rgba(59, 142, 229, 0.7) 74.04%, #9dcbfc 100%);
+}
+
+/* 纯净模式：底部不再有快捷入口胶囊，光晕继续往上多铺 4rem（深浅色同一口径，
+   与输入栏 .chat-input--pure::before 的 calc(100% - -4rem) 对齐） */
+.voice-query__glow--pure {
+  height: calc(env(safe-area-inset-bottom) + 230rpx + 4rem);
 }
 
 /* 与胶囊的散开动画同步浮现；静态终态与设计稿完全一致 */
@@ -309,8 +331,7 @@ function onSubmit() {
 /* 设计稿 70:1651 Voice Pill
    327×44px → 654×88rpx；x=24（左右 48rpx）；距底 36px=72rpx；
    圆角 45px→90rpx（大于半高，视觉即胶囊）；
-   底 rgba(13,13,13,0.38)：浅色稿的胶囊是中性灰（约 #A2A2A2），
-   原来 0.279 压在蓝光上偏深，换成白光晕后要再压深一点才和稿子一致；
+   底 #0D0D0D30（半透明黑，与输入条那一排控件同一档材质）；
    padding 6 / 4 → 12rpx / 8rpx */
 .voice-query {
   position: fixed;
@@ -324,7 +345,7 @@ function onSubmit() {
   height: 88rpx;
   padding: 8rpx 12rpx;
   border-radius: 90rpx;
-  background: rgba(13, 13, 13, 0.38);
+  background: #0d0d0d30;
   // 入场：从中间向两边散开（clip-path 只裁视觉，不改布局），散开到位后内部元素再淡入，
   // 就是「点击说话 → 向两边散开 → 出现录音态」的节奏。
   // 容器不支持 clip-path 时直接显示完整胶囊，功能不受影响
@@ -441,23 +462,34 @@ function onSubmit() {
   text-align: right;
 }
 
-/* 设计稿 70:1657 / 70:1661：36×36 圆（72rpx），r18（36rpx），纯白不透明 */
+/* 设计稿 70:1657 / 70:1661：48×36 胶囊（96×72rpx），r18（36rpx）。
+   底色由 icon-recording-send.svg 提供（48×36，白 20% + r18），容器不再铺底色，
+   只负责尺寸与居中，箭头压在这层之上 */
 .voice-query__submit {
+  position: relative;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: 36rpx;
-  background: #ffffff;
+  width: 96rpx; // 48px
+  height: 72rpx; // 36px
+  border-radius: 36rpx; // 18px
+  background: transparent;
+}
+
+.voice-query__submit-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .voice-query__submit--busy {
   opacity: 0.45;
 }
 
-/* 设计稿 70:1658：20×20（40rpx）箭头位，内部：chevron 11.667×5.833 + 竖线 11.667 */
+/* 设计稿 70:1658：20×20（40rpx）箭头位，内部：chevron 11.667×5.833 + 竖线 11.667。
+   必须定位：底图是 absolute，箭头也要定位才能盖在它上面（DOM 顺序在后，同层级后者优先） */
 .voice-query__arrow {
   position: relative;
   width: 40rpx;
@@ -473,8 +505,8 @@ function onSubmit() {
   box-sizing: border-box;
   width: 16.5rpx;
   height: 16.5rpx;
-  border-top: 3.33rpx solid #0d0d0d;
-  border-left: 3.33rpx solid #0d0d0d;
+  border-top: 3.33rpx solid #ffffff;
+  border-left: 3.33rpx solid #ffffff;
   transform: rotate(45deg);
 }
 
@@ -486,7 +518,7 @@ function onSubmit() {
   box-sizing: border-box;
   width: 3.33rpx;
   height: 23.33rpx;
-  background: #0d0d0d;
+  background: #ffffff;
 }
 
 /* ===== 胶囊下方的安全提示 =====
@@ -527,15 +559,6 @@ function onSubmit() {
   color: rgba(242, 243, 245, 0.55);
 }
 
-.voice-query--dark .voice-query__submit {
-  background: #f2f3f5;
-}
+/* 深色不再单独改发送钮：底色来自 icon-recording-send.svg（白 20%），箭头本来就是白色 */
 
-.voice-query--dark .voice-query__arrow-head {
-  border-color: #0d0d0d;
-}
-
-.voice-query--dark .voice-query__arrow-stem {
-  background: #0d0d0d;
-}
 </style>

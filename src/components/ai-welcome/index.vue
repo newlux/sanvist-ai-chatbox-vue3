@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PropType } from "vue";
+import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
@@ -16,6 +17,7 @@ import saniLogoWebp from "@/assets/img/sani-logo.webp";
 import titleDark from "@/assets/img/sany-neo-dark.svg";
 import titleLight from "@/assets/img/sany-neo-light.svg";
 import { useSafeArea } from "@/hooks/useSafeArea";
+import { useSettingsStore } from "@/stores";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
 
@@ -78,6 +80,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const { safeAreaStyle } = useSafeArea();
+/** 纯净模式：开着时底部没有快捷入口胶囊，深色渐变带可以再往下多铺一截（与对话页输入栏同口径） */
+const { pureMode } = storeToRefs(useSettingsStore());
 
 /**
  * 「Hey,SANI」整行字标：直接用设计导出的整行图，不再用文字 + background-clip 拼。
@@ -336,7 +340,12 @@ onBeforeUnmount(() => {
 <template>
   <view
     class="welcome"
-    :class="{ 'welcome--leaving': leaving, 'welcome--landed': landed, 'welcome--dark': dark }"
+    :class="{
+      'welcome--leaving': leaving,
+      'welcome--landed': landed,
+      'welcome--dark': dark,
+      'welcome--pure': pureMode,
+    }"
     :style="safeAreaStyle"
   >
     <view class="welcome__hero">
@@ -561,6 +570,15 @@ onBeforeUnmount(() => {
   // 中间那枚半圆只有深色模式才铺（浅色按要求去掉白底），声明见下方 .welcome--dark::before
 }
 
+/* 纯净模式（初始页）：底部没有快捷入口胶囊，渐变带往下多铺 4rem（浅色 / 深色同一口径），
+   与对话页 .chat-input--pure::before 的 calc(100% - -4rem) 同口径；
+   关闭纯净模式仍是基类的 176rpx + 安全区。
+   深色那条要写成两个类，才能压过下面 .welcome--dark 里的 background-size */
+.welcome--pure,
+.welcome--pure.welcome--dark {
+  background-size: 100% calc(176rpx + env(safe-area-inset-bottom) + 4rem);
+}
+
 /* 起飞态：底色让位（下面的对话页露出来），文字与输入条先淡出，只有 logo 继续往上滑 */
 .welcome--leaving {
   background: transparent;
@@ -728,6 +746,7 @@ onBeforeUnmount(() => {
   // 标语单独上提 10rpx（5px）：用 transform 而不是 margin —— 位移不参与布局，
   // 下面两行描述的位置一点也不动
   transform: translateY(-10rpx);
+  margin-bottom: 20rpx;
 }
 
 .welcome__desc {
@@ -735,7 +754,7 @@ onBeforeUnmount(() => {
   color: #8e8e8e;
   font-size: 26rpx; // 16px
   font-weight: 400;
-  line-height: 48rpx; // 24px
+  line-height: 40rpx; // 24px
   text-align: center;
 }
 
@@ -900,8 +919,9 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
+/* 文本态占位「请输入内容」：压在蓝色渐变上，浅色也用纯白 #FFFFFF（原来是 #8E8E8E） */
 .welcome__composer-placeholder {
-  color: #8e8e8e;
+  color: #ffffff;
   font-size: 28rpx;
 }
 
@@ -1030,8 +1050,9 @@ onBeforeUnmount(() => {
   color: #f2f3f5;
 }
 
+// 深色同样是纯白，与问答页 .input-bar__placeholder 口径一致
 .welcome--dark .welcome__composer-placeholder {
-  color: #6b6b6b; // 与问答页深色 placeholder 同色
+  color: #ffffff;
 }
 
 /* 加号 / 键盘图标素材本身就是白色线条（icon-plus.svg / icon-keyboard-dark.svg）：
@@ -1042,12 +1063,10 @@ onBeforeUnmount(() => {
   filter: invert(1);
 }
 
+/* 麦克风图标（icon-mic-red.svg）素材本身就是白色线条：浅色 / 深色都保持白色，
+   不再压成 #0D0D0D（原来那条 brightness(0) invert(5.1%) 会把它染黑） */
 .welcome__composer-kb--mic .welcome__composer-kb-icon {
-  filter: brightness(0) invert(5.1%);
-}
-
-.welcome--dark .welcome__composer-kb--mic .welcome__composer-kb-icon {
-  filter: brightness(0) invert(1);
+  filter: none;
 }
 
 /* 主视觉的投影：浅色稿是黑 14%，深底上等于没有，加浓一档让三角浮起来 */

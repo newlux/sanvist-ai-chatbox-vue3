@@ -443,7 +443,7 @@ onBeforeUnmount(() => {
     "Microsoft YaHei",
     sans-serif;
   font-size: 44rpx;
-  font-weight: 500;
+  font-weight: 300;
   line-height: calc(41 * var(--u));
   letter-spacing: 0;
   text-align: center;
