@@ -257,11 +257,11 @@ function resolveRootElement(): HTMLElement | null {
 
 <template>
   <view ref="rootRef" class="guide-check-block" :class="{ 'guide-check-block--dark': dark }">
-    <!-- 卡片左上角品牌署名：SANY NEO logo + SANY NEO + 语音播报控制（与气泡里的完成态同一套观感） -->
+    <!-- 卡片左上角品牌署名：SANY NEO logo + SANY Neo + 语音播报控制（与气泡里的完成态同一套观感） -->
     <view class="guide-check-block__brand">
       <image class="guide-check-block__brand-icon" :src="saniIcon" mode="aspectFit" />
       <text class="guide-check-block__brand-text">
-        SANY NEO
+        SANY Neo
       </text>
       <view
         v-if="ttsEnabled"
@@ -377,7 +377,7 @@ function resolveRootElement(): HTMLElement | null {
     </text>
 
     <!-- 动作区：复制 / 分享，与回答气泡的操作栏同一套图标与观感；精简版整块不画。
-         播报按钮已上移到卡片左上角的 SANY NEO 后面（与气泡完成态一致）；
+         播报按钮已上移到卡片左上角的 SANY Neo 后面（与气泡完成态一致）；
          data-share-poster-ignore 让分享截图时把这一行摘掉，海报里只有卡片内容 -->
     <view v-if="showActions && !compact" class="guide-check-block__actions" data-share-poster-ignore>
       <view class="guide-check-block__action-btn" @tap.stop="onCopyTap">
@@ -409,7 +409,7 @@ function resolveRootElement(): HTMLElement | null {
   width: 100%;
 }
 
-/* 左上角品牌署名：SANY NEO logo + SANY NEO + 播报按钮（与气泡完成态同一套观感） */
+/* 左上角品牌署名：SANY NEO logo + SANY Neo + 播报按钮（与气泡完成态同一套观感） */
 .guide-check-block__brand {
   display: flex;
   align-items: center;

@@ -2016,7 +2016,7 @@ onBeforeUnmount(() => {
   font-size: 28rpx; // 14px
   font-weight: 400;
   line-height: 40rpx; // 20px
-  color: #5e5e5e; // 截图最深像素 #5E5E5E
+  color: #ffffff; // 截图最深像素 #5E5E5E
   text-align: center;
 }
 
@@ -2042,7 +2042,7 @@ onBeforeUnmount(() => {
 
 /* 已触发（实时语音进行中）：白底不变，靠图标换成蓝色声波区分 */
 .input-bar__wave-chip--active {
-  background: #ffffff;
+  background: #ffffff20;
 }
 
 .input-bar__wave-chip image {
@@ -2480,7 +2480,7 @@ onBeforeUnmount(() => {
   // 否则芯片和 #212121 胶囊同色连成一片，图标看着像露在框外面；
   // 触发后提到 14% 白（比 #303030 再亮一档）+ 换蓝色声波，作为"正在实时语音"的反馈
   .input-bar__wave-chip {
-    background: #212121;
+    background: #ffffff20;
   }
 
   .input-bar__wave-chip--active {

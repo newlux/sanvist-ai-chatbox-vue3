@@ -25,9 +25,11 @@ import { createLogger } from "@/utils/logger";
  *   选中卡 1px `#1166D6` 描边 + 「默认」徽标，右侧 18×18 波形图标。
  *
  * 卡片文案（对齐设计稿 180:211 / 180:212）：
+ * - 头像 = 音色对应的本地 png（`config/report-voices` 的 `avatar`，设计稿每行一张不同的人像）；
  * - 主标题 = 音色「类型」，如「温柔知性」（按 code 前缀取本地词条 `report-voice-name-*`，
  *   中英文都走词条；接口新增音色没有词条时才退回接口 description）；
- * - 灰色说明 = 该类型的描述句，如「温柔亲和，陪伴式对话自然舒适」（本地 i18n slogan）。
+ * - 灰色说明 = 「性别｜描述句」，如「女｜温柔亲和，陪伴式对话自然舒适」——设计稿 180:212
+ *   把性别做在这行最前面，所以性别不单独占一个标签（本地 i18n slogan + `gender`）。
  *
  * 数据：接口文档 4.5 `/settings`，`voiceCode` 是全局音色、`speechRate` 是语速倍率；
  * 每次操作只 PUT 本次改动的字段。音色列表取 `/listen-broadcast/config` 的 `voices`，
@@ -72,8 +74,14 @@ interface SoundVoice {
   type: string;
   /** 灰色说明句，如「温柔亲和，陪伴式对话自然舒适」 */
   slogan: string;
-  /** 试听音频（本地 wav），接口新增的音色可能没有 */
+  /** 头像（本地 png，设计稿 1018:186 等每行一张），接口新增的音色可能没有 */
+  avatar: string;
+  /** 性别：设计稿 180:212 的说明句以「女｜」「男｜」起头，空串表示该音色没有性别信息 */
+  gender: ReportVoiceOption["gender"] | "";
+  /** 试听音频（中文，本地 wav），接口新增的音色可能没有 */
   preview: string;
+  /** 英文模式下的试听音频（`assets/audio/voice-en`，与中文同名），没有则回退 `preview` */
+  previewEn: string;
 }
 
 /**
@@ -183,13 +191,33 @@ function typeOf(code: string, description?: string) {
   return String(description || "").trim() || code;
 }
 
+/** 性别词条：设计稿 180:212 说明句的前缀，接口新增、本地没配性别时返回空串 */
+function genderText(gender: SoundVoice["gender"]) {
+  if (gender === "female") return t("sound-settings-gender-female");
+  if (gender === "male") return t("sound-settings-gender-male");
+  return "";
+}
+
+/**
+ * 灰色说明句：设计稿 180:212 是「女｜温柔亲和，陪伴式对话自然」——
+ * 性别贴在描述最前面、与描述同档字号，不单独占一个标签位。
+ */
+function voiceDesc(voice: SoundVoice) {
+  const gender = genderText(voice.gender);
+  if (gender && voice.slogan) return `${gender}｜${voice.slogan}`;
+  return gender || voice.slogan;
+}
+
 /** 本地音色配置转成同一结构：类型与说明都与听播音色同一份文案 */
 function fallbackVoices(): SoundVoice[] {
   return REPORT_VOICE_OPTIONS.map(option => ({
     code: option.id,
     type: typeOf(option.id),
     slogan: sloganOf(option.id, option),
+    avatar: option.avatar,
+    gender: option.gender,
     preview: option.preview,
+    previewEn: option.previewEn,
   }));
 }
 
@@ -205,7 +233,10 @@ function toVoices(list?: ListenBroadcastVoice[]): SoundVoice[] {
         code,
         type,
         slogan: sloganOf(code, option),
+        avatar: option?.avatar || "",
+        gender: option?.gender || "",
         preview: option?.preview || "",
+        previewEn: option?.previewEn || "",
       } satisfies SoundVoice;
     })
     .filter((item): item is SoundVoice => Boolean(item));
@@ -234,6 +265,16 @@ function notifySaveResult(result: Promise<boolean>) {
 // —— 试听：音频取本地 wav（见 report-voices），同一时刻只播一个 ——
 let previewAudio: ReturnType<typeof uni.createInnerAudioContext> | null = null;
 
+/**
+ * 当前界面语言对应的试听音频：
+ * 英文模式播 `assets/audio/voice-en` 下的同名文件（英文发音），其余语言仍用中文 wav；
+ * 接口新增、本地没有英文音频的音色回退中文，保证点了有声音。
+ */
+function previewOf(voice: SoundVoice) {
+  const isEnglish = String(locale.value || "").toLowerCase().startsWith("en");
+  return (isEnglish && voice.previewEn) || voice.preview;
+}
+
 function stopPreview() {
   playingCode.value = "";
   previewAudio?.stop();
@@ -254,15 +295,16 @@ function ensurePreviewAudio() {
   return audio;
 }
 
-/** 播某个音色的试听；接口新增、本地没有 wav 的音色直接跳过 */
+/** 播某个音色的试听（按当前语言取中文 / 英文素材）；接口新增、本地没有 wav 的音色直接跳过 */
 function playPreview(voice: SoundVoice) {
-  if (!voice.preview) {
+  const src = previewOf(voice);
+  if (!src) {
     logger.warn("该音色没有本地试听音频", voice.code);
     return;
   }
   const audio = ensurePreviewAudio();
   audio.stop();
-  audio.src = voice.preview;
+  audio.src = src;
   playingCode.value = voice.code;
   audio.play();
 }
@@ -480,6 +522,17 @@ onMounted(async () => {
             :class="{ 'sound-settings__voice--active': voice.code === selectedVoiceCode }"
             @tap="selectVoice(voice)"
           >
+            <!-- 1018:186 等 Mask group：头像 36×36（72rpx）正方形、圆角 6px（12rpx），
+                 底色 #FAFAFAFF；接口新增、本地没有头像的音色只留这块底板 -->
+            <view class="sound-settings__voice-avatar">
+              <image
+                v-if="voice.avatar"
+                class="sound-settings__voice-avatar-img"
+                :src="voice.avatar"
+                mode="aspectFill"
+              />
+            </view>
+
             <view class="sound-settings__voice-main">
               <!-- 180:211 类型 14px Medium #000000 + 180:220「默认」徽标（仅默认音色） -->
               <view class="sound-settings__voice-title-row">
@@ -488,8 +541,8 @@ onMounted(async () => {
                   {{ t("sound-settings-default") }}
                 </text>
               </view>
-              <!-- 180:212 说明 12px #8E8E8E -->
-              <text v-if="voice.slogan" class="sound-settings__voice-desc">{{ voice.slogan }}</text>
+              <!-- 180:212 说明 12px #8E8E8E：性别做前缀，「女｜温柔亲和，…」 -->
+              <text v-if="voiceDesc(voice)" class="sound-settings__voice-desc">{{ voiceDesc(voice) }}</text>
             </view>
             <!-- 198:168 Frame 117：18×18 波形图标，点击试听。
                  播放中换成发起问答页「SANI 后面自动播报」那一套 4 根蓝色声波条（同尺寸、同动效） -->
@@ -528,12 +581,12 @@ onMounted(async () => {
 }
 
 /* 保存结果提示：实心 #303030FF 底 + 1px（2rpx）#1166D6 描边 + 圆角 12px（24rpx），
-   文字 15px（30rpx）#FFFFFF，水平居中、垂直落在列表面板下段（「专业播报」与「灵动可爱」两张卡之间）；
+   文字 15px（30rpx）#FFFFFF，水平居中、垂直落在列表面板下段（「醇厚磁性」与「灵动可爱」两张卡之间）；
    底色不透明（FF），深浅两个主题都用同一块深灰浮标，压在页面文字上不会透出字影 */
 .sound-settings__toast {
   position: fixed;
   z-index: 1200;
-  /* 12% 再下移 4px（= 8rpx）：按 375×812 的截图换算，胶囊中心落在「专业播报」与「灵动可爱」两张卡之间 */
+  /* 12% 再下移 4px（= 8rpx）：按 375×812 的截图换算，胶囊中心落在「醇厚磁性」与「灵动可爱」两张卡之间 */
   bottom: calc(12% - 8rpx);
   left: 50%;
   box-sizing: border-box;
@@ -706,17 +759,39 @@ onMounted(async () => {
 }
 
 /* 设计稿 180:219 等：卡片 298×64（596×128rpx）、白底、圆角 12px（24rpx）；
-   描边常驻 1px（2rpx）透明，选中时换成 #1166D6，避免选中态导致内容位移 */
+   描边常驻 1px（2rpx）透明，选中时换成 #1166D6，避免选中态导致内容位移。
+   左右内边距扣掉这层 1px 描边：头像距卡片外沿 14px、波形图标距外沿 22px */
 .sound-settings__voice {
   display: flex;
   box-sizing: border-box;
   height: 128rpx;
   align-items: center;
+  gap: 20rpx;
   padding: 0 42rpx 0 26rpx;
   border: 2rpx solid transparent;
   border-radius: 24rpx;
   background: #ffffff;
   transition: border-color 150ms ease;
+}
+
+/* 1018:185 Rectangle 204：头像底板 36×36（72rpx）的正方形，圆角 6px（12rpx），
+   底色 #FAFAFAFF（不透明）；人像铺满，右缘距主文案 10px（20rpx，由卡片 gap 承担） */
+.sound-settings__voice-avatar {
+  display: flex;
+  width: 72rpx;
+  height: 72rpx;
+  flex: 0 0 72rpx;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 12rpx;
+  background: #fafafaff;
+}
+
+/* 设计稿图片本体 37×37（比底板大 1px，多出的边被圆角裁掉）：这里用 aspectFill 等价覆盖 */
+.sound-settings__voice-avatar-img {
+  width: 72rpx;
+  height: 72rpx;
 }
 
 .sound-settings__voice--active {
@@ -782,7 +857,6 @@ onMounted(async () => {
   flex: 0 0 36rpx;
   align-items: center;
   justify-content: center;
-  margin-left: 14rpx;
 }
 
 .sound-settings__voice-play::after {
@@ -918,6 +992,11 @@ onMounted(async () => {
   /* 203:1126 等 Rectangle 185：音色卡 #303030，圆角 12（24rpx） */
   .sound-settings__voice {
     background: #202020;
+  }
+
+  /* 头像底板：浅色 #FAFAFAFF 在深色卡上会亮得刺眼，降成 #303030（深色稿卡片层级） */
+  .sound-settings__voice-avatar {
+    background: #fafafa;
   }
 
   /* 203:1123 Group 183（当前选中）：1px（2rpx）#1166D6 描边，其余卡片无描边 */

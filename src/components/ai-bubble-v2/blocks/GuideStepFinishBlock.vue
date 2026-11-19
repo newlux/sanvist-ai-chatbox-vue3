@@ -91,11 +91,11 @@ onMounted(() => {
     class="guide-finish"
     :class="{ 'guide-finish--dark': dark }"
   >
-    <!-- 左上角品牌署名：与步骤卡保持同一套观感（SANY NEO logo + SANY NEO + 播报按钮） -->
+    <!-- 左上角品牌署名：与步骤卡保持同一套观感（SANY NEO logo + SANY Neo + 播报按钮） -->
     <view class="guide-finish__brand">
       <image class="guide-finish__brand-icon" :src="saniIcon" mode="aspectFit" />
       <text class="guide-finish__brand-text">
-        SANY NEO
+        SANY Neo
       </text>
       <view
         v-if="ttsEnabled"

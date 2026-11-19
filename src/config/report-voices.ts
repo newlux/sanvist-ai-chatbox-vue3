@@ -1,12 +1,21 @@
-import bunnyPreview from "@/assets/audio/voice/brief_qiaoxiaojiao.wav";
+// 8 个 Qwen 音色的试听音频（本地 wav），id 与声音一一对应：
+// 英文在 voice-en/（文件名与中文一一对应，只是发音语言不同），中文在 voice/
+import mochiPreviewEn from "@/assets/audio/voice-en/brief_anmingyuan.wav";
+import maiaPreviewEn from "@/assets/audio/voice-en/brief_guyunshu.wav";
+import ethanPreviewEn from "@/assets/audio/voice-en/brief_longanyang.wav";
+import neilPreviewEn from "@/assets/audio/voice-en/brief_longsanshu.wav";
+import kaiPreviewEn from "@/assets/audio/voice-en/brief_longzhe.wav";
+import bunnyPreviewEn from "@/assets/audio/voice-en/brief_qiaoxiaojiao.wav";
+import miaPreviewEn from "@/assets/audio/voice-en/brief_xieshurou.wav";
+import serenaPreviewEn from "@/assets/audio/voice-en/brief_xuyuyuan.wav";
 import mochiPreview from "@/assets/audio/voice/brief_anmingyuan.wav";
-import ethanPreview from "@/assets/audio/voice/brief_longanyang.wav";
-import kaiPreview from "@/assets/audio/voice/brief_longzhe.wav";
 import maiaPreview from "@/assets/audio/voice/brief_guyunshu.wav";
-import miaPreview from "@/assets/audio/voice/brief_xieshurou.wav";
+import ethanPreview from "@/assets/audio/voice/brief_longanyang.wav";
 import neilPreview from "@/assets/audio/voice/brief_longsanshu.wav";
+import kaiPreview from "@/assets/audio/voice/brief_longzhe.wav";
+import bunnyPreview from "@/assets/audio/voice/brief_qiaoxiaojiao.wav";
+import miaPreview from "@/assets/audio/voice/brief_xieshurou.wav";
 import serenaPreview from "@/assets/audio/voice/brief_xuyuyuan.wav";
-// 8 个 Qwen 音色试听（本地 wav），id 与声音一一对应
 
 import avatarBunny from "@/assets/img/voice-assistant/voice-avatar-Bunny.png";
 import avatarEthan from "@/assets/img/voice-assistant/voice-avatar-Ethan.png";
@@ -45,8 +54,13 @@ export interface ReportVoiceOption {
   hero: string;
   /** 轮播椭圆小头像（设计稿 2874:2） */
   avatar: string;
-  /** 试听音频（本地 wav URL），滑到该音色时播放 */
+  /** 试听音频（中文，本地 wav URL），滑到该音色时播放 */
   preview: string;
+  /**
+   * 英文模式下的试听音频（`assets/audio/voice-en`，文件名与中文一致）。
+   * 只在界面语言为英文时使用；为空则回退 `preview`。
+   */
+  previewEn: string;
 }
 
 /** 按设计稿要求交错排列：女、男、女、男、女、男、女、男。 */
@@ -61,6 +75,7 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     hero: heroMia,
     avatar: avatarMia,
     preview: miaPreview,
+    previewEn: miaPreviewEn,
   },
   {
     id: "longanyang_v3.1",
@@ -72,6 +87,7 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     hero: heroEthan,
     avatar: avatarEthan,
     preview: ethanPreview,
+    previewEn: ethanPreviewEn,
   },
   {
     id: "xuyuyuan_v3.1",
@@ -83,6 +99,7 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     hero: heroSerena,
     avatar: avatarSerena,
     preview: serenaPreview,
+    previewEn: serenaPreviewEn,
   },
   {
     id: "longzhe_v3.1",
@@ -94,6 +111,7 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     hero: heroKai,
     avatar: avatarKai,
     preview: kaiPreview,
+    previewEn: kaiPreviewEn,
   },
   {
     id: "qiaoxiaojiao_v3.1",
@@ -105,6 +123,7 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     hero: heroBunny,
     avatar: avatarBunny,
     preview: bunnyPreview,
+    previewEn: bunnyPreviewEn,
   },
   {
     id: "longsanshu_v3.1",
@@ -116,6 +135,7 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     hero: heroNeil,
     avatar: avatarNeil,
     preview: neilPreview,
+    previewEn: neilPreviewEn,
   },
   {
     id: "guyunshu_v3.1",
@@ -127,6 +147,7 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     hero: heroMaia,
     avatar: avatarMaia,
     preview: maiaPreview,
+    previewEn: maiaPreviewEn,
   },
   {
     id: "anmingyuan_v3.1",
@@ -138,5 +159,6 @@ export const REPORT_VOICE_OPTIONS: ReportVoiceOption[] = [
     hero: heroMochi,
     avatar: avatarMochi,
     preview: mochiPreview,
+    previewEn: mochiPreviewEn,
   },
 ];

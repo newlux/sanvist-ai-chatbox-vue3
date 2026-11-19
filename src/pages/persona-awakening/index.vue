@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { onHide, onShow } from "@dcloudio/uni-app";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import heySani from "@/assets/img/hey-sani.svg";
 import enlargeIcon from "@/assets/img/icon-enlarge.svg";
 import reduceIcon from "@/assets/img/icon-reduce.svg";
 import glowMaskBottom from "@/assets/img/persona-awakening/glow-mask-bottom.png";
 import saniLogo from "@/assets/img/sani-logo.webp";
+import sanyNeoDark from "@/assets/img/sany-neo-dark.svg";
 import tellDark from "@/assets/img/tell-dark.webp";
 import AudioRipple from "@/components/audio-ripple/index.vue";
 import PushNoticePanel from "@/components/push-notice-panel/index.vue";
@@ -235,7 +235,7 @@ onBeforeUnmount(() => {
       <!-- 291:18734 底部叠加光效，opacity 0.1 -->
       <image class="persona-awakening__glow-mask" :src="glowMaskBottom" />
 
-      <!-- 291:18735 顶部「Hey，SANI」176.962 × 47：素材改用 src/assets/img/hey-sani.svg -->
+      <!-- 291:18735 顶部「Hey，SANI」176.962 × 47：素材用 src/assets/img/sany-neo-dark.svg -->
       <button
         type="button"
         class="persona-awakening__hey-trigger"
@@ -243,7 +243,7 @@ onBeforeUnmount(() => {
         :aria-expanded="debugPanelOpen"
         @click.stop="debugPanelOpen = true"
       >
-        <image class="persona-awakening__hey" :src="heySani" mode="aspectFit" />
+        <image class="persona-awakening__hey" :src="sanyNeoDark" mode="aspectFit" />
       </button>
 
       <!-- 右上角全屏切换：默认 icon-enlarge.svg，全屏后切 icon-reduce.svg -->
@@ -502,7 +502,7 @@ onBeforeUnmount(() => {
 
 /**
  * 291:18735 顶部「Hey，SANI」：设计 176.962 × 47 @ (871, 312)，水平居中、距顶用纵向基准
- * 素材改用 hey-sani.svg（106 × 24，比例 4.42 比按钮的 3.77 更扁），
+ * 素材用 sany-neo-dark.svg（120 × 29，比例 4.14 比按钮的 3.17 更扁），
  * `mode="aspectFit"` 等比装入按钮，宽度贴满、上下各留一点空白，字形不被拉伸
  */
 .persona-awakening__hey-trigger {

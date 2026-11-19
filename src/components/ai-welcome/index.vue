@@ -2,7 +2,6 @@
 import type { PropType } from "vue";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import heySani from "@/assets/img/hey-sani.svg";
 import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
 import microphoneIcon from "@/assets/img/icon-mic-red.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
@@ -14,6 +13,8 @@ import listenLogo from "@/assets/img/listen.gif";
 // 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 1MB 的 webp 慢网下先空白）
 import saniLogoStatic from "@/assets/img/header-island-logo.png";
 import saniLogoWebp from "@/assets/img/sani-logo.webp";
+import titleDark from "@/assets/img/sany-neo-dark.svg";
+import titleLight from "@/assets/img/sany-neo-light.svg";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
@@ -80,8 +81,9 @@ const { safeAreaStyle } = useSafeArea();
 
 /**
  * 「Hey,SANI」整行字标：直接用设计导出的整行图，不再用文字 + background-clip 拼。
- * 浅色 / 深色统一用同一张 hey-sani.svg（126×37），不再按主题切图。
+ * 按主题切图：浅色 `sany-neo-light.svg`、深色 `sany-neo-dark.svg`（都是 120×29 的整行字标）。
  */
+const titleImage = computed(() => (props.dark ? titleDark : titleLight));
 
 /**
  * 声波图标：**未触发**（没开实时语音）时用未激活态切图，**触发后**换成蓝色声波 + 白色胶囊（截图两态）。
@@ -338,9 +340,9 @@ onBeforeUnmount(() => {
     :style="safeAreaStyle"
   >
     <view class="welcome__hero">
-      <!-- 标题行「Hey,SANI」：直接用设计导出的整行字标 hey-sani.svg（126×37），深浅色同一张 -->
+      <!-- 标题行「Hey,SANI」：设计导出的整行字标，浅色 sany-neo-light.svg / 深色 sany-neo-dark.svg -->
       <view class="welcome__title">
-        <image class="welcome__title-img" :src="heySani" mode="aspectFit" />
+        <image class="welcome__title-img" :src="titleImage" mode="aspectFit" />
       </view>
       <!-- 主视觉：原 306:2783 容器 134×134 / 306:2791 图 110×110，投影 0 3 9 rgba(0,0,0,.14)
            起飞时整组按父页面给的 transform 滑到对话页顶部的灵动岛位置；
@@ -464,8 +466,7 @@ onBeforeUnmount(() => {
           {{ t("welcome-tap-to-speak") }}
         </text>
         <!-- 声波芯片（实时语音）：嵌在胶囊右端内部，不另占一列（截图 x450..526 / y352..409）；
-             底色常驻，图标才像"被这个框包着"（与对话页 .input-bar__wave-chip 同口径）；
-             触发后只把图标换成蓝色声波 -->
+             与对话页 .input-bar__wave-chip 同口径：未开启不铺底，开启后 #FFFFFF20 + 蓝色声波 -->
         <view
           v-if="duplexEnabled"
           class="welcome__composer-wave"
@@ -593,8 +594,8 @@ onBeforeUnmount(() => {
 
 /* ===== 标题行「Hey,SANI」=====
    整行直接贴设计导出的字标（颜色、渐变、字距都在图里，不再用文字 + background-clip 拼）：
-   hey-sani.svg 自身就是 126×37px（viewBox 同尺寸），这里按 1px = 2rpx 铺满 252×74rpx，
-   深浅色共用同一张，不再按主题切图。 */
+   字标自身 120×29px（sany-neo-light / sany-neo-dark 同尺寸），盒子按 126×37px
+   （252×74rpx）给，`aspectFit` 等比装入 —— 视觉宽度仍与旧图 126px 一致，行高不跳。 */
 .welcome__title {
   display: flex;
   align-items: center;
@@ -763,7 +764,8 @@ onBeforeUnmount(() => {
   transition: opacity 240ms ease;
 }
 
-/* 加号：44×44 圆钮，实色 #FAFAFA，与「点击说话」胶囊 / 键盘钮同一材质。
+/* 加号：44×44 圆钮，与「点击说话」胶囊 / 键盘钮同一材质（#0D0D0D30，约 19% 黑，
+   压在蓝渐变上会跟背景一起走，不会像实色那样浮一层白）。
    圆底曾经画在 icon-plus.svg 里（#0D0D0D 3.61% 半透明），叠的底色一变就跟着偏色，
    现在底板交给 CSS、图标只留十字，深浅色各给一套底色 */
 .welcome__composer-plus {
@@ -774,15 +776,17 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 90rpx;
-  background: #fafafa;
+  background: #0d0d0d30;
 }
 
+/* 十字本体固定 20×20px（40rpx）：icon-plus.svg 自身就是 20×20，
+   不再撑满 44px 圆钮，圆底只由 .welcome__composer-plus 承担 */
 .welcome__composer-plus-icon {
-  width: 88rpx; // 44px，字面十字 16px 与原图一致
-  height: 88rpx;
+  width: 40rpx; // 20px
+  height: 40rpx;
 }
 
-/* 中间的「点击说话」胶囊：44px 高 / 圆角 45px / 实色 #FAFAFA
+/* 中间的「点击说话」胶囊：44px 高 / 圆角 45px / #0D0D0D30（约 19% 黑）
    —— 与加号、键盘钮同一材质（三块都取同一个色值，避免深浅不一）。
    截图实测：胶囊 x184..539（≈218px 宽）、y345..416（44px 高），右侧内嵌声波芯片 */
 .welcome__composer-voice {
@@ -796,12 +800,12 @@ onBeforeUnmount(() => {
   padding: 0 120rpx 0 36rpx; // 左 18px（截图文字起于 x213）；右留出声波芯片 96rpx + 16rpx
   box-sizing: border-box;
   border-radius: 90rpx;
-  background: #fafafa;
+  background: #0d0d0d30;
 }
 
 /* 文案色取截图最暗像素 #5E5E5E（14px Regular，左对齐起排） */
 .welcome__composer-voice-label {
-  color: #5e5e5e;
+  color: #ffffff;
   font-size: 28rpx; // 14px
   font-weight: 400;
   line-height: 40rpx;
@@ -810,10 +814,8 @@ onBeforeUnmount(() => {
 
 /* 声波芯片（实时语音）：截图 x450..526 / y352..409 → 48×36px 胶囊（圆角 18px），
    右内边距 8px、垂直居中；里面是 20×20 的 6 段声波。
-   底色常驻（与对话页 .input-bar__wave-chip 同一套）：芯片原本和「点击说话」胶囊同色，
-   不铺底时会和胶囊连成一片，图标看着像裸贴在胶囊右边缘外、没有被这个框包住；
-   铺一块和右侧键盘圆钮同级的圆角块，才是"被框包着"的观感。
-   触发后底色不变，靠图标换蓝色声波区分 */
+   与对话页 .input-bar__wave-chip 同一套口径：实时语音没开时不铺底，
+   开启后铺 #FFFFFF20（12.5% 白）做反馈，叠在「点击说话」胶囊材质之上 */
 .welcome__composer-wave {
   position: absolute;
   top: 50%;
@@ -824,13 +826,13 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 36rpx; // 18px，两端半圆
-  background: #ffffff00;
+  background: transparent;
   transform: translateY(-50%);
 }
 
-/* 已触发（实时语音进行中）：白底不变 + 蓝色声波 */
+/* 已开启（实时语音进行中）：底 #FFFFFF20 + 蓝色声波 */
 .welcome__composer-wave--active {
-  background: #ffffff;
+  background: #ffffff20;
 }
 
 .welcome__composer-wave-icon {
@@ -851,7 +853,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: #fafafa; // 与胶囊 / 加号同一个色值
+  background: #0d0d0d30; // 与胶囊 / 加号同一档
 }
 
 .welcome__composer-kb-icon {
@@ -869,7 +871,7 @@ onBeforeUnmount(() => {
   padding: 0 28rpx; // 14px，与问答页文本胶囊的左内边距接近
   box-sizing: border-box;
   border-radius: 90rpx;
-  background: #fafafa; // 与「点击说话」胶囊同一个色值，不再用 3.61% 半透明（会在蓝渐变上偏色）
+  background: #0d0d0d30; // 与「点击说话」胶囊同一档
 }
 
 .welcome__composer-field--with-wave {
@@ -993,15 +995,15 @@ onBeforeUnmount(() => {
   content: none;
 }
 
-/* 标题行深色稿不需要额外覆盖：hey-sani.svg 深浅色共用同一张 */
+/* 标题行深色稿不需要额外覆盖：字标已按主题在 script 里切图（sany-neo-light / sany-neo-dark） */
 
-/* 输入条控件的材质换成「白色 8%」：浅色稿的 #F1F1F1 在深底上等于没有。
+/* 输入条控件的材质在深色下换成 #FFFFFF30（半透明白，与浅色的 #0D0D0D30 对称）：
    加号圆钮也在这一组里，四块（加号 / 胶囊 / 文本框 / 键盘钮）始终同色 */
 .welcome--dark .welcome__composer-plus,
 .welcome--dark .welcome__composer-voice,
 .welcome--dark .welcome__composer-field,
 .welcome--dark .welcome__composer-kb {
-  background: #262628
+  background: #ffffff30;
 }
 
 /* 文本态有内容的发送钮是实心图标，不跟着铺底板 */
@@ -1009,18 +1011,19 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
-/* 声波芯片：底色常驻。深底上胶囊是 8% 白，芯片取 14% 白压一档，
-   才看得出是"胶囊里另起一块"而不是和胶囊糊成一片；触发后同色，靠蓝色声波区分 */
+/* 声波芯片：深色与浅色同一口径 —— 未开启不铺底，开启后 #FFFFFF20 + 蓝色声波 */
 .welcome--dark .welcome__composer-wave {
-  background: rgb(255 255 255 / 0%);
+  background: transparent;
 }
 
 .welcome--dark .welcome__composer-wave--active {
-  background: rgba(255, 255, 255, 0.14);
+  background: #ffffff20;
 }
 
+/* 「点击说话」文案：深色下压纯白 #FFFFFF（比根节点继承的 #F2F3F5 再亮一档），
+   与对话页 .input-bar__hold-label 深色值对齐 */
 .welcome--dark .welcome__composer-voice-label {
-  color: #f2f3f5;
+  color: #ffffff;
 }
 
 .welcome--dark .welcome__composer-textarea {
@@ -1031,9 +1034,11 @@ onBeforeUnmount(() => {
   color: #6b6b6b; // 与问答页深色 placeholder 同色
 }
 
-/* 加号 / 键盘图标本身是深色图形：深底上只反色图标（圆底由上面的背景给，不参与反相） */
-.welcome--dark .welcome__composer-plus-icon,
-.welcome--dark .welcome__composer-kb-icon {
+/* 加号 / 键盘图标素材本身就是白色线条（icon-plus.svg / icon-keyboard-dark.svg）：
+   浅色 / 深色都保持白色，任何主题都不做反相 */
+
+/* 文本态发送是深色线条图标（icon-send-up.svg），深底仍按老规矩反成白线 */
+.welcome--dark .welcome__composer-kb--send .welcome__composer-kb-icon {
   filter: invert(1);
 }
 

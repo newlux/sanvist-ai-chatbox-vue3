@@ -1121,7 +1121,7 @@ onBeforeUnmount(() => {
         >
           <text class="input-bar__hold-label">{{ t("welcome-tap-to-speak") }}</text>
           <!-- 声波芯片（实时语音）：截图里嵌在灰胶囊右端内部，不另占一列（x450..526 / y352..409）；
-               未触发点击 = 深色声波（不铺白底），触发后 = 白胶囊 + 蓝色声波 -->
+               未开启 = 不铺底（只有图标），开启后 = #FFFFFF20 底 + 蓝色声波 -->
           <view
             v-if="duplexEnabled"
             class="input-bar__wave-chip"
@@ -1916,7 +1916,7 @@ onBeforeUnmount(() => {
 
 /* ==========================================================================
    「按住说话」框：设计稿 1204:337 Toolbar
-   375×44 → 750×88rpx；圆角 45 → 90rpx；底 #FAFAFA（与加号 / 键盘圆钮同色）；
+   375×44 → 750×88rpx；圆角 45 → 90rpx；底 #0D0D0D30（与加号 / 键盘圆钮同一档）；
    文案 14px / 行高 20px / #8E8E8E / Regular；
    整块就是录音手势区（按下即录、上滑取消、松手识别）
    ========================================================================== */
@@ -1930,7 +1930,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   box-sizing: border-box;
   border-radius: 90rpx; // 45px
-  background: #fafafa; // 与加号 / 键盘圆钮同一个色值
+  background: #0d0d0d30; // 与加号 / 键盘圆钮同一档
   touch-action: none; /* 长按时禁用滚动/缩放，pointer 事件不被默认手势劫持 */
   -webkit-user-select: none;
   user-select: none;
@@ -1952,10 +1952,8 @@ onBeforeUnmount(() => {
 
 /* 声波芯片（实时语音）：截图 x450..526 / y352..409 → 48×36px 胶囊（圆角 18px），
    右内边距 8px、垂直居中；图标 20px 6 段声波。
-   底色必须常驻：芯片原本跟「点击说话」胶囊同色（#FAFAFA / 深色 #212121），
-   不铺底时会和胶囊连成一片，看着就像图标裸贴在胶囊右边缘外面、没有被框包住；
-   这里给它一块和右侧键盘圆钮同级的可见圆角块，图标才像"被这个框包着"。
-   触发后只换图标色（蓝色声波），底色仍在（深色底下再提亮一档做反馈） */
+   实时语音没开时不铺底（芯片跟「点击说话」胶囊同色，不另起一块底板）；
+   开启后铺 #FFFFFF20（12.5% 白）做"正在实时语音"的反馈，叠在胶囊材质之上 */
 .input-bar__wave-chip {
   position: absolute;
   top: 50%;
@@ -1966,13 +1964,13 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 36rpx; // 18px，两端半圆
-  background: #ffffff00;
+  background: transparent;
   transform: translateY(-50%);
 }
 
-/* 已触发（实时语音进行中）：白底不变，靠图标换成蓝色声波区分 */
+/* 已开启（实时语音进行中）：底 #FFFFFF20 + 蓝色声波 */
 .input-bar__wave-chip--active {
-  background: #ffffff;
+  background: #ffffff20;
 }
 
 .input-bar__wave-chip image {
@@ -2011,7 +2009,7 @@ onBeforeUnmount(() => {
   flex: 0 0 88rpx;
   padding: 0;
   border-radius: 50%;
-  background: #fafafa; // 与加号 / 「点击说话」胶囊同一个色值
+  background: #0d0d0d30; // 与加号 / 「点击说话」胶囊同一档
 }
 
 /* 键盘图标 20×20 */
@@ -2066,25 +2064,28 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
-// 加号：设计稿 1204:337 左侧加号 44×44（圆底 #FAFAFA，与右侧「按住说话」胶囊、
-// 键盘钮同一个色值；底色由 CSS 给，icon-plus.svg 只留 #0D0D0D 的十字）
+// 加号：设计稿 1204:337 左侧加号 44×44（圆底与右侧「按住说话」胶囊、
+// 键盘钮同一档材质：#0D0D0D30 半透明黑，压在渐变 / 任何底色上都不跳；底色由 CSS 给，
+// icon-plus.svg 只留 #0D0D0D 的十字）
 .input-bar__plus {
   width: 88rpx;
   height: 88rpx;
   flex: 0 0 88rpx;
   border-radius: 50%;
-  background: #fafafa;
+  background: #0d0d0d30;
 }
 
+// 十字本体固定 20×20px（40rpx）：icon-plus.svg 自身就是 20×20，不再撑满 44px 圆钮
+// 素材是白色线条，浅色 / 深色都保持白色，不做任何反相
 .chat-input .input-bar__plus image {
-  width: 88rpx;
-  height: 88rpx;
+  width: 40rpx;
+  height: 40rpx;
 }
 
-// 语音/键盘是纯图标，底色由 CSS 给，留出内边距（与语音态胶囊 / 加号同色 #FAFAFA）
+// 语音/键盘是纯图标，底色由 CSS 给，留出内边距（与语音态胶囊 / 加号同一档 #0D0D0D30）
 .input-bar__mode {
   padding: 18rpx;
-  background: #fafafa;
+  background: #0d0d0d30;
 }
 
 // 发送与停止本身就是实心图标，不再加底色
@@ -2228,18 +2229,19 @@ onBeforeUnmount(() => {
   flex: 0 0 88rpx;
 }
 
+// 十字本体同样固定 20×20px（40rpx），与语音态加号一致
 .chat-input .input-bar--plain .input-bar__plus image {
-  width: 88rpx;
-  height: 88rpx;
+  width: 40rpx;
+  height: 40rpx;
 }
 
-/* 灰色胶囊本体：#F3F3F3，高 44，r22，左内边距 16
+/* 灰色胶囊本体：与加号 / 键盘圆钮同一档 #0D0D0D30，渐变仍能透上来
    右侧留出切换钮的位置（钮画在胶囊内部，不再单独占一列） */
 .chat-input .input-bar--plain .input-bar__text-field {
   min-height: 88rpx;
   padding: 0 130rpx 0 32rpx;
   border-radius: 44rpx;
-  background: #f3f3f3;
+  background: #0d0d0d30;
   box-sizing: border-box;
 }
 
@@ -2263,7 +2265,7 @@ onBeforeUnmount(() => {
   min-height: 88rpx;
   padding: 0 32rpx;
   border-radius: 44rpx;
-  background: #f3f3f3;
+  background: #0d0d0d30; // 与 plain 态胶囊同一档
   box-sizing: border-box;
 }
 
@@ -2357,8 +2359,7 @@ onBeforeUnmount(() => {
 
 /* ===== 深色主题：底部输入栏（Ardot 1193:2097 → Toolbar 1193:2099） =====
    只换材质色，尺寸 / 间距 / 圆角两稿一致，不做改动：
-   - 加号 1193:2099;85:187：圆底 #212121，十字描边白（85:189 / 85:190）
-   - 按住说话 85:191 Voice Pill：r45 / 底 #212121；其中键盘块 85:200 底 #303030
+   - 加号 / 按住说话 Voice Pill / 键盘：统一 #FFFFFF30（半透明白，与浅色 #0D0D0D30 对称）
    - 底部提示 1204:292：#BABABA，两稿同值
    页面底由 .ai-page--dark 给 #0D0D0D，输入栏底与页面同色（不能比页面浅，否则底部切一刀） */
 .chat-input--dark {
@@ -2375,22 +2376,23 @@ onBeforeUnmount(() => {
     box-shadow: none;
   }
 
-  // 文本态灰胶囊 #F3F3F3 → 与 Voice Pill 同一材质 #212121（plain 与生成中 / 识别中都适用）
+  // 文本态胶囊：浅色 #0D0D0D30 的对称面 —— #FFFFFF30（半透明白，能透出底部渐变；
+  // plain 与生成中 / 识别中都适用）
   .input-bar.input-bar--text .input-bar__text-field {
-    background: #212121;
+    background: #ffffff30;
   }
 
-  // 语音态：「按住说话」与右侧键盘（浅色是 #0D0D0D 3.61%）
+  // 语音态：「按住说话」与右侧键盘（浅色是 #0D0D0D30，深色是 #FFFFFF30）
   .input-bar__hold,
   .input-bar:not(.input-bar--text) .input-bar__mode,
   .input-bar--duplex .input-bar__mode {
-    background: #212121;
+    background: #ffffff30;
   }
 
-  // 加号：圆底与「按住说话」胶囊同色 #212121，图标只反相十字
+  // 加号：圆底与「按住说话」胶囊同一档 #FFFFFF30，图标只反相十字
   .input-bar__plus {
     border-radius: 50%;
-    background: #212121;
+    background: #ffffff30;
   }
 
   // 「按住说话」文案：深底改白；生成中置灰态压到 #8F8F8F，避免白字看起来还能点
@@ -2406,15 +2408,13 @@ onBeforeUnmount(() => {
     color: #8f8f8f;
   }
 
-  // 声波芯片：底色常驻 —— 深底上用 #303030（与设计稿语音胶囊内的键盘块同档），
-  // 否则芯片和 #212121 胶囊同色连成一片，图标看着像露在框外面；
-  // 触发后提到 14% 白（比 #303030 再亮一档）+ 换蓝色声波，作为"正在实时语音"的反馈
+  // 声波芯片：与浅色同一口径 —— 未开启不铺底，开启后 #FFFFFF20 + 蓝色声波
   .input-bar__wave-chip {
-    background: #212121;
+    background: transparent;
   }
 
   .input-bar__wave-chip--active {
-    background: rgba(255, 255, 255, 0.14);
+    background: #ffffff20;
   }
 
   // 输入文字 / 占位
@@ -2428,11 +2428,9 @@ onBeforeUnmount(() => {
     color: #6b6b6b;
   }
 
-  // 图标反相：加号十字 / 键盘 / 发送 / 停止都是「深色线条 + 白/透明底」，
-  // 反相后正好是深底要的白线条。语音态发送是品牌红 #C8201E，不能跟着反相；
-  // 声波钮用的是彩色渐变图标，深底下保持原色（反相会变成橙粉色）
-  .input-bar__plus image,
-  .input-bar__mode image,
+  // 加号 / 键盘图标素材本身就是白色，浅深两色都保持白色，不参与反相。
+  // 只有「深色线条」的发送 / 停止需要反成白线；
+  // 语音态发送是品牌红 #C8201E，声波钮是彩色渐变图标，都不跟着反相
   .input-bar__stop image,
   .input-bar.input-bar--text .input-bar__send image {
     filter: invert(1);
