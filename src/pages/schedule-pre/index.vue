@@ -4,6 +4,7 @@ import type { TaskDetailPanelPayload, TaskDetailPanelStatus } from "@/components
 import type { SchedulePinchEvent } from "@/hooks/useScheduleGestures";
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import arrowNextIcon from "@/assets/img/schedule-arrow-next.svg";
 import arrowPrevIcon from "@/assets/img/schedule-arrow-prev.svg";
 import AiTaskDetailPanel from "@/components/ai-task-detail-panel/index.vue";
@@ -43,6 +44,8 @@ import { clearPendingScheduleView, readPendingScheduleView } from "@/utils/sched
  */
 
 defineOptions({ name: "SchedulePrePage" });
+
+const { t } = useI18n();
 
 /**
  * 进入页面自动横屏（原生优先、CSS 旋转兜底），离开时还原。
@@ -330,7 +333,7 @@ function normalizeViewRows(viewRows: GanttViewRow[]): ScheduleRow[] {
           id: String(bar.id || `${row.id || rowIndex}-${barIndex + 1}`),
           title: String(bar.title || ""),
           timeText: String(bar.timeText || "").trim()
-            || (planned ? `${minutesToTime(startMin)}-${minutesToTime(endMin)}` : "时间待定"),
+            || (planned ? `${minutesToTime(startMin)}-${minutesToTime(endMin)}` : t("gantt-time-tbd")),
           startMin,
           endMin,
           state: "pre" as BarState,
@@ -422,17 +425,19 @@ function minutesToTime(minutes: number) {
   const total = Math.round(Number(minutes) || 0);
   const wrapped = ((total % 1440) + 1440) % 1440;
   const clock = `${String(Math.floor(wrapped / 60)).padStart(2, "0")}:${String(wrapped % 60).padStart(2, "0")}`;
-  // 跨过 24 点的时段标「次日」，与接口 timeText 的写法（「次日00:21—次日01:04」）保持一致
-  return total >= 1440 ? `次日${clock}` : clock;
+  // 跨过 24 点的时段标「次日」，与接口 timeText 的写法保持一致
+  return total >= 1440 ? t("gantt-next-day-prefix", { time: clock }) : clock;
 }
 
-/** 时长（分钟）→「89分钟」/「3小时15分」（稿子样本的写法：2 小时内按分钟）；小数同样先取整 */
+/** 时长（分钟）→ 本地化文案（2 小时内按分钟）；小数同样先取整 */
 function lengthText(total: number) {
   const minutes = Math.max(Math.round(Number(total) || 0), 0);
-  if (minutes < 120) return `${minutes}分钟`;
+  if (minutes < 120) return t("gantt-duration-minutes", { count: minutes });
   const hour = Math.floor(minutes / 60);
   const minute = minutes % 60;
-  return minute ? `${hour}小时${minute}分` : `${hour}小时`;
+  return minute
+    ? t("gantt-duration-hours-minutes", { hours: hour, minutes: minute })
+    : t("gantt-duration-hours", { count: hour });
 }
 
 /** 条内时间文案（没给就按起止拼） */
@@ -440,12 +445,22 @@ function barTimeText(bar: ScheduleBar) {
   return bar.timeText || `${minutesToTime(bar.startMin)}-${minutesToTime(bar.endMin)}`;
 }
 
-/** 类别 → 作业内容（稿子样本：搅拌运输车「混凝土运输」、现场泵车「混凝土浇筑」） */
-const WORK_TYPE: Record<string, string> = {
-  供料: "混凝土供应",
-  泵车: "混凝土浇筑",
-  运输: "混凝土运输",
+/** 类别 → 作业内容 i18n key（未知类别按通用混凝土作业） */
+const WORK_TYPE_KEY: Record<string, string> = {
+  供料: "gantt-work-supply",
+  供应: "gantt-work-supply",
+  泵车: "gantt-work-pouring",
+  泵送: "gantt-work-pouring",
+  运输: "gantt-work-transport",
+  supply: "gantt-work-supply",
+  pump: "gantt-work-pouring",
+  pouring: "gantt-work-pouring",
+  transport: "gantt-work-transport",
 };
+function workTypeLabel(category: string) {
+  const key = String(category || "").trim();
+  return t(WORK_TYPE_KEY[key] || WORK_TYPE_KEY[key.toLowerCase()] || "gantt-work-generic");
+}
 
 /**
  * 按当前时刻判断任务状态（接口没给 status 时用它兜底）。
@@ -474,35 +489,49 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
   // 站点取条标题的第一段（「万达基地 C20 12立方」→「万达基地」），规格/方量取「C20」「12立方」
   const site = String(bar.title || "").split(" ")[0] || "—";
   const spec = (String(bar.title || "").match(/C\d+/) || [""])[0];
-  const volume = (String(bar.title || "").match(/[\d.]+立方/) || [""])[0].replace("立方", "方") || "—";
+  const volumeMatch = String(bar.title || "").match(/([\d.]+)\s*(?:立方|m³|m3)/i);
+  const volume = volumeMatch ? t("gantt-volume", { count: volumeMatch[1] }) : "—";
   // 逾期分钟数（计划开始时间到现在）；startMin 带小数，先取整再显示
   const overdueMin = Math.max(Math.round(NOW_MIN - bar.startMin), 0);
   detail.value = {
     title: [carNo || vehicle, row.category, driver || plate].filter(Boolean).join("|"),
     status,
     site,
-    workType: WORK_TYPE[row.category] || "混凝土作业",
+    workType: workTypeLabel(row.category),
     spec,
     volume,
-    supplyNote: `预计 ${row.bars.length} 车次送料`,
-    planTime: `${minutesToTime(bar.startMin)} - ${minutesToTime(bar.endMin)}（${lengthText(bar.endMin - bar.startMin)}）`,
+    supplyNote: t("gantt-supply-note", { count: row.bars.length }),
+    planTime: t("gantt-plan-time", {
+      start: minutesToTime(bar.startMin),
+      end: minutesToTime(bar.endMin),
+      duration: lengthText(bar.endMin - bar.startMin),
+    }),
     progress:
       status === "running"
-        ? `作业中（已作业${lengthText(NOW_MIN - bar.startMin)}）`
+        ? t("gantt-progress-running", { duration: lengthText(NOW_MIN - bar.startMin) })
         : status === "done"
-          ? "已完工"
+          ? t("gantt-progress-done")
           : status === "pending"
-            ? "已就位，等待发车"
+            ? t("gantt-progress-pending")
             : "",
-    support: first ? `首车 ${carNo || vehicle} ${minutesToTime(first.startMin)} 到场，车队连续送料` : "—",
+    support: first
+      ? t("gantt-support-first", {
+        vehicle: carNo || vehicle,
+        time: minutesToTime(first.startMin),
+      })
+      : "—",
     previous: prev ? `${barTimeText(prev)} ${prev.title}` : "—",
     next: next ? `${barTimeText(next)} ${next.title}` : "—",
     // 仅「逾期未开始」给警告块（稿子样本 4）
     warning:
       status === "overdue"
         ? {
-            title: `计划未开始（逾期 ${overdueMin}分钟）`,
-            text: `计划 ${minutesToTime(bar.startMin)} 开始，截至 ${minutesToTime(NOW_MIN)} 系统未收到开始记录，上一程已结束 ${overdueMin} 分钟，请核实现场情况。`,
+            title: t("gantt-warning-title", { duration: lengthText(overdueMin) }),
+            text: t("gantt-warning-text", {
+              start: minutesToTime(bar.startMin),
+              now: minutesToTime(NOW_MIN),
+              duration: lengthText(overdueMin),
+            }),
           }
         : undefined,
   };
@@ -544,7 +573,7 @@ function onTaskTap(bar: ScheduleBar, row: ScheduleRow) {
       <view class="schedule__side">
         <view class="schedule__side-head">
           <text class="schedule__side-head-text">
-            资源与车辆人员
+            {{ t("gantt-resource-title") }}
           </text>
         </view>
         <view class="schedule__side-view">

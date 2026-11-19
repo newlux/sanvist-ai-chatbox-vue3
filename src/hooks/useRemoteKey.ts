@@ -31,6 +31,19 @@ const BACK_SCAN_CODES = new Set([158]);
 /** 同一物理键的重复 down 只认一次（宿主不推 up 时靠这个兜底，也顺手吃掉按键抖动） */
 const REPEAT_GUARD_MS = 400;
 
+/**
+ * 遥控器音量键 → 语音输入 的总开关（配置项：环境变量 `VITE_REMOTE_VOICE_KEY`）。
+ *
+ * 原生注册是「把整套遥控按键都拦截」（见 mpaas.registerRemoteKeyListener 的说明），
+ * 没法定向只截音量键：所以配成关闭时**整页不注册监听** ——
+ * 音量键回归系统调音量、返回键交回容器，页面本身仍可用触屏操作。
+ *
+ * 默认开启；配 N / no / false / 0 / off 关闭。值是构建期静态替换，改完要重新打包。
+ */
+const REMOTE_VOICE_KEY_ENABLED = !["n", "no", "false", "0", "off"].includes(
+  String(import.meta.env.VITE_REMOTE_VOICE_KEY ?? "Y").trim().toLowerCase(),
+);
+
 export interface UseRemoteKeyOptions {
   /** 是否处于需要接管遥控器的页面态；离开页面务必置 false，否则按键被原生一直拦截 */
   enabled: Ref<boolean>;
@@ -89,6 +102,12 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
 
   async function start() {
     if (registered.value || starting || !supported.value) return;
+    if (!REMOTE_VOICE_KEY_ENABLED) {
+      // 配置里关掉了「音量键触发语音输入」：不注册，按键全部交回系统（音量键照常调音量）
+      supported.value = false;
+      logger.info("遥控器按键监听已在配置中关闭（VITE_REMOTE_VOICE_KEY），按键交回系统");
+      return;
+    }
     starting = true;
     // 先订阅再注册：宿主可能在注册回调里就推第一帧按键事件
     if (!unsubscribe) unsubscribe = onRemoteKeyEvent(handleKey);
