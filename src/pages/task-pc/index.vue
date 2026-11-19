@@ -2780,14 +2780,14 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
 
 .task-pc-fullscreen {
   position: absolute;
-  top: max(24px, calc(100vh * 48 / 1080));
-  right: max(24px, calc(100vw * 48 / 1920));
+  top: calc(var(--safe-top-px, 0px) + 8rpx);
+  right: 40rpx;
   z-index: 1011;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: max(24px, calc(40 * min(100vw / 1920, 100vh / 1080)));
-  height: max(24px, calc(40 * min(100vw / 1920, 100vh / 1080)));
+  width: 84rpx;
+  height: 84rpx;
   padding: 0;
   border: 0;
   background: transparent;
@@ -2796,8 +2796,8 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
   &::after { border: 0; }
 
   image {
-    width: 100%;
-    height: 100%;
+    width: 48rpx;
+    height: 48rpx;
   }
 }
 

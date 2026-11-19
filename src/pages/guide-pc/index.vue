@@ -1,141 +1,267 @@
 <script setup lang="ts">
-import type { AskSlotOption, AskSlotPayload, AskSlotSubmitPayload, GuideStepItem, GuideStepPayload, GuideStepSelectEvent, GuideSuggestionPayload } from "@/api/chat/types";
-import type { UiChatMessage } from "@/stores/chat-types";
-import type { VoiceMessageOrigin } from "@/utils/voice-message-motion";
+import type { PushMessageRecord } from "@/utils/push/types";
+import { markPushRead } from "@/utils/push/push-inbox";
+import { pushActionOf } from "@/utils/push/push-payload";
+import { createSpeechEndDetector } from "@/utils/asr/speech-end-detector";
+import AiVoiceHoldOverlay from "@/components/ai-voice-hold-overlay/index.vue";
+import { useDuplexVoice } from "@/hooks/useDuplexVoice";
+import { useVoiceQueryGesture } from "@/hooks/useVoiceQueryGesture";
+import type {
+  AskSlotOption,
+  AskSlotPayload,
+  AskSlotSubmitPayload,
+  GuideStepItem,
+  GuideStepPayload,
+  GuideStepSelectEvent,
+  GuideSuggestionPayload,
+} from "@/api/chat/types";
+import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
+import type { AttachmentSource } from "@/hooks/useComposerAttachments";
+import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
+import type { AsrStreamSession } from "@/utils/asr/asr-stream-session";
+import type { PcmCapture } from "@/utils/asr/pcm-capture";
+import type { RepairCaseReport } from "@/utils/repair-callback";
 import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { getRecommendedGuideQuestions } from "@/api/guide";
-import { getTodayAwakeningPrompt } from "@/api/user-role";
-import arrowDownDarkIcon from "@/assets/img/arrow-down-dark.png";
+import { chatMessageAnchorDomId } from "@/stores/modules/chat";
+import { animateVoiceMessageArrival, readVoiceMessageOrigin } from "@/utils/voice-message-motion";
+import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat/index";
+import { getConversationSummary } from "@/api/conversation-summary/index";
+import { getTodayListenBroadcast } from "@/api/listen-broadcast/index";
+import { getRepairInformationState } from "@/api/repair/index";
+import { getTodayAwakeningPrompt } from "@/api/user-role/index";
+import taskNoticeSound from "@/assets/task-notice/task_notice.wav";
+import enlargeIcon from "@/assets/img/icon-enlarge.svg";
+import reduceIcon from "@/assets/img/icon-reduce.svg";
 import arrowDownIcon from "@/assets/img/arrow-down.png";
-import saniLogoWebp from "@/assets/img/sani-logo.webp";
+import arrowDownDarkIcon from "@/assets/img/arrow-down-dark.png";
 import AiAssistantNavigationSheet from "@/components/ai-assistant-navigation-sheet/index.vue";
 import AiBadFeedbackSheet from "@/components/ai-bad-feedback-sheet/index.vue";
+import AiChatBackdrop from "@/components/ai-chat-backdrop/index.vue";
+import AudioRipple from "@/components/audio-ripple/index.vue";
+import AiChatHeader from "@/pages/guide-pc/private/components/ai-chat-header/index.vue";
+import AiChatInput from "@/pages/guide-pc/private/components/ai-chat-input/index.vue";
 import AiGuideStepSheet from "@/components/ai-guide-step-sheet/index.vue";
 import AiGuideSuggestionSheet from "@/components/ai-guide-suggestion-sheet/index.vue";
+import AiMessageList from "@/pages/guide-pc/private/components/ai-message-list/index.vue";
+import AiPartsJumpSheet from "@/components/ai-parts-jump-sheet/index.vue";
 import ShareConversationPoster from "@/components/ai-share-poster/index.vue";
 import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
-import AiVoiceHoldOverlay from "@/components/ai-voice-hold-overlay/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
-import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
-import { useAssistantNavigation } from "@/hooks/useAssistantNavigation";
+import PersonaAwakening from "@/pages/guide-pc/private/components/persona-awakening-screen/index.vue";
+import { AI_ASK_WELCOME_DONE_KEY } from "@/config/index";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
-import { useChatSend } from "@/hooks/useChatSend";
+import { useAssistantNavigation } from "@/hooks/useAssistantNavigation";
+import { useChatSend } from "@/pages/guide-pc/private/hooks/useChatSend";
 import { useChatShare } from "@/hooks/useChatShare";
-import { useChatTts } from "@/hooks/useChatTts";
 import { useChatViewport } from "@/hooks/useChatViewport";
-import { useDuplexVoice } from "@/hooks/useDuplexVoice";
-import { usePlainTts } from "@/hooks/usePlainTts";
+import { useComposerAttachments } from "@/hooks/useComposerAttachments";
+import { useSafeArea } from "@/hooks/useSafeArea";
 import { useRealtimeTts } from "@/hooks/useRealtimeTts";
 import { useRemoteKey } from "@/hooks/useRemoteKey";
-import { useSafeArea } from "@/hooks/useSafeArea";
-import { useVoiceQuery } from "@/hooks/useVoiceQuery";
-import { useWelcomeStage } from "@/hooks/useWelcomeStage";
-import { getInitIntroSpeech } from "@/mock/init-intro";
-import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores";
-import { chatMessageAnchorDomId } from "@/stores/modules/chat";
+import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores/index";
+import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
+import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
+import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
+import { exitMiniProgram } from "@/utils/exit-mini-program";
+import { saveCurrentListenReportDate } from "@/utils/listen-report";
 import { createLogger } from "@/utils/logger";
-import { onNativeEvent } from "@/utils/platform/mpaas";
-import { backFromScene } from "@/utils/scene-navigation";
+import { openPartsAssistant } from "@/utils/parts-h5";
+import { ensureNativePermission, getMicrophoneVolume, isMpaasReady, onNativeEvent, permissionDeniedMessage } from "@/utils/platform/mpaas";
+import { getRepairConversationId } from "@/utils/repair-bridge";
+import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, parseRepairCaseReport, repairCaseReportStatusText } from "@/utils/repair-callback";
+import { openRepairAssistant } from "@/utils/repair-h5";
+import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
 import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
-import { animateVoiceMessageArrival, readVoiceMessageOrigin } from "@/utils/voice-message-motion";
-import { markWelcomeDone } from "@/utils/welcome-done";
-import AiChatHeader from "./components/ai-chat-header/index.vue";
-import AiMessageList from "./components/ai-message-list/index.vue";
-import PcWelcome from "./components/pc-welcome/index.vue";
+import VoiceRecorder from "@/utils/voiceRecorder.js";
 
-/**
- * 作业指导 PC 版（由 pages/guide 复制而来，路由 #/pages/guide-pc/index，独立演变）。
- *
- * 作业指导页（基于首页 home 的聊天 UI：Header 历史会话 + 消息列表 + 快捷入口 + 输入栏）。
- *
- * 与首页 / 听汇报的区别：
- * - 独立会话域 "guide"，不与首页主会话互相污染；
- * - 复用首页 useChatSend 对话链路，发送时固定透传 inputs.scene=GUIDE；
- * - 每次进入起一轮干净会话（与听汇报一致），返回再进时重新开一轮。
- */
-defineOptions({ name: "AiGuidePcPage" });
+defineOptions({ name: "GuidePcPage" });
+const GUIDE_PC_DEVICE_NO = "CC0260CG0003";
+const GUIDE_PC_DEVICE_MODEL = "SCC3200T-EV";
 
-const logger = createLogger("guide-pc-page");
+const homeVisible = ref(true);
+onShow(() => { homeVisible.value = true; });
+onHide(() => { homeVisible.value = false; });
+
+function startGuidePcConversation() {
+  enterChatNow();
+  void startVoiceQuery();
+}
+
+// Canvas 图表需直接调整 ECharts 字号；仅处理本页会话中的图表。
+function enlargeChartText(option: Record<string, any>) {
+  const fontSize = Math.max(18, typeof document === "undefined"
+    ? 18 : Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 18);
+  const textStyle = (style: Record<string, any> = {}) => ({
+    ...style,
+    fontSize: Math.max(fontSize, Number(style.fontSize) || 0),
+    lineHeight: Math.max(fontSize * 1.5, Number(style.lineHeight) || 0),
+  });
+  const items = (value: any) => Array.isArray(value) ? value : value ? [value] : [];
+  option.textStyle = textStyle(option.textStyle);
+  for (const title of items(option.title)) {
+    title.textStyle = textStyle(title.textStyle);
+    title.subtextStyle = textStyle(title.subtextStyle);
+  }
+  for (const legend of items(option.legend)) legend.textStyle = textStyle(legend.textStyle);
+  for (const axis of [...items(option.xAxis), ...items(option.yAxis)]) {
+    axis.axisLabel = textStyle(axis.axisLabel);
+    axis.nameTextStyle = textStyle(axis.nameTextStyle);
+  }
+  for (const series of items(option.series)) series.label = textStyle(series.label);
+  for (const radar of items(option.radar)) radar.axisName = textStyle(radar.axisName);
+  for (const tooltip of items(option.tooltip)) tooltip.textStyle = textStyle(tooltip.textStyle);
+}
+
+watch(() => chatStore.messages.map(message => message.blocks), (groups) => {
+  for (const blocks of groups) {
+    for (const block of blocks || []) {
+      if (block.type === "chart" && block.payload?.option) enlargeChartText(block.payload.option);
+    }
+  }
+}, { immediate: true });
+
+const pushBanner = ref<PushMessageRecord | null>(null);
+
+function onPushNotice(record: PushMessageRecord) {
+  pushBanner.value = record;
+}
+
+function openPushQuery() {
+  const record = pushBanner.value;
+  if (!record) return;
+  pushBanner.value = null;
+  markPushRead(record.msgId);
+  const action = pushActionOf(record.payload);
+  if (!action) return;
+  enterChatNow();
+  if (voiceQueryActive.value) cancelVoiceQuery();
+  void sendMessage({
+    text: action.prompt,
+    markPreviousStopped: true,
+  });
+}
+
+const logger = createLogger("chat-page");
+
+const isFullscreen = ref(false);
+const fullscreenIcon = computed(() => (isFullscreen.value ? reduceIcon : enlargeIcon));
+
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+function syncFullscreenState() {
+  const doc = document as FullscreenDocument;
+  isFullscreen.value = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
+}
+
+async function toggleFullscreen() {
+  const doc = document as FullscreenDocument;
+  const root = document.documentElement as FullscreenElement;
+  try {
+    if (isFullscreen.value) {
+      const exit = doc.exitFullscreen?.bind(doc) || doc.webkitExitFullscreen?.bind(doc);
+      await exit?.();
+    }
+    else {
+      const enter = root.requestFullscreen?.bind(root) || root.webkitRequestFullscreen?.bind(root);
+      await enter?.();
+    }
+    syncFullscreenState();
+  }
+  catch (error) {
+    logger.warn("全屏切换失败", error);
+    // 退出全屏没成功时保持原图标，避免 UI 与真实状态不一致
+    syncFullscreenState();
+  }
+}
+
+if (typeof document !== "undefined") {
+  onMounted(() => {
+    syncFullscreenState();
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    document.addEventListener("webkitfullscreenchange", syncFullscreenState);
+  });
+  onBeforeUnmount(() => {
+    document.removeEventListener("fullscreenchange", syncFullscreenState);
+    document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
+  });
+}
+
 const { t } = useI18n();
-
-const chatScope = provideChatScope("guide");
+const { safeAreaStyle } = useSafeArea();
 const userStore = useUserStore();
+const chatScope = provideChatScope("guide-pc");
 const chatStore = useChatStore(chatScope);
-// 首包返回会话 ID 时保持组件与读秒，切换已有会话/重置才重新挂载列表。
+// 新会话首包只补齐服务端 ID，不重建消息列表；切换已有会话或清空时才重建。
 const chatListKey = ref(0);
 watch(() => chatStore.aiSessionId, (next, previous) => {
   if (previous != null && previous !== "" && String(next ?? "") !== String(previous)) {
     chatListKey.value += 1;
   }
 });
-// 注入 --safe-top-px：悬浮头部的高度补偿（--chat-header-height）要按真实状态栏算
-const { safeAreaStyle } = useSafeArea();
-/** PC 版固定深色：不跟随外观设置，页面与向下传的 :dark 一律为 true */
-const systemStore = useSystemStore();
-const isDark = computed(() => true);
-/** 语音播报总开关：PC 版头部不再露出这颗开关，仍按设置值决定自动播报是否生效 */
-const settingsStore = useSettingsStore();
-/**
- * 纯净模式（设置弹层 → 纯净模式）：只影响欢迎阶段是否隐藏头部。
- * PC 版左上角固定为历史对话抽屉（菜单键），右上角不渲染任何按钮。
- */
-const { pureMode } = storeToRefs(settingsStore);
-/** 一键回到底部的箭头：深色模式换 arrow-down-dark.png（浅色箭头压在暗底上看不清） */
-const scrollBottomIcon = computed(() => (isDark.value ? arrowDownDarkIcon : arrowDownIcon));
 /**
  * 自动滚动的落点：回复内容末尾（不含参考来源）——参考来源不被贴底滚进视野，
  * 以内容块容器高度减去参考来源高度为准（见 ai-message-list 的 alignToReplyEnd）。
  * 回复里没有参考来源时，表现与原来的贴底一致。
  */
 chatStore.setStopAtReplyEnd(true);
-/**
- * 待机引导（Ardot 347:5392）：标题是固定问候语（操作手，你好。），
- * 其余文案不再写死在前端 JSON，而是用推荐页带过来的 deviceModel / experience / modelExperience 调
- * GET /recommended-questions/guide，用返回的 greeting 与 questions 动态渲染。
- * 没有这三个参数（例如从用户中心直接进入）时不展示引导区，只留聊天界面。
- */
-/** 待机态取几条推荐问题（与推荐页一致，取一屏够看的量） */
-const GUIDE_WELCOME_QUESTION_COUNT = 3;
-const guideGreeting = ref("");
-const guideQuestions = ref<string[]>([]);
-/** 引导区拉取中：期间不渲染（避免先闪一屏空文案再变成接口文案） */
-const guideWelcomeLoading = ref(false);
-/** 推荐页带过来的上下文：机型 + 两轮经验 */
-const guideRecommendContext = ref({ deviceModel: "", experience: "", modelExperience: "" });
 const sessionStore = useSessionStore();
-const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
-const sharePosterWrap = ref<unknown>(null);
-const shareSheetBottomInset = ref("");
+/** 外观（设置弹层 → 深色）：首页问答态走 C 方案暗色 1193:2097 的底色与顶部渐隐 */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
 /**
- * 机型选中值（modelKey）：在「选择体验的设备」页选好后写进 store，
- * 本页不再弹卡片，直接读 store；未选择时不下发，选中后每次对话都作为 inputs.device_model 透传。
+ * 播报声纹的弧段端点（0 = 右中，90 = 顶中，180 = 左中，270 = 底中，角度递增即沿边绕行）。
+ * 120 → 60 走 3/4 圈：左 → 底 → 右，顶部留 60° 缺口，正好是「左右 + 底部」三条边。
+ * colorSpeed 归零：颜色固定成「左紫 → 蓝 → 蓝紫 → 右粉」，不随动画旋转。
  */
-const selectedDeviceModel = computed(() => userStore.selectedDeviceModelKey);
-/** 指导步骤卡片（COMPONENT scene=guide / type=step）：随回答自动弹起，选完即回发下一轮 */
-const guideStepPayload = ref<GuideStepPayload | null>(null);
+const TTS_RIPPLE_APPEARANCE = { startAngle: 120, endAngle: 60, colorSpeed: 0 };
+/** 有任意一条消息正在播报（自动播报 / 手动点播都会置 ttsPlaying）就点亮全屏声纹 */
+const isTtsSpeaking = computed(() => (chatStore.messages || []).some(message => Boolean(message?.ttsPlaying)));
+/** 一键回到底部的箭头：深色模式换 arrow-down-dark.png（浅色箭头压在暗底上看不清） */
+const scrollBottomIcon = computed(() => (isDark.value ? arrowDownDarkIcon : arrowDownIcon));
+const sharePosterWrap = ref<unknown>(null);
+/** 输入栏实例：步骤卡拍照后把附件挂进输入栏并聚焦，不再直接发送 */
+const chatInputRef = ref<{
+  appendAttachments?: (meta: ChatMessageAttachment[]) => void;
+  focusTextInput?: () => void;
+  cancelDuplexPress?: () => void;
+} | null>(null);
+const shareSheetBottomInset = ref("");
+const pageStage = ref<"welcome" | "chat">("welcome");
+/** 初始页起飞中：欢迎层先不卸载，等中间 logo 滑到对话页顶部再收起 */
+const welcomeLeaving = ref(false);
+/** 初始页 logo 的落点 transform：按对话页灵动岛图标的真实坐标算出来 */
+const welcomeLogoStyle = ref<Record<string, string>>({});
+/** 已到顶：欢迎层 logo 淡出，交给对话页自己的灵动岛图标接上 */
+const welcomeLanded = ref(false);
+/** 欢迎层是否还挂在页面上（起飞期间与对话页同时存在） */
+const showWelcome = computed(() => pageStage.value === "welcome" || welcomeLeaving.value);
+const listenBroadcast = ref<TodayListenBroadcast | null>(null);
+const listenBroadcastLoading = ref(false);
+const listenReportRefreshKey = ref(0);
 const guideStepSheetVisible = ref(false);
 /** 底部步骤白板实例：点核对卡步骤条时用它直接切到对应步 */
 const guideStepSheetRef = ref<{ goToStep: (index: number) => void } | null>(null);
 /** 请求白板显示的步骤下标（0 起）：点核对卡步骤条时带上，展开时按它定位 */
 const guideStepRequestedIndex = ref(0);
-/** 步骤卡片实时高度（px）：卡片展开时把列表底部 padding 顶起来，最后一条回答不会被盖住 */
 const guideStepSheetHeight = ref(0);
-/**
- * 当前要显示的那张核对卡属于哪一步（步骤 id）。
- *
- * 不用「第几张」：多步骤卡会被反复触发，每轮回答各带一张卡，序号法会把新一轮的卡
- * 算到第一张卡的位置上。按步骤 id 交给消息列表定位，重复触发时取最新那一轮的卡。
- */
-const guideStepCardStepId = ref("");
 /** 核对卡要顶到对话区顶部还缺的底部间距（px，由消息列表量出来） */
 const guideStepCardSpace = ref(0);
 
+let isDemoPage = false;
+
 const {
   messages,
+  inputText,
   isLoading,
   aiSessionId,
   showQuickPrompts,
@@ -149,37 +275,33 @@ const { sessions, isSessionSwitching } = storeToRefs(sessionStore);
 
 const {
   chatViewportStyle,
+  keyboardHeight,
+  voiceKeyboardHeight,
   composerBottomInset,
+  composerDockOffset,
   syncWindowHeight,
+  setInputDockHeight,
+  setTextInputFocused,
+  setVoiceInputFocused,
 } = useChatViewport({ recoverKeyboardOnBlur: () => systemStore.isIOS });
 /**
- * 欢迎态 → 对话态：与首页同一套起飞动画。
- * 进页面先是整屏「Hey,SANI」欢迎层，点语音 / 键盘后中间 logo 飞到头部灵动岛、对话页淡入。
+ * 纯净模式（设置弹层 → 纯净模式）：关闭时底部才露出快捷入口胶囊
+ * （作业指导 / 任务协同 / 维修助理 / 配件助手 / 听汇报），打开后整条导航不渲染
+ * —— 纯净模式即「界面只留对话」，胶囊入口属于要收起来的那部分。
  */
-const {
-  stage: pageStage,
-  showWelcome,
-  chatEnterDelayMs,
-  enterChatNow,
-  backToWelcome,
-} = useWelcomeStage();
-/** 对话页整体淡入：保留原有 chatViewportStyle，只加一个动画延迟变量 */
-const chatEnterStyle = computed(() => ({
-  ...chatViewportStyle.value,
-  "--chat-enter-delay": `${chatEnterDelayMs.value}ms`,
-}));
-// 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用实时 TTS 做流式听播。
-const { onTtsClick: onHistoryTtsClick, releaseAudio: stopHistoryTts, activeMessageId: historyTtsMessageId } = useChatTts(chatScope);
+const settingsStore = useSettingsStore();
+const { pureMode } = storeToRefs(settingsStore);
+/** 底部快捷入口当前高亮的智能体 key（内联智能体如配件助手点一下切换） */
+const navActiveKey = ref("");
+/** 快捷入口贴输入栏正上方：输入栏高度（含键盘抬起）由 useChatViewport 给 */
+const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
+// 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用它做流式听播。
 const realtimeTts = useRealtimeTts(chatScope);
 const duplex = useDuplexVoice({
   cancelManual() {
-    // resetVoiceQuery 由下方 useVoiceQuery 提供：options 回调在调用时执行，声明后置安全
-    // eslint-disable-next-line ts/no-use-before-define -- 见上行说明
-    const released = resetVoiceQuery();
-    stopHistoryTts();
-    return released;
+    return resetVoiceQuery();
   },
-  submit: (text) => { void sendMessage({ text, markPreviousStopped: true }); },
+  submit: text => { void sendMessage({ text, markPreviousStopped: true }); },
   setGain: gain => realtimeTts.setPlaybackGain(gain),
   playbackText: () => realtimeTts.playbackText.value,
   playbackActive: () => realtimeTts.playing.value,
@@ -187,265 +309,74 @@ const duplex = useDuplexVoice({
 });
 const { active: duplexActive, starting: duplexStarting, listening: duplexListening, transcript: duplexTranscript } = duplex;
 const duplexStatus = computed(() => {
-  if (duplexStarting.value) return t("duplex-starting");
-  return duplexActive.value ? duplexTranscript.value || t("duplex-listening") : "";
+  if (duplexStarting.value) return t('duplex-starting');
+  return duplexActive.value ? duplexTranscript.value || t('duplex-listening') : '';
 });
 
-const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
+const {
+  sendMessage: sendChatMessage,
+  sendQuickPrompt,
+  sendAskSlotSelection,
+  sendAssistantCallback,
+  beginAsrPlaceholder,
+  discardAsrPlaceholder,
+  stopGenerating,
+  cancelActiveStream,
+} = useChatSend(chatScope, {
+  hideNoviceVoice: false,
   scene: "GUIDE",
-  // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
-  // 回复里的核对卡仍由 focusStepBlock 在卡片出现 / 翻页时顶到对话区最上方（见 onGuideStepOpen）。
-  // 机型在「选择体验的设备」页、讲解模式在「选择身份」页，各自写进 store，这里每次发送时现取，
-  // 避免切会话或来回进出页面后带上旧值
-  getExtraInputs: () => ({
-    ...(selectedDeviceModel.value ? { device_model: selectedDeviceModel.value } : {}),
-    ...(userStore.operatorRole?.roleKey ? { operator_role: userStore.operatorRole.roleKey } : {}),
-  }),
-  // 显式下发的 voice 播报稿按流式增量进入队列。
+  user: GUIDE_PC_DEVICE_NO,
+  getExtraInputs: () => ({ deviceModel: GUIDE_PC_DEVICE_MODEL }),
+  // 问答完成、答案文字开始渲染就自动听播（不等 workflow_finished / message_end）：
+  // 第一块 answer 文字到达即开播，后续文字流式增量续播，音频按原文顺序排队播放。
   onAiAnswerDelta({ aiMsgId, delta, ended }) {
-    const message = chatStore.messages.find(item => item.id === aiMsgId);
-    if (!message) return;
-    realtimeTts.feedAnswerDelta(message, delta, ended);
-  },
-  /**
-   * 开场引导卡（COMPONENT scene=guide / type=lead）：「你好，我是 SANI…」这段正文是整块下发的，
-   * 不走 answer delta，流式那条线永远拿不到它 —— 回答完成时补一次自动播报，把正文念出来。
-   *
-   * 多步骤卡的消息不在这里补（播报归卡片管）；已经有 answer 正文的也不补（流式那条线念过了，
-   * 再播一次会把刚播的打断重来）。
-   */
-  onAiMessageComplete({ aiMsgId }) {
     const index = chatStore.messages.findIndex(item => item.id === aiMsgId);
     if (index < 0) return;
-    const message = chatStore.messages[index];
-    const blocks = message.blocks || [];
-    if (!blocks.some(block => block?.type === "guide-lead") || message.speechText) return;
-    if (blocks.some(block => block?.type === "guide-step")) return;
-    if (blocks.some(block => block?.type === "answer" && String(block.payload?.content || "").trim())) return;
-    // 语音播报总开关关掉：不自动补播
-    if (!settingsStore.autoTtsEnabled) return;
-    void realtimeTts.togglePlay(message);
+    realtimeTts.feedAnswerDelta(chatStore.messages[index], delta, ended);
   },
-  // 与首页同一套滚动：发送时只登记本轮的提问（消息列表据此加大顶部呼吸位），
-  // 回答边写边贴底跟随，本轮提问顶到头部下沿就停住（见 ai-message-list 的 alignToReplyEnd）
+  // 本轮的提问是跟随上限：回答边写边贴底跟随，提问顶到头部下沿就停住（见消息列表 alignToReplyEnd）
   alignSentMessageToTop: true,
+  // 首页：发送后立刻把这条提问顶到头部下沿（每次提问同一个位置，历史往上顶）
+  pinOnSend: true,
 });
-
-/**
- * 初始化介绍的口播：走 usePlainTts（按句切分 → /speech/tts/v2/stream）。
- * mock 消息没有服务端 messageId，走不了 useChatTts / 实时听播那两套，所以这里单独一套。
- */
-const introTts = usePlainTts();
-
-/** 补播监听的事件：个别 WebView 会拦掉无用户手势的自动播放，等第一次触摸再补一次 */
-const INTRO_GESTURE_EVENTS = ["touchstart", "pointerdown"] as const;
-let introGestureRetry: (() => void) | null = null;
-
-function disarmIntroVoiceRetry() {
-  const handler = introGestureRetry;
-  if (!handler) return;
-  introGestureRetry = null;
-  INTRO_GESTURE_EVENTS.forEach(name => document.removeEventListener(name, handler));
-}
-
-/** 给刚发起的一段口播挂上「首触补播」：已经出声就什么都不做 */
-function armIntroVoiceRetry(replay: () => void) {
-  disarmIntroVoiceRetry();
-  const handler = () => {
-    disarmIntroVoiceRetry();
-    if (introTts.started.value) return;
-    replay();
-  };
-  introGestureRetry = handler;
-  INTRO_GESTURE_EVENTS.forEach(name => document.addEventListener(name, handler, { once: true, passive: true }));
-}
-
-/** 播报初始化介绍的正文（从 mock 内容里取）；带 messageId 时把气泡上的播报态也点起来 */
-function speakInitIntro(speech: string, messageId?: string) {
-  const text = String(speech || "").trim();
-  if (!text) return;
-  if (messageId) chatStore.patchMessageById(messageId, { ttsLoading: true });
-  introTts.speak(text);
-  armIntroVoiceRetry(() => introTts.speak(text));
-}
-
-/**
- * 初始化 mock 消息的播报开关：这类消息没有服务端 messageId，走不了 useChatTts，
- * 复用开场白这套 plain tts；再点一次就是停。
- */
-function toggleMockIntroTts(message: UiChatMessage) {
-  const speech = String(message.mockSpeech || getInitIntroSpeech(message.blocks || [])).trim();
-  if (!speech) return;
-  if (introTts.playing.value) {
-    introTts.stop();
-    chatStore.patchMessageById(message.id, { ttsPlaying: false, ttsLoading: false });
-    return;
-  }
-  speakInitIntro(speech, message.id);
-}
-
-/**
- * plain tts 不维护消息上的播报态：按引擎的 playing 回填到气泡，
- * 自动开场白与手动点播报都能看到 spinner / 声波，播完自动回落。
- */
-watch(
-  () => introTts.playing.value,
-  (playing) => {
-    const target = chatStore.messages.find(item => item.role === "ai" && item.mockSpeech && (item.ttsPlaying || item.ttsLoading));
-    if (!target) return;
-    chatStore.patchMessageById(target.id, playing
-      ? { ttsPlaying: true, ttsLoading: false }
-      : { ttsPlaying: false, ttsLoading: false });
-  },
-);
-
-/** 停掉本页两套听播引擎（实时流式 + 历史整段）：换交互 / 离开页面时统一走这里。 */
-function stopSceneTts() {
-  realtimeTts.stop();
-  stopHistoryTts();
-  // 初始化介绍的口播也一起停：用户开口 / 发送时不该还念着开场白
-  introTts.stop();
-  disarmIntroVoiceRetry();
-}
 
 /**
  * 发送新消息（文字会话 / 语音确认发送共用 @send 出口）时立刻停掉正在进行的听播。
- * 同步停、不依赖 activeRequestSeq watcher —— 发出去的瞬间就安静。
+ * 同步停、不依赖 activeRequestSeq watcher —— 发出去的瞬间就安静，
+ * 避免旧播报一直响到新答案文字出来才被替换。
  */
 function sendMessage(payload?: Parameters<typeof sendChatMessage>[0]) {
-  stopSceneTts();
+  realtimeTts.stop();
   return sendChatMessage(payload);
 }
 
-/**
- * 本轮实时转写文本：录音期间逐字刷新，只长在顶部浮动条上，不进消息列表。
- * 与首页一致：不做占位气泡，实时文字走页面级 .voice-live 浮动条。
- */
-const voiceTranscript = ref("");
-/** 实时文字的实测高度（px）：两行封顶后是定值（含底部渐隐带），列表按它让位 */
-const voiceLiveHeight = ref(0);
-let voiceArrivalOrigin: VoiceMessageOrigin | null = null;
-let cancelVoiceArrival: (() => void) | null = null;
-/**
- * 「识别中」实时转写文字的出场闸门（文字铺在对话页顶部那一条上，不再是消息气泡）。
- * 从欢迎层起飞时先关上：这行文字要等中间图标飞进灵动岛、落位动效彻底收尾之后才出现，
- * 否则它会和图标动效叠在一起（看起来像被图标压住半截）。
- * 对话页里直接说话不经过起飞，保持 true 立即显示。
- */
-const asrTipReady = ref(true);
-
-/**
- * 实时文字的落点锚：上一轮登记过的那条提问（pinMessageId），
- * 取不到（或已不在当前会话里）就退回最后一条用户消息。
- * 拿不到锚点时（第一次提问 / 空会话）返回空串：没有可隐藏的旧提问。
- */
-function resolveVoiceAnchorId() {
-  const pinned = String(chatStore.pinMessageId || "");
-  const messages = chatStore.messages || [];
-  if (pinned && messages.some(item => String(item?.id ?? "") === pinned)) return pinned;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role === "user" && !message.asrPending) return String(message.id || "");
-  }
-  return "";
+/** 用户主动点出来的提问（快捷问题 / 推荐追问 / 作业指导卡片） */
+function sendUserPrompt(query: string) {
+  sendQuickPrompt(query);
 }
 
 /**
- * 「点击说话」语音链路（录音条 + 实时字幕）：与首页同一套实现。
- * 实时文字走页面级 .voice-live 浮动条（不进消息列表占位气泡），
- * 录音、识别、静音收尾、流式降级原生录音全在 hook 里。
+ * 按住说话 / 再次识别按下的瞬间停掉听播。此时录音刚开始、请求还没发出，
+ * activeRequestSeq watcher 不会动 —— 但旧播报继续响会盖住用户对着麦克风说话，
+ * 还会被录进 ASR 里，必须按下即停。
  */
-const {
-  voiceQueryActive,
-  voiceLevel,
-  voiceSeconds,
-  voiceFinishing,
-  startVoiceQuery,
-  stopVoiceQuery,
-  cancelVoiceQuery,
-  resetVoiceQuery,
-} = useVoiceQuery({
-  // eslint-disable-next-line ts/no-use-before-define -- 按住状态为脚本尾部 ref（回调在 setup 运行期才执行）
-  isHolding: () => voiceHoldActive.value,
-  beginPlaceholder: () => {
-    // 与首页一致：不插「识别中」占位气泡，实时文字由 .voice-live 浮动条承载。
-    // 返回一个虚拟 id 让 hook 的 onPartial 守卫通过（partial 不回填气泡，而是写 voiceTranscript）；
-    // 同时把「上一轮提问」登记为 pin 目标，消息列表据此隐藏它、把位置让给浮动条。
-    const anchorId = resolveVoiceAnchorId();
-    if (anchorId) {
-      chatStore.setPinnedToBottom(true);
-      chatStore.setPinMessage(anchorId);
-      chatStore.setCapRoundAtTop(true);
-    }
-    return "__voice-floating__";
-  },
-  patchPlaceholder: (_id, text) => { voiceTranscript.value = text; },
-  pinPlaceholder: () => {
-    const anchorId = resolveVoiceAnchorId();
-    if (anchorId) chatStore.pinMessageToTop(anchorId);
-  },
-  discardPlaceholder: () => { voiceTranscript.value = ""; },
-  onBeforeSubmit: () => {
-    voiceArrivalOrigin = readVoiceMessageOrigin(typeof document === "undefined"
-      ? null
-      : document.querySelector(".voice-live__text"));
-  },
-  submit: async (text) => {
-    const origin = voiceArrivalOrigin;
-    voiceArrivalOrigin = null;
-    // 说完：先清浮动条文字，再走正常发送链路（提问由 sendQuickPrompt 落成正式气泡）
-    voiceTranscript.value = "";
-    sendQuickPrompt(text);
-    const messageId = chatStore.pinMessageId;
-    const requestSeq = chatStore.activeRequestSeq;
-    await nextTick();
-    await nextTick();
-    if (!messageId || requestSeq !== chatStore.activeRequestSeq || typeof document === "undefined") return;
-    const body = document.getElementById(chatMessageAnchorDomId(messageId))
-      ?.querySelector<HTMLElement>(".ai-bubble-v2__body") || null;
-    cancelVoiceArrival?.();
-    cancelVoiceArrival = animateVoiceMessageArrival(body, origin);
-  },
-  // 开口前先掐掉正在播的回答，避免外放被麦克风收进 ASR
-  onStart: async () => {
-    await duplex.stop();
-    stopSceneTts();
-  },
-});
+function stopRealtimeTtsOnVoiceStart() {
+  void duplex.stop();
+  realtimeTts.stop();
+}
 
-/**
- * 实时文字随「录音中 + 起飞已落位」出现 / 消失：出现时开始量高，收起时让位归零。
- * 必须放在 useVoiceQuery 之后（getter 里要用到 voiceQueryActive）。
- */
-watch(
-  () => voiceQueryActive.value && asrTipReady.value,
-  (visible) => {
-    if (visible) {
-      // 高度由共用字幕组件上报。
-      return;
-    }
-    // 收起（取消 / 说完 / 离开页面）：清掉文字并收回列表让出的高度
-    voiceTranscript.value = "";
-    voiceLiveHeight.value = 0;
-  },
-  { flush: "post" },
-);
+/** 停掉本页听播：步骤卡确认完最后一步、切到小结的瞬间由消息列表触发 */
+function stopSceneTts() {
+  realtimeTts.stop();
+}
 
-// 「再次发起其他提问 / 切换会话 / 停止生成」时立刻停掉正在进行的听播（同首页）：
-// activeRequestSeq 在新请求开始和取消/重置时都会变化，一个 watcher 兜底覆盖全部入口。
+// 「再次发起其他提问 / 切换会话 / 停止生成」时立刻停掉正在进行的自动听播：
+// activeRequestSeq 在新请求开始（nextRequestSeq）和取消/重置（invalidateActiveRequest）
+// 时都会变化，一个 watcher 统一覆盖全部入口（输入框、快捷提问、建议、插槽、助手回调、历史切换）。
+// 不等到新答案首块文字才停 —— 那中间几秒旧播报还会继续响。
 watch(() => chatStore.activeRequestSeq, () => {
-  stopSceneTts();
+  realtimeTts.stop();
 });
-
-/**
- * 作业指导是「核对卡顶到对话区最上方」的阅读方式，所以核对卡一旦置顶就不能再被流式追加拽走：
- * 关掉「贴底跟随」这件事只在 focusGuideStepCardAtTop 里做（见下），也就是真的把某张核对卡
- * 顶到对话区顶部时才关。
- *
- * 不能像以前那样「请求一开始就一律关掉」：发送时那次强制回底（scrollToBottom(true)）会因此作废
- * ——消息列表量 DOM 对齐时 pinned 已经是 false，回复只在可视区外面往下写，表现就是「回复不滚动」。
- * 用户自己滑到底部时，列表会重新上报 pinned（@pinned-change），跟随照旧。
- */
 const {
   iconCopyImage,
   iconSaveImage,
@@ -470,23 +401,260 @@ const {
   onCopySharePoster,
 } = useChatShare(sharePosterWrap, chatScope);
 const { badFeedbackSheetVisible, onFeedbackChange, onBadFeedbackConfirm, onBadFeedbackClose } = useChatFeedback(chatScope);
-
-const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(text => sendMessage({ text }), {
-  // 进维修助理 / 配件助手是 pushWindow 开新 webview，本页不会 onHide：离开前先掐掉自动听播
-  onLeavePage: () => realtimeTts.stopForSceneLeave(),
-});
+/** 步骤卡「拍照」入口专用：独立实例，选完一张图直接把文件交给 sendMessage */
+const photoPicker = useComposerAttachments();
 
 /**
- * 追问卡（COMPONENT scene=ask / type=slot）：与首页同一套口径。
- *
- * - 单题选择题由答题气泡内联渲染（AskSlotBlock），点选项直接当一次提问发出去；
- * - 多选 / 填空 / 多步骤表单在气泡里排不下，仍由页面弹底部抽屉（AiSlotDrawer）。
+ * 录音态底部面板（设计稿 1204:467 录动态）是否展开。
+ * 设计稿这一屏底部只有「水面 + 提示行 + 声纹」，底部导航与「一键回到底部」都要让位，
+ * 否则它们会盖在水面上（AiChatNav / .chat-scroll-bottom 的层级都在面板之上）。
  */
+const voicePanelOpen = ref(false);
+/**
+ * 底部快捷入口是否展示：纯净模式关闭才显示（打开就整条不渲染），
+ * 录音面板 / 录音条展开时让位
+ */
+const navVisible = computed(() => false);
+
+const messageBottomInset = computed(() => {
+  if (shareSheetVisible.value) return shareSheetBottomInset.value;
+  // 步骤卡贴底展开：列表底部既要让开卡片高度，也要留够把核对卡顶到对话区最上方的间距
+  if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) {
+    return `${Math.max(guideStepSheetHeight.value, guideStepCardSpace.value)}px`;
+  }
+  // 追问卡（单选点即作答 / 多选确认提交）弹出时同样让出卡片高度
+  if (askSlotDrawerVisible.value && askSlotDrawerHeight.value > 0) {
+    return `${askSlotDrawerHeight.value}px`;
+  }
+  /**
+   * 录音中：输入栏已经被 fixed 的录音条顶掉，底部快捷入口也一起收起，
+   * 这时的 composerBottomInset 还是输入栏那一帧量到的旧值。
+   * 录音条胶囊的顶边固定在「安全区 + 160rpx」（bottom 72rpx + 高 88rpx），
+   * 旧值一旦比它小，滚到底时最后一行就压在胶囊后面；取两者较大值，两种情况都不吃亏。
+   */
+  if (voiceQueryActive.value) {
+    return `max(${composerBottomInset.value}, calc(env(safe-area-inset-bottom) + 184rpx))`;
+  }
+  // 纯净模式关闭时底部多了一条快捷入口：给列表多留 88rpx（导航 72rpx + 顶部间距 16rpx）
+  if (navVisible.value) return `calc(${composerBottomInset.value} + 88rpx)`;
+  // 底部只剩输入栏
+  return composerBottomInset.value;
+});
+/**
+ * 「按住说话」录音中：输入栏把录音态透出来，顶部灵动岛据此把常态动图换成 sani-logo.webp。
+ * 只在录音期间为 true（松手进识别 / 取消 / 发送都会回落），思考 / 回答的状态图逻辑不受影响。
+ */
+const voiceListening = ref(false);
 const askSlotQueue = ref<AskSlotPayload[]>([]);
 const askSlotDrawerVisible = ref(false);
+/** 追问卡实时高度（px）：卡片弹出时给消息列表加底部间距，最后一条内容不会被盖住 */
 const askSlotDrawerHeight = ref(0);
+const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(sendUserPrompt, {
+  // 进维修助理 / 配件助手是 pushWindow 开新 webview，本页不会 onHide：
+  // 不在这里掐掉，这一轮的语音会挂到回来之后才念出来（「正在进入维修助理」）。
+  onLeavePage: () => realtimeTts.stopForSceneLeave(),
+});
+/** 底部「配件助手」点击后的地址输入弹层 */
+const partsJumpVisible = ref(false);
+let repairSummaryPollingTimer: ReturnType<typeof setTimeout> | null = null;
+let repairSummaryPollingAttempts = 0;
+const REPAIR_SUMMARY_POLL_INTERVAL_MS = 5_000;
+const REPAIR_SUMMARY_MAX_ATTEMPTS = 30;
+
+/** 点维修助理回流卡：pushWindow 直达三方维修 H5 的详情页；已生成的回流结果看过就不再重复拉取。 */
+function onAssistantCallbackOpen(conversationId: string) {
+  const id = String(conversationId || "").trim();
+  if (!id) return;
+  logger.info("维修助理回流卡点「看详情」", { conversationId: id });
+  clearPendingRepairCallback();
+  // 同一类场景窗口跳转：离开前先掐掉自动听播，回来不再接着念
+  realtimeTts.stopForSceneLeave();
+  void openRepairAssistant({
+    chatConversationId: id,
+    // 降级回本地壳页时要把会话 id 带上，壳页据此拼 `/repair/{id}`
+    fallbackUrl: `/pages/repair/index?conversationId=${encodeURIComponent(id)}`,
+  });
+}
+
+/**
+ * 进入配件助手：与维修助理同一套口径 —— pushWindow 直达三方 H5，
+ * 参数一致、只有地址不同（见 config 的 PARTS_ASSISTANT_EMBED_URL），
+ * 原生容器不可用时才降级到本地壳页 `/pages/parts/index?url=...`。
+ */
+function enterPartsAssistant() {
+  void openPartsAssistant();
+}
+
+function clearRepairSummaryPolling() {
+  if (!repairSummaryPollingTimer) return;
+  clearTimeout(repairSummaryPollingTimer);
+  repairSummaryPollingTimer = null;
+}
+
+function startRepairSummaryCallback() {
+  const task = consumePendingRepairCallback();
+  if (!task) {
+    logger.debug("没有待消费的维修助理回调任务，跳过回流摘要轮询");
+    return;
+  }
+  logger.info("开始轮询维修助理回流摘要", task);
+
+  clearRepairSummaryPolling();
+  repairSummaryPollingAttempts = 0;
+  const aiMsgId = `repair-summary-${Date.now()}`;
+  chatStore.messages.push({
+    id: aiMsgId,
+    role: "ai",
+    content: "",
+    blocks: [],
+    loading: true,
+    sessionId: chatStore.aiSessionId,
+    messageId: null,
+    // 文案都走词条：切中英文后新推出来的卡片跟着变（已落到消息里的文案不会再改）
+    waitingText: t("repair-callback-title"),
+    assistantCallbackTitle: t("repair-callback-title"),
+    // 状态文案由气泡统一补「...」，这里只写标题本体，避免卡片上出现重复省略号
+    processStatus: { phase: "thinking", title: t("repair-callback-status-diagnosing") },
+  });
+  chatStore.scrollToBottom(true);
+
+  /**
+   * 已经补到卡片上的维修助理会话 ID。
+   * 诊断中没有回填明细，但 ID 一到位就要让卡片可点（气泡只按这个字段决定是否显示右箭头），
+   * 所以要单独记一份，避免每轮都重复 patch，也避免 Completed 回包没带 ID 时把它覆盖成空。
+   *
+   * 初值取三方页在通道里回传过的会话 id（conversation_created）：
+   * 摘要接口这次没带回 id 时，卡片照样能点进详情。
+   */
+  let patchedConversationId = getRepairConversationId();
+
+  const poll = async () => {
+    repairSummaryPollingAttempts += 1;
+    try {
+      const data = await getConversationSummary(task);
+      const summaryPayload = JSON.stringify(data);
+      const summary = parseRepairCallbackSummary(summaryPayload);
+      const status = String(data.status || "");
+      const conversationId = String(summary.repairConversationId || patchedConversationId || "").trim();
+      // 真机排查：每次轮询的状态与是否带回会话 id
+      logger.debug("回流摘要返回", {
+        attempt: repairSummaryPollingAttempts,
+        status: status || "(空)",
+        conversationId: conversationId || "(空)",
+      });
+
+      /**
+       * 会话 ID 一到位就先补到卡片上（气泡只按这个字段决定是否渲染右箭头）：
+       * 不用等报告生成完，用户随时能点进维修助理看诊断详情。
+       */
+      if (conversationId && conversationId !== patchedConversationId) {
+        patchedConversationId = conversationId;
+        chatStore.patchMessageById(aiMsgId, { assistantCallbackConversationId: conversationId });
+      }
+
+      /** 结果就绪：把卡片标题 / 副标题 / 明细 / 会话 ID 补齐，再走回流接口。 */
+      const finish = async (details: Array<{ label: string; value: string }>, statusText: string, reason: string) => {
+        clearRepairSummaryPolling();
+        chatStore.patchMessageById(aiMsgId, {
+          assistantCallbackTitle: summary.title,
+          assistantCallbackStatus: statusText,
+          assistantCallbackDetails: details,
+          assistantCallbackConversationId: patchedConversationId,
+        });
+        logger.info("回流摘要已就绪，回填卡片并回流", {
+          attempt: repairSummaryPollingAttempts,
+          reason,
+          status: status || "(无 status)",
+          conversationId: patchedConversationId || "(空)",
+          details: details.map(item => `${item.label}:${item.value}`),
+        });
+        await sendAssistantCallback(summaryPayload, { aiMsgId, waitingText: t("repair-callback-quick-qa") });
+      };
+
+      /**
+       * 案例报告：明细一律取三方「案例报告状态」，四项固定四行，没值的那行是「待识别」。
+       * 拿不到（没会话 ID / 接口失败）就当四项全空，卡片照样出，不空着等。
+       */
+      let caseReport: RepairCaseReport | null = null;
+      if (conversationId) {
+        try {
+          caseReport = parseRepairCaseReport(await getRepairInformationState(conversationId));
+        }
+        catch (error) {
+          logger.warn("案例报告状态查询失败，本轮按未填全处理", { conversationId, status }, error);
+        }
+      }
+
+      /**
+       * 卡片不等四项齐全：拿到多少先摆多少。
+       * 副标题只在四项全有值时才是「案例报告生成已完成」，缺任何一项就传空 —— 气泡那边空文案整行不渲染。
+       */
+      if (caseReport) {
+        chatStore.patchMessageById(aiMsgId, {
+          assistantCallbackTitle: summary.title,
+          assistantCallbackStatus: repairCaseReportStatusText(caseReport),
+          assistantCallbackDetails: caseReport.details,
+        });
+      }
+
+      /** 四项齐全：定稿回流。 */
+      if (caseReport?.ready) {
+        await finish(caseReport.details, repairCaseReportStatusText(caseReport), "案例报告四项已齐");
+        return;
+      }
+
+      /**
+       * 回流数据没有 status（历史口径里的快速问答）：首次取到就是结果，直接回流。
+       * 卡片形态不再分快问快答 / 机型诊断，有三方案例报告就按报告出，副标题同样只在四项齐全时给。
+       */
+      if (!status) {
+        await finish(
+          caseReport?.details || summary.details,
+          caseReport ? repairCaseReportStatusText(caseReport) : summary.statusText,
+          "无 status（快速问答）",
+        );
+        return;
+      }
+
+      /**
+       * 拿不到三方状态的兜底：退回旧口径 status=Completed 就算结束，
+       * 明细按四项全空渲染（全「待识别」），避免三方接口一抖动，卡片就永远等不到回流。
+       */
+      if (!caseReport && status === "Completed") {
+        await finish(parseRepairCaseReport(null).details, "", `status=${status}`);
+        return;
+      }
+
+      // 缺哪一项一眼能看出来：日志里逐行打 label:value，值还是「待识别」的就是三方没填的
+      logger.debug("案例报告还没生成完，继续轮询", {
+        attempt: repairSummaryPollingAttempts,
+        status,
+        hasConversationId: Boolean(conversationId),
+        details: caseReport?.details.map(item => `${item.label}:${item.value}`) || [],
+      });
+    }
+    catch (error) {
+      logger.error("回流摘要接口失败", { attempt: repairSummaryPollingAttempts }, error);
+    }
+
+    if (repairSummaryPollingAttempts >= REPAIR_SUMMARY_MAX_ATTEMPTS) {
+      clearRepairSummaryPolling();
+      logger.warn("回流摘要轮询次数用尽，标记为未完成", { attempts: repairSummaryPollingAttempts });
+      chatStore.patchMessageById(aiMsgId, {
+        content: t("repair-callback-timeout"),
+        loading: false,
+        processStatus: { phase: "failed", title: t("repair-callback-status-failed") },
+      });
+      return;
+    }
+    repairSummaryPollingTimer = setTimeout(poll, REPAIR_SUMMARY_POLL_INTERVAL_MS);
+  };
+
+  void poll();
+}
 
 function onAskSlotOpen(slot: AskSlotPayload) {
+  // 作业协同多步骤表单会一次带来整组题目（slot.slots），按顺序拆开入队；普通追问卡就是一道题
   const incoming = Array.isArray(slot.slots) && slot.slots.length ? slot.slots : [slot];
   incoming.forEach((item) => {
     const existingIndex = askSlotQueue.value.findIndex(existing => existing.slot_name === item.slot_name);
@@ -501,7 +669,7 @@ function closeAskSlotDrawer() {
   askSlotDrawerVisible.value = false;
 }
 
-/** 抽屉高度量出来了：底部间距随之变化，贴一次底把内容抬到卡片上方 */
+/** 追问卡高度量出来了：底部间距随之变化，贴一次底把内容抬到卡片上方 */
 function onAskSlotDrawerHeightChange(height: number) {
   askSlotDrawerHeight.value = height;
   if (askSlotDrawerVisible.value && height > 0) nextTick(() => chatStore.scrollToBottom(true));
@@ -513,114 +681,46 @@ function onAskSlotSubmit(payload: AskSlotSubmitPayload) {
   sendAskSlotSelection(payload);
 }
 
-/** 内联选项点中：不本地改选中态，直接把这一项当成一次提问再发出去 */
+/**
+ * 内联追问卡（气泡里排在回答下方的选项）点中某项：
+ * 不本地改选中态，直接把这一项当成一次提问再发给 chat-messages，
+ * 等接口返回后由服务端下发的数据决定选中结果。
+ */
 function onAskSlotPick(payload: { slot: AskSlotPayload; option: AskSlotOption }) {
   sendAskSlotSelection({ slot: payload.slot, selectedOptions: [payload.option] });
 }
 
-const messageBottomInset = computed(() => {
-  // PC 车机版：底部 Dock（宿主绘制）119px，列表底部固定让开 160px，内容不会被 Dock 盖住
-  if (shareSheetVisible.value) return shareSheetBottomInset.value;
-  // 追问抽屉贴底展开
-  if (askSlotDrawerVisible.value && askSlotDrawerHeight.value > 0) {
-    return `${askSlotDrawerHeight.value}px`;
-  }
-  // 步骤卡 / 追问卡贴底展开：列表底部既要让开卡片高度，也要留够把核对卡顶到对话区最上方的间距
-  if (guideStepSheetVisible.value && guideStepSheetHeight.value > 0) {
-    return `${Math.max(guideStepSheetHeight.value, guideStepCardSpace.value)}px`;
-  }
-  // eslint-disable-next-line ts/no-use-before-define -- 追问卡状态声明在脚本下方（Vue setup 运行期已就绪）
-  if (guideSuggestionSheetVisible.value && guideSuggestionSheetHeight.value > 0) {
-    // eslint-disable-next-line ts/no-use-before-define -- 同上
-    return `${guideSuggestionSheetHeight.value}px`;
-  }
-  // PC 车机版：无输入栏，底部固定让开 Dock（宿主绘制）
-  return "160px";
-});
+/** 指导步骤卡片（COMPONENT scene=guide / type=step）：单步点一下进入下一轮，多步选好后确认回发。 */
+const guideStepPayload = ref<GuideStepPayload | null>(null);
+/**
+ * 当前要顶到对话区顶部的那张核对卡属于哪一步（步骤 id）：多步骤卡每轮各带一张，
+ * 按 id 从最新一轮往回找，避免新一轮的卡被算到第一张卡的位置上。
+ */
+const guideStepCardStepId = ref("");
+/**
+ * 多步骤卡改为气泡内联展示（标题 + 进度 + 步骤标题 + 讲解 + 确认问题 + A/B/C 选项），
+ * 不再弹底部白板。需要回退到白板时把这里改成 false。
+ */
+const INLINE_STEP_CARD = true;
 
 /**
  * 把当前显示的那张核对卡（对话区的 .chat-box__card）顶到对话区最上方。
  * 步骤卡出现、翻页、卡片高度变化后都用它：卡片顶在上方才整张可见。
  */
 function focusGuideStepCardAtTop() {
-  // 顶成功了才关掉贴底跟随：卡片还没渲染出来（focusStepBlock 没命中）时保持跟随，
-  // 否则流式回答会停在可视区外面，看着就是「回复不滚动」。
   const stepId = String(guideStepCardStepId.value || "").trim();
-  if (stepId && chatStore.focusStepBlock(stepId)) chatStore.setPinnedToBottom(false);
+  if (stepId) chatStore.focusStepBlock(stepId);
 }
-
-/**
- * 自动弹层的延时：答案生成结束后再等 5s 再弹，避免答案刚出来就被浮层盖住。
- * 定时器必须放在页面层——生成结束时气泡正文会被整体卸载（见 ai-bubble-v2 的 hideBody），
- * 挂在卡片组件里的定时器会跟着组件一起销毁，卡片就永远等不到自动弹起。
- */
-const AUTO_OPEN_DELAY_MS = 5000;
-let autoOpenTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingAutoOpen: (() => void) | null = null;
-
-function armAutoOpenTimer() {
-  if (!pendingAutoOpen || autoOpenTimer) return;
-  autoOpenTimer = setTimeout(() => {
-    autoOpenTimer = null;
-    const run = pendingAutoOpen;
-    pendingAutoOpen = null;
-    run?.();
-  }, AUTO_OPEN_DELAY_MS);
-}
-
-/**
- * 自动弹层：生成中先挂起，等 loading 变 false 后再计时 5s。
- *
- * 排期时记下当前请求序号：这一轮被「停止生成 / 重新发送 / 切会话」作废后
- * （activeRequestSeq 会变，见 stores/modules/chat 的 nextRequestSeq / invalidateActiveRequest），
- * 到点也不再弹 —— 否则旧卡片会在新一轮对话上盖出来。只丢弃这一张卡片，不影响请求本身。
- */
-function scheduleAutoOpen(open: () => void) {
-  const requestSeq = chatStore.activeRequestSeq;
-  pendingAutoOpen = () => {
-    if (chatStore.activeRequestSeq !== requestSeq) return;
-    open();
-  };
-  if (isLoading.value) return;
-  armAutoOpenTimer();
-}
-
-watch(isLoading, (loading) => {
-  if (!loading) armAutoOpenTimer();
-});
-
-function clearAutoOpenTimer() {
-  if (autoOpenTimer) {
-    clearTimeout(autoOpenTimer);
-    autoOpenTimer = null;
-  }
-  pendingAutoOpen = null;
-}
-
-/**
- * 用户中断 / 重新发送 / 切换会话时立刻作废待弹的选项卡片（步骤卡 / 追问卡）：
- * activeRequestSeq 在新请求开始、取消（停止生成）、重置会话时都会变，
- * 一个 watcher 覆盖全部入口；这里只清「延时弹卡」的定时器，不碰在途请求 ——
- * 新一轮的卡片照旧由 scheduleAutoOpen 重新挂在生成结束之后。
- */
-watch(() => chatStore.activeRequestSeq, () => {
-  clearAutoOpenTimer();
-});
 
 /** 步骤卡片：单步是多轮追问（点一下直接发），多步选好后确认，统一按普通问题发送。 */
-function onGuideStepOpen(payload: GuideStepPayload, auto = false) {
-  // 自动弹起：等答案生成结束再延时；手动点卡片立即打开
-  if (auto) {
-    scheduleAutoOpen(() => openGuideStepSheet(payload));
-    return;
-  }
-  openGuideStepSheet(payload);
-}
-
-/** 真正打开步骤卡白板（自动 / 手动共用） */
-function openGuideStepSheet(payload: GuideStepPayload) {
+function onGuideStepOpen(payload: GuideStepPayload) {
   guideStepPayload.value = payload;
   guideStepRequestedIndex.value = 0;
+  // 内联卡片：卡片就在对话里，只定位到第一步，不弹白板
+  if (INLINE_STEP_CARD) {
+    guideStepCardStepId.value = String(payload?.steps?.[0]?.id || "");
+    return;
+  }
   guideStepSheetVisible.value = true;
   // 这一轮的核对卡：按本轮第一步定位（每轮回答各带一套自己的卡，取最新那一轮）
   guideStepCardStepId.value = String(payload?.steps?.[0]?.id || "");
@@ -628,56 +728,9 @@ function openGuideStepSheet(payload: GuideStepPayload) {
   nextTick(() => focusGuideStepCardAtTop());
 }
 
-/**
- * 多步骤卡的回答不渲染气泡（见 ai-bubble-v2 的 hideBody），卡片组件也就不会挂载，
- * 它自己 onMounted 里的自动弹起不会触发 —— 自动弹起改在这里盯最后一条 AI 消息的 guide-step 块：
- * 出现即排期（生成结束后再等 5s，见 scheduleAutoOpen），同一张卡只弹一次。
- * 历史消息的块不带 auto_open，不会触发，也不会把历史卡片弹出来。
- *
- * 去重键必须是「消息 + 块」：块 id 是按内容生成的（guide-step-<标题>），
- * 同一个问题问两次会拿到一模一样的块 id，只用块 id 会把第二次的卡当成「已经弹过」，
- * 结果白板还停在上一次那张卡翻到的步骤上（下标、语音、滚动全错位）。
- */
-/**
- * 多步骤卡改为气泡内联展示（标题 + 进度 + 步骤标题 + 讲解 + 确认问题 + A/B/C 选项），
- * 不再弹底部白板：白板里的「确认 / 拍照 / 输入框」三块能力都已经搬到卡片里。
- * 需要回退到白板时把这里改成 false。
- */
-const INLINE_STEP_CARD = true;
-
-const autoOpenedStepCardIds = new Set<string>();
-watch(
-  () => {
-    const list = chatStore.messages;
-    const last = list[list.length - 1];
-    if (!last || last.role !== "ai") return null;
-    const block = (last.blocks || []).find(item => item?.type === "guide-step" && item.payload?.auto_open === true);
-    if (!block) return null;
-    // 优先本地 id（消息一创建就有、不会中途变），服务端 messageId 兜底
-    const messageKey = String(last.id || last.messageId || "");
-    const blockKey = String(block.id || "");
-    return { key: `${messageKey}::${blockKey}`, payload: block.payload as GuideStepPayload };
-  },
-  (current) => {
-    // 内联卡片模式：卡片就在对话里，不再自动弹底部白板
-    if (INLINE_STEP_CARD) return;
-    if (!current || !current.key) return;
-    // 键里带消息身份：块 id 撞车（同一个问题问两次）也不能被当成弹过
-    if (autoOpenedStepCardIds.has(current.key)) return;
-    autoOpenedStepCardIds.add(current.key);
-    // 白板还开着：新卡一出现就立刻切到它（换内容 + 归零下标 + 滚动），
-    // 别干等 5 秒还停在上一张卡的步骤上；白板本来就盖着，切内容不会影响「刚生成的答案」。
-    if (guideStepSheetVisible.value) {
-      openGuideStepSheet(current.payload);
-      return;
-    }
-    scheduleAutoOpen(() => openGuideStepSheet(current.payload));
-  },
-);
-
 function onGuideStepSubmit(query: string) {
   guideStepSheetVisible.value = false;
-  sendQuickPrompt(query);
+  sendUserPrompt(query);
 }
 
 function onGuideStepHeightChange(height: number) {
@@ -696,19 +749,21 @@ function onGuideStepCardSpaceChange(space: number) {
  * 步骤卡的附件按钮：选完不直接发送——收起步骤卡、把附件挂到输入栏并聚焦输入框，
  * 用户补一句说明或直接点发送，都走原来的对话发送链路。
  */
-/**
- * 步骤卡片展开 / 翻页时，把这一步对应的核对卡（最新那一轮）顶到对话区顶部。
- * 切步第一时间关掉贴底跟随：换卡那帧旧卡卸载、新卡挂载会让内容高度变化，
- * 若还贴着底，content-grow 会把视口先拽到回复末尾「向下滚一下」，再被顶到顶拉回来；
- * 用户主动切步就是要看这一步，跟随理应先让位。
- */
+async function onGuideStepPhoto(source: AttachmentSource) {
+  const picked = await photoPicker.pickAttachmentForSend(source);
+  if (!picked) return;
+  guideStepSheetVisible.value = false;
+  chatInputRef.value?.appendAttachments(picked.meta);
+  chatInputRef.value?.focusTextInput();
+}
+
+/** 步骤卡片展开 / 翻页时，把这一步对应的核对卡（最新那一轮）顶到对话区顶部 */
 function onGuideStepChange(step: GuideStepItem | null) {
   const stepId = String(step?.id || "").trim();
   if (!stepId) return;
   const steps = guideStepPayload.value?.steps || [];
   const index = steps.findIndex(item => String(item?.id || "") === stepId);
   if (index >= 0) guideStepCardStepId.value = stepId;
-  chatStore.setPinnedToBottom(false);
   nextTick(() => focusGuideStepCardAtTop());
 }
 
@@ -749,30 +804,11 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   if (nextStepId && nextStepId !== String(guideStepCardStepId.value || "")) realtimeTts.stop();
   guideStepCardStepId.value = nextStepId;
   guideStepRequestedIndex.value = index;
-  // 切步先关贴底跟随，再靠卡片重挂载后的 card-ready 顶到对话区顶部：
-  // 关晚了换卡那帧 content-grow 会把视口先拽到回复末尾（见 focusGuideStepCardAtTop）。
-  chatStore.setPinnedToBottom(false);
   // 内联卡片模式：卡片自己翻页，只切对话里那张卡，不弹白板
   if (INLINE_STEP_CARD) return;
   guideStepSheetVisible.value = true;
   // 白板已展开时 stepIndex 可能没变化（比如又切回上一步），用方法兜底再切一次
   nextTick(() => guideStepSheetRef.value?.goToStep(index));
-}
-
-/**
- * 点击追问后先移除它所属回答的追问列表，再按普通问题走完整发送链路。
- * 开场引导卡（guide-lead）点选后**不做任何改动**：卡片保留在对话上下文里
- * （选项仍可点），既不隐藏也不转只读态——它作为「选择机型」的常驻入口，
- * 每一轮对话都留在消息列表中。只对 suggestion / guide-suggestion 的
- * suggestion 块维持原逻辑（点选后移除该块）。
- */
-function onGuideSuggestionTap(suggestion: string, messageIndex: number) {
-  const message = chatStore.messages[messageIndex];
-  if (message?.role === "ai" && Array.isArray(message.blocks)) {
-    const blockIndex = message.blocks.findIndex(block => block.type === "suggestion");
-    if (blockIndex >= 0) message.blocks.splice(blockIndex, 1);
-  }
-  sendQuickPrompt(suggestion);
 }
 
 /**
@@ -784,32 +820,25 @@ const guideSuggestionSheetVisible = ref(false);
 /** 追问卡实时高度（px）：同步骤卡，展开时给列表底部让位 */
 const guideSuggestionSheetHeight = ref(0);
 
-function onGuideSuggestionOpen(payload: GuideSuggestionPayload, auto = false) {
-  // 自动弹起：等答案生成结束再延时；手动点文本立即打开
-  if (auto) {
-    scheduleAutoOpen(() => openGuideSuggestionSheet(payload));
-    return;
-  }
-  openGuideSuggestionSheet(payload);
-}
-
-function openGuideSuggestionSheet(payload: GuideSuggestionPayload) {
+function onGuideSuggestionOpen(payload: GuideSuggestionPayload) {
   guideSuggestionPayload.value = payload;
   guideSuggestionSheetVisible.value = true;
 }
 
 function onGuideSuggestionSubmit(query: string) {
   guideSuggestionSheetVisible.value = false;
-  sendQuickPrompt(query);
+  sendUserPrompt(query);
 }
 
 function onGuideSuggestionHeightChange(height: number) {
   guideSuggestionSheetHeight.value = height;
 }
 
+/** 消息播音统一走实时 TTS。 */
 /**
- * 这条消息正在播报的步骤：多步骤卡的回答只播当前这一步，
- * 翻页后同一条消息换了步骤，点播报要念新的一步（不是把 5 步全念一遍）。
+ * 多步骤卡的回答只播当前这一步；翻页后换了步骤要念新的一步。
+ * 只认属于这条消息的核对卡：一个对话里有多轮步骤条时，页面级的「当前步」可能是别的一轮停留的步骤，
+ * 直接拿来用会把这条消息念成另一轮的内容。
  */
 function resolveActiveStepId(msg: UiChatMessage | undefined) {
   const cards = (msg?.blocks || []).filter(block => block?.type === "guide-check");
@@ -819,93 +848,27 @@ function resolveActiveStepId(msg: UiChatMessage | undefined) {
   return String(cards[0]?.payload?.step_id || "");
 }
 
-/** 新生成消息实时播放，历史消息播放已合成的整段语音。 */
 function onTtsClick(index: number, textOverride = "") {
   const msg = chatStore.messages[index];
-  // 初始化 mock 消息：没有服务端 id，走开场白那套 plain tts
-  if (msg?.mockSpeech) {
-    toggleMockIntroTts(msg);
-    return;
-  }
   const messageId = msg?.messageId;
   if (messageId == null || msg?.sessionId == null) return;
   // 小结这类「要念的文本不在消息正文里」的播报用独立判重键，免得和步骤播报互相停
   const stepId = textOverride ? "summary" : resolveActiveStepId(msg);
 
-  // 同一目标再点一次 = 停止；换了步骤（卡片翻页）不算重复点击
   const sameRealtimeTarget = realtimeTts.playingMessageId.value === messageId
     && String(realtimeTts.playingStepId.value || "") === stepId;
   if (sameRealtimeTarget) {
     realtimeTts.stop();
     return;
   }
-  if (historyTtsMessageId.value === messageId && !stepId) {
-    stopHistoryTts();
-    return;
-  }
 
   realtimeTts.stop();
-  stopHistoryTts();
-  if (duplexActive.value || duplexStarting.value || msg.ttsPlaybackMode === "realtime") {
-    void realtimeTts.togglePlay(msg, stepId, textOverride);
-    return;
-  }
-  void onHistoryTtsClick(index);
+  void realtimeTts.togglePlay(msg, stepId, textOverride);
 }
 
-/** 已自动播报过核对卡的消息 id：同一条消息只自动播一次 */
-const autoSpokenCheckMessageIds = new Set<string>();
-
-/**
- * 核对卡（guide-check）渲染出来就自动播报（不等底部步骤卡弹出）：
- * 监听最后一条 AI 消息「生成中 → 生成完」的瞬间，只有这一刻满足「气泡正文为空 + 带核对卡」才播一次。
- * 历史加载的消息直接就是 done、没有 loading 过渡，不会被误触发；
- * 播报文本走 realtimeTts.togglePlay → extractAnswerText 里的核对卡（标题 + 步骤正文）兜底。
- */
-watch(
-  () => {
-    const list = chatStore.messages;
-    const last = list[list.length - 1];
-    if (!last || last.role !== "ai") return "";
-    return `${String(last.id)}:${last.loading ? "loading" : "done"}`;
-  },
-  (state, prev) => {
-    if (!prev?.endsWith(":loading") || !state.endsWith(":done")) return;
-    const list = chatStore.messages;
-    const last = list[list.length - 1];
-    if (!last || last.role !== "ai" || !last.ttsEnabled) return;
-    const blocks = last.blocks || [];
-    if (!blocks.some(block => block?.type === "guide-check")) return;
-    // 分步骤卡消息：播报归卡片管（念当前步骤），speechText 是老师傅导语（新手模式应忽略），
-    // 不能按「有播报稿就不播」短路；无步骤卡时才按 speechText 判断。
-    if (last.speechText && !blocks.some(block => block?.type === "guide-check" || block?.type === "guide-step")) return;
-    // answer 正文已有内容时走 onAiAnswerDelta 的流式听播，这里不重复播
-    if (blocks.some(block => block?.type === "answer" && String(block.payload?.content || "").trim())) return;
-    const key = String(last.messageId ?? last.id);
-    if (autoSpokenCheckMessageIds.has(key)) return;
-    autoSpokenCheckMessageIds.add(key);
-    // 只播当前这一步（默认第一步）：不传 stepId 会把多步骤卡的每一张核对卡
-    // 标题+正文全部拼在一起念（见 useRealtimeTts 的 extractAnswerText），
-    // 与手动点播报只念当前步骤的口径不一致，表现为「第一次播报内容比手动点击长一大截」。
-    // 语音播报总开关关掉：核对卡出来后不再自动念
-    if (!settingsStore.autoTtsEnabled) return;
-    // 新消息落列时把「当前步骤」归一到这条消息的第一步：内联卡片模式（INLINE_STEP_CARD）
-    // 不会走 openGuideStepSheet 重置 guideStepCardStepId，全局会残留上一条消息翻页到的步骤
-    // （如第 4 步），resolveActiveStepId 据此误播到第 4 步、而 UI 默认显示第 1 步 —— 错位。
-    // 用户主动翻页（onGuideStepChange）仍会更新它，同一条消息的手动播报不受影响。
-    const checkCards = blocks.filter(block => block?.type === "guide-check");
-    if (checkCards.length) guideStepCardStepId.value = String(checkCards[0]?.payload?.step_id || "");
-    void realtimeTts.togglePlay(last, resolveActiveStepId(last));
-  },
-);
-
 const localizedQuickPrompts = computed(() => chatStore.quickPrompts.map(item => t(item)));
-/** 有 greeting 或有推荐问题时才渲染引导区（接口没给就走纯聊天界面） */
-watch(() => chatStore.messages.length, (length) => {
-  // 会话里已经有内容（历史会话 / 推荐页带过来的问题 / 语音占位气泡）：不再停在欢迎层
-  if (length) enterChatNow();
-  void nextTick(() => chatStore.scrollToBottom());
-});
+
+watch(() => chatStore.messages.length, () => nextTick(() => chatStore.scrollToBottom()));
 
 watch(shareSheetVisible, async (visible) => {
   if (!visible) {
@@ -923,65 +886,753 @@ watch(shareSheetVisible, async (visible) => {
     .exec();
 });
 
-/**
- * PC 车机版待机页点击：收起待机页直接进对话态（无飞行动画），并同时起一轮语音。
- * 车机稿没有手机版那颗「点击说话」胶囊，点击居中的 logo / 文案整块即开始说话。
- */
-async function onPcWelcomeStart() {
-  markWelcomeDone();
-  // 对话态先放行（直接切，不走 goToChat 的飞行动画——PC 没有灵动岛落点）
-  enterChatNow();
-  asrTipReady.value = true;
-  await startVoiceQuery();
-}
-
-/** 顶部胶囊点击：录音中继续点就收尾（等同说完），否则开始一轮语音 */
-function onPcCapsuleVoice() {
-  if (voiceQueryActive.value) {
-    stopVoiceQuery();
-    return;
-  }
-  if (isLoading.value) return;
-  void startVoiceQuery();
-}
-
 function startNewConversation() {
   // 已经是一轮空白会话就别再重置了，重复点击给个明确反馈
   if (!chatStore.messages.length && !chatStore.aiSessionId) {
     uni.showToast({ title: t("already-new-conversation"), icon: "none" });
     return;
   }
-  // 正在生成时切走：先掐掉在途请求，否则回包会继续往新会话里写
-  cancelActiveStream();
-  chatStore.resetConversation();
-  // 待填的追问属于上一轮，跟着一起清掉
-  askSlotQueue.value = [];
-  askSlotDrawerVisible.value = false;
-  askSlotDrawerHeight.value = 0;
-  nextTick(() => chatStore.scrollToBottom(true));
-  // 新对话重新回到整屏欢迎层（与刚进页面一致）
-  backToWelcome();
+  // demo 页是纯展示场景：只清空当前会话，不退回首屏
+  if (isDemoPage) {
+    cancelActiveStream();
+    chatStore.resetConversation();
+    nextTick(() => chatStore.scrollToBottom(true));
+    return;
+  }
+  /**
+   * 与「首次打开」严格对齐：不留在对话页的空会话，而是退回 Hey,SANI 首屏。
+   * 复用回到初始页的那套复位（掐在途请求 / 听播 / 浮层、清「已进过对话」标记、
+   * 复位起飞动画与 stage），否则 onShow 的 syncPageStage 会立刻把页面拽回对话。
+   */
+  onRestartToStart();
 }
 
-function onBack() {
-  backFromScene();
+/**
+ * 快捷入口：听汇报 / 作业指导 / 任务协同都走专属页（url 优先）。
+ * 听汇报跳转前先记下当天早报日期，供播报页判断是否已收听。
+ *
+ * 带 `?direct=1`：概览卡「去收听」与底部胶囊「听汇报」都直接进播报页起播，
+ * 跳掉播报页里「选助手 → 选汇报内容」那一步（风格设置页）。
+ * 播报页的偏好设置入口仍在，用户想改偏好可以自己进去。
+ */
+function enterListenReport() {
+  saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
+  void navigateToScene("/pages/podcast/index?direct=1");
+}
+
+/** 从入口项的 `/pages/parts/index?url=...` 里取三方地址（URLSearchParams 会自动解码） */
+function readPartsEmbedUrl(route: string) {
+  const query = route.split("?")[1] || "";
+  if (!query) return "";
+  return new URLSearchParams(query).get("url") || "";
+}
+
+/**
+ * 配件助手跳转：弹层里填的是完整地址，作为 pushWindow 的目标地址（不校验域名），
+ * 参数与维修助理一致，由 utils/parts-h5 统一补上。
+ */
+function onPartsJump(url: string) {
+  const target = String(url || "").trim();
+  if (!target) return;
+  void openPartsAssistant({ url: target });
+}
+
+/**
+ * 音频卡片「去收听」：跳转前固定本次早报日期。
+ */
+function onGoListenReport() {
+  enterListenReport();
+}
+
+/**
+ * 底部快捷入口点击（仅纯净模式关闭时可见）：
+ * - mode=inline（配件助手）：就地切换智能体，再点一次取消；
+ * - 听汇报：先固定当天早报日期，再在当前页进播报页（与卡片入口同一套逻辑）；
+ * - 作业指导 / 任务协同 / 听汇报都在当前 mPaaS 内跳转，左滑回到上一页，而不是关掉整个容器。
+ */
+function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; url?: string }) {
+  if (item?.mode === "inline") {
+    const subagent = String(item?.subagent || "");
+    if (!subagent) return;
+    const nextKey = navActiveKey.value === item.key ? "" : String(item.key || "");
+    navActiveKey.value = nextKey;
+    chatStore.setSubagent(nextKey ? subagent : "");
+    return;
+  }
+
+  const targetUrl = String(item?.url || "");
+  if (!targetUrl) return;
+  // 从初始页跳出去的：场景页的返回键要回到 Hey,SANI，而不是对话页（见 markReturnToWelcome）
+  if (pageStage.value === "welcome") markReturnToWelcome();
+  if (targetUrl === "/pages/podcast/index") {
+    enterListenReport();
+    return;
+  }
+  // 维修助理：pushWindow 直达三方 H5，本地壳页只做兜底（与对话内跳转同一套口径）
+  if (targetUrl === "/pages/repair/index") {
+    void openRepairAssistant();
+    return;
+  }
+  // 配件助手：同一套口径，地址由入口项带过来（缺省用 config 里的地址）
+  if (targetUrl.startsWith("/pages/parts/index")) {
+    void openPartsAssistant({ url: readPartsEmbedUrl(targetUrl) });
+    return;
+  }
+  void navigateToScene(targetUrl);
+}
+
+/**
+ * 历史抽屉分页取数。z-paging 每翻一页回调一次，实现落在 sessionStore 里。
+ */
+function getAISessionList(pageNo = 1, pageSize = 20) {
+  return sessionStore.loadSessions(pageNo, pageSize);
+}
+
+function toggleQuickList(show: boolean) {
+  if (chatStore.messages.length > 0 && show) return;
+  chatStore.showQuickList = show;
+}
+
+/** 起飞动画时长：必须与 .welcome__logo-img 的 transform transition 对齐 */
+const WELCOME_FLY_MS = 640;
+/** 落位后留给「欢迎层 logo 淡出 → 对话页 logo 接上」的时间 */
+const WELCOME_LAND_FADE_MS = 160;
+let welcomeFlyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function readClientRect(selector: string) {
+  if (typeof document === "undefined") return null;
+  const el = document.querySelector(selector) as HTMLElement | null;
+  return el ? el.getBoundingClientRect() : null;
+}
+
+/** 等两帧：第一帧把新节点画出来，第二帧写 transform 才会走 transition（否则是瞬移） */
+function nextPaint() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+/**
+ * 对话页首帧布局要等到这些时机才稳定：header 里的状态栏占位高度由 useSafeArea
+ * 回填、字体/图标尺寸也可能在首帧后才定。这些都会让灵动岛图标整体上下移动，
+ * 所以量目标位置之前要等布局落定，否则会量到偏高的一点（表现为「冲过头再掉回来」）。
+ */
+async function waitChatLayoutSettled() {
+  await nextTick();
+  await nextPaint();
+  await new Promise<void>(resolve => setTimeout(resolve, 48));
+}
+
+/**
+ * listen.gif 第一次「扩散到最大」的时刻，起飞动画卡在这一刻开始。
+ *
+ * 实测（500×500 / 150 帧 / 每帧 40ms）：图形面积占比 0ms 起一路涨到
+ * 第 12 帧 480ms 达到最大值（ratio 0.12），之后 560ms 起回落收束。
+ * 所以 480ms 就是第一次扩散的顶点；想改看第二段呼吸的顶点就填 3520。
+ * 前提是动图从第 0 帧起播 —— AiWelcome 在点击时才挂载这张图来保证这一点。
+ */
+const WELCOME_LISTEN_PEAK_MS = 480;
+/** 首帧 load 到父页面接管之间的相位差（约 1 帧），从峰值里扣掉，别让起飞晚半拍 */
+const WELCOME_LISTEN_LOAD_LAG_MS = 40;
+/** 切到 listen.gif 之后先停留多久再起飞（= 峰值时刻 - 已播掉的那 1 帧） */
+const WELCOME_LISTEN_HOLD_MS = Math.max(0, WELCOME_LISTEN_PEAK_MS - WELCOME_LISTEN_LOAD_LAG_MS);
+/** 对话页淡入从起飞那一刻开始，避免 logo 还停在中间时对话页已经铺满整屏 */
+const CHAT_ENTER_DELAY_MS = Math.max(0, WELCOME_LISTEN_HOLD_MS - 120);
+
+/** 飞行曲线的侧向弧线幅度（px）：首尾都在屏幕中线上，靠它画出「抛物线」的弧 */
+const WELCOME_FLY_ARC_X = 18;
+/** 中段最大放大倍数：先慢慢变大，末段再收敛回灵动岛图标尺寸 */
+const WELCOME_FLY_PEAK_SCALE = 1.16;
+/** 放大达到峰值的进度点（0~1）：前半程膨胀，后半程收小并加速冲刺 */
+const WELCOME_FLY_PEAK_AT = 0.45;
+
+/** 落位后 listen.gif 在岛内再呼吸多久，然后交回空闲态 sani-logo.webp */
+const WELCOME_LISTEN_IDLE_MS = 900;
+
+/**
+ * 岛内是否处在「从初始页飞进来」的 listen 态。
+ *
+ * 落位后切上去，让飞过来的 listen 图有一段延续；播完（WELCOME_LISTEN_IDLE_MS）
+ * 就交回空闲态 sani-logo.webp —— listen.gif 现在是「回答中 / 播报中」的状态图，
+ * 空闲时留在上面会让人以为还在播报。
+ */
+const islandListenFromWelcome = ref(false);
+/**
+ * 「识别中...」实时转写文字的出场闸门（文字铺在问答页顶部那一条上，不再是消息气泡）。
+ * 从初始页起飞时先关上：这行文字要等中间图标飞进灵动岛、落位动效彻底收尾之后才出现，
+ * 否则它会和图标动效叠在一起（看起来像被图标压住半截）。
+ * 对话页里直接说话不经过起飞，保持 true 立即显示。
+ */
+const asrTipReady = ref(true);
+/** 上面这段延续的收尾定时器（回初始页 / 卸载要清掉） */
+let islandListenIdleTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * 初始页「点击说话」→ 立刻起飞，录音期间的实时转写（WS 流式 ASR）铺在问答页顶部那一条上。
+ *
+ * 不往消息列表插「识别中」用户气泡，改成一条浮在提问落点上的纯文字（见 .voice-live）：
+ * - 开口先把上一轮的提问顶到头部下沿（历史回复整体往上拉走），
+ *   再让列表把那条提问临时隐藏、把位置让给实时文字 —— 实时文字背后不会压着任何正文；
+ * - 文字从左往右长出来，跟打字一样，说完才收成正式提问气泡；
+ * - 只露最后两行（定高裁顶、文字压底），再长就把旧的顶走；整块上提一行并铺一层页面底色渐隐，
+ *   把头部留白条里透出来的上一条回答一起盖住；
+ * - 让位的高度跟着实时文字走（voiceTopPad），两行封顶后是固定值；
+ * - 说完（静音 1.5s / 点 ↑）后按原有规则把提问气泡顶到头部下沿，回答从它下面长出来。
+ */
+const voiceQueryActive = ref(false);
+/** 本轮实时转写文本：录音期间逐字刷新，只长在顶部那条文字上，不进消息列表 */
+const voiceTranscript = ref("");
+/** 实时文字的实测高度（px）：两行封顶后是定值（含底部渐隐带），列表按它让位 */
+const voiceLiveHeight = ref(0);
+let cancelVoiceArrival: (() => void) | null = null;
+/** 实时音量 0~1（已平滑）：驱动底部录音条的声纹长短 */
+const voiceLevel = ref(0);
+/** 已录秒数：底部录音条右侧那枚 4s */
+const voiceSeconds = ref(0);
+let voiceSession: AsrStreamSession | null = null;
+let voiceCapture: PcmCapture | null = null;
+/** 每轮一个序号：重置 / 重开时让旧回调自行作废 */
+let voiceSeq = 0;
+/** 已发过 finish、正在等 final：静音检测 / 手动发送都可能触发，用它防重 */
+const voiceFinishing = ref(false);
+let voiceTickTimer: ReturnType<typeof setInterval> | null = null;
+/** 一直没听到人声的兜底：别让麦克风空转 */
+const VOICE_NO_SPEECH_MS = 8000;
+let voiceNoSpeechTimer: ReturnType<typeof setTimeout> | null = null;
+let voiceHeard = false;
+const speechEndDetector = createSpeechEndDetector({
+  onSilence: stopVoiceQuery,
+  isPaused: () => voiceHoldActive.value,
+});
+/**
+ * 本轮走哪条录音链路。
+ * - stream：WebAudio 采集 + WebSocket 流式 ASR，能逐字出文字（iOS / 普通浏览器）；
+ * - native：mPaaS 原生录音（microphoneStart/End）+ 整段识别，不出 partial，但在
+ *   Android WebView 这种「拿不到可用音频」的容器里是唯一能用的那条线。
+ * 优先 stream，采集起不来（getUserMedia 失败 / 1.2s 没有回调 / 采到静音）自动降级到 native。
+ */
+let voiceBackend: "stream" | "native" = "stream";
+let nativeVoiceStartup: Promise<void> | null = null;
+/** 原生录音器：只有降级后才创建 */
+let nativeVoiceRecorder: VoiceRecorderInstance | null = null;
+/** 原生通道的音量轮询：没有 partial，声纹和静音收尾全靠它 */
+let nativeLevelTimer: ReturnType<typeof setInterval> | null = null;
+/** 每轮只降级一次，避免两条链路互相打架 */
+let voiceDegraded = false;
+/** 原生通道这一轮听到的最大音量：排查「有没有真的收到声音」时打日志用 */
+let nativePeakLevel = 0;
+/** 原生通道整段识别的最长等待：超时就当没识别到，别把录音条一直挂在「识别中」 */
+const NATIVE_RECOGNIZE_TIMEOUT_MS = 30_000;
+/** 原生录音的硬上限：只做兜底，正常收尾靠用户点发送（↑） */
+const NATIVE_MAX_RECORD_MS = 60_000;
+
+/** 原生录音回传的音频形态：容器里一般给 audioUrl，也有的直接回 base64 */
+interface NativeRecorderAudio {
+  audioUrl?: string;
+  audioBase64?: string;
+  mimeType?: string;
+  tempFilePath?: string;
+}
+
+/**
+ * VoiceRecorder 在 utils 下是 .js（构造时按环境返回原生 / 浏览器实现），
+ * 声明文件里看不到实例方法，这里补一份本地结构，免得整页用 any。
+ */
+interface VoiceRecorderInstance {
+  start: (options?: { sampleRate?: number; timeSlice?: number }) => Promise<{ success?: boolean; error?: string; data?: NativeRecorderAudio } | undefined>;
+  stop: () => Promise<{ success?: boolean; error?: string; data?: NativeRecorderAudio } | undefined>;
+  cancel?: () => void;
+  release?: () => void;
+}
+
+/**
+ * 字幕组件上报高度；收起时同步收回列表留白。
+ */
+watch(
+  () => voiceQueryActive.value && asrTipReady.value,
+  (visible) => {
+    if (!visible) voiceLiveHeight.value = 0;
+  },
+  { flush: "post" },
+);
+
+/** 收掉这一轮录音：实时文字与底部录音条一起退场，列表让出的高度同时归零 */
+function resetVoiceQuery() {
+  cancelVoiceArrival?.();
+  cancelVoiceArrival = null;
+  // 序号自增：正在 await 权限 / 采集的启动流程据此自行作废
+  voiceSeq += 1;
+  voiceQueryActive.value = false;
+  voiceTranscript.value = "";
+  voiceLiveHeight.value = 0;
+  voiceFinishing.value = false;
+  voiceLevel.value = 0;
+  voiceSeconds.value = 0;
+  voiceHeard = false;
+  speechEndDetector.reset();
+  if (voiceNoSpeechTimer) {
+    clearTimeout(voiceNoSpeechTimer);
+    voiceNoSpeechTimer = null;
+  }
+  if (voiceTickTimer) {
+    clearInterval(voiceTickTimer);
+    voiceTickTimer = null;
+  }
+  const captureReleased = voiceCapture?.stop();
+  voiceCapture = null;
+  voiceSession?.close();
+  voiceSession = null;
+  // 降级到原生录音的那一轮：停轮询、放掉录音器（正常收尾时 finishNativeVoiceQuery 已经置空）
+  stopNativeLevelPolling();
+  if (nativeVoiceRecorder) {
+    try {
+      (nativeVoiceRecorder.release ?? nativeVoiceRecorder.cancel)?.call(nativeVoiceRecorder);
+    }
+    catch (error) {
+      logger.warn("native recorder release failed", error);
+    }
+    nativeVoiceRecorder = null;
+  }
+  voiceBackend = "stream";
+  voiceDegraded = false;
+  // 「按住说话」那条入口仍会在列表里落占位气泡：收尾时一并撤掉（录音提问这条路已经没有占位了）
+  discardAsrPlaceholder();
+  // 一句话都没发出去（取消 / 识别失败 / 权限被拒）：把问候与快捷提问放回来，
+  // 口径与撤销占位气泡时一致 —— 录音期间只是暂时收起，不代表真的发了消息
+  if (!chatStore.messages.length) {
+    chatStore.showQuickPrompts = true;
+    chatStore.showQuickList = true;
+  }
+  return captureReleased;
+}
+
+function failVoiceQuery(title: string) {
+  resetVoiceQuery();
+  uni.showToast({ title, icon: "none" });
+}
+
+/** 保留实时字幕的文字起点，发送后把同一段文字平滑移入右侧胶囊。 */
+async function submitRecognizedVoice(query: string) {
+  const origin = readVoiceMessageOrigin(typeof document === "undefined"
+    ? null : document.querySelector(".voice-live__text"));
+  resetVoiceQuery();
+  if (!query) {
+    uni.showToast({ title: t("no-speech-recognized"), icon: "none" });
+    return;
+  }
+  const seq = voiceSeq;
+  sendQuickPrompt(query);
+  const messageId = chatStore.pinMessageId;
+  await nextTick();
+  await nextTick();
+  if (seq !== voiceSeq || !messageId || typeof document === "undefined") return;
+  const body = document.getElementById(chatMessageAnchorDomId(messageId))
+    ?.querySelector<HTMLElement>(".ai-bubble-v2__body") || null;
+  cancelVoiceArrival = animateVoiceMessageArrival(body, origin);
+}
+
+/**
+ * 实时文字的落点锚：上一轮登记过的那条提问（`pinMessageId`），
+ * 取不到（或已经不在当前会话里）就退回最后一条用户消息。
+ * 拿不到锚点时（第一次提问 / 空会话）不滚动：落点本来就是空的。
+ */
+function resolveVoiceAnchorId() {
+  const pinned = String(chatStore.pinMessageId || "");
+  const messages = chatStore.messages || [];
+  if (pinned && messages.some(item => String(item?.id ?? "") === pinned)) return pinned;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user" && !message.asrPending) return String(message.id || "");
+  }
+  return "";
+}
+
+async function startVoiceQuery() {
+  const duplexRelease = duplex.stop();
+  const pendingVoiceSeq = voiceSeq;
+  await duplexRelease;
+  if (pendingVoiceSeq !== voiceSeq) return;
+  /**
+   * 按下「点击说话」的第一件事：把正在播的语音掐掉。
+   * 一是用户要开口了，播报继续响会盖住他；二是外放的声音会被麦克风原样收进 ASR，
+   * 识别结果里就会混进上一段回答。
+   * 「按住说话」那条入口走的是 useVoiceInput，另在 @voice-start / @voice-restart 上
+   * 挂了同样的 stopRealtimeTtsOnVoiceStart（那个入口不会经过这里）。
+   */
+  realtimeTts.stop();
+
+  const seq = ++voiceSeq;
+  voiceFinishing.value = false;
+  voiceLevel.value = 0;
+  voiceSeconds.value = 0;
+  voiceHeard = false;
+  speechEndDetector.reset();
+  voiceQueryActive.value = true;
+  voiceTranscript.value = "";
+  // 开口了就把问候 / 快捷提问收起（以前是插占位气泡时顺带清掉的）
+  chatStore.showQuickPrompts = false;
+  chatStore.showQuickList = false;
+
+  /**
+   * 开口第一件事：把上一轮的提问顶到头部下沿。
+   *
+   * 不这么做的话，多轮对话里实时文字会压在上面那些历史正文上 ——
+   * 文字是浮在落点上的，落点下面原本就是上一轮的回复文字。
+   * 顶上去之后，落点上只剩那条提问气泡，列表再把它临时隐藏（voiceTopPad），
+   * 实时文字背后就干净了；上方的历史整体被拉走、留在头部渐隐里。
+   * 不插消息、不改内容，只借用 pin 的那套滚动定位。
+   */
+  const anchorId = resolveVoiceAnchorId();
+  if (anchorId) {
+    chatStore.setPinnedToBottom(true);
+    chatStore.setCapRoundAtTop(true);
+    chatStore.pinMessageToTop(anchorId);
+  }
+
+  // 底部录音条的计时：从进入问答页就开始走，和真实录音时长对齐
+  if (voiceTickTimer) clearInterval(voiceTickTimer);
+  voiceTickTimer = setInterval(() => {
+    voiceSeconds.value += 1;
+  }, 1000);
+
+  /**
+   * 音频从哪来（Android 与 iOS 同一口径）：
+   * - 容器里有 `pcmStreamStart`（mPaaS bridge 已注入）：用宿主原生推流，
+   *   16k 裸 PCM 由原生抛过来，后面的 WebSocket 流式 ASR 一点不变 —— 实时文字照常；
+   * - 没有 bridge（浏览器 / 宿主未注入）才用 WebAudio 自己采；
+   * - 两条都不行（没有 WebSocket / 没有 WebAudio 且没有原生推流）才退到整段识别。
+   *
+   * 之前这里按 UA 限定 Android，iOS 只能走 WebAudio；宿主两端现在都实现了同一套
+   * `pcmStreamStart` / `pcmStreamData`，改为只按 bridge 是否就绪判断，两端行为一致。
+   */
+  const useNativePcm = isNativePcmStreamSupported();
+  if (!isAsrStreamSupported() || (!useNativePcm && !isPcmCaptureSupported())) {
+    await (nativeVoiceStartup = startNativeVoiceQuery(seq));
+    return;
+  }
+
+  try {
+    // 容器里要先向原生申请麦克风权限，否则浏览器那层会被静默拒绝
+    const granted = await ensureNativePermission("record_audio");
+    if (seq !== voiceSeq) return;
+    if (!granted) {
+      failVoiceQuery(permissionDeniedMessage("record_audio"));
+      return;
+    }
+
+    const session = openAsrStreamSession({
+      onPartial(text) {
+        if (seq !== voiceSeq) return;
+        if (!voiceFinishing.value) {
+          speechEndDetector.observeTranscript(text);
+          if (text.trim()) voiceHeard = true;
+        }
+        // partial 是「完整文本的当前版本」：整体替换顶部那条实时文字，不要自己拼接
+        voiceTranscript.value = text;
+      },
+      onFinal(text) {
+        if (seq !== voiceSeq) return;
+        const query = String(text).trim();
+        void submitRecognizedVoice(query);
+      },
+      onError() {
+        // 通道层失败（握手被网关拦、服务未部署）和「没听清」要分开提示，
+        // 否则用户会以为是自己说话的问题
+        if (seq === voiceSeq) failVoiceQuery(t("welcome-voice-unavailable"));
+      },
+    });
+    voiceSession = session;
+
+    const capture = useNativePcm
+      ? await startNativePcmCapture({
+        onFrame: frame => session.pushFrame(frame),
+        onLevel: onVoiceLevel,
+        // 原生推流中途报错：换整段识别那条线，别让这一轮白说
+        onError: message => degradeToNativeVoice(`pcm-stream:${message}`),
+      })
+      : await startPcmCapture({
+        onFrame: frame => session.pushFrame(frame),
+        onLevel: onVoiceLevel,
+        // 采集起来了但拿不到可用音频（没回调 / 采到静音）：这一轮降到原生录音，别让用户白说一句
+        onUnavailable: reason => degradeToNativeVoice(reason),
+      });
+    if (seq !== voiceSeq) {
+      capture.stop();
+      return;
+    }
+    voiceCapture = capture;
+
+    /**
+     * 8s 没人说话就自己收尾，别让麦克风空转。
+     * 原生 PCM 推流这条不启用：宿主给的是哪一档音量不确定（可能偏小），
+     * 一旦电平没过阈值就会被判成「没人说话」、在你还在说的时候把录音掐掉。
+     * 这条通道的收尾交给「说过话后静音 1.5s」和用户点 ↑。
+     */
+    if (!useNativePcm) {
+      voiceNoSpeechTimer = setTimeout(() => {
+        voiceNoSpeechTimer = null;
+        if (!voiceHeard && !voiceHoldActive.value) stopVoiceQuery();
+      }, VOICE_NO_SPEECH_MS);
+    }
+  }
+  catch (error) {
+    // getUserMedia 三档全挂（Android WebView 常见）：不掉到「录音启动失败」，先换原生录音
+    logger.warn("voice query start failed, fallback to native recorder", error);
+    if (seq === voiceSeq) degradeToNativeVoice("capture-failed");
+  }
+}
+
+/** 停掉原生通道的音量轮询 */
+function stopNativeLevelPolling() {
+  if (nativeLevelTimer) {
+    clearInterval(nativeLevelTimer);
+    nativeLevelTimer = null;
+  }
+}
+
+/**
+ * 流式这条路走不通时，把这一轮原地换成原生录音。
+ * 顶部那条实时文字和列表让位都不动，这里只换采集通道：不撤文字、不重置序号，
+ * 用户看到的就是「识别中…」继续在那儿，声纹继续跳，说完照样出文本。
+ */
+function degradeToNativeVoice(reason: string) {
+  if (voiceDegraded || !voiceQueryActive.value) return;
+  voiceDegraded = true;
+  const seq = voiceSeq;
+  logger.warn("[voice] 流式采集不可用，降级到原生录音", { reason, mpaasReady: isMpaasReady() });
+  // 流式那一路彻底扔掉：采集停掉、WebSocket 关掉，否则两边一起抢麦克风
+  voiceCapture?.stop();
+  voiceCapture = null;
+  voiceSession?.close();
+  voiceSession = null;
+  // 重新计时：原生录音是从现在才开始收的
+  if (voiceTickTimer) {
+    clearInterval(voiceTickTimer);
+    voiceTickTimer = null;
+  }
+  voiceSeconds.value = 0;
+  voiceLevel.value = 0;
+  voiceHeard = false;
+  speechEndDetector.reset();
+  voiceTickTimer = setInterval(() => {
+    voiceSeconds.value += 1;
+  }, 1000);
+  nativeVoiceStartup = startNativeVoiceQuery(seq);
+}
+
+/**
+ * 原生录音通道：mPaaS microphoneStart/End + 整段识别。
+ * 和「按住说话」完全同一条线（VoiceRecorder 在容器里自动选 NativeVoiceRecorder），
+ * 唯一差别是没有 partial —— 录音期间只有声纹和计时，说完才一次性出文本。
+ */
+async function startNativeVoiceQuery(seq: number) {
+  voiceBackend = "native";
+
+  voiceHeard = false;
+  speechEndDetector.reset();
+  try {
+    const granted = await ensureNativePermission("record_audio");
+    if (seq !== voiceSeq) return;
+    if (!granted) {
+      failVoiceQuery(permissionDeniedMessage("record_audio"));
+      return;
+    }
+
+    const recorder = new VoiceRecorder() as unknown as VoiceRecorderInstance;
+    const started = await recorder.start();
+    if (seq !== voiceSeq) {
+      (recorder.release ?? recorder.cancel)?.call(recorder);
+      return;
+    }
+    if (!started?.success) {
+      logger.warn("[voice-native] 录音启动失败", started);
+      failVoiceQuery(t("record-start-failed"));
+      return;
+    }
+
+    nativeVoiceRecorder = recorder;
+    nativePeakLevel = 0;
+    logger.warn("[voice-native] 录音已开始", { seq, mpaasReady: isMpaasReady() });
+    /**
+     * 原生录音拿不到 partial，电平只用来驱动声纹。
+     * 注意这里不能喂给 onVoiceLevel：那里面带了「静音 1.5s 自动收尾」，
+     * 而 microphoneVolume 在部分容器里恒为 0 / 拿不到，一喂就等于用户话没说完就被掐掉。
+     * 收尾统一交给用户点发送（↑ → stopVoiceQuery）。
+     */
+    stopNativeLevelPolling();
+    voiceLevel.value = 0;
+    let polling = false;
+    nativeLevelTimer = setInterval(() => {
+      if (seq !== voiceSeq || polling) return;
+      polling = true;
+      void getMicrophoneVolume()
+        .then((level) => {
+          if (seq !== voiceSeq || typeof level !== "number") return;
+          if (level > nativePeakLevel) nativePeakLevel = level;
+          const normalized = Math.min(1, Math.max(0, level / 0.15));
+          voiceLevel.value += (normalized - voiceLevel.value) * 0.35;
+        })
+        .catch(() => {})
+        .finally(() => {
+          polling = false;
+        });
+    }, 120);
+
+    // 只留一个硬上限兜底：用户忘了点发送时别让麦克风一直开着
+    if (voiceNoSpeechTimer) clearTimeout(voiceNoSpeechTimer);
+    voiceNoSpeechTimer = setTimeout(() => {
+      voiceNoSpeechTimer = null;
+      stopVoiceQuery();
+    }, NATIVE_MAX_RECORD_MS);
+  }
+  catch (error) {
+    logger.warn("native voice query start failed", error);
+    if (seq === voiceSeq) failVoiceQuery(t("record-start-failed"));
+  }
+}
+
+/** 带超时的整段识别：接口挂了也要把录音条收掉，不能一直挂在「识别中」 */
+function requestNativeRecognition(audio: NativeRecorderAudio) {
+  const request = audio.audioUrl
+    ? recognizeSpeechByUrl({ audioUrl: audio.audioUrl })
+    : audio.audioBase64
+      ? recognizeSpeechByBase64({ audioBase64: audio.audioBase64, mimeType: audio.mimeType })
+      : audio.tempFilePath
+        ? recognizeSpeechByUpload({ filePath: audio.tempFilePath, timeout: NATIVE_RECOGNIZE_TIMEOUT_MS })
+        : Promise.reject(new Error("no audio"));
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("recognize timeout")), NATIVE_RECOGNIZE_TIMEOUT_MS);
+  });
+  return Promise.race([request, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/** 原生录音是异步启动的：用户手快点发送时会赶上"还没 start 完"，等一下它 */
+async function waitNativeRecorderReady(timeoutMs = 800) {
+  const deadline = Date.now() + timeoutMs;
+  while (!nativeVoiceRecorder && Date.now() < deadline) {
+    await new Promise<void>(resolve => setTimeout(resolve, 50));
+  }
+  return nativeVoiceRecorder;
+}
+
+/** 原生通道收尾：停录音 → 整段识别 → 文本回填到占位气泡上再发问 */
+async function finishNativeVoiceQuery() {
+  const seq = voiceSeq;
+  const recorder = nativeVoiceRecorder ?? await waitNativeRecorderReady();
+  nativeVoiceRecorder = null;
+  stopNativeLevelPolling();
+  if (!recorder) {
+    resetVoiceQuery();
+    return;
+  }
+
+  let audio: NativeRecorderAudio = {};
+  try {
+    const stopped = await recorder.stop();
+    if (seq !== voiceSeq) return;
+    if (!stopped?.success) {
+      logger.warn("native recorder stop failed", stopped?.error);
+      failVoiceQuery(t("no-audio-recorded"));
+      return;
+    }
+    audio = stopped.data || {};
+  }
+  catch (error) {
+    logger.warn("native recorder stop threw", error);
+    if (seq === voiceSeq) failVoiceQuery(t("no-audio-recorded"));
+    return;
+  }
+
+  logger.warn("[voice-native] 录音结束", {
+    seconds: voiceSeconds.value,
+    peakLevel: Number(nativePeakLevel.toFixed(3)),
+    hasUrl: Boolean(audio.audioUrl),
+    hasBase64: Boolean(audio.audioBase64),
+    hasFile: Boolean(audio.tempFilePath),
+  });
+  const recognizeStart = Date.now();
+  try {
+    const result = await requestNativeRecognition(audio);
+    if (seq !== voiceSeq) return;
+    logger.warn("[voice-native] 识别返回", {
+      chars: String(result?.text || "").length,
+      costMs: Date.now() - recognizeStart,
+    });
+    const query = String(result?.text || "").trim();
+    await submitRecognizedVoice(query);
+  }
+  catch (error) {
+    logger.warn("native recognition failed", error);
+    if (seq === voiceSeq) failVoiceQuery(t("asr-no-content-retry"));
+  }
+}
+
+/** 说完了：先停采集再发 finish，等 final 回来才落成气泡 */
+function stopVoiceQuery() {
+  if (!voiceQueryActive.value || voiceFinishing.value) return;
+  voiceFinishing.value = true;
+  speechEndDetector.reset();
+  // 计时停在这里：底部条要显示「最终录了几秒」，不要再涨
+  if (voiceTickTimer) {
+    clearInterval(voiceTickTimer);
+    voiceTickTimer = null;
+  }
+  // 原生通道：停录音 → 整段识别 → 回填文本（没有 finish/final 那套）
+  if (voiceBackend === "native") {
+    const seq = voiceSeq;
+    // 降级或授权还在启动时也记住发送，不能在 recorder 尚未赋值时丢掉本轮。
+    void Promise.resolve(nativeVoiceStartup).then(() => {
+      if (seq === voiceSeq && voiceQueryActive.value) void finishNativeVoiceQuery();
+    });
+    return;
+  }
+  voiceCapture?.stop();
+  voiceCapture = null;
+  voiceSession?.finish();
+}
+
+/** 取消这一轮：直接断流，不发 finish、不落气泡 */
+function cancelVoiceQuery() {
+  if (!voiceQueryActive.value) return;
+  resetVoiceQuery();
+}
+
+/** 静音检测：说过话之后连续 1.5s 没声音就自动收尾，用户不用再点一次 */
+function onVoiceLevel(level: number) {
+  const normalized = Math.min(1, Math.max(0, level / 0.15));
+  voiceLevel.value += (normalized - voiceLevel.value) * 0.35;
+  if (voiceQueryActive.value && !voiceFinishing.value) {
+    voiceHeard = speechEndDetector.observeLevel(level);
+  }
+}
+
+function onWelcomeDuplexToggle() {
+  duplex.toggle();
+  void goToChat({ holdMs: 0 });
 }
 
 /* ---------------- 遥控器（Android TV / 蓝牙遥控器） ---------------- */
 
 /**
- * 遥控器接管开关：本页可见且没有浮层挡住时才注册（与首页同一套时序）。
- * 注册成功后原生侧会拦截遥控器按键（含返回键），被压栈 / 卸载必须注销，
- * 所以初值给 false，跟着下面的 onShow / onHide / onUnload 走。
+ * 遥控器接管开关：本页可见且没有浮层挡住时才注册。
+ * 注册成功后原生侧会拦截遥控器按键（含返回键），页面失焦 / 卸载必须注销，
+ * 所以初值给 false，跟着下面的 onShow / onHide 走。
  */
 const remoteKeyActive = ref(false);
-/** 连按保护：startVoiceQuery 起手要先等双工释放，这段时间 voiceQueryActive 还是 false，挡住第二次 */
+/**
+ * 遥控器连按保护：startVoiceQuery 起手要先 await 双工释放，这段时间 voiceQueryActive
+ * 还没置 true，再按一次会重复起一轮采集。用一个同步标志挡住第二次。
+ */
 let remoteKeyStarting = false;
 
 /**
  * 遥控器音量加 / 音量减 / 静音键 = 输入栏的「点击说话」：
- * - 欢迎层：起飞进对话并同时起一轮录音（与点按钮同一时序）；
- * - 对话态：直接起一轮录音，说完静音自动收尾；
+ * - 初始页：起飞进对话页并同时起一轮录音（与点按钮同一时序，见 onWelcomeStart）；
+ * - 对话页：直接起一轮录音，说完静音 1.5s 自动收尾，不用再按；
  * - 已在录音：再按一次 = 说完了（等同录音条上的 ↑ 发送）；
  * - 生成中 / 双工模式：不抢，交给原链路。
  */
@@ -993,7 +1644,7 @@ function onRemoteKeyConfirm() {
   }
   if (remoteKeyStarting || isLoading.value || duplexActive.value) return;
   remoteKeyStarting = true;
-  const starting = pageStage.value === "welcome" ? onPcWelcomeStart() : startVoiceQuery();
+  const starting = pageStage.value === "welcome" ? onWelcomeStart() : startVoiceQuery();
   void Promise.resolve(starting).finally(() => {
     remoteKeyStarting = false;
   });
@@ -1005,7 +1656,7 @@ function onRemoteKeyBack() {
     cancelVoiceQuery();
     return;
   }
-  onBack();
+  backToWelcome();
 }
 
 useRemoteKey({
@@ -1015,30 +1666,256 @@ useRemoteKey({
 });
 
 /**
- * 长按顶部三角图标 5 秒：回到首页初始「你好三一」页。
- * 首页本身是「初始页 / 对话页」两个态（pageStage）：清掉「欢迎页已完成」标记后重载首页，
- * 首页 onLoad 的 syncPageStage 才会落到 welcome 态（否则会因标记残留 / 旧实例仍停在对话态）。
+ * 初始页「点击说话」的落地动作：起飞的同时把语音会话跑起来，
+ * 用户在飞行动画里开口也不会丢（ready 前的音频由会话自己缓存）。
+ */
+function onWelcomeStart() {
+  // 先关掉「识别中」文字再起飞：语音链路是异步的，慢一点就会抢在动效前面冒出文字
+  asrTipReady.value = false;
+  const recording = startVoiceQuery();
+  void goToChat();
+  return recording;
+}
+
+/**
+ * 初始页「键盘」：不在点键盘时跳走 —— AiWelcome 在原地展开文本输入框，
+ * 用户填完点发送才走这里：先起一轮问答，再用同一条抛物线进对话页（不换 listen.gif、不等扩散峰值）。
+ * 顺序与「点击说话」一致（先发起再起飞），用户不用等动画走完才看到回答开始。
+ */
+function onWelcomeTextSend(text: string) {
+  const content = text.trim();
+  if (!content) return;
+  void sendMessage({ text: content });
+  void goToChat({ holdMs: 0 });
+}
+
+/** 对话页淡入延迟：语音起飞要等 listen.gif 扩散到最大，文字起飞（holdMs = 0）立即淡入 */
+const chatEnterDelayMs = ref(CHAT_ENTER_DELAY_MS);
+/** 对话页把淡入推迟到起飞那一刻（保留原有 chatViewportStyle，只加一个动画延迟变量） */
+const chatEnterStyle = computed(() => ({
+  ...chatViewportStyle.value,
+  "--chat-enter-delay": `${chatEnterDelayMs.value}ms`,
+}));
+
+/** 当前这趟飞行的 rAF 取消器（重启 / 卸载时要掐掉，避免继续往已卸载的层写样式） */
+let cancelWelcomeFly: (() => void) | null = null;
+
+function stopWelcomeFly() {
+  if (cancelWelcomeFly) {
+    cancelWelcomeFly();
+    cancelWelcomeFly = null;
+  }
+}
+
+/**
+ * 抛物线式飞行：逐帧算 transform。
+ *
+ * - 位移：进度取 1.9 次幂 → 起手慢、越往后越快（末段「冲刺」）；
+ * - 轨迹：叠一条 sin 弧线，中段偏离中线最多、两端归零，看起来才是抛物线而不是直线；
+ * - 尺寸：0 → 45% 从 1 放大到 1.16 倍，之后收到灵动岛图标的实际比例（62/110），
+ *   落位时大小与顶部图标完全一致。
+ */
+function runWelcomeFly(from: DOMRect, to: DOMRect, onDone: () => void) {
+  const dx = to.left + to.width / 2 - (from.left + from.width / 2);
+  const dy = to.top + to.height / 2 - (from.top + from.height / 2);
+  const targetScale = from.width > 0 ? to.width / from.width : 1;
+  const startedAt = performance.now();
+  let rafId = 0;
+
+  const frame = (now: number) => {
+    const p = Math.min(1, (now - startedAt) / WELCOME_FLY_MS);
+    const travel = p ** 1.9;
+    const arc = Math.sin(Math.PI * p) * WELCOME_FLY_ARC_X;
+    const scale = p <= WELCOME_FLY_PEAK_AT
+      ? 1 + (WELCOME_FLY_PEAK_SCALE - 1) * (p / WELCOME_FLY_PEAK_AT)
+      : WELCOME_FLY_PEAK_SCALE
+        + (targetScale - WELCOME_FLY_PEAK_SCALE) * ((p - WELCOME_FLY_PEAK_AT) / (1 - WELCOME_FLY_PEAK_AT));
+
+    welcomeLogoStyle.value = {
+      transform: `translate3d(${dx * travel + arc}px, ${dy * travel}px, 0) scale(${scale})`,
+    };
+
+    if (p < 1) {
+      rafId = requestAnimationFrame(frame);
+      return;
+    }
+    // 由最后一帧收尾（而不是另起一个固定时长的定时器）：两者时间基准不同，
+    // 定时器有可能比最后一帧早到，把 logo 停在半路
+    onDone();
+  };
+
+  rafId = requestAnimationFrame(frame);
+  return () => cancelAnimationFrame(rafId);
+}
+
+/**
+ * 初始页 → 对话页：中间图标按抛物线飞到对话页顶部灵动岛的位置停住，
+ * 同时欢迎层淡出、对话页整体淡入，避免硬切。
+ *
+ * 落点直接量 `.chat-header__island-logo` 的真实包围盒，所以不受状态栏高度、
+ * 屏幕尺寸影响；落位尺寸按两侧宽度比收敛，交接瞬间不会跳大小。
+ */
+async function goToChat(options?: { holdMs?: number }) {
+  if (welcomeLeaving.value) return;
+  if (pageStage.value === "chat") return;
+
+  // 已经进对话页，「从初始页跳出去」的标记就用不上了，清掉免得之后误伤
+  clearReturnToWelcome();
+
+  // holdMs：起飞前先等多久（语音等 listen.gif 扩散到最大，文字发送传 0 立即起飞）
+  const holdMs = Math.max(0, options?.holdMs ?? WELCOME_LISTEN_HOLD_MS);
+  chatEnterDelayMs.value = holdMs > 0 ? CHAT_ENTER_DELAY_MS : 0;
+
+  try {
+    uni.setStorageSync(AI_ASK_WELCOME_DONE_KEY, true);
+  } catch (error) {
+    logger.error("caught error", error);
+  }
+
+  // 起飞前先量欢迎页 logo 的中心（量飞行层，sani / listen 两张图都在它里面），
+  // 随后欢迎层让位、对话页开始渲染
+  const from = readClientRect(".welcome__logo-fly");
+  const startedAt = performance.now();
+  // 起飞开始就关掉「识别中」文字，等落位动效走完再放出来
+  asrTipReady.value = false;
+  welcomeLeaving.value = true;
+  pageStage.value = "chat";
+
+  await waitChatLayoutSettled();
+  const to = readClientRect(".chat-header__island-logo");
+
+  // 等 listen.gif 扩散到最大再起飞：动图还在涨的时候就走，会显得后半段被吃掉
+  const holdRemain = holdMs - (performance.now() - startedAt);
+  if (holdRemain > 0) {
+    await new Promise<void>(resolve => setTimeout(resolve, holdRemain));
+  }
+  if (!welcomeLeaving.value) return;
+
+  /** 落位收尾：先淡出欢迎层 logo（对话页图标同位置同尺寸接上），再卸载欢迎层 */
+  const land = () => {
+    stopWelcomeFly();
+    welcomeLanded.value = true;
+    if (welcomeFlyTimer) clearTimeout(welcomeFlyTimer);
+    welcomeFlyTimer = setTimeout(() => {
+      welcomeFlyTimer = null;
+      welcomeLeaving.value = false;
+      welcomeLanded.value = false;
+      welcomeLogoStyle.value = {};
+      // 位移特效彻底走完、欢迎层也收掉了，这时才把岛内换成 listen.gif：
+      // 飞行途中提前换的话，会被上层欢迎层挡住一半，露出来的那半边容易看成「两张图打架」
+      islandListenFromWelcome.value = true;
+      // 同一时刻放行「识别中...」文字：图标已经落位，文字再出现不会跟动效打架
+      asrTipReady.value = true;
+      // 只延续一小段，随后交回空闲态 sani-logo.webp
+      if (islandListenIdleTimer) clearTimeout(islandListenIdleTimer);
+      islandListenIdleTimer = setTimeout(() => {
+        islandListenIdleTimer = null;
+        islandListenFromWelcome.value = false;
+      }, WELCOME_LISTEN_IDLE_MS);
+    }, WELCOME_LAND_FADE_MS);
+  };
+
+  if (from && to && to.width > 0) {
+    stopWelcomeFly();
+    cancelWelcomeFly = runWelcomeFly(from, to, () => {
+      cancelWelcomeFly = null;
+      land();
+    });
+    return;
+  }
+
+  // 量不到目标（对话页还没渲染出灵动岛）：不做位移，直接按原时长收尾
+  if (welcomeFlyTimer) clearTimeout(welcomeFlyTimer);
+  welcomeFlyTimer = setTimeout(land, WELCOME_FLY_MS);
+}
+
+/**
+ * 头部右上角那颗房子按钮：回宿主首页。
+ *
+ * 走 `"goHome"` 口径（goHome → popWindow），与作业指导 / 任务协同同一套：
+ * 这两页点房子是正常的，而首页原来走的是 popWindow（只关当前 webview），
+ * 宿主背后没有可回退的原生页时会被关成一片白屏。
+ * 游客态的听播临时态由本页自己收掉，其余（清身份 / 清听播存储 / 退栈兜底）
+ * 与作业指导、任务协同页共用一份实现，见 utils/exit-mini-program。
+ */
+function backToWelcome() {
+  if (userStore.isVisitor) listenBroadcast.value = null;
+  exitMiniProgram("goHome");
+}
+
+/**
+ * 回到初始页（三个入口共用：长按顶部三角图标 5 秒、历史抽屉里的「新建对话」、
+ * 从初始页跳出去的场景页返回）。
+ * 不换路由 —— 首页本身就是「初始页 / 对话页」两个态（pageStage），
+ * 把 stage 打回 welcome 就等于重进初始页（AiWelcome 重新挂载，内部状态全清），
+ * 同时把 demo 标记与「已进过对话」的存储标记清掉，
+ * 否则 onShow 里的 syncPageStage 会立刻把页面拽回对话。
  */
 function onRestartToStart() {
+  // 生成中：先掐在途请求与听播，避免旧回包继续往新状态里写
+  cancelActiveStream();
+  realtimeTts.stop();
+  // 收起挂着的浮层，别让抽屉 / 追问卡压在初始页上
+  guideStepSheetVisible.value = false;
+  guideSuggestionSheetVisible.value = false;
+  askSlotDrawerVisible.value = false;
+  guideStepPayload.value = null;
+  guideSuggestionPayload.value = null;
+  askSlotQueue.value = [];
+  // 离开 demo 模式，并清掉「欢迎页已完成」标记（会员分支靠它决定要不要直接进对话）
+  isDemoPage = false;
   try {
     uni.removeStorageSync(AI_ASK_WELCOME_DONE_KEY);
   } catch (error) {
     logger.warn("failed to clear welcome flag", error);
   }
-  uni.redirectTo({ url: "/pages/index/index" });
+  // 初始页重新进来就是一轮新会话，与 role-select / 初始页「开始体验」的入口保持一致
+  chatStore.resetConversation();
+  // 复位起飞动画状态，下次进对话页重新量落点（否则 logo 会停在上一次的位置）
+  if (welcomeFlyTimer) {
+    clearTimeout(welcomeFlyTimer);
+    welcomeFlyTimer = null;
+  }
+  stopWelcomeFly();
+  resetVoiceQuery();
+  if (islandListenIdleTimer) {
+    clearTimeout(islandListenIdleTimer);
+    islandListenIdleTimer = null;
+  }
+  islandListenFromWelcome.value = false;
+  asrTipReady.value = true;
+  welcomeLeaving.value = false;
+  welcomeLanded.value = false;
+  welcomeLogoStyle.value = {};
+  chatEnterDelayMs.value = CHAT_ENTER_DELAY_MS;
+  pageStage.value = "welcome";
 }
 
 /**
- * 历史抽屉分页取数。z-paging 每翻一页回调一次，实现落在 sessionStore 里。
+ * 不走起飞动画直接进对话态：打开历史会话等「不该播动画」的场景。
+ *
+ * 新建对话（onRestartToStart）会把 stage 打回 welcome，这时再点任意历史会话，
+ * 历史消息虽然已经载入，欢迎层却还盖在上面 —— 表现为「点了历史对话仍是 logo 居中的初始页」。
+ * 起飞途中调用直接忽略：动画跑完本来就是对话态，别把它掐断。
  */
-function getAISessionList(pageNo = 1, pageSize = 20) {
-  return sessionStore.loadSessions(pageNo, pageSize);
+function enterChatNow() {
+  if (welcomeLeaving.value || pageStage.value === "chat") return;
+  stopWelcomeFly();
+  if (welcomeFlyTimer) {
+    clearTimeout(welcomeFlyTimer);
+    welcomeFlyTimer = null;
+  }
+  welcomeLanded.value = false;
+  welcomeLogoStyle.value = {};
+  chatEnterDelayMs.value = 0;
+  asrTipReady.value = true;
+  pageStage.value = "chat";
 }
 
 async function openLocalHistory(id: string | number, force = false) {
   if (!force && String(chatStore.aiSessionId) === String(id) && chatStore.messages.length) return;
   cancelActiveStream();
-  // 打开历史会话是「直接进对话」，不播欢迎层的起飞动画
+  // 打开历史会话是「直接进对话」：新建对话后 stage 已在 welcome，必须就地收起欢迎层
   enterChatNow();
   chatStore.showQuickPrompts = false;
   chatStore.showQuickList = false;
@@ -1047,6 +1924,12 @@ async function openLocalHistory(id: string | number, force = false) {
   chatStore.aiSessionId = id;
   try {
     await sessionStore.loadHistory(id, chatStore);
+    for (const message of chatStore.messages) {
+      if (message.role === "user") {
+        message.content = String(message.content || "")
+          .replace(/(?:\s*\[push(?::[^\]\r\n]+)?\])+\s*$/i, "");
+      }
+    }
   } catch (error) {
     logger.error("caught error", error);
     uni.showToast({ title: t("load-history-failed"), icon: "none" });
@@ -1065,14 +1948,14 @@ function onSessionClick(session: { sessionId?: string | number; id?: string | nu
 
 /**
  * 删除 / 批量删除的二次确认已经由历史抽屉里的自定义弹窗完成（ai-chat-header 的
- * history-delete-confirm → confirmDelete），这里只负责执行删除，不再弹 uni.showModal。
+ * history-delete-confirm → confirmDelete），这里只负责执行删除。
+ * 早前这里还调了一次 uni.showModal，确认后会再弹一个系统框，等于问两遍。
  */
 async function onSessionDelete(session: { id?: string | number }) {
   const id = session?.id;
   if (!id) return;
   try {
     await sessionStore.removeSession(id);
-    await chatHeader.value?.reloadSessions?.();
     if (String(chatStore.aiSessionId) === String(id)) chatStore.resetConversation();
     uni.showToast({ title: t("delete-success"), icon: "none" });
   } catch (error) {
@@ -1086,7 +1969,6 @@ async function onSessionDeleteBatch(ids: Array<string | number>) {
   if (!uniqueIds.length) return;
   try {
     await sessionStore.removeSessions(uniqueIds);
-    await chatHeader.value?.reloadSessions?.();
     if (chatStore.aiSessionId && uniqueIds.includes(String(chatStore.aiSessionId))) {
       chatStore.resetConversation();
     }
@@ -1123,23 +2005,58 @@ async function loadAwakeningPrompt() {
   }
 }
 
+async function loadTodayListenBroadcast() {
+  if (!isDemoPage) return;
+  listenBroadcastLoading.value = true;
+  try {
+    listenBroadcast.value = await getTodayListenBroadcast();
+    saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
+  } catch (error) {
+    logger.warn("failed to load today listen broadcast", error);
+    listenBroadcast.value = null;
+  } finally {
+    listenBroadcastLoading.value = false;
+  }
+}
+
+function syncPageStage() {
+  // 已有对话继续展示；新进入不再因旧的唤醒标记跳过欢迎首页。
+  if (isDemoPage || chatStore.messages.length) {
+    pageStage.value = "chat";
+  }
+}
+
 /**
- * 一键回到底部（与首页一致）：没贴底时出现，回到底部（含发送后强制贴底）自动消失。
- * 分享选择态、贴底卡片（步骤卡 / 建议卡）展开时不显示，避免和这些浮层抢位置。
+ * 一键回到底部：没贴底时出现，回到底部（含发送后强制贴底）自动消失。
+ * 分享选择态、贴底卡片（步骤卡 / 追问卡）展开时不显示，避免和这些浮层抢位置。
  */
 const showScrollToBottom = computed(
   () =>
     !shareSheetVisible.value
     && !guideStepSheetVisible.value
-    && !guideSuggestionSheetVisible.value
     && !askSlotDrawerVisible.value
     && !pinnedToBottom.value
     && (messages.value?.length || 0) > 0,
 );
 
+/**
+ * 一键回到底部的垂直位置：输入栏高（含键盘抬起）+ 24rpx 间隙。
+ *
+ * 底部快捷入口（作业指导 / 任务协同 / 维修助理）展示时，整条导航贴在输入栏正上方
+ * （72rpx 高 + 16rpx 上间距 = 88rpx），箭头必须再让开这一段，否则会压在胶囊上。
+ * 用 max() 兼容键盘抬起：navigation 只跟 dock 走，键盘弹起时输入栏更高，取大的那个。
+ */
+const scrollBottomStyle = computed(() => {
+  const clearance = navVisible.value
+    ? `max(${composerBottomInset.value}, calc(${composerDockOffset.value} + 88rpx))`
+    : composerBottomInset.value;
+  return { bottom: `calc(${clearance} + 24rpx)` };
+});
+
 function onScrollToBottomTap() {
+  // 点了就恢复「跟随底部」，后续流式增量会继续贴底
   // 落点是「真末尾」（含最后一条消息的操作栏 / 参考来源），不能用 scrollToBottom：
-  // 本页开着 stopAtReplyEnd，那条落点会把尾部操作栏留在输入栏下面，看起来没到底
+  // 首页开着 stopAtReplyEnd，那条落点会把尾部操作栏留在输入栏下面，看起来没到底
   chatStore.jumpToBottom();
 }
 
@@ -1150,9 +2067,24 @@ function onScrollToBottomTap() {
  */
 function onPinnedChange(pinned: boolean) {
   chatStore.setPinnedToBottom(pinned);
-  // 封顶模式下「滚到底」就是回到本轮提问的落点，撤封顶会把视图再拽回顶部（见首页同函数）
+  /**
+   * 封顶模式下「滚到底」就是回到本轮提问的落点，不代表用户要看最新内容：
+   * 这一拍撤封顶会连带收回垫白、把视图又拽回顶部（表现为「滑到底跳一下」）。
+   * 真正的「回到底部」走 jumpToBottom，它自己会撤封顶。
+   */
   if (pinned && chatStore.capRoundAtTop) return;
   if (pinned) chatStore.setCapRoundAtTop(false);
+}
+
+/**
+ * 内容长高后的贴底跟随。
+ *
+ * 录音期间一律不跟：实时文字是逐字长出来的，每长一点就贴一次底，
+ * 钉在顶部的那条实时气泡会被一路拽到下面去。此时只让气泡自己向下生长。
+ */
+function onMessageContentGrow() {
+  if (voiceQueryActive.value) return;
+  chatStore.scrollToBottom();
 }
 
 async function onScrollTop() {
@@ -1165,140 +2097,38 @@ async function onScrollTop() {
   }
 }
 
-/** query 值解码：uni 一般已解码，H5 直开 URL / 宿主拼参时可能还是编码态，这里兜一次 */
-function decodeQueryValue(value: string) {
-  const text = String(value || "").trim();
-  if (!/%[0-9A-F]{2}/i.test(text)) return text;
-  try {
-    return decodeURIComponent(text).trim();
-  }
-  catch {
-    return text;
-  }
-}
-
-/** 从 onLoad options 或当前 URL 里取一个 query 参数 */
-function readQueryValue(options: Record<string, unknown> | null | undefined, key: string) {
-  const raw = options?.[key];
-  if (raw != null && String(raw).trim()) return decodeQueryValue(String(raw));
-
-  if (typeof location === "undefined") return "";
-  const search = new URLSearchParams(location.search || "");
-  const fromSearch = search.get(key);
-  if (fromSearch) return decodeQueryValue(fromSearch);
-  const hash = String(location.hash || "");
-  const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "";
-  return query ? decodeQueryValue(new URLSearchParams(query).get(key) || "") : "";
-}
-
-/** 推荐页带过来的上下文：机型 + 两轮经验（决定待机态拉哪一套文案） */
-function readGuideRecommendContext(options?: Record<string, unknown> | null) {
-  return {
-    deviceModel: readQueryValue(options, "deviceModel"),
-    experience: readQueryValue(options, "experience"),
-    modelExperience: readQueryValue(options, "modelExperience"),
-  };
-}
-
-/**
- * 待机态动态文案：GET /recommended-questions/guide（greeting + questions）。
- * 机型 / 经验缺一个就不发请求，引导区不展示（例如从用户中心直接进来）。
- */
-async function loadGuideRecommend() {
-  const { deviceModel, experience, modelExperience } = guideRecommendContext.value;
-  if (!deviceModel || !experience) return;
-
-  guideWelcomeLoading.value = true;
-  try {
-    const data = await getRecommendedGuideQuestions({
-      deviceModel,
-      experience,
-      ...(modelExperience ? { modelExperience } : {}),
-      count: GUIDE_WELCOME_QUESTION_COUNT,
-      offset: 0,
-    });
-    guideGreeting.value = String(data?.greeting || "").trim();
-    guideQuestions.value = (Array.isArray(data?.questions) ? data.questions : [])
-      .map(item => String(item || "").trim())
-      .filter(Boolean);
-  }
-  catch (error) {
-    logger.warn("failed to load guide recommended questions", error);
-  }
-  finally {
-    guideWelcomeLoading.value = false;
-  }
-}
-
-/** 等 `/settings` 决定纯净模式的上限（ms）：超时先放行欢迎层，避免整页一直空着 */
-const WELCOME_DECISION_TIMEOUT_MS = 800;
-
-/**
- * 欢迎层的渲染闸门：设置（纯净模式）没拉回来之前先不铺整屏欢迎层。
- *
- * 非纯净模式要直接进自我介绍（mock 内容直接落消息），先铺一层「Hey,SANI」再跳会明显闪一下；
- * 而纯净模式到底开没开取决于 `/settings`，不能凭首帧的默认值拍板，所以整层等这个标记落地再渲染。
- */
-const welcomeDecisionReady = ref(false);
-
-/**
- * 初始化自我介绍：只在「新开一轮会话」时触发（打开历史会话不走）。
- *
- * 现在**不走介绍接口**：直接取 `mock/init-intro` 里的内容，落成一条 AI 消息。
- * 非纯净模式下**不停留欢迎层**：进来就直接是对话页 + 自我介绍（走助手胶囊、语音输入这些入口跳过来时，
- * 先铺一帧「Hey,SANI」再切走会明显闪一下）。用户提问气泡不显示。
- *
- * - 纯净模式保留原逻辑：什么都不出，停在欢迎层等用户开口；
- * - 消息列表里已经有内容（用户已经自己开口）：mock 不插队，只把页面切到对话态；
- * - mock 里原本就没有 tips（「正在思考」这类过程提示），这里再兜一道，别的对话的 tips 照常显示；
- * - 语种按 `header.Lang` 取；guide 只有一套文案（中英文各一份），task 是三套随机挑一套。
- */
-/**
- * PC 车机版：不插自我介绍、不自动进对话 —— 先停在待机页（PcWelcome），
- * 用户点击 logo 才开始说话（见 onPcWelcomeStart）。这里只放行待机页渲染的闸门。
- */
-function showInitIntro() {
-  const start = () => {
-    welcomeDecisionReady.value = true;
-  };
-  if (settingsStore.loaded) {
-    start();
-    return;
-  }
-  // 等 `/settings` 不能无限等：超时先把待机页放出来，别让整页一直空着。
-  const timer = setTimeout(() => {
-    welcomeDecisionReady.value = true;
-  }, WELCOME_DECISION_TIMEOUT_MS);
-  void settingsStore.load().then(() => {
-    clearTimeout(timer);
-    start();
-  });
-}
-
-/** 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 GUIDE。 */
 onLoad((options) => {
-  syncWindowHeight();
+  isDemoPage = options?.mode === "demo";
+  /**
+   * 初始页就要按服务端 `/settings` 决定是否开纯净模式（顶部三颗图标 + 底部胶囊入口的显隐）。
+   * App.vue 的 onLaunch 已经拉过一次且不 await，这里只在「还没拿到」时补一次；
+   * store 里做了并发去重，两处同时在飞也只会发一个 `GET /settings`。
+   */
+  if (!settingsStore.loaded) void settingsStore.load();
+  syncPageStage();
   const sessionId = readSessionIdFromOptions(options) || peekPendingHistorySession("GUIDE");
   if (sessionId) {
-    // 历史会话不走初始化内容：欢迎层的闸门直接放开（这里本来就 enterChatNow，不会铺欢迎层）
-    welcomeDecisionReady.value = true;
+    pageStage.value = "chat";
     void openLocalHistory(consumePendingHistorySession("GUIDE") || sessionId, true);
-    return;
   }
-  // 进入即起一轮干净会话（返回首页再进会重新开一轮）；发送场景由 useChatSend 固定为 GUIDE。
-  chatStore.resetConversation();
-  chatStore.showQuickPrompts = false;
-  chatStore.showQuickList = false;
-  // 每次进入保留欢迎首页；纯净模式只在开始对话后显示顶部菜单。
-  guideRecommendContext.value = readGuideRecommendContext(options);
-  void loadGuideRecommend();
-  // 新会话先让 AI 自我介绍（历史会话上面已经 return，不会重复出内容）。
-  showInitIntro();
+  void loadTodayListenBroadcast();
 });
 
 onMounted(() => {
   syncWindowHeight();
   loadAwakeningPrompt();
+  uni.$on("listen-report-marked", refreshListenReportState);
+});
+function refreshListenReportState() {
+  listenReportRefreshKey.value += 1;
+}
+
+const stopNativeResume = onNativeEvent("resume", () => {
+  logger.info("原生 resume：从场景窗口回到本页，尝试消费维修助理回调");
+  refreshListenReportState();
+  // 维修助理是独立场景窗口：关窗回到本页时原 webview 一直在，不会经历 onHide/onShow，
+  // 只靠 onShow 消费回调会漏，这里在原生 resume 上补一次（重复调用有 pending 判空，安全）。
+  startRepairSummaryCallback();
 });
 
 onShow(() => {
@@ -1306,58 +2136,102 @@ onShow(() => {
   // 页面可见才接管遥控器：注册后原生会拦截按键（含返回键），压在栈里时必须放回去
   remoteKeyActive.value = true;
   const sessionId = consumePendingHistorySession("GUIDE");
-  if (sessionId) void openLocalHistory(sessionId, true);
+  if (sessionId) {
+    // 显式打开某个历史会话：优先级最高，顺手把「回初始页」标记作废
+    clearReturnToWelcome();
+    pageStage.value = "chat";
+    void openLocalHistory(sessionId, true);
+  }
+  else if (consumeReturnToWelcome()) {
+    /**
+     * 从初始页（Hey,SANI）跳出去的场景页回来了：navigateBack / 关场景窗口会回到这个实例，
+     * 听汇报关播报、关窗失败兜底则是 redirectTo 新建一个实例 —— 两种情况都要与「首次打开」一致。
+     * 直接复用回到初始页的那套复位（同时退出 demo 态、清「已进过对话」标记），
+     * 否则紧接着的 syncPageStage 又会按标记把页面落回对话。
+     * 已经在 onLoad 里按 sessionId 打开某个历史会话时不动它（显式意图优先）。
+     */
+    if (!chatStore.aiSessionId) onRestartToStart();
+  }
+  else {
+    syncPageStage();
+  }
+  chatStore.refreshQuickPrompts();
+  refreshListenReportState();
+  startRepairSummaryCallback();
 });
-
-/**
- * 原生 resume：本页打开的场景页是独立 webview（pushWindow），关窗回来时本页一直在，
- * 不一定会走 onShow。这里补一次待打开会话的消费，重复调用有 peek 判空，安全。
- */
-const stopNativeResume = onNativeEvent("resume", () => {
-  const sessionId = consumePendingHistorySession("GUIDE");
-  if (sessionId) void openLocalHistory(sessionId, true);
-});
-
-// 离开页面时停止听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
-// 两个 TTS hook 自带的 onBeforeUnmount 清理不会触发，必须挂在 onHide / onUnload 上。
+// 离开页面时停止自动听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
+// useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
+  chatInputRef.value?.cancelDuplexPress?.();
   // 遥控器按键还给系统：被压栈后继续拦截，子页面与系统返回键都会失灵
   remoteKeyActive.value = false;
-  cancelVoiceArrival?.();
-  cancelVoiceArrival = null;
-  voiceArrivalOrigin = null;
-  stopSceneTts();
-  clearAutoOpenTimer();
-  // 页面被盖住时正在录音：直接断流，别让麦克风在后台继续采
-  resetVoiceQuery();
+  realtimeTts.stop();
 });
 onUnload(() => {
   remoteKeyActive.value = false;
-  cancelVoiceArrival?.();
-  cancelActiveStream();
-  stopSceneTts();
-  clearAutoOpenTimer();
+  realtimeTts.stop();
+});
+onBeforeUnmount(() => {
+  speechEndDetector.reset();
+  clearRepairSummaryPolling();
   stopNativeResume();
+  uni.$off("listen-report-marked", refreshListenReportState);
+  cancelActiveStream();
+  realtimeTts.stop();
+  if (welcomeFlyTimer) {
+    clearTimeout(welcomeFlyTimer);
+    welcomeFlyTimer = null;
+  }
+  stopWelcomeFly();
   resetVoiceQuery();
-  disarmIntroVoiceRetry();
+  if (islandListenIdleTimer) {
+    clearTimeout(islandListenIdleTimer);
+    islandListenIdleTimer = null;
+  }
+  islandListenFromWelcome.value = false;
+  asrTipReady.value = true;
 });
 const voiceHoldActive = ref(false);
 const voiceHoldCancelPending = ref(false);
+const startWelcomeVoiceFromGesture = useVoiceQueryGesture({
+  active: voiceQueryActive,
+  holding: voiceHoldActive,
+  cancelPending: voiceHoldCancelPending,
+  start: onWelcomeStart,
+  send: stopVoiceQuery,
+  cancel: cancelVoiceQuery,
+});
+const startVoiceQueryFromGesture = useVoiceQueryGesture({
+  active: voiceQueryActive,
+  holding: voiceHoldActive,
+  cancelPending: voiceHoldCancelPending,
+  start: startVoiceQuery,
+  send: stopVoiceQuery,
+  cancel: cancelVoiceQuery,
+});
 </script>
 
 <template>
-  <view class="ai-page ai-page--pc" :class="{ 'ai-page--dark': isDark }" :style="safeAreaStyle">
+  <view class="ai-page" :class="{ 'ai-page--dark': isDark }" :style="safeAreaStyle">
+    <button
+      class="guide-pc-fullscreen"
+      type="button"
+      :aria-label="isFullscreen ? '退出全屏' : '全屏'"
+      @click.stop="toggleFullscreen"
+    >
+      <image :src="fullscreenIcon" mode="aspectFit" />
+    </button>
     <AiVoiceHoldOverlay
       :active="voiceHoldActive"
       :cancel-pending="voiceHoldCancelPending"
       :dark="isDark"
     />
     <AiChatHeader
+      hide-right-buttons
       v-if="!pureMode || pageStage === 'chat'"
-      ref="chatHeader"
-      v-model:sessions="sessions"
       :show-island="pageStage === 'chat'"
       :duplex-status="duplexStatus"
+      v-model:sessions="sessions"
       class="ai-page__header"
       plain-bg
       :load-sessions="getAISessionList"
@@ -1368,9 +2242,11 @@ const voiceHoldCancelPending = ref(false);
       :share-select-all-disabled="shareSelectAllDisabled"
       :share-all-checked="shareAllChecked"
       :share-selected-round-count="shareSelectedRoundCount"
-      :voice-listening="voiceQueryActive || duplexListening"
+      :voice-listening="voiceListening || voiceQueryActive || duplexListening"
+      :listen-idle="islandListenFromWelcome"
       restartable
       round-buttons
+      @back="backToWelcome"
       @restart="onRestartToStart"
       @new-conversation="startNewConversation"
       @session-click="onSessionClick"
@@ -1378,17 +2254,44 @@ const voiceHoldCancelPending = ref(false);
       @session-delete-batch="onSessionDeleteBatch"
       @session-rename="onSessionRename"
       @share-select-all="onShareSelectAll"
-      @voice-tap="onPcCapsuleVoice"
     />
 
-    <!-- 欢迎层：与首页初始页同款（Hey,NEO + logo + 点击说话 / 键盘）；
-         起飞动画期间继续挂载，logo 滑到顶部灵动岛再收起 -->
-    <!-- PC 车机版待机页：居中 logo / 文案，点击整块收起并开始说话（见 onPcWelcomeStart） -->
-    <PcWelcome
-      v-if="(showWelcome && welcomeDecisionReady) || voiceHoldActive"
-      @start="onPcWelcomeStart"
+    <PersonaAwakening
+      v-if="homeVisible"
+      v-show="showWelcome"
+      class="guide-pc-home"
+      :device-no="GUIDE_PC_DEVICE_NO"
+      mqtt-key="eXrUIsfrJWmE7K5ZyvcD3CxT"
+      :notice-sound-url="taskNoticeSound"
+      :show-fullscreen="false"
+      interactive-logo
+      embedded
+      @notice="onPushNotice"
+      @listen="startGuidePcConversation"
     />
-    <!-- 对话页：与欢迎层同时存在，整体淡入 -->
+
+    <view
+      v-if="pushBanner"
+      :key="pushBanner.msgId"
+      class="guide-pc-notice"
+      role="button"
+      tabindex="0"
+      @click="openPushQuery"
+      @keydown.enter.prevent="openPushQuery"
+      @keydown.space.prevent="openPushQuery"
+    >
+      <view class="guide-pc-notice__content">
+        <text class="guide-pc-notice__text">任务通知：收到一个任务通知，点击查看任务摘要</text>
+      </view>
+      <button
+        class="guide-pc-notice__close"
+        type="button"
+        aria-label="关闭通知并查看任务摘要"
+        @click.stop="openPushQuery"
+      >×</button>
+    </view>
+
+    <!-- 问答页：与欢迎层同时存在，整体淡入 -->
     <view
       v-if="pageStage === 'chat'"
       class="ai-page__chat ai-page__chat--enter"
@@ -1397,48 +2300,22 @@ const voiceHoldCancelPending = ref(false);
     >
       <view class="ai-chat-glow ai-chat-glow--blue" />
       <view class="ai-chat-glow ai-chat-glow--red" />
-      <!-- 顶部毛玻璃渐隐：与首页对话页同一层，状态栏 / 头部区域半透明，内容滚上来只会被虚化 -->
+      <!-- 设备线稿背景图：跟着用户选的机型走（履带吊 / 混凝土泵车）；深色下隐藏（见 .ai-page--dark） -->
+      <AiChatBackdrop class="ai-page__backdrop" />
+      <!-- 顶部白色渐变：页面上沿由白向下渐隐，压住线稿背景与滚上来的内容 -->
       <view class="ai-page__top-fade" />
-      <!-- Header：悬浮在内容之上（不占布局），消息可以滚到它下面，由 .ai-page__top-fade 做毛玻璃渐隐 -->
-
-      <!-- 待机引导（Ardot 347:5392）：标题 + greeting + 推荐问题；
-           greeting / 问题来自 /recommended-questions/guide，标题是固定问候语。
-           PC 车机版待机由 PcWelcome 承载，这里不再展示 -->
-      <view v-if="false" class="guide-welcome">
-        <text class="guide-welcome__title">
-          {{ t("guide-welcome-title") }}
-        </text>
-        <text v-if="guideGreeting" class="guide-welcome__greeting">
-          {{ guideGreeting }}
-        </text>
-        <template v-if="guideQuestions.length">
-          <text class="guide-welcome__label">
-            {{ t("guide-welcome-ask-label") }}
-          </text>
-          <view class="guide-welcome__list">
-            <view
-              v-for="question in guideQuestions"
-              :key="question"
-              class="guide-welcome__row"
-              @tap="sendQuickPrompt(question)"
-            >
-              <text class="guide-welcome__question">
-                {{ question }}
-              </text>
-            </view>
-          </view>
-        </template>
-      </view>
+      <!-- 顶部菜单统一由页面根节点的 AiChatHeader 渲染，避免两套按钮叠加。 -->
       <AiMessageList
+        class="guide-pc-messages"
         :key="chatListKey"
-        top-inset="170px"
-        :dark="isDark"
-        pc-layout
-        :generating="isLoading"
+        top-inset="var(--chat-top-inset, 300rpx)"
+        :dark="true"
+        :asr-tip-ready="asrTipReady"
         :messages="messages"
         :quick-prompts="localizedQuickPrompts"
         :show-quick-prompts="showQuickPrompts"
         :show-business-overview="false"
+        :top-aligned="true"
         :scroll-into-view="scrollIntoView"
         :reply-end-token="replyEndToken"
         :bottom-jump-token="chatStore.jumpToBottomToken"
@@ -1450,45 +2327,46 @@ const voiceHoldCancelPending = ref(false);
         :select-mode="shareSheetVisible"
         :suppress-highlight="shareSuppressHighlight"
         :bottom-inset="messageBottomInset"
+        :voice-top-pad="voiceLiveHeight"
         :step-card-step-id="guideStepCardStepId"
         :card-pin-token="chatStore.cardPinToken"
         :card-pin-dom-id="chatStore.cardPinDomId"
         :pin-step-card="guideStepSheetVisible"
-        :compact-guide-card="true"
+        @card-space-change="onGuideStepCardSpaceChange"
+        @content-grow="onMessageContentGrow"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
+        :listen-broadcast="listenBroadcast"
+        :listen-broadcast-loading="listenBroadcastLoading"
+        :listen-report-refresh-key="listenReportRefreshKey"
         :pinned-to-bottom="pinnedToBottom"
-        :asr-tip-ready="asrTipReady"
-        :top-aligned="true"
-        :voice-top-pad="voiceLiveHeight"
         :realtime-tts-message-key="realtimeTts.playingMessageKey.value"
         :realtime-tts-playing="realtimeTts.playing.value"
-        @card-space-change="onGuideStepCardSpaceChange"
-        @content-grow="chatStore.scrollToBottom()"
-        @quick-prompt="sendQuickPrompt"
-        @suggestion-tap="onGuideSuggestionTap"
+        @quick-prompt="sendUserPrompt"
+        @suggestion-tap="sendUserPrompt"
+        @ask-slot-open="onAskSlotOpen"
+        @ask-slot-pick="onAskSlotPick"
+        @ask-slot-submit="onAskSlotSubmit"
+        @assistant-navigation-open="onAssistantNavigationOpen"
+        @assistant-navigation-confirm="onAssistantNavigationConfirm"
+        @assistant-callback-open="onAssistantCallbackOpen"
         @guide-step-open="onGuideStepOpen"
         @guide-suggestion-open="onGuideSuggestionOpen"
         @guide-check-step-select="onGuideCheckStepSelect"
         @step-card-ready="focusGuideStepCardAtTop"
-        @assistant-navigation-open="onAssistantNavigationOpen"
-        @assistant-navigation-confirm="onAssistantNavigationConfirm"
-        @ask-slot-open="onAskSlotOpen"
-        @ask-slot-pick="onAskSlotPick"
-        @ask-slot-submit="onAskSlotSubmit"
         @tts-click="onTtsClick"
         @tts-stop="stopSceneTts"
         @feedback-change="onFeedbackChange"
         @share-click="onShareClick"
         @copy-click="onCopyMessage"
         @select-toggle="onShareSelectToggle"
+        @listen-report="onGoListenReport"
         @scroll-top="onScrollTop"
         @pinned-change="onPinnedChange"
-        @stop="stopGenerating"
       />
       <!-- 录音中的实时转写：铺在提问气泡的同一个落点（头部下沿）上，纯文字、没有气泡外壳，
            文字从左往右长出来；说完才收成正式提问气泡。
-           与首页同款：点下说话时会先把上一轮提问顶到这个落点（历史回复整体往上拉走），
+           点下说话时会先把上一轮提问顶到这个落点（历史回复整体往上拉走），
            再由列表把那条提问临时隐藏、把位置让给这段文字（voiceTopPad 同步它的高度），
            所以实时文字背后不会有任何正文，下面的回复也只按文字长短往下让位。
            只露最后两行：超出的旧文字被裁在框顶外，最新的始终贴在下面；
@@ -1499,12 +2377,13 @@ const voiceHoldCancelPending = ref(false);
         :dark="isDark"
         @height-change="voiceLiveHeight = $event"
       />
-      <!-- 一键回到底部（与首页一致）：离底时出现，贴底自动隐藏；
-           垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙；水平居中，只放 arrow-down.png -->
+      <!-- 一键回到底部：离底时出现，贴底自动隐藏；
+           垂直位置 = 输入栏高（含键盘抬起）+ 24rpx 间隙，底部胶囊展示时再让开 88rpx（见 scrollBottomStyle）；
+           水平居中，只放 arrow-down.png（无白底 / 阴影，见 .chat-scroll-bottom） -->
       <view
-        v-if="showScrollToBottom"
+        v-if="showScrollToBottom && !voicePanelOpen"
         class="chat-scroll-bottom"
-        :style="{ bottom: `calc(${composerBottomInset} + 24rpx)` }"
+        :style="scrollBottomStyle"
         @tap="onScrollToBottomTap"
       >
         <image
@@ -1513,6 +2392,44 @@ const voiceHoldCancelPending = ref(false);
           mode="aspectFit"
         />
       </view>
+      <AiSlotDrawer
+        :slots="askSlotQueue"
+        :visible="askSlotDrawerVisible"
+        :dark="isDark"
+        @close="closeAskSlotDrawer"
+        @submit="onAskSlotSubmit"
+        @height-change="onAskSlotDrawerHeightChange"
+      />
+      <!-- 跳转确认层：维修助理已改成消息流内联卡，这里只剩配件助手（拍照 / 上传 / 首页） -->
+      <AiAssistantNavigationSheet
+        v-model:visible="assistantNavigationVisible"
+        :payload="assistantNavigationPayload"
+        @confirm="onAssistantNavigationConfirm"
+      />
+      <!-- 底部「配件助手」入口：填地址 → 新开内嵌页 -->
+      <AiPartsJumpSheet
+        v-model:visible="partsJumpVisible"
+        :dark="isDark"
+        @jump="onPartsJump"
+      />
+      <AiGuideStepSheet
+        ref="guideStepSheetRef"
+        v-model:visible="guideStepSheetVisible"
+        :payload="guideStepPayload"
+        :step-index="guideStepRequestedIndex"
+        :keyboard-height="keyboardHeight"
+        @submit="onGuideStepSubmit"
+        @height-change="onGuideStepHeightChange"
+        @step-change="onGuideStepChange"
+        @photo="onGuideStepPhoto"
+      />
+      <AiGuideSuggestionSheet
+        v-model:visible="guideSuggestionSheetVisible"
+        :payload="guideSuggestionPayload"
+        :keyboard-height="keyboardHeight"
+        @submit="onGuideSuggestionSubmit"
+        @height-change="onGuideSuggestionHeightChange"
+      />
       <view v-if="isSessionSwitching" class="session-loading">
         <view class="session-loading__spinner" />
       </view>
@@ -1520,7 +2437,7 @@ const voiceHoldCancelPending = ref(false);
       <view v-if="shareSheetVisible" class="share-sheet-modal">
         <view class="share-sheet" @tap.stop>
           <text class="share-sheet__title">
-            {{ t("share-to") }}
+            分享到：
           </text>
           <view class="share-sheet__options">
             <view
@@ -1554,7 +2471,7 @@ const voiceHoldCancelPending = ref(false);
         </view>
       </view>
 
-      <!-- 分享图片预览/生成 -->
+      <!-- 分享图片预览/生成（Figma: 495:809） -->
       <view v-else-if="sharePosterVisible" class="share-poster-modal">
         <view class="share-poster-modal__mask" @tap="closeSharePosterModal" />
         <view class="share-poster-modal__card" @tap.stop>
@@ -1563,7 +2480,7 @@ const voiceHoldCancelPending = ref(false);
               <view class="share-poster-modal__loading-content">
                 <view class="session-loading__spinner share-poster-modal__loading-spinner" />
                 <text class="share-poster-modal__loading-text">
-                  {{ t("share-poster-generating") }}
+                  图片生成中
                 </text>
               </view>
             </view>
@@ -1586,7 +2503,7 @@ const voiceHoldCancelPending = ref(false);
                   <image class="share-poster-modal__option-icon-img" :src="iconSaveImage" mode="aspectFit" />
                 </view>
                 <text class="share-poster-modal__option-label">
-                  {{ t("share-save-image") }}
+                  保存图片
                 </text>
               </view>
               <view class="share-poster-modal__option" @tap="onCopySharePoster">
@@ -1594,14 +2511,14 @@ const voiceHoldCancelPending = ref(false);
                   <image class="share-poster-modal__option-icon-img" :src="iconCopyImage" mode="aspectFit" />
                 </view>
                 <text class="share-poster-modal__option-label">
-                  {{ t("share-copy-image") }}
+                  复制图片
                 </text>
               </view>
             </view>
             <view class="share-poster-modal__divider" />
             <view class="share-poster-modal__cancel" @tap="closeSharePosterModal">
               <text class="share-poster-modal__cancel-text">
-                {{ t("cancel") }}
+                取消
               </text>
             </view>
           </view>
@@ -1612,25 +2529,40 @@ const voiceHoldCancelPending = ref(false);
         </view>
       </view>
 
-      <!-- PC 车机版：底部蓝色氛围光（设计稿 y≈863 起三层椭圆，被底部 Dock 覆盖）；
-           仅语音识别（录音中）才显示，普通状态下不渲染（需求：蓝光只在识别时出现） -->
-      <view v-if="voiceQueryActive || duplexListening" class="pc-chat-glow" aria-hidden="true" />
+      <AiChatInput
+        attachment-disabled
+        v-else
+        :voice-query-active="voiceQueryActive"
+        duplex-enabled
+        :duplex-active="duplexActive"
+        :duplex-starting="duplexStarting"
+        @duplex-toggle="duplex.toggle"
+        ref="chatInputRef"
+        v-model="inputText"
+        :dark="isDark"
+        :is-loading="isLoading"
+        :keyboard-height="keyboardHeight"
+        :voice-keyboard-height="voiceKeyboardHeight"
+        :compact-voice-listening="true"
+        :tap-to-talk="true"
+        @send="sendMessage"
+        @voice-query-start="startVoiceQueryFromGesture"
+        @stop="stopGenerating"
+        @voice-start="stopRealtimeTtsOnVoiceStart"
+        @voice-restart="stopRealtimeTtsOnVoiceStart"
+        @voice-listening="voiceListening = $event"
+        @recognize-begin="beginAsrPlaceholder"
+        @recognize-fail="discardAsrPlaceholder"
+        @toggle-quick-list="toggleQuickList"
+        @input-focus="setTextInputFocused(true)"
+        @input-blur="setTextInputFocused(false)"
+        @voice-input-focus="setVoiceInputFocused(true)"
+        @voice-input-blur="setVoiceInputFocused(false)"
+        @voice-panel-open="voicePanelOpen = $event"
+        @dock-height-change="setInputDockHeight"
+      />
 
-      <!-- PC 车机版右下角 logo：点击开始说话（与顶部胶囊同一链路 onPcCapsuleVoice；
-           录音中整条不渲染（不可见也不可点），避免被底部录音条盖住后残留热区） -->
-      <view
-        v-if="!shareSheetVisible && !voiceQueryActive"
-        class="pc-corner-logo"
-        @tap="onPcCapsuleVoice"
-      >
-        <image
-          class="pc-corner-logo__img"
-          :src="saniLogoWebp"
-          mode="aspectFit"
-        />
-      </view>
-
-      <!-- PC 车机版：无文字输入栏（纯语音），保留录音条 -->
+      <!-- 录音中：输入栏换成「取消 / 声纹 / 计时 + 发送」这一条（稿子 Frame 114） -->
       <AiVoiceQueryBar
         v-if="voiceQueryActive && !shareSheetVisible"
         :level="voiceLevel"
@@ -1643,59 +2575,367 @@ const voiceHoldCancelPending = ref(false);
         @submit="stopVoiceQuery"
       />
 
-      <!-- 回答里的指导步骤卡片：选中步骤后自动收起并带上选择回发下一轮 -->
-      <AiGuideStepSheet
-        ref="guideStepSheetRef"
-        v-model:visible="guideStepSheetVisible"
-        :payload="guideStepPayload"
-        :step-index="guideStepRequestedIndex"
-        :keyboard-height="keyboardHeight"
-        :allow-extras="false"
-        @submit="onGuideStepSubmit"
-        @height-change="onGuideStepHeightChange"
-        @step-change="onGuideStepChange"
-      />
-      <AiGuideSuggestionSheet
-        v-model:visible="guideSuggestionSheetVisible"
-        :payload="guideSuggestionPayload"
-        :keyboard-height="keyboardHeight"
-        @submit="onGuideSuggestionSubmit"
-        @height-change="onGuideSuggestionHeightChange"
-      />
-      <AiAssistantNavigationSheet
-        v-model:visible="assistantNavigationVisible"
-        :payload="assistantNavigationPayload"
-        @confirm="onAssistantNavigationConfirm"
-      />
-      <!-- 追问抽屉：多选题 / 填空 / 多步骤表单在气泡里排不下，统一走底部抽屉 -->
-      <AiSlotDrawer
-        :slots="askSlotQueue"
-        :dark="isDark"
-        :visible="askSlotDrawerVisible"
-        @close="closeAskSlotDrawer"
-        @height-change="onAskSlotDrawerHeightChange"
-        @submit="onAskSlotSubmit"
-      />
-
       <AiBadFeedbackSheet
         :visible="badFeedbackSheetVisible"
         @close="onBadFeedbackClose"
         @confirm="onBadFeedbackConfirm"
       />
     </view>
+
+    <!-- 语音播报声纹（迁移自 audio-ripple）：播报期间沿屏幕左、底、右三边走渐变光带，
+         纯装饰层，不吃点击；pixel-ratio 压到 1 是为了全屏逐像素运算别拖慢主线程 -->
+    <AudioRipple
+      v-if="isTtsSpeaking"
+      class="ai-page__tts-ripple"
+      variant="output"
+      preview="speech"
+      :dark="isDark"
+      :pixel-ratio="1"
+      :output-appearance="TTS_RIPPLE_APPEARANCE"
+    />
   </view>
 </template>
 
 <style lang="scss" scoped>
-$color-text-primary: #1a1a1a;
-$color-text-secondary: #6b6b6b;
-$color-text-muted: #bababa;
+/* 隐藏滚动条外观，滚动容器继续响应触摸、鼠标和滚轮。 */
+.ai-page,
+.ai-page :deep(*) {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
+/* 车载屏回答采用独立深色卡片，样式仅作用于本页的消息列表。 */
+.guide-pc-messages {
+  :deep(.ai-bubble-v2__busy-hint-text) {
+    font-size: 36rpx;
+    line-height: 1.6;
+  }
+
+  :deep(.ai-bubble-v2--user .ai-bubble-v2__body) {
+    border-color: #4b5568;
+    background: #4b5568;
+  }
+
+  :deep(.ai-bubble-v2--user .ai-bubble-v2__user-content),
+  :deep(.ai-bubble-v2--user .ai-bubble-v2__asr) {
+    color: #fff;
+  }
+
+  :deep(.table-block),
+  :deep(.table-block__table),
+  :deep(.table-block__cell),
+  :deep(.markdown-renderer table),
+  :deep(.markdown-renderer td) {
+    background: transparent !important;
+    border-color: #596579 !important;
+    color: #f4f6fa !important;
+  }
+
+  :deep(.table-block .table-block__row--head .table-block__cell),
+  :deep(.markdown-renderer th) {
+    background: #3b4658 !important;
+    border-color: #596579 !important;
+    color: #f4f6fa !important;
+  }
+
+  :deep(.table-block__cell-text),
+  :deep(.error-block__title),
+  :deep(.error-block__message),
+  :deep(.metric-block__label),
+  :deep(.metric-block__unit),
+  :deep(.metric-block__trend),
+  :deep(.chart-block__data-title),
+  :deep(.chart-block__data-label),
+  :deep(.chart-block__data-value),
+  :deep(.chart-block__data-series-name),
+  :deep(.status-block__stage),
+  :deep(.status-block__message),
+  :deep(.tool-call-block__title),
+  :deep(.chart-block__toggle) {
+    font-size: 34rpx;
+    line-height: 1.6;
+  }
+
+  :deep(.table-block__cell) {
+    padding: 24rpx;
+    min-width: 160rpx;
+  }
+
+  :deep(.error-block),
+  :deep(.metric-block) {
+    border-color: #596579;
+    background: #3b4658;
+    color: #f4f6fa;
+  }
+
+  :deep(.error-block__message),
+  :deep(.metric-block__label),
+  :deep(.metric-block__unit),
+  :deep(.metric-block__trend) {
+    color: #d6dce7;
+  }
+
+  :deep(.metric-block__value) {
+    font-size: 56rpx;
+    color: #f4f6fa;
+  }
+
+  :deep(.ai-bubble-v2) {
+    margin: 0;
+  }
+
+  :deep(.ai-bubble-v2--user) {
+    margin: 64rpx 0;
+  }
+
+  :deep(.ai-bubble-v2--user .ai-bubble-v2__user-content),
+  :deep(.ai-bubble-v2--user .ai-bubble-v2__asr) {
+    font-size: 36rpx;
+    line-height: 1.6;
+  }
+
+  :deep(.ai-bubble-v2:not(.ai-bubble-v2--user)),
+  :deep(.chat-box__card) {
+    box-sizing: border-box;
+    padding: 32rpx;
+    border: 1px solid #303945;
+    border-radius: 24rpx;
+    background: #242b35;
+    color: #f4f6fa;
+  }
+
+  // 步骤卡已有独立容器，隐藏正文的空气泡不再绘制外框。
+  :deep(.ai-bubble-v2.ai-bubble-v2--standalone-only) {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  :deep(.guide-image-block) {
+    width: min(50vw, 100%);
+    max-width: 50vw;
+    align-self: flex-start;
+  }
+
+  :deep(.markdown-renderer img) {
+    width: 50vw !important;
+    max-width: 100% !important;
+    height: auto !important;
+    object-fit: contain;
+  }
+
+  :deep(.ai-bubble-v2:not(.ai-bubble-v2--user)) {
+    flex-wrap: wrap;
+    gap: 24rpx;
+  }
+
+  :deep(.ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body) {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0;
+    background: transparent;
+    color: #f4f6fa;
+    font-size: 36rpx;
+    line-height: 1.6;
+  }
+
+  // Markdown 节点由 mp-html 写入行内字号，局部覆盖确保正文实际放大。
+  :deep(.ai-bubble-v2:not(.ai-bubble-v2--user) .markdown-renderer),
+  :deep(.ai-bubble-v2:not(.ai-bubble-v2--user) .markdown-renderer p),
+  :deep(.ai-bubble-v2:not(.ai-bubble-v2--user) .markdown-renderer li),
+  :deep(.ai-bubble-v2:not(.ai-bubble-v2--user) .markdown-renderer td),
+  :deep(.ai-bubble-v2:not(.ai-bubble-v2--user) .markdown-renderer th),
+  :deep(.chat-box__card .markdown-renderer),
+  :deep(.chat-box__card .markdown-renderer p),
+  :deep(.chat-box__card .markdown-renderer li) {
+    color: #f4f6fa !important;
+    font-size: 36rpx !important;
+    line-height: 1.6 !important;
+  }
+
+  :deep(.markdown-renderer h1),
+  :deep(.markdown-renderer h2),
+  :deep(.markdown-renderer h3) {
+    color: #fff !important;
+    font-size: 44rpx !important;
+    line-height: 1.45 !important;
+  }
+
+  :deep(.markdown-renderer strong) {
+    color: #fff !important;
+  }
+
+  :deep(.ask-slot__title),
+  :deep(.ask-slot__option-letter),
+  :deep(.ask-slot__option-text),
+  :deep(.guide-suggestion__question),
+  :deep(.guide-suggestion__option-label) {
+    color: #f4f6fa;
+    font-size: 36rpx;
+    line-height: 1.5;
+  }
+
+  :deep(.ask-slot__option),
+  :deep(.guide-suggestion__option) {
+    box-sizing: border-box;
+    min-height: 80rpx;
+    height: auto;
+    padding: 20rpx 28rpx;
+    border-color: #414a57;
+    border-radius: 24rpx;
+    background: #303845;
+  }
+
+  :deep(.ask-slot__option:active),
+  :deep(.guide-suggestion__option:active) {
+    background: #46515f;
+  }
+}
+
+
+.guide-pc-fullscreen {
+  position: absolute;
+  top: calc(var(--safe-top-px, 0px) + 8rpx);
+  right: 40rpx;
+  z-index: 1011;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 84rpx;
+  height: 84rpx;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+
+  &::after { border: 0; }
+
+  image {
+    width: 48rpx;
+    height: 48rpx;
+  }
+}
+
+.guide-pc-notice {
+  position: absolute;
+  top: var(--guide-pc-header-height, 200rpx);
+  left: 50%;
+  z-index: 1026;
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  box-sizing: border-box;
+  width: min(84vw, 1920rpx);
+  padding: 28rpx 32rpx;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 24rpx;
+  background: #243b62;
+  color: #fff;
+  cursor: pointer;
+  transform: translateX(-50%);
+  animation: guide-pc-notice-enter 320ms ease-out both;
+}
+
+.guide-pc-notice__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.guide-pc-notice__text {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 28rpx;
+  line-height: 1.5;
+}
+
+.guide-pc-notice__close {
+  flex: none;
+  width: 64rpx;
+  height: 64rpx;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 48rpx;
+  line-height: 64rpx;
+
+  &::after { border: 0; }
+}
+
+@keyframes guide-pc-notice-enter {
+  from { opacity: 0; transform: translate(-50%, -32rpx); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .guide-pc-notice { animation: none; }
+}
+
+.guide-pc-home {
+  position: absolute;
+  inset: 0;
+}
+
+/* Design tokens from Ardot */
+$color-text-primary: #1a1a1a;       // r:0.102
+$color-text-secondary: #6b6b6b;     // r:0.420
+$color-text-muted: #bababa;         // r:0.729
 $color-red-accent: #ff0000;
-$color-red-btn: #fe0000;
-$color-bg-phone: #fafafa;
-$color-bg-voice: #f5f5f5;
-$color-border-light: #efefef;
+$color-red-btn: #fe0000;             // r:0.996 g:0 b:0
+$color-bg-phone: #fafafa;           // r:0.98
+$color-bg-voice: #f5f5f5;           // r:0.96
+$color-border-light: #efefef;       // r:0.937
 $color-white: #ffffff;
+
+/* Background */
+.phone-bg {
+  position: absolute;
+  inset: 0;
+  background-color: $color-bg-phone;
+  z-index: 0;
+}
+
+/* Decorative glows — top corners */
+.glow {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.glow-blue {
+  left: -40px;
+  top: -20px;
+  width: 280px;
+  height: 180px;
+  background: radial-gradient(
+    ellipse 80% 60% at 40% 40%,
+    rgba(123, 167, 217, 0.10) 0%,
+    rgba(123, 167, 217, 0.04) 50%,
+    rgba(123, 167, 217, 0) 70%
+  );
+  filter: blur(8px);
+}
+
+.glow-red {
+  left: 44px;
+  top: -20px;
+  width: 380px;
+  height: 180px;
+  background: radial-gradient(
+    ellipse 70% 55% at 60% 35%,
+    rgba(255, 80, 80, 0.08) 0%,
+    rgba(255, 80, 80, 0.03) 50%,
+    rgba(255, 80, 80, 0) 70%
+  );
+  filter: blur(10px);
+}
 
 .ai-page {
   position: relative;
@@ -1710,6 +2950,14 @@ $color-white: #ffffff;
   overscroll-behavior: none;
 }
 
+/* 语音播报声纹（AudioRipple）：全屏铺满，只走左、底、右三边，压在内容之上但不吃点击 */
+.ai-page__tts-ripple {
+  position: fixed;
+  inset: 0;
+  z-index: 1025;
+  pointer-events: none;
+}
+
 .ai-page__chat {
   display: flex;
   flex-direction: column;
@@ -1719,21 +2967,21 @@ $color-white: #ffffff;
   background: var(--app-page-bg, #fafafa);
   overflow: hidden;
   position: relative;
-  // 顶部毛玻璃层的高度 = 悬浮头部在内容里的占位（与首页对话页同一个值）
-  // 210rpx 略高于 200rpx 的实色头部：首条消息贴着头部下沿起步，上一轮的尾巴不会在灵动岛下面露一截
+  // 顶部毛玻璃层的高度 = 悬浮头部在内容里的占位：
+  // 两者共用一个值，消息正好从渐隐的下沿起步，往上滚就被模糊掉
+  // 210rpx（105px）略高于 200rpx（100px）的实色头部：首条内容贴着头部下沿起步，
+  // 上一轮回答的尾巴不会在灵动岛下面露出一截被裁掉的字
   --chat-top-inset: calc(constant(safe-area-inset-top) + 210rpx);
   --chat-top-inset: calc(env(safe-area-inset-top) + 210rpx);
-  // 悬浮头部不占布局，需要给「欢迎区」补回来的实际头部高度：状态栏占位 + 栏高 50px
-  --chat-header-height: calc(max(var(--safe-top-px, 0px), env(safe-area-inset-top)) + 100rpx);
 }
 
 .ai-page__chat--duplex {
   --chat-top-inset: max(calc(env(safe-area-inset-top, 0px) + 300rpx), calc(var(--safe-top-px, 0px) + 260rpx));
 }
 
-/* 欢迎层 → 对话页：整页淡入。
-   延迟由 --chat-enter-delay 控制（语音起飞会等 listen.gif 扩散），
-   让淡入跟起飞同时开始，不会出现「logo 还挂在中间、对话页已经铺满」的割裂感 */
+/* 初始页 → 对话页：整页淡入。
+   延迟由 --chat-enter-delay 控制（= listen.gif 停留时间），让淡入跟起飞同时开始，
+   不会出现「logo 还挂在中间、对话页已经铺满」的割裂感 */
 .ai-page__chat--enter {
   animation: ai-page-chat-in 720ms cubic-bezier(0.22, 0.61, 0.36, 1) var(--chat-enter-delay, 0ms) both;
 }
@@ -1748,22 +2996,48 @@ $color-white: #ffffff;
   }
 }
 
-// 头部悬浮（与首页对话页一致）：不占布局高度，消息可以滚到它下面，透过 .ai-page__top-fade 的毛玻璃淡出；
+// 一键回到底部：只剩 arrow-down.png 图本身（白底圆钮 / 阴影 / 描边全部去掉），水平居中。
+// bottom 由行内样式给：composerBottomInset（输入栏高 + 键盘抬起）+ 24rpx 间隙
+/* 一键回到底部：只剩 arrow-down.png 图本身（白底圆钮 / 阴影 / 描边全部去掉），水平居中 */
+.chat-scroll-bottom {
+  position: absolute;
+  left: 50%;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateX(-50%);
+}
+
+/* 箭头：直接用设计给的 arrow-down.png，显示框 64×64px（= 128rpx，1px = 2rpx） */
+.chat-scroll-bottom__chevron {
+  display: block;
+  width: 128rpx; // 64px
+  height: 128rpx; // 64px
+}
+
+// 头部悬浮：不占布局高度，消息可以滚到它下面，透过 .ai-page__top-fade 的毛玻璃淡出；
 // 同时要盖住消息列表和输入栏：历史抽屉、操作菜单都挂在它的层叠上下文里，
 // 留在 z-index:1 会被后面的兄弟节点盖掉（气泡压在抽屉上就是这个原因）。
 // 这里必须是 1010：历史抽屉（内部 1000）的层级帽由这一层决定，
 // 底部 slot 抽屉是 1002，小于它就会被压住（附件弹窗 1020 仍在其上）
+.ai-page {
+  --guide-pc-header-height: 200rpx;
+}
+
 .ai-page > .ai-page__header {
   position: absolute;
   top: 0;
   right: 0;
   left: 0;
   z-index: 1010;
-  height: 200rpx;
+  height: var(--guide-pc-header-height);
 }
 
-// 顶部毛玻璃渐隐（与首页对话页同一层）：透明 + 背后模糊，状态栏与头部区域是半透明的，
-// 内容滚到头部下面还能看见字，只是被虚化；「渐变」体现在模糊强度上，没有硬边。
+// 顶部毛玻璃渐隐（对应设计稿 722:152「回答」头部底板）：
+// 不铺白色底 —— 透明 + 背后模糊，消息滚到头部下面还能看见字，只是被虚化；
+// 「渐变」体现在模糊强度上：上沿最糊，往下渐弱到完全清晰，接住正文，没有硬边。
+// 高度 = 刘海安全区 + 210rpx（与 --chat-top-inset 一致，消息正好从渐隐下沿起步）。
 .ai-page__top-fade {
   position: absolute;
   z-index: 1;
@@ -1772,56 +3046,19 @@ $color-white: #ffffff;
   left: 0;
   height: var(--chat-top-inset);
   pointer-events: none;
+  // 只模糊、不遮挡（老内核拿不到 backdrop-filter 时，退化成下面那层极淡的雾，文字照样看得见）
   backdrop-filter: blur(16rpx); // 8px
   -webkit-backdrop-filter: blur(16rpx);
+  // 模糊强度按 mask 的 alpha 渐变：0% 满强度 → 45% 约七成 → 100% 完全清晰
   mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, rgba(0, 0, 0, 0) 100%);
   -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, rgba(0, 0, 0, 0) 100%);
+  // 极淡一层同色雾：顶部文字比正文稍淡一点，但不至于被吃掉
   background: linear-gradient(
     180deg,
     rgba(250, 250, 250, 0.34) 0%,
     rgba(250, 250, 250, 0.18) 48%,
     rgba(250, 250, 250, 0) 100%
   );
-}
-
-/* ===== 深色主题（与首页问答态同一口径）=====
-   只替换底色与材质：页面底 #0D0D0D（对应浅色 #FAFAFA），顶部渐隐换成深色底，
-   角落光晕在深色稿里是关掉的。组件内部样式各自通过 :dark 切换。 */
-.ai-page--dark {
-  background: #0d0d0d;
-
-  .ai-page__chat {
-    background: #0d0d0d;
-  }
-
-  .ai-page__top-fade {
-    background: linear-gradient(
-      180deg,
-      rgba(13, 13, 13, 0.34) 0%,
-      rgba(13, 13, 13, 0.18) 48%,
-      rgba(13, 13, 13, 0) 100%
-    );
-  }
-
-  .ai-chat-glow {
-    display: none;
-  }
-
-  /* 深色模式：固定问候语 / 问题列表文字反白，保证在暗底上可读 */
-  .guide-welcome__title,
-  .guide-welcome__question {
-    color: #fff;
-  }
-
-  .guide-welcome__greeting {
-    color: #d9d9d9;
-  }
-
-  .guide-welcome__label {
-    color: #a3a3a3;
-  }
-
-  /* 边缘流光在深色下同样保留：色值、厚度、流动都与浅色一致 */
 }
 
 .ai-chat-glow {
@@ -1854,103 +3091,6 @@ $color-white: #ffffff;
     rgba(254, 0, 0, 0.1) 0%,
     rgba(254, 0, 0, 0) 100%
   );
-}
-
-/* ===== 待机引导（Ardot 347:5392）=====
-   画板 375×812：标题 y=178，往下依次是 greeting（说明）、「你可以这么问」与问题列表，
-   左右留白 20（40rpx）。
-
-   顶部留白与作业协同页（pages/task/index.vue 的待机内容）对齐：
-   头部悬浮在内容之上（状态栏 + 栏高 50px，见 --chat-header-height），灵动岛（92）+ 下方
-   「SANI」胶囊是绝对定位浮在内容之上，换算到内容区岛底 ≈ 84rpx、胶囊底 ≈ 136rpx。
-   设计稿的 148rpx 会让标题顶只比胶囊低 12rpx（6px），视觉上贴着 logo；
-   这里沿用 216rpx（头部高度之外），标题距胶囊底约 80rpx（40px）。 */
-.guide-welcome {
-  position: relative;
-  z-index: 1;
-  // 头部改成悬浮后不占布局，这里把它的实际高度补回来，欢迎区仍从头部下方起步
-  // （216rpx 是原来「头部之下」再让出的距离，与作业协同页 .task-welcome 同一档）
-  padding: calc(var(--chat-header-height) + 216rpx) 40rpx 0;
-}
-
-/* 固定问候语（Ardot 347:5392 Greeting Title）：28px Bold #0D0D0D，行高 41 */
-.guide-welcome__title {
-  display: block;
-  color: #0d0d0d;
-  font-family: "Source Han Sans CN", "PingFang SC", sans-serif;
-  font-size: 56rpx; // 28
-  font-weight: 700;
-  line-height: 82rpx; // 41
-}
-
-/* 接口返回的 greeting（Ardot 347:5392 Greeting Sub）：14px Regular #5D5D5D，行高 22；
-   与标题间距 13px —— 设计稿里问候语本身就是说明文案，不再是标题 */
-.guide-welcome__greeting {
-  display: block;
-  margin-top: 26rpx; // 13
-  color: #5d5d5d;
-  font-family: "PingFang SC";
-  font-size: 28rpx; // 14
-  font-weight: 400;
-  line-height: 44rpx; // 22
-}
-
-.guide-welcome__label {
-  display: block;
-  margin-top: 32rpx; // 16
-  color: #8f8f8f;
-  font-family: "PingFang SC";
-  font-size: 28rpx; // 14
-  font-weight: 500;
-  line-height: 40rpx; // 20
-}
-
-/* 问题列表：首尾各一道 1px 分隔线，行高 52（上下内边距 16） */
-.guide-welcome__list {
-  margin-top: 28rpx; // 14
-  border-top: 1px solid #f3f3f3;
-  border-bottom: 1px solid #f3f3f3;
-}
-
-.guide-welcome__row {
-  padding: 32rpx 0; // 16
-  border-bottom: 1px solid #f3f3f3;
-
-  &:last-child {
-    border-bottom: 0;
-  }
-
-  &:active {
-    opacity: 0.6;
-  }
-}
-
-.guide-welcome__question {
-  display: block;
-  color: #0d0d0d;
-  font-family: "PingFang SC";
-  font-size: 28rpx; // 14
-  font-weight: 400;
-  line-height: 40rpx; // 20
-}
-
-// 一键回到底部（与首页同一套）：只剩 arrow-down.png 图本身（白底圆钮 / 阴影 / 描边全部去掉），水平居中。
-// bottom 由行内样式给：composerBottomInset（输入栏高 + 键盘抬起）+ 24rpx 间隙
-.chat-scroll-bottom {
-  position: absolute;
-  left: 50%;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transform: translateX(-50%);
-}
-
-/* 箭头：直接用设计给的 arrow-down.png，显示框 64×64px（= 128rpx，1px = 2rpx） */
-.chat-scroll-bottom__chevron {
-  display: block;
-  width: 128rpx; // 64px
-  height: 128rpx; // 64px
 }
 
 .session-loading {
@@ -2001,7 +3141,7 @@ $color-white: #ffffff;
   }
 }
 
-/* Share sheet */
+/* Share sheet (495:759) */
 /* 分享面板必须盖住 header（1010）：历史抽屉与设置弹层都挂在 header 的层叠上下文里 */
 .share-sheet-modal {
   position: fixed;
@@ -2139,6 +3279,11 @@ $color-white: #ffffff;
   overflow: hidden;
 }
 
+.share-poster-modal__img-wrap {
+  width: 100%;
+  height: 100%;
+}
+
 .share-poster-modal__loading {
   display: flex;
   align-items: center;
@@ -2240,6 +3385,15 @@ $color-white: #ffffff;
   color: #999999;
 }
 
+.share-poster {
+  width: 656rpx;
+  margin: 0 auto;
+  background: #ffffff;
+  border-radius: 24rpx;
+  padding: 24rpx 30rpx 30rpx;
+  box-sizing: border-box;
+}
+
 .share-poster-modal__img {
   width: 100%;
   max-width: 656rpx;
@@ -2276,54 +3430,39 @@ $color-white: #ffffff;
   pointer-events: none;
 }
 
-/* ===== PC 车机版（Ardot 747340735267872）：固定深色 #181A1E，全部 px =====
-   顶部状态栏 / 底部 Dock 由宿主绘制；对话态隐藏手机版顶部毛玻璃与角落光晕。 */
-.ai-page--pc,
-.ai-page--pc .ai-page__chat {
-  background: #181a1e;
-}
+/* ===== 深色主题：首页问答态（Ardot 1193:2097「日常运营助手-老板-个性觉醒」） =====
+   只替换底色与材质，间距 / 圆角 / 字号两稿一致，不做改动：
+   - 页面底：#0D0D0D（对应浅色稿的 #FAFAFA）
+   - 顶部渐隐 1193:2129;722:341 Rectangle 152：#0D0D0D 100% → 0% 竖向渐变
+   - 角落光晕 1193:2123 Blue Glow TL / 1193:2124 Red Glow TR：深色稿 visible = false
+   - 设备线稿 1193:2125 Frame 85：深色稿 visible = false */
+.ai-page--dark {
+  background: #0d0d0d;
 
-/* 对话态：隐藏手机版顶部毛玻璃渐隐与角落光晕（设计稿对话页无这些元素） */
-.ai-page--pc .ai-page__top-fade,
-.ai-page--pc .ai-chat-glow {
-  display: none;
-}
-
-/* 对话态底部蓝色氛围光（设计稿 Ardot 747340735267872 Frame 85）：适配对话区滚动 */
-.ai-page--pc .pc-chat-glow {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 220px;
-  pointer-events: none;
-  z-index: 0;
-  background: radial-gradient(ellipse 100% 100% at 50% 100%, #1b72cfff, rgba(27, 114, 207, 0));
-
-}
-
-/* PC 车机版右下角 logo（点击开始说话）：
-   右下角避开底部 Dock（宿主绘制约 119px，messageBottomInset 让出 160px）与录音条，
-   与一键回底箭头（居中）不冲突；深色页面直接用白色三角 sani-logo.webp */
-.ai-page--pc .pc-corner-logo {
-  position: absolute;
-  right: 68px;
-  bottom: 44px;
-  display: flex;
-  z-index: 20;
-  align-items: center;
-  justify-content: center;
-  width: 150px;
-  height: 150px;
-  cursor: pointer;
-  &:active {
-    opacity: 0.8;
+  .ai-page__chat {
+    background: #0d0d0d;
   }
-}
 
-.ai-page--pc .pc-corner-logo__img {
-  display: block;
-  width: 150px;
-  height: 150px;
+  // 渐隐材质换成深色页面底：上沿完全盖住滚上来的内容，往下渐透
+  .ai-page__top-fade {
+    background: linear-gradient(
+      180deg,
+      #0d0d0d 0%,
+      rgba(13, 13, 13, 0.7) 45%,
+      rgba(13, 13, 13, 0) 100%
+    );
+  }
+
+  // 浅色底上的彩色雾放到深底上会泛白，深色稿里这两个光晕本身就是关掉的
+  .ai-chat-glow {
+    display: none;
+  }
+
+  /* 边缘流光在深色下同样保留：色值、厚度、流动都与浅色一致，
+     不做深色专用替换（深底下同样的紫/蓝更显，无需再调） */
+
+  .ai-page__backdrop {
+    display: none;
+  }
 }
 </style>
