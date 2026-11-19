@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PropType } from "vue";
-import { computed, nextTick, onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import heySani from "@/assets/img/hey-sani.svg";
 import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
@@ -226,10 +226,65 @@ const textareaRef = ref<{ focus?: () => void } | null>(null);
 
 const showSend = computed(() => textMode.value && Boolean(draft.value.trim()));
 
-/** 键盘弹起的高度：文本态把整条工具栏顶到键盘上方（页面高度不随键盘压缩） */
-const keyboardSpacerHeight = computed(() => (
+/**
+ * 键盘弹起的高度：文本态把整条工具栏顶到键盘上方。
+ *
+ * 宿主给的 keyboardHeight 是「键盘占了多高」，但本层是 `position: fixed`：
+ * 在会把布局视口一起压短的 WebView（Android adjustResize 这类）里，层的下沿本来就
+ * 已经贴到键盘上沿了，再整段补一个键盘高度，输入条就被顶到屏幕上方去（实测多顶近一个键盘高）。
+ *
+ * 所以先按键盘高度铺，一帧后实测「占位块的上沿离可视区底部还差多少」再修正一次：
+ * 多顶出来（超过阈值）就把占位收掉相应高度；本来就贴着键盘（iOS 这类布局视口不缩的容器）则不动。
+ */
+const SPACER_EDGE_GAP_PX = 8;
+const SPACER_OVERLIFT_TOLERANCE_PX = 24;
+
+const spacerRef = ref<unknown>(null);
+/** 键盘高度原值 */
+const rawSpacerPx = computed(() => (
   textMode.value ? Math.max(0, Number(props.keyboardHeight) || 0) : 0
 ));
+/** 实测多顶上去的量，只往下收、不额外补 */
+const overLiftPx = ref(0);
+const keyboardSpacerHeight = computed(() => Math.max(0, rawSpacerPx.value - overLiftPx.value));
+
+function readSpacerEl(raw: unknown): HTMLElement | null {
+  if (!raw) return null;
+  if (typeof HTMLElement !== "undefined" && raw instanceof HTMLElement) return raw;
+  const el = (raw as { $el?: unknown }).$el;
+  return typeof HTMLElement !== "undefined" && el instanceof HTMLElement ? el : null;
+}
+
+let spacerMeasureTimers: Array<ReturnType<typeof setTimeout>> = [];
+function clearSpacerMeasure() {
+  spacerMeasureTimers.forEach(timer => clearTimeout(timer));
+  spacerMeasureTimers = [];
+}
+
+/** 占位块的上沿应该正好落在可视区底部：高出来多少就收掉多少 */
+function correctSpacerIfOverLifted() {
+  const el = readSpacerEl(spacerRef.value);
+  const viewport = typeof window !== "undefined" ? window.visualViewport : null;
+  if (!el || !viewport) return;
+  const visibleBottom = Math.round(viewport.height + viewport.offsetTop);
+  const surplus = visibleBottom - Math.round(el.getBoundingClientRect().top);
+  if (surplus <= SPACER_OVERLIFT_TOLERANCE_PX) return;
+  overLiftPx.value = Math.min(rawSpacerPx.value, overLiftPx.value + (surplus - SPACER_EDGE_GAP_PX));
+}
+
+watch(
+  () => [props.keyboardHeight, textMode.value] as const,
+  async ([height, active]) => {
+    clearSpacerMeasure();
+    overLiftPx.value = 0;
+    if (!active || !(Number(height) > 0)) return;
+    await nextTick();
+    // 键盘动画期间报上来的高度还会变，量三次兜底（每次都是从「已修正后的位置」再算差值）
+    requestAnimationFrame(correctSpacerIfOverLifted);
+    spacerMeasureTimers.push(setTimeout(correctSpacerIfOverLifted, 260));
+    spacerMeasureTimers.push(setTimeout(correctSpacerIfOverLifted, 520));
+  },
+);
 
 async function enterTextMode() {
   if (textMode.value) return;
@@ -268,6 +323,7 @@ function onModeTap() {
 
 onBeforeUnmount(() => {
   clearSpeakHold();
+  clearSpacerMeasure();
   if (readyTimer) {
     clearTimeout(readyTimer);
     readyTimer = null;
@@ -456,8 +512,13 @@ onBeforeUnmount(() => {
       </text>
     </view>
 
-    <!-- 文本态键盘弹起：页面高度不随键盘压缩，用这段占位把工具栏顶到键盘上方 -->
-    <view v-if="keyboardSpacerHeight" :style="{ height: `${keyboardSpacerHeight}px` }" />
+    <!-- 文本态键盘弹起：用这段占位把工具栏顶到键盘上方；
+         ref 给的是「实测修正」用（见 keyboardSpacerHeight 的说明） -->
+    <view
+      v-if="keyboardSpacerHeight"
+      ref="spacerRef"
+      :style="{ height: `${keyboardSpacerHeight}px` }"
+    />
   </view>
 </template>
 

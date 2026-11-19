@@ -202,6 +202,10 @@ function submitRemark() {
   flex-direction: column;
   gap: 16rpx; /* 8px：问题行与选项组 */
   width: 100%;
+  /* 与 answer-group 内部的 32rpx 行距对齐：
+     卡片固定追加在回答最底部，前面如果收在图表 / 表格上（那两块自身没有下外边距），
+     不留这一档就会直接贴上坐标轴标签或表格最后一行 */
+  margin-top: 32rpx;
 }
 
 .ask-slot__title {

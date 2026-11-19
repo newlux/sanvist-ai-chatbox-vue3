@@ -354,7 +354,7 @@ onBeforeUnmount(() => {
     "PingFang SC",
     "Microsoft YaHei",
     sans-serif;
-  font-size: calc(32 * var(--u));
+  font-size: 64rpx;
   font-weight: 500;
   line-height: calc(46 * var(--u));
   letter-spacing: 0;
@@ -442,7 +442,7 @@ onBeforeUnmount(() => {
     "PingFang SC",
     "Microsoft YaHei",
     sans-serif;
-  font-size: calc(28 * var(--u));
+  font-size: 56rpx;
   font-weight: 500;
   line-height: calc(41 * var(--u));
   letter-spacing: 0;

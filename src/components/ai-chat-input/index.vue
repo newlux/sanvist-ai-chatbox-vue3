@@ -196,10 +196,31 @@ const VOICE_WAVE_BARS_MOTION = VOICE_WAVE_BARS.map((height, index) => ({
 
 const keyboardOpen = computed(() => props.keyboardHeight > 0);
 const voiceKeyboardOpen = computed(() => props.voiceKeyboardHeight > 0);
+
+/**
+ * 键盘抬升：输入栏是 `position: fixed`，按宿主报的键盘高度抬到键盘上方。
+ *
+ * 但在会把布局视口一起压短的 WebView（Android adjustResize 这类）里，fixed 的下沿本身
+ * 已经贴到键盘上沿了，再整段抬一个键盘高，输入栏就会顶到屏幕上方去。
+ * 所以先按原值抬，一帧后实测「输入栏底边离可视区底部还差多少」再修正一次：
+ * 多抬了就收回去；本来就贴着键盘的（iOS / 带 transform 的容器）实测差值 ≈ 0，不动。
+ */
+const DOCK_EDGE_GAP_PX = 8;
+const DOCK_OVERLIFT_TOLERANCE_PX = 24;
+
+const rawLiftPx = computed(() => Math.max(0, Number(props.keyboardHeight || props.voiceKeyboardHeight) || 0));
+/** 实测多抬上去的量，只往下收、不额外补 */
+const overLiftPx = ref(0);
 const inputLiftStyle = computed(() => {
-  const lift = Math.max(0, Number(props.keyboardHeight || props.voiceKeyboardHeight) || 0);
+  const lift = Math.max(0, rawLiftPx.value - overLiftPx.value);
   return lift > 0 ? { bottom: `${lift}px` } : {};
 });
+
+let liftMeasureTimers: Array<ReturnType<typeof setTimeout>> = [];
+function clearLiftMeasure() {
+  liftMeasureTimers.forEach(timer => clearTimeout(timer));
+  liftMeasureTimers = [];
+}
 
 const dockRef = ref<unknown>(null);
 const voiceSheetRef = ref<unknown>(null);
@@ -212,6 +233,28 @@ function readEl(raw: unknown): HTMLElement | null {
   if (typeof HTMLElement !== "undefined" && el instanceof HTMLElement) return el;
   return null;
 }
+
+/** 输入栏底边应该正好落在可视区底部（= 键盘上沿）：高出来多少就收掉多少 */
+function correctLiftIfOverLifted() {
+  const dock = readEl(dockRef.value);
+  const viewport = typeof window !== "undefined" ? window.visualViewport : null;
+  if (!dock || !viewport) return;
+  const visibleBottom = Math.round(viewport.height + viewport.offsetTop);
+  const surplus = visibleBottom - Math.round(dock.getBoundingClientRect().bottom);
+  if (surplus <= DOCK_OVERLIFT_TOLERANCE_PX) return;
+  overLiftPx.value = Math.min(rawLiftPx.value, overLiftPx.value + (surplus - DOCK_EDGE_GAP_PX));
+}
+
+watch(rawLiftPx, async (next) => {
+  clearLiftMeasure();
+  overLiftPx.value = 0;
+  if (!(next > 0)) return;
+  await nextTick();
+  // 键盘动画期间报上来的高度还会变，量三次兜底（每次都从当前已修正后的位置再算差值）
+  requestAnimationFrame(correctLiftIfOverLifted);
+  liftMeasureTimers.push(setTimeout(correctLiftIfOverLifted, 260));
+  liftMeasureTimers.push(setTimeout(correctLiftIfOverLifted, 520));
+});
 
 function measureComposerHeight() {
   const dock = readEl(dockRef.value);
@@ -801,6 +844,7 @@ onBeforeUnmount(() => {
   composerResizeObserver = null;
   // 按住计时的兜底：页面离开时别把定时器留到下一轮
   clearHoldTimer();
+  clearLiftMeasure();
 });
 </script>
 
@@ -2121,7 +2165,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 16rpx;
+  // padding-top: 16rpx;
 }
 
 .chat-input__footer-text {

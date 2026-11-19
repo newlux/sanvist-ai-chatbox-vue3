@@ -72,7 +72,7 @@ useVerticalScrollGesture(tableRoot);
 
 <style lang="scss" scoped>
 /* 表格：正文底色跟随外层 AI 气泡（#F3F3F3，见 ai-bubble-v2 的回答卡），
-   表头第一行铺淡蓝底 #E1F0FF，所有描边（外框 + 行分隔线 + 列分隔线）统一 #E8E8E8 */
+   表头第一行铺 #E8E8E8，所有描边（外框 + 行分隔线 + 列分隔线）也是 #E8E8E8 */
 .table-block {
   width: 100%;
   overflow: hidden;
@@ -107,12 +107,12 @@ useVerticalScrollGesture(tableRoot);
   display: table-row;
   color: #1a1a1e;
 }
-/* 表头（第一行）：铺 #E1F0FF，再靠加粗与正文区分 */
+/* 表头（第一行）：铺 #E8E8E8，再靠加粗与正文区分 */
 .table-block__row--head {
   font-weight: 600;
 }
 .table-block__row--head .table-block__cell {
-  background: #e1f0ff;
+  background: #e8e8e8;
 }
 .table-block__cell {
   display: table-cell;
@@ -142,7 +142,7 @@ useVerticalScrollGesture(tableRoot);
 
 /* ===== 深色主题：结构化表格块（Ardot 1193:5104 → 回复卡 1193:5116）=====
    单元格文字与表格外的正文同色（实色 #FFFFFF，与 markdown 正文一致）；
-   外框 + 行分隔线 + 列分隔线一律 #303030；表头铺深蓝底 #173859；
+   外框 + 行分隔线 + 列分隔线一律 #303030；表头铺 #303030；
    尺寸 / 间距 / 字号不动 */
 .table-block--dark {
   border-color: #303030;
@@ -158,10 +158,10 @@ useVerticalScrollGesture(tableRoot);
     border-left-color: #303030;
   }
 
-  // 表头：深蓝底 #173859 + 白字加粗；浅色稿的 #E1F0FF 在这里顶掉
+  // 表头：#303030 + 白字加粗；浅色稿的 #E8E8E8 在这里顶掉
   .table-block__row--head .table-block__cell {
     color: #ffffff;
-    background: #173859;
+    background: #303030;
   }
 }
 </style>

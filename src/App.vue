@@ -24,12 +24,11 @@ const logger = createLogger("app");
  * 置空时请求不会带 Authorization 头（见 utils/request 的 getRequestHeaders）。
  * 注意：这串会打进产物，正式上线前需要确认是否保留。
  */
-const LOCAL_AUTHORIZATION_FALLBACK = "bearer eb793de8-ceb8-4b4c-a44b-0c668f2985b1";
+const LOCAL_AUTHORIZATION_FALLBACK = "bearer 80bdd29b-8827-416d-bd69-a5a65a56bee7";
 
 type StartupQuery = Record<string, any>;
 
 interface LaunchOptions {
-  path?: string;
   query?: StartupQuery;
 }
 
@@ -75,21 +74,6 @@ watch(
 
 function getLaunchQuery(options?: LaunchOptions): StartupQuery {
   return resolveLaunchQuery(options);
-}
-
-/**
- * 车载端 task-pc 的启动判定：这一页不消费 /settings 的任何字段
- * （语言由宿主注入、外观恒为深色、没有纯净模式与录音偏好），进应用不用拉全量设置。
- *
- * onLaunch 的 path 在 H5 直开 / hash 路由下偶尔是空的，所以再兜一层 URL 判断；
- * 万一没命中，settings store 自己做了并发去重，其它页面 onLoad 时也会按需补拉，不会漏。
- */
-function isTaskPcEntry(options?: LaunchOptions): boolean {
-  if (String(options?.path || "").includes("pages/task-pc/index")) return true;
-  if (typeof window === "undefined") return false;
-  const hash = String(window.location.hash || "");
-  const search = String(window.location.search || "");
-  return hash.includes("pages/task-pc/index") || search.includes("pages/task-pc/index");
 }
 
 /**
@@ -392,9 +376,8 @@ onLaunch(async (options) => {
   await systemStore.setLanguage(baseInfo.lang);
   // 系统设置（接口文档 4.5 GET /settings）：进应用拉一次全量，
   // 语言 / 外观 / 记忆 / 纯净模式 / 对话 / 音色 / 语速各落到自己的归属地（见 stores/modules/settings.ts）。
-  // 不 await：拉不到就用宿主注入的语言与本地默认值，不能阻塞首屏。
-  // 车载端 task-pc 直接跳过这个请求（该页不消费设置字段，见 isTaskPcEntry）。
-  if (!isTaskPcEntry(options)) void settingsStore.load();
+  // 不 await：拉不到就用宿主注入的语言与本地默认值，不能阻塞首屏
+  void settingsStore.load();
   watchLateStartupParams();
   await systemStore.initPhoneSizesInfo();
   initializeDeviceInfo();
