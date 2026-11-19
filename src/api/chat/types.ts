@@ -434,6 +434,10 @@ export interface GanttViewPayload extends Record<string, unknown> {
   status_text?: string;
   /** 业务日期，如 2026-10-13 */
   businessDate?: string;
+  /** 宿主当前界面语言：zh_CN / en_US，离线包据此初始化 i18n */
+  lang?: string;
+  /** 宿主当前深浅色，离线包据此初始化 systemStore */
+  isDark?: boolean;
 }
 
 export interface RichContentEvent {

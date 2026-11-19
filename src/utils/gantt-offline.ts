@@ -50,6 +50,20 @@ export interface GanttContainerMode {
 }
 
 /**
+ * 宿主当前界面语言（与深浅色同一口径，唯一来源 systemStore）。
+ * 统一成离线包 i18n 的 locale 命名：zh_CN / en_US。
+ */
+export function resolveGanttLanguage() {
+  const systemStore = useSystemStore();
+  const raw = String(systemStore.header?.Lang || "").trim();
+  if (!raw) return "zh_CN";
+  const base = raw.toLowerCase().replace(/-/g, "_").split("_")[0];
+  if (base === "en") return "en_US";
+  if (base === "zh") return "zh_CN";
+  return raw;
+}
+
+/**
  * 宿主侧的「是否横屏 / 全屏」判定（按要求只放在 chatbox 这一侧）。
  *
  * - `schedule` / `pre` / `replan` 三个调度视图在普通手机上横屏 + 全屏；
@@ -145,6 +159,7 @@ const SLIM_VIEW_KEYS = [
   "businessDate",
   "payload",
   "isDark",
+  "lang",
 ] as const;
 
 /** 去掉后端透传的其余字段，只保留离线包要用的 */
@@ -233,9 +248,13 @@ export async function openOfflineGantt(viewType: string, view: GanttViewPayload)
     throw new Error("demo 数据桥不可用：saveDemoModeData 调用超时（宿主未实现该 JSAPI）");
   }
 
-  // 深浅色随整包带给离线包：离线包 getDemoModeData 读回后据此初始化自己的 systemStore
+  // 深浅色 / 语言随整包带给离线包：离线包读回后初始化自己的 systemStore 与 i18n
   const systemStore = useSystemStore();
-  const payload = { ...view, isDark: systemStore.isDark } as GanttViewPayload;
+  const payload = {
+    ...view,
+    isDark: systemStore.isDark,
+    lang: resolveGanttLanguage(),
+  } as GanttViewPayload;
 
   // 方向按机型定：本身就是横屏画布的机型（智慧屏 / 电视 / 大屏一体机）走竖屏容器，
   // 其余（普通手机）仍是横屏 + 全屏。设备信息在 App 启动时预热过，这里基本不耗时。
@@ -245,7 +264,8 @@ export async function openOfflineGantt(viewType: string, view: GanttViewPayload)
   // 没有 token 就不带（离线包请求层空 Authorization 时自动省略该头）
   const auth = String(systemStore.header.Authorization || "");
   const authQuery = auth ? `&Authorization=${encodeURIComponent(auth)}` : "";
-  const path = `${GANTT_OFFLINE_ENTRY}?target=${encodeURIComponent(viewType)}${authQuery}`;
+  const langQuery = `&lang=${encodeURIComponent(String(payload.lang || "zh_CN"))}`;
+  const path = `${GANTT_OFFLINE_ENTRY}?target=${encodeURIComponent(viewType)}${authQuery}${langQuery}`;
   const startedAt = Date.now();
   const payloadBytes = measureBytes(payload);
   const slimBytes = measureBytes(pickGanttViewForOffline(payload));

@@ -3,6 +3,7 @@ import type { GanttViewRow } from "@/api/chat/types";
 import type { SchedulePinchEvent } from "@/hooks/useScheduleGestures";
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 
 import arrowNextIcon from "@/assets/img/schedule-arrow-next.svg";
 import arrowPrevIcon from "@/assets/img/schedule-arrow-prev.svg";
@@ -48,6 +49,8 @@ import { backFromScene } from "@/utils/scene-navigation";
  */
 
 defineOptions({ name: "SchedulePage" });
+
+const { t } = useI18n();
 
 /**
  * 进入页面自动横屏（原生优先、CSS 旋转兜底），离开时还原。
@@ -270,7 +273,7 @@ function normalizeViewRows(viewRows: GanttViewRow[]): ScheduleRow[] {
         id: String(bar.id || `task-${rowIndex + 1}-${barIndex + 1}`),
         title: String(bar.title || "").trim(),
         timeText: String(bar.timeText || "").trim()
-          || (planned ? `${hhmm(startMin)}-${hhmm(barEndMin)}` : "时间待定"),
+          || (planned ? `${hhmm(startMin)}-${hhmm(barEndMin)}` : t("gantt-time-tbd")),
         startMin,
         endMin: barEndMin,
         state: stateFromState(bar.state),
@@ -473,6 +476,11 @@ function rowTagVisible(groupRows: ScheduleRow[], row: ScheduleRow) {
   return row.bars.some(bar => changedBarIds.value.has(bar.id));
 }
 
+/** 内部仍用「旧 / 新」做分组判断，仅展示层翻译 */
+function tagLabel(tag?: string) {
+  return tag === "新" ? t("gantt-tag-new") : t("gantt-tag-old");
+}
+
 /** 连接线坐标系：与 .schedule__grid-inner 一致（表头 45 高、重排每行 40 高、条 26 高） */
 const LINK_RULER_HEIGHT = 0;
 const LINK_ROW_HEIGHT = 40;
@@ -546,18 +554,18 @@ const linkLines = computed(() => {
 });
 
 /** 图例（稿子 7229:440 原计划 / 7229:437 新计划 / 7229:444 已取消） */
-const legend = [
-  { key: "planned", label: "原计划" },
-  { key: "new", label: "新计划" },
-  { key: "canceled", label: "已取消" },
-] as const;
+const legend = computed(() => [
+  { key: "planned", label: t("gantt-legend-planned") },
+  { key: "new", label: t("gantt-legend-new") },
+  { key: "canceled", label: t("task-status-canceled") },
+]);
 
 /** 分钟数 →「HH:MM」（提示文案用真实排班时间，不用条里可能被截断的 timeText；取整 / 回绕见 hhmm） */
 function formatMinute(min: number) {
   const total = Math.round(Number(min) || 0);
   const clock = hhmm(total);
-  // 跨过 24 点的时段标「次日」，与接口 timeText 的写法（「次日00:21—次日01:04」）保持一致
-  return total >= 1440 ? `次日${clock}` : clock;
+  // 跨过 24 点的时段标「次日」，与接口 timeText 的写法保持一致
+  return total >= 1440 ? t("gantt-next-day-prefix", { time: clock }) : clock;
 }
 
 function formatRange(bar: ScheduleBar) {
@@ -626,18 +634,18 @@ const notice = computed(() => {
     const oldRange = formatRange(oldHit.bar);
     const newRange = formatRange(newHit.bar);
     if (oldHit.bar.state === "canceled") {
-      return `${head}：原 ${oldRange} 已取消，调整至 ${newRange}`;
+      return t("gantt-notice-canceled", { head, old: oldRange, new: newRange });
     }
     if (oldRange === newRange) {
-      return `${head}：${oldRange} 与原计划一致，未调整`;
+      return t("gantt-notice-unchanged", { head, range: oldRange });
     }
-    return `${head}：${oldRange} 调整至 ${newRange}`;
+    return t("gantt-notice-adjusted", { head, old: oldRange, new: newRange });
   }
   if (newHit) {
-    return `${head}：新增任务，安排在 ${formatRange(newHit.bar)}`;
+    return t("gantt-notice-added", { head, new: formatRange(newHit.bar) });
   }
   if (oldHit) {
-    return `${head}：原 ${formatRange(oldHit.bar)} 在新计划中不再安排`;
+    return t("gantt-notice-removed", { head, old: formatRange(oldHit.bar) });
   }
   return "";
 });
@@ -834,7 +842,7 @@ function toggleShowAll() {
         <view class="schedule__toggle-all" @tap="toggleShowAll">
           <view class="schedule__checkbox" :class="{ 'schedule__checkbox--on': showAllTasks }" />
           <text class="schedule__legend-text">
-            查看全部任务
+            {{ t("gantt-show-all-tasks") }}
           </text>
         </view>
 
@@ -852,7 +860,7 @@ function toggleShowAll() {
       <view class="schedule__side">
         <view class="schedule__side-head">
           <text class="schedule__side-head-text">
-            资源与车辆人员
+            {{ t("gantt-resource-title") }}
           </text>
         </view>
         <!-- 同一辆车的「旧 / 新」两行合成一格：车辆信息只显示一次、跨两行上下居中 -->
@@ -884,7 +892,7 @@ function toggleShowAll() {
           <view v-if="group.rows.length > 1" class="schedule__side-tags">
             <view v-for="row in group.rows" :key="row.id" class="schedule__side-tag">
               <text v-if="rowTagVisible(group.rows, row)">
-                {{ row.tag }}
+                {{ tagLabel(row.tag) }}
               </text>
             </view>
           </view>
@@ -993,7 +1001,7 @@ function toggleShowAll() {
     <!-- 底部提示条（稿子 7229:449：476×42 白底 + #F2F2F2 描边圆角 6，左侧「任务置换」深色胶囊 7229:291） -->
     <view v-if="notice" class="schedule__notice">
       <view class="schedule__notice-chip">
-        任务置换
+        {{ t("gantt-task-changes") }}
       </view>
       <text class="schedule__notice-text">
         {{ notice }}

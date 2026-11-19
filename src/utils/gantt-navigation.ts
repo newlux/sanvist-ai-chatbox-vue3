@@ -1,6 +1,6 @@
 import type { GanttViewPayload } from "@/api/chat/types";
 
-import { openOfflineGantt, resolveOfflineGanttDecision } from "@/utils/gantt-offline";
+import { openOfflineGantt, resolveGanttLanguage, resolveOfflineGanttDecision } from "@/utils/gantt-offline";
 import { createLogger } from "@/utils/logger";
 import { navigateToScene } from "@/utils/scene-navigation";
 import { stashPendingScheduleView } from "@/utils/schedule-view";
@@ -76,7 +76,7 @@ export async function openGanttView(payload?: GanttViewPayload | null) {
   }
   lastOpenAt = now;
 
-  const view = payload || {};
+  const view = { ...(payload || {}), lang: resolveGanttLanguage() } as GanttViewPayload;
   const viewType = String(view.viewType || "").trim().toLowerCase();
   const url = VIEW_TYPE_PAGE[viewType] || VIEW_TYPE_PAGE.schedule;
 
