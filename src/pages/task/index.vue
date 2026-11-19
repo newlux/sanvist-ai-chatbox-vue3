@@ -28,6 +28,7 @@ import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
+import AudioRipple from "@/components/audio-ripple/index.vue";
 import { AI_ASK_WELCOME_DONE_KEY } from "@/config";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useAssistantNavigation } from "@/hooks/useAssistantNavigation";
@@ -169,6 +170,21 @@ const duplexStatus = computed(() => {
   if (duplexStarting.value) return t('duplex-starting');
   return duplexActive.value ? duplexTranscript.value || t('duplex-listening') : '';
 });
+
+/**
+ * 播报声纹的弧段端点（0 = 右中，90 = 顶中，180 = 左中，270 = 底中，角度递增即沿边绕行）。
+ * 120 → 60 走 3/4 圈：左 → 底 → 右，顶部留 60° 缺口，正好是「左右 + 底部」三条边。
+ * colorSpeed 归零：颜色固定成「左紫 → 蓝 → 蓝紫 → 右粉」，不随动画旋转。与首页同一份参数。
+ */
+const TTS_RIPPLE_APPEARANCE = { startAngle: 120, endAngle: 60, colorSpeed: 0 };
+/**
+ * 是否正在语音播报（页面左右下边缘声纹的显示时机）：
+ * 实时流式听播（realtimeTts.playing）或整段播报（消息上的 ttsPlaying）任一在播都算。
+ */
+const isTtsPlaying = computed(() =>
+  Boolean(realtimeTts.playing.value)
+  || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
+);
 
 /**
  * 任务协同的「沙箱」临时配置：两个值都来自环境变量，只在 .env.development 里配了才生效。
@@ -1641,6 +1657,18 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         @confirm="onBadFeedbackConfirm"
       />
     </view>
+
+    <!-- 语音播报声纹（与首页同一份实现）：播报期间沿屏幕左、底、右三边走渐变光带，
+         纯装饰层，不吃点击；pixel-ratio 压到 1 是为了全屏逐像素运算别拖慢主线程 -->
+    <AudioRipple
+      v-if="isTtsPlaying"
+      class="ai-page__tts-ripple"
+      variant="output"
+      preview="speech"
+      :dark="isDark"
+      :pixel-ratio="1"
+      :output-appearance="TTS_RIPPLE_APPEARANCE"
+    />
   </view>
 </template>
 
@@ -1666,6 +1694,14 @@ $color-white: #ffffff;
   font-family: PingFang SC;
   overflow: hidden;
   overscroll-behavior: none;
+}
+
+/* 语音播报声纹（AudioRipple）：全屏铺满，只走左、底、右三边，压在内容之上但不吃点击 */
+.ai-page__tts-ripple {
+  position: fixed;
+  inset: 0;
+  z-index: 1025;
+  pointer-events: none;
 }
 
 .ai-page__chat {

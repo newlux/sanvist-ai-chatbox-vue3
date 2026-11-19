@@ -2,7 +2,7 @@
 import type { PushMessageRecord } from "@/utils/push/types";
 import { onHide, onShow } from "@dcloudio/uni-app";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import heySani from "@/assets/img/hey-sani.svg";
+import heySani from "@/assets/img/hey-sani-dark.svg";
 import enlargeIcon from "@/assets/img/icon-enlarge.svg";
 import reduceIcon from "@/assets/img/icon-reduce.svg";
 import glowMaskBottom from "@/assets/img/persona-awakening/glow-mask-bottom.png";

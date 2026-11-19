@@ -209,19 +209,20 @@ const duplexStatus = computed(() => {
 });
 
 /**
- * 是否正在语音播报（页面左右下边缘流光的显示时机）：
+ * 播报声纹的弧段端点（0 = 右中，90 = 顶中，180 = 左中，270 = 底中，角度递增即沿边绕行）。
+ * 120 → 60 走 3/4 圈：左 → 底 → 右，顶部留 60° 缺口，正好是「左右 + 底部」三条边。
+ * colorSpeed 归零：颜色固定成「左紫 → 蓝 → 蓝紫 → 右粉」，不随动画旋转。与首页同一份参数。
+ */
+const TTS_RIPPLE_APPEARANCE = { startAngle: 120, endAngle: 60, colorSpeed: 0 };
+/**
+ * 是否正在语音播报（页面左右下边缘声纹的显示时机）：
  * 实时流式听播（realtimeTts.playing）或整段播报（消息上的 ttsPlaying）任一在播都算。
  */
 const isTtsPlaying = computed(() =>
   Boolean(realtimeTts.playing.value)
   || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
 );
-/**
- * 播报声纹的弧段端点（与首页 pages/index 的 TTS_RIPPLE_APPEARANCE 同一套参数）：
- * 120 → 60 走 3/4 圈，左 → 底 → 右，顶部留 60° 缺口；
- * colorSpeed 归零：颜色固定成「左紫 → 蓝 → 蓝紫 → 右粉」，不随动画旋转。
- */
-const TTS_RIPPLE_APPEARANCE = { startAngle: 120, endAngle: 60, colorSpeed: 0 };
+ 
 const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
   // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
