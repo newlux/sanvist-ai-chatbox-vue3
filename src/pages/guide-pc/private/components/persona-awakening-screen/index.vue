@@ -2,6 +2,7 @@
 import type { PushMessageRecord } from "@/utils/push/types";
 import { onHide, onShow } from "@dcloudio/uni-app";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import heyNeoLight from "@/assets/img/hey-neo-light.svg";
 import heySani from "@/assets/img/hey-sani-dark.svg";
 import enlargeIcon from "@/assets/img/icon-enlarge.svg";
 import reduceIcon from "@/assets/img/icon-reduce.svg";
@@ -10,6 +11,7 @@ import saniLogo from "@/assets/img/sani-logo.webp";
 import tellDark from "@/assets/img/tell-dark.webp";
 import AudioRipple from "@/components/audio-ripple/index.vue";
 import PushNoticePanel from "@/pages/guide-pc/private/components/push-notice-panel/index.vue";
+import { useSystemStore } from "@/stores/index";
 import { createLogger } from "@/utils/logger";
 import { pushNoticeSoundPlaying } from "@/pages/guide-pc/private/utils/push/push-sound";
 
@@ -59,6 +61,15 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ listen: []; notice: [record: PushMessageRecord] }>();
 
 const logger = createLogger("persona-awakening");
+
+/**
+ * 深浅色：深色是设计稿原样（#0D0D0D 底 + 白字 + hey-sani-dark.svg）；
+ * 浅色主题下底改 #FAFAFA、文字改 #0D0D0D，顶部「Hey，SANI」换 hey-neo-light.svg。
+ * 外观唯一来源是 systemStore.appAppearance（宿主 getColorScheme），与页面其它深色样式同口径。
+ */
+const systemStore = useSystemStore();
+const isDark = computed(() => systemStore.isDark);
+const heyLogoSrc = computed(() => (isDark.value ? heySani : heyNeoLight));
 
 const pageVisible = ref(false);
 const debugPanelOpen = ref(false);
@@ -218,7 +229,10 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- 291:7285「老板屏页面」：铺满视口，clipsContent -->
-  <view class="persona-awakening" :class="{ 'persona-awakening--debug-open': debugPanelOpen }">
+  <view
+    class="persona-awakening"
+    :class="{ 'persona-awakening--debug-open': debugPanelOpen, 'persona-awakening--light': !isDark }"
+  >
     <view
       class="persona-awakening__screen"
       :class="{ 'persona-awakening__screen--playing': pageVisible && pushNoticeSoundPlaying }"
@@ -267,7 +281,7 @@ onBeforeUnmount(() => {
         :aria-expanded="debugPanelOpen"
         @click.stop="debugPanelOpen = true"
       >
-        <image class="persona-awakening__hey" :src="heySani" mode="aspectFit" />
+        <image class="persona-awakening__hey" :src="heyLogoSrc" mode="aspectFit" />
       </button>
 
       <!-- 右上角全屏切换：默认 icon-enlarge.svg，全屏后切 icon-reduce.svg -->
@@ -362,6 +376,25 @@ onBeforeUnmount(() => {
   left: 0;
   overflow: hidden;
   background: #0d0d0d;
+}
+
+/**
+ * 浅色主题（`.persona-awakening--light` 由脚本按 systemStore.isDark 挂上）：
+ * 底改 #FAFAFA、标题 / 说明文字改 #0D0D0D，顶部 logo 在脚本里换 hey-neo-light.svg。
+ * 根容器与 screen 一并改，避免任何缝隙透出深色。
+ */
+.persona-awakening--light {
+  background: #fafafa;
+
+  .persona-awakening__screen,
+  .persona-awakening__backdrop {
+    background: #fafafa;
+  }
+
+  .persona-awakening__title,
+  .persona-awakening__desc {
+    color: #0d0d0d;
+  }
 }
 
 /**
