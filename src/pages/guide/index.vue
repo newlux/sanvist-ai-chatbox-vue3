@@ -28,6 +28,7 @@ import AiSlotDrawer from "@/components/ai-slot-drawer/index.vue";
 import AiVoiceQueryBar from "@/components/ai-voice-query-bar/index.vue";
 import AiVoiceTranscript from "@/components/ai-voice-transcript/index.vue";
 import AiWelcome from "@/components/ai-welcome/index.vue";
+import AudioRipple from "@/components/audio-ripple/index.vue";
 import { useChatFeedback } from "@/hooks/useChatFeedback";
 import { useAssistantNavigation } from "@/hooks/useAssistantNavigation";
 import { useChatSend } from "@/hooks/useChatSend";
@@ -215,6 +216,12 @@ const isTtsPlaying = computed(() =>
   Boolean(realtimeTts.playing.value)
   || chatStore.messages.some(message => message.role === "ai" && message.ttsPlaying),
 );
+/**
+ * 播报声纹的弧段端点（与首页 pages/index 的 TTS_RIPPLE_APPEARANCE 同一套参数）：
+ * 120 → 60 走 3/4 圈，左 → 底 → 右，顶部留 60° 缺口；
+ * colorSpeed 归零：颜色固定成「左紫 → 蓝 → 蓝紫 → 右粉」，不随动画旋转。
+ */
+const TTS_RIPPLE_APPEARANCE = { startAngle: 120, endAngle: 60, colorSpeed: 0 };
 const { sendMessage: sendChatMessage, sendQuickPrompt, sendAskSlotSelection, beginAsrPlaceholder, discardAsrPlaceholder, stopGenerating, cancelActiveStream } = useChatSend(chatScope, {
   scene: "GUIDE",
   // 发送后强制回底（走 scrollToBottom(true)，不再传 keepScrollOnSend 保留阅读位置）；
@@ -1807,6 +1814,18 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         @confirm="onBadFeedbackConfirm"
       />
     </view>
+
+    <!-- 语音播报声纹（与首页同一套动效）：播报期间沿屏幕左、底、右三边走渐变光带，
+         纯装饰层，不吃点击；pixel-ratio 压到 1 是为了全屏逐像素运算别拖慢主线程 -->
+    <AudioRipple
+      v-if="isTtsPlaying"
+      class="ai-page__tts-ripple"
+      variant="output"
+      preview="speech"
+      :dark="isDark"
+      :pixel-ratio="1"
+      :output-appearance="TTS_RIPPLE_APPEARANCE"
+    />
   </view>
 </template>
 
@@ -1832,6 +1851,15 @@ $color-white: #ffffff;
   font-family: PingFang SC;
   overflow: hidden;
   overscroll-behavior: none;
+}
+
+/* 语音播报声纹（AudioRipple）：全屏铺满，只走左、底、右三边，压在内容之上但不吃点击
+   （与首页 .ai-page__tts-ripple 同口径） */
+.ai-page__tts-ripple {
+  position: fixed;
+  inset: 0;
+  z-index: 1025;
+  pointer-events: none;
 }
 
 .ai-page__chat {
