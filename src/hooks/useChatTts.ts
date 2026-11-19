@@ -1,7 +1,7 @@
-import { onBeforeUnmount, ref } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { getTextToSpeech } from "@/api/chat";
-import { useChatStore } from "@/stores";
+import { useChatStore, useSettingsStore } from "@/stores";
 
 import { createLogger } from "@/utils/logger";
 
@@ -135,6 +135,22 @@ export function useChatTts(scope?: string) {
       patchMessageByMessageId(messageId, { ttsLoading: false });
     }
   }
+
+  /**
+   * 播报中把顶部声音总开关关掉：立刻静音，不等它念完。
+   *
+   * 与 useRealtimeTts 同一口径 —— 总开关是「声音总开关」，关掉就必须没声音，
+   * 否则在作业指导 / 任务协同里表现为「关了开关还在念」（整段音频走的就是这条链路）。
+   * 开关只决定「要不要自动播」，不影响手动点播报这次交互本身。
+   */
+  const settingsStore = useSettingsStore();
+  watch(
+    () => settingsStore.autoTtsEnabled,
+    (enabled) => {
+      if (enabled) return;
+      if (activeMessageId.value !== null || audioCtx) releaseAudio();
+    },
+  );
 
   onBeforeUnmount(releaseAudio);
 

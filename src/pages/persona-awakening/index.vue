@@ -327,7 +327,7 @@ onBeforeUnmount(() => {
  */
 .persona-awakening__backdrop {
   position: absolute;
-  top: 0;
+  top: 40rpx;
   right: 0;
   bottom: 0;
   left: 0;
@@ -354,7 +354,7 @@ onBeforeUnmount(() => {
     "PingFang SC",
     "Microsoft YaHei",
     sans-serif;
-  font-size: 64rpx;
+  font-size: 56rpx;
   font-weight: 500;
   line-height: calc(46 * var(--u));
   letter-spacing: 0;
@@ -380,7 +380,7 @@ onBeforeUnmount(() => {
 .persona-awakening__logo-frame {
   position: absolute;
   z-index: 1;
-  top: calc(359 * var(--uh));
+  top: calc(350 * var(--uh));
   left: 50%;
   width: calc(254 * var(--u));
   height: calc(254 * var(--u));
@@ -430,7 +430,7 @@ onBeforeUnmount(() => {
  */
 .persona-awakening__desc {
   position: absolute;
-  top: calc(682 * var(--uh));
+  top: calc(714 * var(--uh));
   left: 50%;
   display: block;
   overflow: hidden;
@@ -442,7 +442,7 @@ onBeforeUnmount(() => {
     "PingFang SC",
     "Microsoft YaHei",
     sans-serif;
-  font-size: 56rpx;
+  font-size: 44rpx;
   font-weight: 500;
   line-height: calc(41 * var(--u));
   letter-spacing: 0;
@@ -508,11 +508,11 @@ onBeforeUnmount(() => {
 .persona-awakening__hey-trigger {
   position: absolute;
   z-index: 1;
-  top: calc(312 * var(--uh));
+  top: calc(200 * var(--uh));
   left: 50%;
   display: block;
-  width: calc(176.962 * var(--u));
-  height: calc(47 * var(--u));
+  width: 608rpx;
+  height: 192rpx;
   margin: 0;
   padding: 0;
   border: 0;

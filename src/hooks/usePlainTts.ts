@@ -1,8 +1,9 @@
 import type { RealtimeTtsChunk } from "@/api/chat/types";
 import type { TtsStreamHandle } from "@/api/chat/tts-stream";
-import { onBeforeUnmount, ref } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 import { consumeTextToSpeechStream } from "@/api/chat/tts-stream";
 import { resolveReportVoiceId } from "@/hooks/useReportVoice";
+import { useSettingsStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("plain-tts");
@@ -355,6 +356,22 @@ export function usePlainTts() {
     jobs = [{ text: "", chunks: [{ dataUrl: src }], done: true }];
     playNext(id);
   }
+
+  /**
+   * 播报中把顶部声音总开关关掉：立刻静音，不等它念完。
+   *
+   * 与 useRealtimeTts / useChatTts 同一口径 —— 总开关是「声音总开关」，关掉就必须没声音。
+   * 作业指导的步骤卡口播、任务协同的开场白都走这条链路，缺了这一条就会出现
+   * 「关掉开关还在念」。
+   */
+  const settingsStore = useSettingsStore();
+  watch(
+    () => settingsStore.autoTtsEnabled,
+    (enabled) => {
+      if (enabled) return;
+      if (playing.value || audio) stop();
+    },
+  );
 
   onBeforeUnmount(stop);
 
