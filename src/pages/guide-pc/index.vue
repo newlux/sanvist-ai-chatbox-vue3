@@ -2227,6 +2227,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       :dark="isDark"
     />
     <AiChatHeader
+      :chat-scope="chatScope"
       hide-right-buttons
       v-if="!pureMode || pageStage === 'chat'"
       :show-island="pageStage === 'chat'"

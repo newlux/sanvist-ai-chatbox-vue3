@@ -3,7 +3,6 @@ import { useI18n } from "vue-i18n";
 import actionBatchDeleteIcon from "@/assets/img/icon-history-action-batch-delete.svg";
 import actionDeleteIcon from "@/assets/img/icon-history-action-delete.svg";
 import actionEditIcon from "@/assets/img/icon-history-action-edit.svg";
-import autoTtsOffIcon from "@/assets/img/icon-tts-auto-off.png";
 import autoTtsOffSvgIcon from "@/assets/img/icon-tts-auto-off.svg";
 import autoTtsOnIcon from "@/assets/img/icon-tts-auto-on.png";
 import listenLogoDark from "@/assets/img/listen-dark.webp";
@@ -18,7 +17,7 @@ import thinkLogoWebp from "@/assets/img/think.webp";
 import AiSettingsSheet from "@/components/ai-settings-sheet/index.vue";
 import { useIframeMinimize } from "@/hooks/useIframeMinimize";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useChatStore, useSettingsStore, useSystemStore } from "@/stores/index";
+import { useChatStore, useSettingsStore, useSystemStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { getSessionSceneLabel, isPodcastSession } from "@/utils/session-scene";
 
@@ -47,6 +46,7 @@ const props = defineProps({
   shareSelectedRoundCount: { type: Number, default: 0 },
   backOnly: { type: Boolean, default: false },
   hideRightButtons: { type: Boolean, default: false },
+  chatScope: { type: String, default: "" },
   /**
    * 左侧按钮显示「返回」箭头（emit back），替掉默认的历史对话抽屉按钮。
    * 作业指导 / 任务协同按纯净模式传：纯净模式**关闭**时传 true（左侧返回上级页面），
@@ -113,7 +113,7 @@ const emit = defineEmits([
  * - 一旦出现 answer 正文 → 回答中：图标回落到原尺寸，文案「正在回答中..」
  * 不传 scope，沿 provide 链取页面自己的那份 store（首页 / 智能体页各自独立）。
  */
-const chatStore = useChatStore();
+const chatStore = useChatStore(props.chatScope || undefined);
 const systemStore = useSystemStore();
 /**
  * 语音播报总开关（头部回主页按钮左边那颗喇叭）：
@@ -166,13 +166,10 @@ function onTellLogoError() {
   stateGifLoaded.value.tell = false;
 }
 /**
- * 自动播报开关图标：关闭态在深色下换 icon-tts-auto-off.svg（#6B6B6B 线稿 + 斜杠缺口）。
+ * 自动播报开关图标：关闭态统一走 icon-tts-auto-off.svg（#5D5D5D 线稿 + 斜杠缺口），浅色 / 深色同一张。
  * 走这张图时不能套头部的统一反相，否则线稿会被整片染白、缺口糊掉，见样式里 tts-switch--off 的 filter: none。
  */
-const autoTtsIcon = computed(() => {
-  if (autoTtsEnabled.value) return autoTtsOnIcon;
-  return darkPlain.value ? autoTtsOffSvgIcon : autoTtsOffIcon;
-});
+const autoTtsIcon = computed(() => (autoTtsEnabled.value ? autoTtsOnIcon : autoTtsOffSvgIcon));
 const answering = computed(() => {
   if (!props.generating) return false;
   const list = chatStore.messages;
@@ -1149,6 +1146,7 @@ onBeforeUnmount(() => {
   }
 }
 
+
 .ai-chat-header {
   position: relative;
   flex: 0 0 auto;
@@ -1199,7 +1197,7 @@ onBeforeUnmount(() => {
     filter: brightness(0) invert(1);
   }
 
-  // 自动播报「关闭态」深色下走 icon-tts-auto-off.svg（#6B6B6B 线稿 + 斜杠缺口），
+  // 自动播报「关闭态」走 icon-tts-auto-off.svg（#5D5D5D 线稿 + 斜杠缺口），
   // 套反相会被整片染白、缺口糊掉，所以这一种情况免掉反相
   .chat-header__tts-switch--off .chat-header__icon-tts-img {
     filter: none;
