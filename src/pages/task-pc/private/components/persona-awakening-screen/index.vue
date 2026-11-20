@@ -2,7 +2,7 @@
 import type { PushMessageRecord } from "@/utils/push/types";
 import { onHide, onShow } from "@dcloudio/uni-app";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import heySani from "@/assets/img/hey-sani-dark.svg";
+import sanyNeoDark from "@/assets/img/sany-neo-dark.svg";
 import enlargeIcon from "@/assets/img/icon-enlarge.svg";
 import reduceIcon from "@/assets/img/icon-reduce.svg";
 import glowMaskBottom from "@/assets/img/persona-awakening/glow-mask-bottom.png";
@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
         :aria-expanded="debugPanelOpen"
         @click.stop="debugPanelOpen = true"
       >
-        <image class="persona-awakening__hey" :src="heySani" mode="aspectFit" />
+        <image class="persona-awakening__hey" :src="sanyNeoDark" mode="aspectFit" />
       </button>
 
       <!-- 右上角全屏切换：默认 icon-enlarge.svg，全屏后切 icon-reduce.svg -->
@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
  */
 .persona-awakening__backdrop {
   position: absolute;
-  top: 0;
+  top: 40rpx;
   right: 0;
   bottom: 0;
   left: 0;
@@ -383,7 +383,7 @@ onBeforeUnmount(() => {
     "PingFang SC",
     "Microsoft YaHei",
     sans-serif;
-  font-size: 64rpx;
+  font-size: 56rpx;
   font-weight: 500;
   line-height: calc(46 * var(--u));
   letter-spacing: 0;
@@ -413,7 +413,7 @@ onBeforeUnmount(() => {
 .persona-awakening__logo-frame {
   position: absolute;
   z-index: 1;
-  top: calc(359 * var(--uh));
+  top: calc(350 * var(--uh));
   left: 50%;
   width: calc(254 * var(--u));
   height: calc(254 * var(--u));
@@ -463,7 +463,7 @@ onBeforeUnmount(() => {
  */
 .persona-awakening__desc {
   position: absolute;
-  top: calc(682 * var(--uh));
+  top: calc(714 * var(--uh));
   left: 50%;
   display: block;
   overflow: hidden;
@@ -475,8 +475,8 @@ onBeforeUnmount(() => {
     "PingFang SC",
     "Microsoft YaHei",
     sans-serif;
-  font-size: 56rpx;
-  font-weight: 500;
+  font-size: 44rpx;
+  font-weight: 300;
   line-height: calc(41 * var(--u));
   letter-spacing: 0;
   text-align: center;
@@ -535,17 +535,17 @@ onBeforeUnmount(() => {
 
 /**
  * 291:18735 顶部「Hey，SANI」：设计 176.962 × 47 @ (871, 312)，水平居中、距顶用纵向基准
- * 素材改用 hey-sani.svg（106 × 24，比例 4.42 比按钮的 3.77 更扁），
+ * 素材用 sany-neo-dark.svg（120 × 29，比例 4.14 比按钮的 3.17 更扁），
  * `mode="aspectFit"` 等比装入按钮，宽度贴满、上下各留一点空白，字形不被拉伸
  */
 .persona-awakening__hey-trigger {
   position: absolute;
   z-index: 1;
-  top: calc(312 * var(--uh));
+  top: calc(200 * var(--uh));
   left: 50%;
   display: block;
-  width: calc(176.962 * var(--u));
-  height: calc(47 * var(--u));
+  width: 608rpx;
+  height: 192rpx;
   margin: 0;
   padding: 0;
   border: 0;

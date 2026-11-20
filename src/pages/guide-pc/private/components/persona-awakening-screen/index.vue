@@ -370,31 +370,12 @@ onBeforeUnmount(() => {
  */
 .persona-awakening__backdrop {
   position: absolute;
-  top: 0;
+  top: 40rpx;
   right: 0;
   bottom: 0;
   left: 0;
   overflow: hidden;
   background: #0d0d0d;
-}
-
-/**
- * 浅色主题（`.persona-awakening--light` 由脚本按 systemStore.isDark 挂上）：
- * 底改 #FAFAFA、标题 / 说明文字改 #0D0D0D，顶部 logo 在脚本里换 hey-neo-light.svg。
- * 根容器与 screen 一并改，避免任何缝隙透出深色。
- */
-.persona-awakening--light {
-  background: #fafafa;
-
-  .persona-awakening__screen,
-  .persona-awakening__backdrop {
-    background: #fafafa;
-  }
-
-  .persona-awakening__title,
-  .persona-awakening__desc {
-    color: #0d0d0d;
-  }
 }
 
 /**
@@ -416,7 +397,7 @@ onBeforeUnmount(() => {
     "PingFang SC",
     "Microsoft YaHei",
     sans-serif;
-  font-size: 64rpx;
+  font-size: 56rpx;
   font-weight: 500;
   line-height: calc(46 * var(--u));
   letter-spacing: 0;
@@ -446,7 +427,7 @@ onBeforeUnmount(() => {
 .persona-awakening__logo-frame {
   position: absolute;
   z-index: 1;
-  top: calc(359 * var(--uh));
+  top: calc(350 * var(--uh));
   left: 50%;
   width: calc(254 * var(--u));
   height: calc(254 * var(--u));
@@ -496,7 +477,7 @@ onBeforeUnmount(() => {
  */
 .persona-awakening__desc {
   position: absolute;
-  top: calc(682 * var(--uh));
+  top: calc(714 * var(--uh));
   left: 50%;
   display: block;
   overflow: hidden;
@@ -508,8 +489,8 @@ onBeforeUnmount(() => {
     "PingFang SC",
     "Microsoft YaHei",
     sans-serif;
-  font-size: 56rpx;
-  font-weight: 500;
+  font-size: 44rpx;
+  font-weight: 300;
   line-height: calc(41 * var(--u));
   letter-spacing: 0;
   text-align: center;
@@ -568,17 +549,17 @@ onBeforeUnmount(() => {
 
 /**
  * 291:18735 顶部「Hey，SANI」：设计 176.962 × 47 @ (871, 312)，水平居中、距顶用纵向基准
- * 素材改用 hey-sani.svg（106 × 24，比例 4.42 比按钮的 3.77 更扁），
+ * 素材用 sany-neo-dark.svg（120 × 29，比例 4.14 比按钮的 3.17 更扁），
  * `mode="aspectFit"` 等比装入按钮，宽度贴满、上下各留一点空白，字形不被拉伸
  */
 .persona-awakening__hey-trigger {
   position: absolute;
   z-index: 1;
-  top: calc(312 * var(--uh));
+  top: calc(200 * var(--uh));
   left: 50%;
   display: block;
-  width: calc(176.962 * var(--u));
-  height: calc(47 * var(--u));
+  width: 608rpx;
+  height: 192rpx;
   margin: 0;
   padding: 0;
   border: 0;

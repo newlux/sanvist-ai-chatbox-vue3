@@ -8,6 +8,17 @@ import {
 } from "@/config/push";
 import { createLogger } from "@/utils/logger";
 
+/** 每个页面实例独立生成连接标识，自动重连时复用，用户名仍用于主题鉴权。 */
+export function createMqttClientId(username: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const values = crypto.getRandomValues(new Uint32Array(4));
+    const suffix = Array.from(values, value => value.toString(16).padStart(8, "0")).join("");
+    return `${username}-${suffix}`;
+  }
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  return `${username}-${suffix}`;
+}
+
 const logger = createLogger("push-mqtt");
 
 /**
@@ -20,7 +31,7 @@ const logger = createLogger("push-mqtt");
  *   对「以 H5 内嵌在 mPaaS WebView」的形态不划算。
  *
  * 行为对齐协议 4.x：
- * - Client ID / 用户名 = 车载设备号，口令走配置；
+ * - 用户名 = 车载设备号，Client ID = 用户名 + 页面实例随机后缀，口令走配置；
  * - Clean Session = false（服务端保留订阅与未确认的 QoS 1 消息 24 小时，重连自动补投）；
  * - Keep Alive 30s，连续一个周期没收到 PINGRESP 就判定链路已死并重连；
  * - 认证失败（CONNACK 4/5、SUBACK 0x80）按协议 4.2 退避 5 分钟，不得高频重连。

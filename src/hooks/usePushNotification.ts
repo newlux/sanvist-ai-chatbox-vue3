@@ -13,7 +13,7 @@ import {
   pushTopicOf,
 } from "@/config/push";
 import { createLogger } from "@/utils/logger";
-import { MqttPushClient } from "@/utils/push/mqtt-push-client";
+import { createMqttClientId, MqttPushClient } from "@/utils/push/mqtt-push-client";
 import { ackPushDelivered, fetchPushInbox } from "@/utils/push/push-http";
 import { clearPushInbox, getInbox, getOutboxCursor, hasSeenPush, markPushRead, rememberPush, setOutboxCursor } from "@/utils/push/push-inbox";
 import { parseTaskDispatchPush, pushActionOf } from "@/utils/push/push-payload";
@@ -23,7 +23,7 @@ import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 const logger = createLogger("push-notification");
 
 export interface UsePushNotificationOptions {
-  /** 车载设备号：同时是 Client ID / 用户名 / 订阅主题里的 {device_no} */
+  /** 车载设备号：用于用户名与订阅主题，Client ID 另加随机后缀。 */
   deviceNo?: string;
   /** 是否在创建时自动连接（默认 true；离页面即断开） */
   autoStart?: boolean;
@@ -45,6 +45,8 @@ export interface UsePushNotificationOptions {
  */
 export function usePushNotification(options: UsePushNotificationOptions = {}) {
   const deviceNo = options.deviceNo || PUSH_DEVICE_NO;
+  const username = PUSH_USERNAME;
+  const clientId = createMqttClientId(username);
   const httpEnabled = options.enableHttpSupplement ?? PUSH_HTTP_SUPPLEMENT_ENABLED;
   const soundEnabled = options.playSound !== false;
 
@@ -149,8 +151,8 @@ export function usePushNotification(options: UsePushNotificationOptions = {}) {
     running.value = true;
     client = new MqttPushClient({
       url: PUSH_BROKER_URL,
-      clientId: deviceNo,
-      username: PUSH_USERNAME,
+      clientId,
+      username,
       password: PUSH_PASSWORD,
       topic: pushTopicOf(deviceNo),
       onMessage(topic, payload) {

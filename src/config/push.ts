@@ -3,7 +3,7 @@
  *
  * 依据《任务协同助手-车载端MQTT服务器-通信协议规范V2.0》：
  * - 第 2 节：WebSocket + TLS 入口 `wss://mqtt-dev.etripon.com:8084/mqtt`；
- * - 第 3 节：Client ID / 用户名均等于车载设备号，口令由服务方线下交付；
+ * - 第 3 节：用户名等于车载设备号，Client ID 在用户名后追加随机后缀，口令由服务方线下交付；
  * - 第 4 节：QoS 1、Keep Alive 30s、Clean Start = false（持久会话 24h）；
  * - 第 6 节：HTTPS 补漏 / 回执接口。
  *
@@ -14,7 +14,7 @@
 /** MQTT over WebSocket + TLS（车辆网络访问不到 8883 时走这条） */
 export const PUSH_BROKER_URL = "wss://mqtt-dev.etripon.com:8084/mqtt";
 
-/** 车载设备号：同时用作 MQTT Client ID 与用户名（协议 3.x 要求三者一致） */
+/** 车载设备号：用于 MQTT 用户名和订阅主题，Client ID 另加页面实例随机后缀。 */
 export const PUSH_DEVICE_NO = "SIM-BOSS-SCREEN";
 
 export const PUSH_USERNAME = "SIM-BOSS-SCREEN";

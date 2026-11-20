@@ -377,7 +377,13 @@ onLaunch(async (options) => {
   // 系统设置（接口文档 4.5 GET /settings）：进应用拉一次全量，
   // 语言 / 外观 / 记忆 / 纯净模式 / 对话 / 音色 / 语速各落到自己的归属地（见 stores/modules/settings.ts）。
   // 不 await：拉不到就用宿主注入的语言与本地默认值，不能阻塞首屏
-  void settingsStore.load();
+  const pages = getCurrentPages();
+  const hashPath = typeof location === "undefined" ? "" : location.hash.replace(/^#\/?/, "");
+  const currentPath = String(pages[pages.length - 1]?.route || hashPath || options?.path)
+    .replace(/^\//, "").split("?")[0];
+  if (currentPath !== "pages/persona-awakening/index") {
+    void settingsStore.load();
+  }
   watchLateStartupParams();
   await systemStore.initPhoneSizesInfo();
   initializeDeviceInfo();
