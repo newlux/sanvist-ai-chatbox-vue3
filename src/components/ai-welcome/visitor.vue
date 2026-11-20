@@ -1564,13 +1564,12 @@ onMounted(async () => {
         </view>
       </view>
 
-      <!-- 文案组：306:2780 副标题 + 306:2800 描述两行（收尾态淡出）
+      <!-- 文案组：306:2780 副标题 + 306:2800 描述一行（收尾态淡出）
            点这里等同于说对唤醒词：直接进「欢迎了解日常运营AI助手」的自我介绍播报，播完继续走身份选择 -->
       <view class="welcome-visitor__caption" @tap.stop="onCaptionTap">
         <text class="welcome-visitor__slogan">随时，为你而在</text>
         <view class="welcome-visitor__desc">
           <text class="welcome-visitor__desc-line">你的三一设备伙伴</text>
-          <text class="welcome-visitor__desc-line">把问题交给我，把时间留给工作</text>
         </view>
       </view>
     </view>

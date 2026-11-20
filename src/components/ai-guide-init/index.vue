@@ -1413,9 +1413,6 @@ onBeforeUnmount(() => {
             <text class="gi__brand-desc">
               {{ t("init-brand-desc-1") }}
             </text>
-            <text class="gi__brand-desc">
-              {{ t("init-brand-desc-2") }}
-            </text>
           </view>
         </view>
       </view>

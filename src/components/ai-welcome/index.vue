@@ -388,17 +388,14 @@ onBeforeUnmount(() => {
         </view>
       </view>
 
-      <!-- 品牌文案组：图标下方「随时，为你而在」+ 两行灰字，
-           文案沿用引导页那套 i18n（init-brand-slogan / init-brand-desc-1 / -2） -->
+      <!-- 品牌文案组：图标下方「随时，为你而在」+ 一行灰字，
+           文案沿用引导页那套 i18n（init-brand-slogan / init-brand-desc-1） -->
       <view class="welcome__caption">
         <text class="welcome__slogan">
           {{ t("init-brand-slogan") }}
         </text>
         <text class="welcome__desc">
           {{ t("init-brand-desc-1") }}
-        </text>
-        <text class="welcome__desc">
-          {{ t("init-brand-desc-2") }}
         </text>
       </view>
     </view>
