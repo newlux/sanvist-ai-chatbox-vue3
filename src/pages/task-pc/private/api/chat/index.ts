@@ -1,0 +1,386 @@
+import type {
+  BatchDeleteConversationsParams,
+  BatchDeleteResult,
+  BlockingChatMessageResponse,
+  ChatFileUploadResult,
+  ChatMessage,
+  Conversation,
+  CursorPage,
+  Identifier,
+  InterruptChatParams,
+  ListConversationsParams,
+  ListMessagesParams,
+  RecognizeSpeechByBase64Params,
+  RecognizeSpeechByUploadParams,
+  RecognizeSpeechByUrlParams,
+  RenameConversationParams,
+  RunWorkflowParams,
+  SendChatMessageParams,
+  SpeechRecognitionResult,
+  SubmitFeedbackParams,
+  TextToSpeechResult,
+  UploadChatFileParams,
+  WakeValidateParams,
+  WakeValidateResult,
+  WorkflowRunResponse,
+} from "@/api/chat/types";
+import { i18n } from "@/i18n";
+import { toDifyChatMessagesRequest } from "@/utils/ai-stream/dify";
+import { isAsrServiceFailure } from "@/utils/asr-error";
+import { setVoiceInputLanguage } from "@/utils/asr/voice-language";
+import { createLogger } from "@/utils/logger";
+import { request } from "@/pages/task-pc/private/utils/request";
+
+const logger = createLogger("chat-api");
+
+/**
+ * ASR 服务侧失败（如 `/speech/asr/upload/v2` 返回 code=500「系统繁忙」）对用户没有意义，
+ * 在 API 层就把报错信息改写成「没有识别到内容，请重试」，上层直接用 error.message 即可，
+ * 不必每个入口各判一次。其它错误（网络、401、录音失败）原样抛出。
+ */
+function rethrowAsrError(error: unknown): never {
+  if (isAsrServiceFailure(error)) {
+    throw new Error(i18n.global.t("asr-no-content-retry"));
+  }
+  throw error;
+}
+
+/**
+ * 整段识别（url / base64 / upload）同样会回 `language`：
+ * 和流式那条一样记到 voice-language，回答播报按识别语言合成。
+ */
+function rememberRecognizedLanguage<T extends { language?: string }>(result: T) {
+  setVoiceInputLanguage(result?.language);
+  return result;
+}
+
+export { consumeTextToSpeechStream } from "@/pages/task-pc/private/api/chat/tts-stream";
+export type { TtsStreamHandle } from "@/pages/task-pc/private/api/chat/tts-stream";
+
+const jsonOptions = {
+  headers: {
+    "Content-Type": "application/json",
+  },
+};
+
+/** Dify 原生字段使用 snake_case；在 API 边界转换为页面沿用的 camelCase。 */
+interface DifyCursorPage<T> {
+  limit: number;
+  has_more?: boolean;
+  hasMore?: boolean;
+  data: T[];
+}
+
+interface DifyConversation {
+  id: Identifier;
+  name?: string;
+  inputs?: Record<string, unknown>;
+  status?: string;
+  introduction?: string | null;
+  created_at?: number;
+  updated_at?: number;
+}
+
+interface DifyChatMessage {
+  id: Identifier;
+  conversation_id?: Identifier;
+  conversationId?: Identifier;
+  inputs?: Record<string, unknown>;
+  query?: string;
+  answer?: string;
+  message_files?: ChatMessage["messageFiles"];
+  /** 兼容部分网关已经转成 camelCase 的返回。 */
+  messageFiles?: ChatMessage["messageFiles"];
+  /** 部分网关 / 发送回显把附件放在 files，而不是 message_files。 */
+  files?: ChatMessage["messageFiles"];
+  feedback?: ChatMessage["feedback"];
+  retriever_resources?: ChatMessage["retrieverResources"];
+  retrieverResources?: ChatMessage["retrieverResources"];
+  created_at?: number;
+  createdAt?: number;
+  status?: string;
+}
+
+/** `[]` 在 JS 里是 truthy，不能用 `a || b` 取附件列表。 */
+function firstNonEmptyList<T>(...candidates: Array<T[] | undefined | null>): T[] {
+  for (const value of candidates) {
+    if (Array.isArray(value) && value.length) return value;
+  }
+  return [];
+}
+
+function toConversation(item: DifyConversation): Conversation {
+  return {
+    id: item.id,
+    name: item.name || "",
+    inputs: item.inputs || {},
+    status: item.status || "normal",
+    introduction: item.introduction ?? null,
+    createdAt: Number(item.created_at || 0),
+    updatedAt: Number(item.updated_at || item.created_at || 0),
+  };
+}
+
+function toChatMessage(item: DifyChatMessage): ChatMessage {
+  return {
+    id: item.id,
+    conversationId: (item.conversation_id ?? item.conversationId) as ChatMessage["conversationId"],
+    inputs: item.inputs || {},
+    query: item.query || "",
+    answer: item.answer || "",
+    messageFiles: firstNonEmptyList(item.message_files, item.messageFiles, item.files),
+    feedback: item.feedback || null,
+    retrieverResources: item.retriever_resources || item.retrieverResources || [],
+    createdAt: Number(item.created_at ?? item.createdAt ?? 0),
+    status: item.status,
+  };
+}
+
+interface DifyBlockingChatMessageResponse {
+  answer?: string;
+  conversation_id: Identifier;
+  message_id: Identifier;
+  task_id?: Identifier;
+  metadata?: {
+    elapsed_time?: number;
+  };
+}
+
+function toBlockingChatMessageResponse(item: DifyBlockingChatMessageResponse): BlockingChatMessageResponse {
+  return {
+    answer: item.answer || "",
+    conversationId: item.conversation_id,
+    messageId: item.message_id,
+    taskId: item.task_id,
+    metadata: item.metadata
+      ? { elapsedTime: Number(item.metadata.elapsed_time) || 0 }
+      : undefined,
+  };
+}
+
+function toCursorPage<T, R>(page: DifyCursorPage<T>, mapper: (item: T) => R): CursorPage<R> {
+  return {
+    limit: Number(page?.limit || 0),
+    hasMore: Boolean(page?.has_more ?? page?.hasMore),
+    data: Array.isArray(page?.data) ? page.data.map(mapper) : [],
+  };
+}
+
+export function interruptChat(params: InterruptChatParams) {
+  return request.post<null>(`/proxy/v1/chat-messages/${params.taskId}/stop`, {}, jsonOptions).json();
+}
+
+/** Dify blocking 模式一次性返回完整回答。 */
+export function sendBlockingChatMessage(params: SendChatMessageParams) {
+  const body = toDifyChatMessagesRequest({ ...params, responseMode: "blocking" });
+  logger.info("[chat] 对话接口入参(blocking)", body);
+  return request
+    .post<DifyBlockingChatMessageResponse>("/proxy/v1/chat-messages", body, jsonOptions)
+    .json()
+    .then((response) => {
+      logger.info("[chat] 对话接口出参(blocking)", response);
+      return toBlockingChatMessageResponse(response);
+    });
+}
+
+/** Dify 工作流 blocking 响应（原生 snake_case，在 API 边界转 camelCase）。 */
+interface DifyWorkflowRunResponse {
+  workflow_run_id?: Identifier;
+  task_id?: Identifier;
+  data?: {
+    id?: Identifier;
+    workflow_id?: Identifier;
+    status?: string;
+    outputs?: Record<string, unknown>;
+    error?: string | null;
+    elapsed_time?: number;
+    total_tokens?: number;
+    total_steps?: number;
+    created_at?: number;
+    finished_at?: number;
+  };
+}
+
+function toWorkflowRunResponse(item: DifyWorkflowRunResponse | null | undefined): WorkflowRunResponse {
+  const data = item?.data || {};
+  return {
+    workflowRunId: item?.workflow_run_id,
+    taskId: item?.task_id,
+    data: {
+      id: data.id,
+      workflowId: data.workflow_id,
+      status: data.status,
+      outputs: data.outputs || {},
+      error: data.error ?? null,
+      elapsedTime: Number(data.elapsed_time || 0),
+      totalTokens: Number(data.total_tokens || 0),
+      totalSteps: Number(data.total_steps || 0),
+      createdAt: Number(data.created_at || 0),
+      finishedAt: Number(data.finished_at || 0),
+    },
+  };
+}
+
+/**
+ * Dify 工作流 POST /proxy/v1/workflows/run（blocking 一次性返回）。
+ *
+ * 和 /chat-messages 的区别：工作流没有 query、没有 conversation，也没有 SSE 分片，
+ * 业务结果整包在 data.outputs 里；鉴权与游客身份仍由 request 统一注入
+ * （Authorization + guest-role，后者来自 setGuestRole）。
+ *
+ * 任务协同的「查异常」走这里：
+ *   inputs = { query_type: "查异常", user_id: 所选身份, role_id: "OWNER", language: "zh-CN" | "en-US" }
+ * language 跟随当前界面语言，后端按它返回对应语种的卡片文案。
+ */
+export function runBlockingWorkflow(params: RunWorkflowParams) {
+  const body = {
+    inputs: params.inputs ?? {},
+    response_mode: params.responseMode ?? "blocking",
+    user: String(params.user || "").trim() || "guest",
+  };
+  // guest-role 头按调用方指定的身份覆盖（不指定则用 App 里按 visitorRole 设好的那份）
+  const guestRole = String(params.guestRole || "").trim();
+  const options = guestRole
+    ? { headers: { ...jsonOptions.headers, "guest-role": guestRole } }
+    : jsonOptions;
+  logger.info("[chat] 工作流入参", body);
+  return request
+    .post<DifyWorkflowRunResponse>("/proxy/v1/workflows/run", body, options)
+    .json()
+    .then((response) => {
+      logger.info("[chat] 工作流出参", response);
+      return toWorkflowRunResponse(response);
+    });
+}
+
+export function getConversations(params: ListConversationsParams) {
+  // Dify 标准：GET /v1/conversations?user=&last_id=&limit=&sort_by=
+  return request.get<DifyCursorPage<DifyConversation>>("/proxy/v1/conversations", {
+    last_id: params.lastId,
+    limit: params.limit,
+    sort_by: params.sortBy,
+  }).json().then(page => toCursorPage(page, toConversation));
+}
+
+export function deleteConversation(conversationId: Identifier, user: string) {
+  // Dify 标准：DELETE /v1/conversations/{conversation_id}，JSON body 中必须包含 user。
+  return request.delete<null>(`/proxy/v1/conversations/${encodeURIComponent(String(conversationId))}`, {
+    ...jsonOptions,
+    data: { user },
+  }).json();
+}
+
+export async function batchDeleteConversations(params: BatchDeleteConversationsParams): Promise<BatchDeleteResult> {
+  // Dify 没有批量删除会话接口，保留原有批量操作体验，逐条调用标准 DELETE 接口。
+  await Promise.all(params.conversationIds.map(conversationId => (
+    deleteConversation(conversationId, params.user)
+  )));
+  return { deleted: params.conversationIds.length };
+}
+
+export function renameConversation(conversationId: Identifier, params: RenameConversationParams) {
+  return request.post<null>(`/proxy/v1/conversations/${conversationId}/name`, {
+    name: params.name,
+  }, jsonOptions).json();
+}
+
+export function getMessages(params: ListMessagesParams) {
+  return request.get<DifyCursorPage<DifyChatMessage>>("/proxy/v1/messages", {
+    conversation_id: params.conversationId,
+    first_id: params.firstId,
+    limit: params.limit,
+  }).json().then(page => toCursorPage(page, toChatMessage));
+}
+
+/**
+ * 消息详情：返回单条消息对象（不带分页壳），query 的 conversationId 必填。
+ * 用于实时 TTS 从服务端取权威 answer 文本。
+ */
+export function getMessage(messageId: Identifier, params: { conversationId: Identifier }) {
+  return request.get<ChatMessage>(`/messages/${messageId}`, params).json();
+}
+
+export function submitFeedback(messageId: Identifier, params: SubmitFeedbackParams) {
+  // 接口约定：rating 为 null 时撤销此前提交的反馈。
+  return request.post<null>(`/proxy/v1/messages/${messageId}/feedbacks`, {
+    user: params.user,
+    rating: params.rating,
+    content: params.content || "",
+  }, jsonOptions).json();
+}
+
+export function cancelFeedback(messageId: Identifier, user: string) {
+  return submitFeedback(messageId, { user, rating: null });
+}
+
+/**
+ * 录音文件直传识别。相比 base64 通道少一次整文件编码，
+ * 也绕开了小程序对 JSON 请求体体积的限制。
+ * 契约：multipart 字段名固定为 `file`，language 走 query。
+ */
+export function getTextToSpeech(conversationId: Identifier, messageId: Identifier) {
+  return request.get<TextToSpeechResult>(`/chat/tts/${conversationId}/${messageId}`).json();
+}
+
+/**
+ * 对话附件上传。契约：multipart 字段名固定为 `file`，`user` 走表单字段且不能为空。
+ * 返回的 id 作为 Dify `/chat-messages` 的 files[].upload_file_id
+ *（transfer_method=local_file）。
+ */
+export function uploadChatFile(params: UploadChatFileParams) {
+  return request.upload<ChatFileUploadResult>("/proxy/v1/files/upload", {
+    filePath: params.filePath,
+    file: params.file,
+    name: "file",
+    fileType: params.fileType || "image",
+    formData: { user: params.user },
+    timeout: params.timeout,
+  }).json();
+}
+
+/**
+ * 按音频地址识别。原生录音（microphoneEnd）已经把文件传好了，只会给回一个 URL，
+ * 这时候没有本地文件可传，走这个接口。
+ */
+export function recognizeSpeechByUrl(params: RecognizeSpeechByUrlParams) {
+  return request.post<SpeechRecognitionResult>("/speech/asr/url/v2", {
+    audioUrl: params.audioUrl,
+    ...(params.language ? { language: params.language } : {}),
+  }, jsonOptions).json().then(rememberRecognizedLanguage).catch(rethrowAsrError);
+}
+
+/**
+ * 按 base64 识别。宿主原生录音直接回传音频内容（而不是地址）时走这条。
+ * 纯 base64 必须带 mimeType，Data URL 形式则可省略。
+ */
+export function recognizeSpeechByBase64(params: RecognizeSpeechByBase64Params) {
+  return request.post<SpeechRecognitionResult>("/speech/asr/base64/v2", {
+    audioBase64: params.audioBase64,
+    ...(params.mimeType ? { mimeType: params.mimeType } : {}),
+    ...(params.language ? { language: params.language } : {}),
+  }, jsonOptions).json().then(rememberRecognizedLanguage).catch(rethrowAsrError);
+}
+
+export function recognizeSpeechByUpload(params: RecognizeSpeechByUploadParams) {
+  const query = params.language ? `?language=${encodeURIComponent(params.language)}` : "";
+  return request.upload<SpeechRecognitionResult>(`/speech/asr/upload/v2${query}`, {
+    filePath: params.filePath,
+    name: "file",
+    fileType: "audio",
+    timeout: params.timeout,
+  }).json().then(rememberRecognizedLanguage).catch(rethrowAsrError);
+}
+
+/**
+ * 唤醒 / 热词校验（语雀 2.2）：把识别文本按「模块 + 阶段」送后端比对热词表。
+ * 返回 matched / hitValue / intent 等，供调用方决定要不要推进流程；
+ * 不传 fallbackRound 时后端随机回一条兜底话术。
+ */
+export function validateWakeWord(params: WakeValidateParams) {
+  return request.post<WakeValidateResult>("/speech/wake/validate", {
+    module: params.module,
+    step: params.step,
+    text: params.text,
+    ...(params.fallbackRound == null ? {} : { fallbackRound: params.fallbackRound }),
+  }, jsonOptions).json();
+}

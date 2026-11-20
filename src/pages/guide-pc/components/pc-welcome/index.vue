@@ -28,7 +28,7 @@ const { t } = useI18n();
         {{ t("guide-pc-slogan") }}
       </text>
       <text class="pc-welcome__desc">
-        {{ t("guide-pc-desc") }}
+        {{ t("init-brand-desc-1") }}
       </text>
     </view>
     <!-- 底部蓝色氛围光：三层椭圆径向渐变，被底部 Dock 覆盖（宿主绘制） -->

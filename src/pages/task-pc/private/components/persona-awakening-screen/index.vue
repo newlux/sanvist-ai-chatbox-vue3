@@ -254,7 +254,7 @@ onBeforeUnmount(() => {
 
       <!-- 291:7298 底部一段话（672 × 41，80% 白色） -->
       <!-- eslint-disable-next-line vue/singleline-html-element-content-newline -->
-      <text class="persona-awakening__desc">你的三一设备伙伴。</text>
+      <text class="persona-awakening__desc">你的三一设备伙伴</text>
 
       <!-- 291:18734 底部叠加光效，opacity 0.1 -->
       <image class="persona-awakening__glow-mask" :src="glowMaskBottom" />

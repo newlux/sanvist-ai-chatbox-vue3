@@ -1,3 +1,4 @@
+import { getVehicleHttpHeaders } from "@/utils/vehicle-http-headers";
 import { createI18n } from "vue-i18n";
 import ar from "./lang/ar.json";
 import deDE from "./lang/de_DE.json";
@@ -75,7 +76,7 @@ export async function loadRemoteLocale(
   try {
     const remoteLocale = resolvedLocale === "ar_ST" ? "ar" : resolvedLocale;
     const url = `${staticBaseUrl.replace(/\/$/, "")}/lang/${remoteLocale}.json`;
-    const response = await uni.request({ url, method: "GET" });
+    const response = await uni.request({ url, method: "GET", header: getVehicleHttpHeaders() });
     if (Number(response.statusCode) < 200 || Number(response.statusCode) >= 300) return resolvedLocale;
     const remoteMessages = response.data as Record<string, unknown>;
     i18n.global.setLocaleMessage(resolvedLocale, {
