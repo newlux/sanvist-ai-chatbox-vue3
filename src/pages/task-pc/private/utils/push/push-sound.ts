@@ -46,6 +46,16 @@ function createMediaPlayer() {
   return audio;
 }
 
+/** 固定提示音在 MQTT 建连前预加载，减少首条通知等待媒体数据的时间。 */
+export function preloadPushNoticeSound(soundUrl?: string) {
+  if (!soundUrl || typeof Audio === "undefined") return;
+  const audio = player ?? (player = createMediaPlayer());
+  if (audio.getAttribute("src") === soundUrl) return;
+  audio.preload = "auto";
+  audio.src = soundUrl;
+  audio.load();
+}
+
 async function waitForPlayback<T>(operation: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

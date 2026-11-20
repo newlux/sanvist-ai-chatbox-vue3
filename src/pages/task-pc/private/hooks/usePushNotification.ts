@@ -17,7 +17,7 @@ import { createMqttClientId, MqttPushClient } from "@/utils/push/mqtt-push-clien
 import { ackPushDelivered, fetchPushInbox } from "@/utils/push/push-http";
 import { clearPushInbox, getInbox, getOutboxCursor, hasSeenPush, markPushRead, rememberPush, setOutboxCursor } from "@/utils/push/push-inbox";
 import { parseTaskDispatchPush, pushActionOf } from "@/utils/push/push-payload";
-import { disposePushNoticeSound, playPushNoticeSound } from "@/pages/task-pc/private/utils/push/push-sound";
+import { disposePushNoticeSound, playPushNoticeSound, preloadPushNoticeSound } from "@/pages/task-pc/private/utils/push/push-sound";
 import { stashPendingScheduleAsk } from "@/utils/schedule-ask";
 
 const logger = createLogger("push-notification");
@@ -115,10 +115,19 @@ export function usePushNotification(options: UsePushNotificationOptions = {}) {
     if (!rememberPush(record)) return;
 
     notices.value = getInbox();
-    options.onNotice?.(record);
     logger.info("收到新通知", { msgId: payload.msg_id, kind: payload.kind });
-    // 面板展示所有成功入库的通知，提示音与展示使用同一条件。
-    if (soundEnabled) void playNoticeSound();
+    // play() 成功或 Web Audio 启动后再弹横幅，让提示音和滑入动画同时开始。
+    // 播放失败也展示通知；被更新通知取代的播放结果无需再弹旧横幅。
+    if (soundEnabled) {
+      void playNoticeSound().then((result) => {
+        if (result !== "superseded") options.onNotice?.(record);
+      }, (error) => {
+        logger.warn("通知音启动异常", error);
+        options.onNotice?.(record);
+      });
+    } else {
+      options.onNotice?.(record);
+    }
 
     // 协议 6.4：交给消息中心后报 delivered（可选通道，失败不影响展示）
     if (httpEnabled) void ackPushDelivered(payload.msg_id);
@@ -238,6 +247,7 @@ export function usePushNotification(options: UsePushNotificationOptions = {}) {
     return true;
   }
 
+  if (soundEnabled) preloadPushNoticeSound(options.noticeSoundUrl);
   if (options.autoStart !== false) start();
   if (getCurrentInstance()) {
     onUnmounted(() => {
