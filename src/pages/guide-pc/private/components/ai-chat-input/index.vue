@@ -9,51 +9,16 @@ import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
+import { useDuplexButtonGesture } from "@/hooks/useDuplexButtonGesture";
 import { usePressDelay } from "@/hooks/usePressDelay";
 import { useVoiceInput } from "@/pages/guide-pc/private/hooks/useVoiceInput";
 import { createLogger } from "@/utils/logger";
 import { getMicrophoneVolume } from "@/utils/platform/mpaas";
 
-let duplexPressTimer: ReturnType<typeof setTimeout> | null = null;
-let duplexPointer: { id: number; x: number; y: number; held: boolean } | null = null;
-
-function cancelDuplexPress() {
-  if (duplexPressTimer != null) clearTimeout(duplexPressTimer);
-  duplexPressTimer = null;
-  duplexPointer = null;
-}
-
-function startDuplexPress(event: PointerEvent) {
-  if (!event.isPrimary || event.button !== 0 || duplexPointer) return;
-  onVoiceQueryPressEnd();
-  duplexPointer = { id: event.pointerId, x: event.clientX, y: event.clientY, held: false };
-  (event.currentTarget as Element)?.setPointerCapture?.(event.pointerId);
-  duplexPressTimer = setTimeout(() => {
-    duplexPressTimer = null;
-    if (!duplexPointer) return;
-    duplexPointer.held = true;
-    emit("duplex-toggle");
-  }, 2000);
-}
-
-function moveDuplexPress(event: PointerEvent) {
-  if (!duplexPointer || duplexPointer.id !== event.pointerId) return;
-  if (Math.hypot(event.clientX - duplexPointer.x, event.clientY - duplexPointer.y) > 16) {
-    cancelDuplexPress();
-  }
-}
-
-function endDuplexPress(event: PointerEvent) {
-  if (!duplexPointer || duplexPointer.id !== event.pointerId) return;
-  const held = duplexPointer.held;
-  cancelDuplexPress();
-  if (!held) emitVoiceQueryStart();
-}
-
-onMounted(() => window.addEventListener("blur", cancelDuplexPress));
-onBeforeUnmount(() => {
-  window.removeEventListener("blur", cancelDuplexPress);
-  cancelDuplexPress();
+const duplexGesture = useDuplexButtonGesture({
+  onClick: () => onVoiceQueryStartTap(),
+  onHold: () => emit("duplex-toggle"),
+  onPressStart: () => onVoiceQueryPressEnd(),
 });
 
 const logger = createLogger("chat-input");
@@ -851,7 +816,7 @@ async function cancelGlobalVoiceHold() {
  * 注意 appendAttachments 对应 hook 里的 appendUploadedAttachments，两处名字必须一致。
  */
 defineExpose({
-  cancelDuplexPress,
+  cancelDuplexPress: duplexGesture.cancel,
   appendAttachments: appendUploadedAttachments,
   focusTextInput,
   startGlobalVoiceHold,
@@ -1176,18 +1141,20 @@ onBeforeUnmount(() => {
             :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
             :aria-pressed="duplexActive"
             tabindex="0"
-            @pointerdown.stop.prevent="startDuplexPress"
-            @pointermove.stop.prevent="moveDuplexPress"
-            @pointerup.stop.prevent="endDuplexPress"
-            @pointercancel.stop="cancelDuplexPress"
-            @lostpointercapture="cancelDuplexPress"
-            @touchstart.stop="onVoiceQueryPressEnd"
-            @touchend.stop
-            @mousedown.stop="onVoiceQueryPressEnd"
-            @mouseup.stop
-            @tap.stop
-            @keydown.enter.stop.prevent="emitVoiceQueryStart()"
-            @keydown.space.stop.prevent="emitVoiceQueryStart()"
+            @pointerdown.stop.prevent="duplexGesture.start"
+            @pointermove.stop.prevent="duplexGesture.move"
+            @pointerup.stop.prevent="duplexGesture.end"
+            @pointercancel.stop="duplexGesture.cancel"
+            @lostpointercapture="duplexGesture.cancel"
+            @touchstart.stop="duplexGesture.start"
+            @touchend.stop="duplexGesture.end"
+            @touchmove.stop="duplexGesture.move"
+            @touchcancel.stop="duplexGesture.cancel"
+            @mousedown.stop="duplexGesture.start"
+            @mouseup.stop="duplexGesture.end"
+            @tap.stop="duplexGesture.tap"
+            @keydown.enter.stop.prevent="onVoiceQueryStartTap()"
+            @keydown.space.stop.prevent="onVoiceQueryStartTap()"
           >
             <image :src="duplexActive ? waveIconActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
           </view>
@@ -1248,18 +1215,20 @@ onBeforeUnmount(() => {
             :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
             :aria-pressed="duplexActive"
             tabindex="0"
-            @pointerdown.stop.prevent="startDuplexPress"
-            @pointermove.stop.prevent="moveDuplexPress"
-            @pointerup.stop.prevent="endDuplexPress"
-            @pointercancel.stop="cancelDuplexPress"
-            @lostpointercapture="cancelDuplexPress"
-            @touchstart.stop="onVoiceQueryPressEnd"
-            @touchend.stop
-            @mousedown.stop="onVoiceQueryPressEnd"
-            @mouseup.stop
-            @tap.stop
-            @keydown.enter.stop.prevent="emitVoiceQueryStart()"
-            @keydown.space.stop.prevent="emitVoiceQueryStart()"
+            @pointerdown.stop.prevent="duplexGesture.start"
+            @pointermove.stop.prevent="duplexGesture.move"
+            @pointerup.stop.prevent="duplexGesture.end"
+            @pointercancel.stop="duplexGesture.cancel"
+            @lostpointercapture="duplexGesture.cancel"
+            @touchstart.stop="duplexGesture.start"
+            @touchend.stop="duplexGesture.end"
+            @touchmove.stop="duplexGesture.move"
+            @touchcancel.stop="duplexGesture.cancel"
+            @mousedown.stop="duplexGesture.start"
+            @mouseup.stop="duplexGesture.end"
+            @tap.stop="duplexGesture.tap"
+            @keydown.enter.stop.prevent="onVoiceQueryStartTap()"
+            @keydown.space.stop.prevent="onVoiceQueryStartTap()"
           >
             <!-- 声波：未触发是深色 6 段声波，触发后才是纯蓝（#1166D6），不渐变 -->
             <image :src="duplexActive ? waveIconActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
@@ -2498,15 +2467,19 @@ onBeforeUnmount(() => {
     color: #6b6b6b;
   }
 
-  // 图标反相：加号十字 / 键盘 / 发送 / 停止都是「深色线条 + 白/透明底」，
+  // 键盘素材已是白色，保持原色；以下深色图标在深色模式下反相。
+  // 加号十字 / 发送 / 停止使用「深色线条 + 白/透明底」，
   // 反相后正好是深底要的白线条。语音态发送是品牌红 #C8201E，不能跟着反相；
   // 声波钮用的是彩色渐变图标，深底下保持原色（反相会变成橙粉色）
   .input-bar__plus image,
-  .input-bar__mode image,
   .input-bar__stop image,
   .input-bar.input-bar--text .input-bar__send image {
     filter: invert(1);
   }
+}
+
+.chat-input--dark .input-bar__mode:not(.input-bar__mode--mic) image {
+  filter: none;
 }
 
 .input-bar__mode--mic image {
