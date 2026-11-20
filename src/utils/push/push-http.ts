@@ -1,3 +1,4 @@
+import { getVehicleHttpHeaders } from "@/utils/vehicle-http-headers";
 import type { PushInboxPage } from "./types";
 import { PUSH_DEVICE_NO, PUSH_HTTP_BASE_URL, PUSH_HTTP_TIMEOUT_MS, PUSH_INBOX_PAGE_SIZE } from "@/config/push";
 import { createLogger } from "@/utils/logger";
@@ -30,6 +31,7 @@ function buildHeaders(): Record<string, string> {
     // 协议 6.1：联调阶段未开启验签，只需后两个头
     "X-Channel": "vehicle",
     "X-Device-No": PUSH_DEVICE_NO,
+    ...getVehicleHttpHeaders(),
     "Content-Type": "application/json",
   };
 }

@@ -1,4 +1,5 @@
 import type { PlatformRequestOptions } from "@/utils/platform/http-request";
+import { getVehicleHttpHeaders } from "@/utils/vehicle-http-headers";
 import { createLogger } from "@/utils/logger";
 
 import {
@@ -173,12 +174,12 @@ function applyBagEnvHeader(headers: Record<string, string>) {
  * Authorization、Guest-Role、env 都从这里出，调用方不用各自拼。
  */
 export function getRequestHeaders(headers: Record<string, string> = {}) {
-  const base: Record<string, string> = {};
+  const base: Record<string, string> = getVehicleHttpHeaders();
   // token 只由 App.vue 初始化时写入（宿主 query 里的 Authorization，取不到用本地配置），为空就不带头
   if (authorization) base.Authorization = authorization;
   if (guestRole) base["Guest-Role"] = guestRole;
   // 调用方显式传的（如工作流的 Guest-Role）覆盖全局身份，且不会产生重名头
-  return applyBagEnvHeader(mergeHeaders(base, headers));
+  return applyBagEnvHeader(mergeHeaders(mergeHeaders(base, headers), getVehicleHttpHeaders()));
 }
 
 export const GUEST_ROLE_OPTIONS = ["OWNER", "OPERATOR"] as const;

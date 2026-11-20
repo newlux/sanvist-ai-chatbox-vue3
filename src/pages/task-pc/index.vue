@@ -4,7 +4,7 @@ import { markPushRead } from "@/utils/push/push-inbox";
 import { pushActionOf } from "@/utils/push/push-payload";
 import { createSpeechEndDetector } from "@/utils/asr/speech-end-detector";
 import AiVoiceHoldOverlay from "@/components/ai-voice-hold-overlay/index.vue";
-import { useDuplexVoice } from "@/hooks/useDuplexVoice";
+import { useDuplexVoice } from "@/pages/task-pc/private/hooks/useDuplexVoice";
 import { useVoiceQueryGesture } from "@/hooks/useVoiceQueryGesture";
 import type {
   AskSlotOption,
@@ -18,7 +18,7 @@ import type {
 import type { TodayListenBroadcast } from "@/api/listen-broadcast/types";
 import type { AttachmentSource } from "@/hooks/useComposerAttachments";
 import type { ChatMessageAttachment, UiChatMessage } from "@/stores/chat-types";
-import type { AsrStreamSession } from "@/utils/asr/asr-stream-session";
+import type { AsrStreamSession } from "@/pages/task-pc/private/utils/asr/asr-stream-session";
 import type { PcmCapture } from "@/utils/asr/pcm-capture";
 import type { RepairCaseReport } from "@/utils/repair-callback";
 import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
@@ -27,7 +27,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n";
 import { chatMessageAnchorDomId } from "@/stores/modules/chat";
 import { animateVoiceMessageArrival, readVoiceMessageOrigin } from "@/utils/voice-message-motion";
-import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat/index";
+import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/pages/task-pc/private/api/chat/index";
 import { getConversationSummary } from "@/api/conversation-summary/index";
 import { getTodayListenBroadcast } from "@/api/listen-broadcast/index";
 import { getRepairInformationState } from "@/api/repair/index";
@@ -60,10 +60,10 @@ import { useChatShare } from "@/hooks/useChatShare";
 import { useChatViewport } from "@/hooks/useChatViewport";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { useRealtimeTts } from "@/hooks/useRealtimeTts";
+import { useRealtimeTts } from "@/pages/task-pc/private/hooks/useRealtimeTts";
 import { useRemoteKey } from "@/hooks/useRemoteKey";
 import { provideChatScope, useChatStore, useSessionStore, useSettingsStore, useSystemStore, useUserStore } from "@/stores/index";
-import { isAsrStreamSupported, openAsrStreamSession } from "@/utils/asr/asr-stream-session";
+import { isAsrStreamSupported, openAsrStreamSession } from "@/pages/task-pc/private/utils/asr/asr-stream-session";
 import { isNativePcmStreamSupported, startNativePcmCapture } from "@/utils/asr/native-pcm-stream";
 import { isPcmCaptureSupported, startPcmCapture } from "@/utils/asr/pcm-capture";
 import { exitMiniProgram } from "@/utils/exit-mini-program";

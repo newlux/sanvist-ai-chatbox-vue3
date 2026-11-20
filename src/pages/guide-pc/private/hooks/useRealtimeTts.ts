@@ -1,0 +1,552 @@
+import type { TtsStreamHandle } from "@/pages/guide-pc/private/api/chat/tts-stream";
+import type { Identifier, RealtimeTtsChunk, RealtimeTtsParams } from "@/api/chat/types";
+
+import type { UiChatMessage } from "@/stores/chat-types";
+import { onBeforeUnmount, ref, watch } from "vue";
+import { consumeTextToSpeechStream } from "@/pages/guide-pc/private/api/chat/tts-stream";
+import { resolveReportVoiceId, waitReportVoiceSynced } from "@/hooks/useReportVoice";
+import { useChatStore, useSettingsStore } from "@/stores";
+import { createLogger } from "@/utils/logger";
+import { markdownToPlainText } from "@/utils/markdown-to-text";
+
+const logger = createLogger("rt-tts");
+
+interface AudioItem {
+  text: string;
+  dataUrl?: string | null;
+  audioBase64?: string | null;
+  format?: string | null;
+}
+
+function guessAudioMime(base64: string) {
+  if (base64.startsWith("UklGR")) return "audio/wav";
+  return "audio/mpeg";
+}
+
+function extractAnswerText(message: UiChatMessage, stepId = ""): string {
+  const blocks = message.blocks || [];
+  /**
+   * 分步骤卡（guide-check）消息：播报语义是「念卡片当前步骤内容」，不是 voice 导语。
+   * 新手（分步骤）模式下消息上残留的 speechText 是老师傅导语（`<COMPONENT type=voice>`），
+   * 若按 speech 短路返回，会把导语念出来、且永远轮不到下面的 guide-check 步骤兜底——
+   * 表现为「播报 voice 导语、切换步骤也念同一句」。
+   * 这类消息的 voice 导语在 sendAiFlow 已按新手身份过滤（见 useChatSend filterNoviceVoice），
+   * 但消息对象上的 speechText 可能来自历史/其他链路，这里统一跳过，只念步骤卡内容。
+   * 仅按「消息含分步骤卡」判断，不影响首页 / 任务协同的普通 voice 播报。
+   */
+  const hasStepCards = blocks.some(block => block.type === "guide-check" || block.type === "guide-step");
+  /**
+   * 本轮下发了播报稿（`<COMPONENT>{"scene":"ask","type":"voice","data":{"text":"…"}}</COMPONENT>`）：
+   * 只念它，标签外的正文不参与播报 —— 与流式听播（useChatSend 的 answer delta）同一口径。
+   * 分步骤卡消息除外（见上），否则步骤卡内容永远播不出来。
+   */
+  const speech = String(message.speechText || "").trim();
+  if (speech && !hasStepCards) return speech;
+  /**
+   * 没有播报稿就不播：产品口径是「只念 `<COMPONENT type=voice>` 的 data.text」，
+   * 不再兜底把气泡正文（answer 块 / message.content）整段念一遍。
+   * 下面只保留「要念的文本不在正文里」的卡片台词。
+   */
+  /**
+   * 开场引导卡（guide-lead，scene=guide / type=lead）：「你好，我是 SANI…」这段正文是整块下发的，
+   * 不经过 answer delta（流式喂数拿不到），只存在于卡片的 text 上。
+   * 不带它的话，点播报按钮会因为 speech 为空而「没声音」。
+   */
+  const fromLeadBlocks = blocks
+    .filter(block => block.type === "guide-lead")
+    .map(block => String(block.payload?.text || "").trim())
+    .filter(Boolean)
+    .join("\n");
+  if (fromLeadBlocks) return fromLeadBlocks;
+  // 核对卡（guide-check）场景：气泡正文隐藏 / 为空时，用核对卡的「标题 + 步骤正文」当播报文本，
+  // 否则点播报按钮会因为 speech 为空而「没声音」。
+  // 传了 stepId 就只念当前这一步（多步骤卡翻页后不能把 5 步全念一遍）；
+  // 找不到对应步骤时退回全部，避免出现「点了没声音」。
+  const checkBlocks = blocks.filter(block => block.type === "guide-check");
+  const scopedBlocks = stepId
+    ? checkBlocks.filter(block => String(block.payload?.step_id || "") === stepId)
+    : checkBlocks;
+  const fromCheckBlocks = (scopedBlocks.length ? scopedBlocks : checkBlocks)
+    .map(block => [
+      String(block.payload?.title || "").trim(),
+      String(block.payload?.content || "").trim(),
+    ].filter(Boolean).join("\n"))
+    .join("");
+  if (fromCheckBlocks) return fromCheckBlocks;
+  return "";
+}
+
+/**
+ * 把 answer（Markdown）转成纯文本再送 TTS。
+ * 转换规则统一收在 utils/markdown-to-text —— 流式切片会把 `**` `|` 这类标记切在两段之间，
+ * 单批清洗配不上对，只能靠那边的兜底规则一起剔掉，否则 text 里会残留 Markdown 符号。
+ */
+const cleanAnswerText = markdownToPlainText;
+
+/** 流式喂数时取「最后一个句末标点之后」的边界：边界之前的文本视为完整句子可送 TTS。 */
+function lastSentenceBoundary(text: string) {
+  for (let i = text.length - 1; i >= 0; i -= 1) {
+    const ch = text[i];
+    if ("。！？!?；;\n".includes(ch)) return i + 1;
+    // 半角句点要求后面是空白/结尾，避免把 3.14 这类小数从中间切开。
+    if (ch === ".") {
+      const next = text[i + 1];
+      if (next === undefined || next === " " || next === "\t" || next === "\n") return i + 1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * 实时 TTS（分句并发合成，SSE 流式）。只在用户点击新对话消息的播音按钮时触发：
+ * 直接取当前消息对象里已经渲染好的 content 文本，再 POST /speech/tts/v2/stream 逐句流式播放。
+ * audio_chunk 按到达顺序（即原文句序）排进单一队列，逐条播放；
+ * dataUrl/audioBase64 都为空的占位/失败句直接跳过，继续播下一句。
+ *
+ * 历史对话仍走 useChatTts + GET /chat/tts，本引擎不影响它。
+ */
+export function useRealtimeTts(scope?: string) {
+  const chatStore = useChatStore(scope);
+  const settingsStore = useSettingsStore();
+  const playing = ref(false);
+  const playbackText = ref("");
+  const playingMessageId = ref<Identifier | null>(null);
+  const playingMessageKey = ref<string | null>(null);
+  /** 正在播的是哪一步（多步骤卡翻页时用来判断「同一消息、不同步骤」要不要重播） */
+  const playingStepId = ref("");
+
+  let sessionSeq = 0;
+  let streamFinished = false;
+  let activeStream: TtsStreamHandle | null = null;
+  let audioQueue: AudioItem[] = [];
+  let playbackGain = 1;
+  let activeAudio: ReturnType<typeof uni.createInnerAudioContext> | null = null;
+  function setPlaybackGain(value: number) {
+    playbackGain = Math.max(0, Math.min(1, value));
+    if (activeAudio) activeAudio.volume = playbackGain;
+  }
+
+  /** 流式听播会话的内部状态：输入侧（answer 文本）与请求链是否已全部结束。 */
+  interface StreamingSession {
+    /** 在途/排队的 TTS 请求批次数；> 0 时会话还不能收尾。 */
+    pendingFetches: number;
+  }
+  let activeSession: StreamingSession | null = null;
+  /** 输入侧（流式 answer 文本）是否已收尾（message_end / 异常兜底）。 */
+  let streamInputDone = true;
+  /** 流式会话累计收到的原始 answer 文本。 */
+  let streamedRawText = "";
+  /** 已送去 TTS 的「原始文本」长度。raw 偏移是追加稳定的，不受清洗规则改写前缀的影响。 */
+  let submittedRawLength = 0;
+  /** 顺序请求链：上一批 TTS 流结束才发起下一批，保证音频入队顺序 = 原文顺序。 */
+  let fetchChain: Promise<void> = Promise.resolve();
+  /** 用户手动停止过的消息：后续增量不再自动重启听播。 */
+  const manualStopKeys = new Set<string>();
+  /**
+   * 当前流式听播会话归属的消息 key。
+   *
+   * 单看 `playingMessageKey` 判断「新答案的第一块」不够：音频可能比文本流先播完，
+   * `playNext` 收尾时会把 `playingMessageKey` 清空，此后到达的 delta 会被误判成
+   * 新消息重新开一局（ttsLoading 重新点亮、作废在途请求）。会话归属单独记一份，
+   * answer 收尾或用户停止才清空。
+   */
+  let streamMessageKey: string | null = null;
+  /**
+   * 场景跳转（pushWindow 进维修助理 / 配件助手）离开那一刻，store 里已存在的消息 key 快照。
+   *
+   * 「好的，正在为你进入维修助理。」这句常常是跳转**之后**才流进来的：后端先下发 ENTER_ASSISTANT
+   * 触发开窗，正文随后到达。离开时它还没进 store，`playingMessageKey` 记不到它，
+   * 返回页面后第一块正文一到就自动开口。靠这个快照把「离开后才出现的那条」认出来并吞掉。
+   */
+  let sceneLeaveKnownKeys: Set<string> | null = null;
+
+  /**
+   * TTS 请求参数：音色每次现取（`<VOICE_STYLE style="…">` 标签可能刚把它改掉），
+   * 没选过音色就不带这个字段，由后端按默认音色合成。
+   *
+   * 语种不再由端上指定（原先是「本轮 ASR 识别语言 → 界面语言」），后端按文本自行判断。
+   */
+  function buildTtsParams(text: string): RealtimeTtsParams {
+    const voice = resolveReportVoiceId();
+    logger.debug("tts 请求参数", { chars: text.length, voice: voice || "(默认)" });
+    return { text, ...(voice ? { voice } : {}) };
+  }
+
+  function patchMessage(messageId: Identifier, patch: { ttsLoading?: boolean; ttsPlaying?: boolean }) {
+    const key = String(messageId);
+    const messages = chatStore.messages;
+    let index = messages.findIndex(message => String(message.messageId) === key);
+    if (index < 0) {
+      index = messages.findIndex(message => String(message.id) === key);
+    }
+    if (index < 0) {
+      logger.warn("patch tts state failed: message not found", { messageId: key });
+      return;
+    }
+    chatStore.replaceMessage(index, { ...messages[index], ...patch });
+  }
+
+  function releaseAudio() {
+    playbackText.value = "";
+    if (!activeAudio) return;
+    try {
+      activeAudio.stop();
+      activeAudio.destroy?.();
+    } catch {
+      // 个别容器停止失败，忽略
+    }
+    activeAudio = null;
+  }
+
+  function playNext(messageId: Identifier, seq: number) {
+    if (seq !== sessionSeq) return;
+    if (activeAudio) return;
+
+    const item = audioQueue.shift();
+    if (!item) {
+      if (playingMessageId.value !== messageId) return;
+      // 结束条件二选一：
+      //  - 单发会话（togglePlay）：finishRequest 已置 streamFinished；
+      //  - 流式会话（feedAnswerDelta）：输入已收尾 + 请求链排空 + 无在途请求。
+      //    settleStreamIdle 在音频还在播时会提前返回，最后一口气收尾只能靠这里兜住，
+      //    否则会话挂死（停止图标永不消失）。
+      const drained = streamFinished
+        || (streamInputDone && activeSession && activeSession.pendingFetches <= 0 && !activeStream);
+      if (drained) {
+        playing.value = false;
+        playingMessageId.value = null;
+        playingMessageKey.value = null;
+        patchMessage(messageId, { ttsLoading: false, ttsPlaying: false });
+      }
+      return;
+    }
+
+    const dataUrl = String(item.dataUrl || "").trim();
+    const base64 = String(item.audioBase64 || "").trim();
+
+    // 占位/失败句：什么都没有就跳过去，继续播下一句。
+    if (!dataUrl && !base64) {
+      playNext(messageId, seq);
+      return;
+    }
+
+    playing.value = true;
+    // 部分 WebView 不会可靠触发 InnerAudioContext.onPlay；拿到首个可播分片即结束 loading，展示停止图标。
+    patchMessage(messageId, { ttsLoading: false, ttsPlaying: true });
+
+    const audio = uni.createInnerAudioContext();
+    activeAudio = audio;
+    audio.volume = playbackGain;
+
+    if (dataUrl) {
+      audio.src = dataUrl;
+    } else if (base64.startsWith("data:")) {
+      audio.src = base64;
+    } else {
+      audio.src = `data:${guessAudioMime(base64)};base64,${base64}`;
+    }
+
+    audio.onEnded(() => {
+      if (activeAudio !== audio) return;
+      activeAudio = null;
+      playbackText.value = "";
+      audio.destroy?.();
+      playNext(messageId, seq);
+    });
+    audio.onError((error) => {
+      if (activeAudio !== audio) return;
+      logger.info("跳过无法播放的语音句", { error });
+      activeAudio = null;
+      playbackText.value = "";
+      audio.destroy?.();
+      playNext(messageId, seq);
+    });
+    audio.onPlay(() => {
+      if (activeAudio !== audio) return;
+      patchMessage(messageId, { ttsLoading: false, ttsPlaying: true });
+    });
+    playbackText.value = item.text;
+    audio.autoplay = true;
+  }
+
+  function handleChunk(payload: unknown, messageId: Identifier, seq: number, text: string) {
+    if (seq !== sessionSeq) return;
+    if (!payload || typeof payload !== "object") return;
+    const chunk = payload as RealtimeTtsChunk;
+
+    if (chunk.event === "done") return;
+    if (typeof chunk.seq === "number") {
+      audioQueue.push({
+        text,
+        dataUrl: chunk.dataUrl ?? null,
+        audioBase64: chunk.audioBase64 ?? null,
+        format: chunk.format ?? null,
+      });
+      playNext(messageId, seq);
+    }
+  }
+
+  function finishRequest(messageId: Identifier, seq: number) {
+    if (seq !== sessionSeq) return;
+    activeStream = null;
+    streamFinished = true;
+    patchMessage(messageId, { ttsLoading: false });
+    playNext(messageId, seq);
+  }
+
+  /**
+   * 流式会话收尾判定：输入侧结束 + 请求链排空 + 音频队列播完 + 无在播音频，
+   * 才置 streamFinished 并让 playNext 走正常结束分支。
+   */
+  function settleStreamIdle(seq: number, messageId: Identifier, session: StreamingSession) {
+    if (seq !== sessionSeq || activeSession !== session) return;
+    if (!streamInputDone) return;
+    if (session.pendingFetches > 0) return;
+    if (activeStream) return;
+    if (audioQueue.length) return;
+    if (activeAudio) return;
+    streamFinished = true;
+    patchMessage(messageId, { ttsLoading: false });
+    playNext(messageId, seq);
+  }
+
+  /** 把一批完整句子送 TTS。挂到顺序链上：上一批流结束才发起下一批，保证播报顺序。 */
+  function enqueueTtsBatch(text: string, messageId: Identifier, seq: number, session: StreamingSession) {
+    if (!text) return;
+    session.pendingFetches += 1;
+    fetchChain = fetchChain.then(() => new Promise<void>((resolve) => {
+      const settle = () => {
+        if (activeSession === session) session.pendingFetches -= 1;
+        activeStream = null;
+        resolve();
+        settleStreamIdle(seq, messageId, session);
+      };
+      const request = () => {
+        // 会话已被替换/停止：直接放行，不再发起请求。
+        if (seq !== sessionSeq || activeSession !== session) return settle();
+        try {
+          activeStream = consumeTextToSpeechStream(
+            buildTtsParams(text),
+            payload => handleChunk(payload, messageId, seq, text),
+            () => settle(),
+            () => settle(),
+          );
+        } catch {
+          settle();
+        }
+      };
+      /**
+       * 音色刚被语音切过时先等保存落地再合成：
+       * 合成用的是服务端的 voiceCode，抢在保存前面发请求就会用旧音色念出「已切换成功」，
+       * 一直到下一次提问才换成新音色（见 useReportVoice 的 waitReportVoiceSynced）。
+       * 没有在途的音色保存时这里立即 resolve，不增加任何延迟。
+       */
+      void waitReportVoiceSynced().then(request);
+    }));
+  }
+
+  /**
+   * 流式听播：answer 文字边渲染边喂数据。第一块文字到达即自动开播（等价于自动点了
+   * 播音按钮），每攒到一个句末标点就把这批完整句子送 TTS，整段回复都会念完；
+   * answer 收尾（ended）时把最后那段没有句末标点的尾巴一并送出去。
+   * 切片只在**原始文本**上按偏移做，raw 偏移单调增长，绝不丢内容。
+   */
+  function feedAnswerDelta(message: UiChatMessage, deltaText: string, ended: boolean) {
+    // 语音播报总开关关掉：这一轮不自动播报。
+    // 手动播报按钮走 togglePlay，和这个开关无关，照常可用。
+    if (!settingsStore.autoTtsEnabled) return;
+    const messageId = message?.messageId;
+    if (messageId == null || message?.sessionId == null) return;
+    const key = String(message.id ?? messageId);
+    if (manualStopKeys.has(key)) return;
+    /**
+     * 刚从维修助理 / 配件助手跳出去过：离开那一刻快照里没有的新消息 =
+     * 跳转之后才流进来的这条回复（「好的，正在为你进入维修助理。」），
+     * 判成「跳转前已被停止」，记进 manualStopKeys 并吞掉这一条，返回时不再念。
+     * 只吞一次，之后（用户回来继续提问的）新回复照常自动播报。
+     */
+    if (sceneLeaveKnownKeys && !sceneLeaveKnownKeys.has(key)) {
+      sceneLeaveKnownKeys = null;
+      manualStopKeys.add(key);
+      return;
+    }
+
+    // 同一条消息的流式会话还活着就继续往里喂（音频可能比文本流先播完，
+    // 那时 playingMessageKey 已被 playNext 清空，不能据此重开一局）。
+    if (streamMessageKey !== key || !activeSession) {
+      // 新答案的第一块文字：自动开启流式听播会话。
+      stop();
+      streamFinished = false;
+      streamInputDone = false;
+      streamedRawText = "";
+      submittedRawLength = 0;
+      sessionSeq += 1;
+      activeSession = { pendingFetches: 0 };
+      streamMessageKey = key;
+      playingMessageId.value = messageId;
+      playingMessageKey.value = key;
+      patchMessage(messageId, { ttsLoading: true, ttsPlaying: false });
+    }
+
+    const seq = sessionSeq;
+    const session = activeSession;
+    if (!session || streamMessageKey !== key) return;
+
+    streamedRawText += String(deltaText || "");
+
+    // 切片必须在「原始文本」上做：raw 偏移量只会单调增长，绝不丢内容。
+    // 之前按「全文清洗后差量 + 固定清洗偏移」切片，清洗不是追加稳定的
+    // （合成句号被后续真实字符顶掉、markdown 后半截到达让前缀收缩、列表符转顿号改写），
+    // 偏移错位会跳过若干真实文字 —— 这就是漏播的根因。
+    // ended 时直接取到结尾，尾部没有句末标点的那半句也会一并送出。
+    const boundary = ended ? streamedRawText.length : lastSentenceBoundary(streamedRawText);
+    if (boundary > submittedRawLength) {
+      submitBatch(streamedRawText.slice(submittedRawLength, boundary), messageId, seq, session);
+      submittedRawLength = boundary;
+    }
+
+    if (ended) {
+      streamInputDone = true;
+      settleStreamIdle(seq, messageId, session);
+    }
+  }
+
+  /** 清洗一批原始文本并送 TTS。每批独立清洗，批与批之间互不影响偏移。 */
+  function submitBatch(batchRaw: string, messageId: Identifier, seq: number, session: StreamingSession) {
+    // 前置换行让「行首规则」（标题 # / 引用 > / 列表 - 等）在批次开头也能命中。
+    const batch = cleanAnswerText(`\n${batchRaw}`);
+    if (!batch) return;
+    enqueueTtsBatch(batch, messageId, seq, session);
+  }
+
+  /**
+   * 点击播音按钮：同一目标再点一次则停止；否则取当前消息 content 并流式播放。
+   * `stepId` 传多步骤卡的当前步骤：同一条消息换了步骤（卡片翻页）时不算「再点一次」，
+   * 而是停掉旧语音、接着念新一步的正文。
+   * `textOverride` 用于「要念的内容不在消息正文里」的场景（如步骤小结 step_summary）：
+   * 有值时直接念它，不再从 blocks 里拼文本。
+   */
+  async function togglePlay(message: UiChatMessage, stepId = "", textOverride = "") {
+    const messageId = message?.messageId;
+    if (messageId == null || message?.sessionId == null) return;
+
+    const sameTarget = playingMessageId.value === messageId && playingStepId.value === stepId;
+    if (sameTarget) {
+      stop();
+      return;
+    }
+
+    stop();
+    streamFinished = false;
+    const seq = ++sessionSeq;
+    playingMessageId.value = messageId;
+    playingMessageKey.value = String(message.id ?? messageId);
+    playingStepId.value = stepId;
+    patchMessage(messageId, { ttsLoading: true, ttsPlaying: false });
+    try {
+      /**
+       * 手动播报与自动听播同一口径：整段都念，不再只念第一句。
+       * 手动点的消息已渲染完毕，整段一次性送后端合成分句即可。
+       */
+      const text = cleanAnswerText(textOverride || extractAnswerText(message, stepId));
+      if (!text) {
+        finishRequest(messageId, seq);
+        playingMessageId.value = null;
+        playingMessageKey.value = null;
+        return;
+      }
+
+      activeStream = consumeTextToSpeechStream(
+        buildTtsParams(text),
+        payload => handleChunk(payload, messageId, seq, text),
+        (error) => {
+          if (seq !== sessionSeq) return;
+          logger.warn("实时语音请求失败", error);
+          finishRequest(messageId, seq);
+        },
+        () => finishRequest(messageId, seq),
+      );
+    } catch (error) {
+      if (seq !== sessionSeq) return;
+      logger.warn("获取消息详情失败", error);
+      finishRequest(messageId, seq);
+      playingMessageId.value = null;
+      playingMessageKey.value = null;
+    }
+  }
+
+  function stop() {
+    // 自动听播会话被停止（用户点了停止 / 切到别的消息）：这条消息后续增量不再自动重启。
+    if (!streamInputDone && playingMessageKey.value) manualStopKeys.add(playingMessageKey.value);
+    sessionSeq += 1;
+    streamFinished = false;
+    activeStream?.cancel();
+    activeStream = null;
+    audioQueue = [];
+    releaseAudio();
+    // 流式增量会话一并作废：排队的链式请求因 seq 不匹配自然短路。
+    activeSession = null;
+    streamMessageKey = null;
+    streamInputDone = true;
+    streamedRawText = "";
+    submittedRawLength = 0;
+    if (playingMessageId.value != null) {
+      patchMessage(playingMessageId.value, { ttsLoading: false, ttsPlaying: false });
+    }
+    playingMessageId.value = null;
+    playingMessageKey.value = null;
+    playingStepId.value = "";
+    playing.value = false;
+  }
+
+  /**
+   * 跳转场景窗口（维修助理 / 配件助手，pushWindow 新开 webview）前调一次。
+   *
+   * 这类跳转原 webview 不会 onHide，音频队列 / 在途 TTS 会一直挂着，
+   * 等用户从那边回来才接着把这一轮的话念出来 —— 回来后再听「正在进入维修助理」既多余又像故障。
+   * 所以离开前当场停掉；正文万一还在流，这一轮也已记进 manualStopKeys，不会再自己开口。
+   */
+  function stopForSceneLeave() {
+    // 这一轮记进 manualStopKeys：万一正文还在流，回包到达时也不会自己再开口
+    if (playingMessageKey.value) manualStopKeys.add(playingMessageKey.value);
+    /**
+     * 兜底一：离开这一刻 store 里最后一条消息（就是本轮这条回复）也记成手动停止 ——
+     * 极端情况下正文刚插进 store、还没轮到开口，返回后也不会补开。
+     * 兜底二：留下 key 快照，用来认出「跳转之后才流进来的那条」（见 feedAnswerDelta）。
+     */
+    const tail = chatStore.messages[chatStore.messages.length - 1];
+    if (tail) manualStopKeys.add(String(tail.id ?? tail.messageId));
+    sceneLeaveKnownKeys = new Set(chatStore.messages.map(message => String(message.id ?? message.messageId)));
+
+    stop();
+  }
+
+  /**
+   * 播报中把总开关关掉：立刻静音，不等它念完。
+   * 自动流式会话（activeSession 非空）与气泡里手动点的播报（togglePlay，activeSession 为空）
+   * 都要停 —— 总开关是「声音总开关」，关掉就必须没声音，否则表现为「点了关闭还在念」。
+   * 开关只决定「要不要自动播」，手动播报按钮本身仍不受它限制（见 feedAnswerDelta）。
+   */
+  watch(
+    () => settingsStore.autoTtsEnabled,
+    (enabled) => {
+      if (enabled) return;
+      if (activeSession || playingMessageId.value != null || playing.value) stop();
+    },
+  );
+
+  onBeforeUnmount(stop);
+
+  return {
+    setPlaybackGain,
+    playbackText,
+    togglePlay,
+    feedAnswerDelta,
+    stop,
+    stopForSceneLeave,
+    playing,
+    playingMessageId,
+    playingMessageKey,
+    playingStepId,
+  };
+}

@@ -1,3 +1,4 @@
+import { getVehicleHttpHeaders } from "@/utils/vehicle-http-headers";
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("request");
@@ -47,12 +48,16 @@ function withChannelHeader(headers?: Record<string, string>) {
   // #ifdef APP-PLUS
   channel = "app";
   // #endif
-  // 头名大小写不敏感：调用方若自己带了 x-channel，先丢掉，避免发出两条同名头被网关合并
+  const vehicleHeaders = getVehicleHttpHeaders();
+  if (vehicleHeaders["X-Channel"]) channel = "vehicle";
+  // 合并时统一头名，避免大小写不同的同名头被网关合并。
   const merged: Record<string, string> = {};
   Object.entries(headers || {}).forEach(([name, value]) => {
     if (name.toLowerCase() === "x-channel") return;
+    if (vehicleHeaders["X-Device-No"] && name.toLowerCase() === "x-device-no") return;
     merged[name] = value;
   });
+  if (vehicleHeaders["X-Device-No"]) merged["X-Device-No"] = vehicleHeaders["X-Device-No"];
   merged["X-Channel"] = channel;
   return merged;
 }

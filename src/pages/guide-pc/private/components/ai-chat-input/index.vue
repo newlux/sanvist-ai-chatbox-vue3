@@ -10,7 +10,7 @@ import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
 import { usePressDelay } from "@/hooks/usePressDelay";
-import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { useVoiceInput } from "@/pages/guide-pc/private/hooks/useVoiceInput";
 import { createLogger } from "@/utils/logger";
 import { getMicrophoneVolume } from "@/utils/platform/mpaas";
 
