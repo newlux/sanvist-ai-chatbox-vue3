@@ -10,11 +10,18 @@ import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
+import { useDuplexButtonGesture } from "@/hooks/useDuplexButtonGesture";
 import { usePressDelay } from "@/hooks/usePressDelay";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useSettingsStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { getMicrophoneVolume } from "@/utils/platform/mpaas";
+
+const duplexGesture = useDuplexButtonGesture({
+  onClick: () => onVoiceQueryStartTap(),
+  onHold: () => emit("duplex-toggle"),
+  onPressStart: () => onVoiceQueryPressEnd(),
+});
 
 const logger = createLogger("chat-input");
 
@@ -815,6 +822,7 @@ async function cancelGlobalVoiceHold() {
  * 注意 appendAttachments 对应 hook 里的 appendUploadedAttachments，两处名字必须一致。
  */
 defineExpose({
+  cancelDuplexPress: duplexGesture.cancel,
   appendAttachments: appendUploadedAttachments,
   focusTextInput,
   startGlobalVoiceHold,
@@ -1139,9 +1147,21 @@ onBeforeUnmount(() => {
             role="button"
             :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
             :aria-pressed="duplexActive"
-            @touchstart.stop="onVoiceQueryPressEnd"
-            @mousedown.stop="onVoiceQueryPressEnd"
-            @tap.stop="emit('duplex-toggle')"
+            tabindex="0"
+            @pointerdown.stop.prevent="duplexGesture.start"
+            @pointermove.stop.prevent="duplexGesture.move"
+            @pointerup.stop.prevent="duplexGesture.end"
+            @pointercancel.stop="duplexGesture.cancel"
+            @lostpointercapture="duplexGesture.cancel"
+            @touchstart.stop="duplexGesture.start"
+            @touchend.stop="duplexGesture.end"
+            @touchmove.stop="duplexGesture.move"
+            @touchcancel.stop="duplexGesture.cancel"
+            @mousedown.stop="duplexGesture.start"
+            @mouseup.stop="duplexGesture.end"
+            @tap.stop="duplexGesture.tap"
+            @keydown.enter.stop.prevent="onVoiceQueryStartTap()"
+            @keydown.space.stop.prevent="onVoiceQueryStartTap()"
           >
             <image :src="duplexActive ? waveIconActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
           </view>
@@ -1201,7 +1221,21 @@ onBeforeUnmount(() => {
             role="button"
             :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
             :aria-pressed="duplexActive"
-            @tap.stop="emit('duplex-toggle')"
+            tabindex="0"
+            @pointerdown.stop.prevent="duplexGesture.start"
+            @pointermove.stop.prevent="duplexGesture.move"
+            @pointerup.stop.prevent="duplexGesture.end"
+            @pointercancel.stop="duplexGesture.cancel"
+            @lostpointercapture="duplexGesture.cancel"
+            @touchstart.stop="duplexGesture.start"
+            @touchend.stop="duplexGesture.end"
+            @touchmove.stop="duplexGesture.move"
+            @touchcancel.stop="duplexGesture.cancel"
+            @mousedown.stop="duplexGesture.start"
+            @mouseup.stop="duplexGesture.end"
+            @tap.stop="duplexGesture.tap"
+            @keydown.enter.stop.prevent="onVoiceQueryStartTap()"
+            @keydown.space.stop.prevent="onVoiceQueryStartTap()"
           >
             <!-- 声波：未触发是深色 6 段声波，触发后才是纯蓝（#1166D6），不渐变 -->
             <image :src="duplexActive ? waveIconActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
@@ -1252,6 +1286,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
+.input-bar__wave-chip {
+  touch-action: none;
+  user-select: none;
+}
+
 .chat-input {
   position: fixed;
   right: 0;
@@ -2476,7 +2515,22 @@ onBeforeUnmount(() => {
   filter: none;
 }
 
-.input-bar__duplex--starting {
+/* 双工从启动到运行期间持续显示状态点，单次录音不显示。 */
+.input-bar__wave-chip--active::after,
+.input-bar__duplex--starting::after {
+  position: absolute;
+  top: 10rpx;
+  right: 20rpx;
+  z-index: 1;
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: #32d74b;
+  pointer-events: none;
+  content: '';
+}
+
+.input-bar__duplex--starting image {
   opacity: 0.55;
 }
 </style>

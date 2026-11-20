@@ -112,6 +112,7 @@ const sharePosterWrap = ref<unknown>(null);
 const chatInputRef = ref<{
   appendAttachments?: (meta: ChatMessageAttachment[]) => void;
   focusTextInput?: () => void;
+  cancelDuplexPress?: () => void;
 } | null>(null);
 const shareSheetBottomInset = ref("");
 const pageStage = ref<"welcome" | "chat">("welcome");
@@ -2030,6 +2031,7 @@ onShow(() => {
 // 离开页面时停止自动听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
 // useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
+  chatInputRef.value?.cancelDuplexPress?.();
   // 遥控器按键还给系统：被压栈后继续拦截，子页面与系统返回键都会失灵
   remoteKeyActive.value = false;
   realtimeTts.stop();

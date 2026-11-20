@@ -2517,7 +2517,22 @@ onBeforeUnmount(() => {
   filter: brightness(0) invert(1);
 }
 
-.input-bar__duplex--starting {
+/* 双工从启动到运行期间持续显示状态点，单次录音不显示。 */
+.input-bar__wave-chip--active::after,
+.input-bar__duplex--starting::after {
+  position: absolute;
+  top: 10rpx;
+  right: 20rpx;
+  z-index: 1;
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: #32d74b;
+  pointer-events: none;
+  content: '';
+}
+
+.input-bar__duplex--starting image {
   opacity: 0.55;
 }
 </style>

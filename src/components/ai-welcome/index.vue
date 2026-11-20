@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useDuplexButtonGesture } from "@/hooks/useDuplexButtonGesture";
 import type { PropType } from "vue";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
@@ -199,6 +200,15 @@ function onSpeakPressMove(event: unknown) {
   const point = readSpeakPoint(event);
   if (Math.abs(point.x - holdOrigin.x) > 12 || Math.abs(point.y - holdOrigin.y) > 12) clearSpeakHold();
 }
+
+const duplexGesture = useDuplexButtonGesture({
+  onClick: () => onSpeakTap(),
+  onHold: () => onDuplexTap(),
+  onPressStart: () => clearSpeakHold(),
+});
+watch(() => props.leaving, leaving => {
+  if (leaving) duplexGesture.cancel();
+});
 
 function onDuplexTap() {
   if (props.leaving || startFired || listenMounted.value) return;
@@ -449,7 +459,21 @@ onBeforeUnmount(() => {
           role="button"
           :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
           :aria-pressed="duplexActive"
-          @tap.stop="onDuplexTap"
+          tabindex="0"
+          @pointerdown.stop.prevent="duplexGesture.start"
+          @pointermove.stop.prevent="duplexGesture.move"
+          @pointerup.stop.prevent="duplexGesture.end"
+          @pointercancel.stop="duplexGesture.cancel"
+          @lostpointercapture="duplexGesture.cancel"
+          @touchstart.stop="duplexGesture.start"
+          @touchend.stop="duplexGesture.end"
+          @touchmove.stop="duplexGesture.move"
+          @touchcancel.stop="duplexGesture.cancel"
+          @mousedown.stop="duplexGesture.start"
+          @mouseup.stop="duplexGesture.end"
+          @tap.stop="duplexGesture.tap"
+          @keydown.enter.stop.prevent="onSpeakTap()"
+          @keydown.space.stop.prevent="onSpeakTap()"
         >
           <image
             class="welcome__composer-wave-icon"
@@ -483,9 +507,21 @@ onBeforeUnmount(() => {
           role="button"
           :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
           :aria-pressed="duplexActive"
-          @touchstart.stop="clearSpeakHold"
-          @mousedown.stop="clearSpeakHold"
-          @tap.stop="onDuplexTap"
+          tabindex="0"
+          @pointerdown.stop.prevent="duplexGesture.start"
+          @pointermove.stop.prevent="duplexGesture.move"
+          @pointerup.stop.prevent="duplexGesture.end"
+          @pointercancel.stop="duplexGesture.cancel"
+          @lostpointercapture="duplexGesture.cancel"
+          @touchstart.stop="duplexGesture.start"
+          @touchend.stop="duplexGesture.end"
+          @touchmove.stop="duplexGesture.move"
+          @touchcancel.stop="duplexGesture.cancel"
+          @mousedown.stop="duplexGesture.start"
+          @mouseup.stop="duplexGesture.end"
+          @tap.stop="duplexGesture.tap"
+          @keydown.enter.stop.prevent="onSpeakTap()"
+          @keydown.space.stop.prevent="onSpeakTap()"
         >
           <image
             class="welcome__composer-wave-icon"
@@ -530,6 +566,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
+.welcome__composer-wave {
+  touch-action: none;
+  user-select: none;
+}
+
 /* 起飞动画期间要和「对话页」同时存在：欢迎层铺满视口并压在上面，
    底色与对话页同为 #fafafa，淡出时不会看到闪白/闪黑 */
 .welcome {
@@ -856,7 +897,22 @@ onBeforeUnmount(() => {
   height: 40rpx;
 }
 
-.welcome__composer-wave--starting {
+/* 首页与对话输入栏保持一致，启动及运行期间均显示绿点。 */
+.welcome__composer-wave--active::after,
+.welcome__composer-wave--starting::after {
+  position: absolute;
+  top: 10rpx;
+  right: 20rpx;
+  z-index: 1;
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: #32d74b;
+  pointer-events: none;
+  content: '';
+}
+
+.welcome__composer-wave--starting .welcome__composer-wave-icon {
   opacity: 0.55;
 }
 

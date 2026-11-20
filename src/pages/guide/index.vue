@@ -115,6 +115,7 @@ const chatHeader = ref<{ reloadSessions?: () => Promise<void> } | null>(null);
 const chatInputRef = ref<{
   appendAttachments?: (meta: ChatMessageAttachment[]) => void;
   focusTextInput?: () => void;
+  cancelDuplexPress?: () => void;
 } | null>(null);
 const sharePosterWrap = ref<unknown>(null);
 const shareSheetBottomInset = ref("");
@@ -1417,6 +1418,7 @@ const stopNativeResume = onNativeEvent("resume", () => {
 // 离开页面时停止听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
 // 两个 TTS hook 自带的 onBeforeUnmount 清理不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
+  chatInputRef.value?.cancelDuplexPress?.();
   // 遥控器按键还给系统：被压栈后继续拦截，子页面与系统返回键都会失灵
   remoteKeyActive.value = false;
   cancelVoiceArrival?.();
