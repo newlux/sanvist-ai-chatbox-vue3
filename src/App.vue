@@ -24,7 +24,7 @@ const logger = createLogger("app");
  * 置空时请求不会带 Authorization 头（见 utils/request 的 getRequestHeaders）。
  * 注意：这串会打进产物，正式上线前需要确认是否保留。
  */
-const LOCAL_AUTHORIZATION_FALLBACK = "bearer ebfe97c0-6222-47a8-acfe-95af598e540a";
+const LOCAL_AUTHORIZATION_FALLBACK = "bearer a308fa40-c4f3-472d-9b3f-2cbd47545396";
 
 type StartupQuery = Record<string, any>;
 
@@ -354,8 +354,9 @@ function watchLateStartupParams() {
     const currentLang = String(systemStore.header.Lang || "");
     if (!lateLang || lateLang === currentLang) return;
     logger.debug("bridge 晚到，补启动语言", lateLang);
-    // 与 onLaunch 同一个入口：i18n 与 header 一起改，设置弹层的分段也会跟着变
+    // 与 onLaunch 同一个入口：i18n / header 一起改，并把服务端语言一并校正
     void systemStore.setLanguage(lateLang);
+    void settingsStore.syncHostLanguage(lateLang).then(() => settingsStore.load());
   });
 }
 
@@ -374,16 +375,17 @@ onLaunch(async (options) => {
   void systemStore.syncSystemColorScheme();
   // 语言只有一个入口：i18n 全局 locale 与 header 的 Lang 一起写
   await systemStore.setLanguage(baseInfo.lang);
-  // 系统设置（接口文档 4.5 GET /settings）：进应用拉一次全量，
-  // 语言 / 外观 / 记忆 / 纯净模式 / 对话 / 音色 / 语速各落到自己的归属地（见 stores/modules/settings.ts）。
-  // 不 await：拉不到就用宿主注入的语言与本地默认值，不能阻塞首屏
   const pages = getCurrentPages();
   const hashPath = typeof location === "undefined" ? "" : location.hash.replace(/^#\/?/, "");
   const currentPath = String(pages[pages.length - 1]?.route || hashPath || options?.path)
-    .replace(/^\//, "").split("?")[0];
-  if (currentPath !== "pages/persona-awakening/index") {
-    void settingsStore.load();
-  }
+    .replace(/^\//, "")
+    .split("?")[0];
+  // 宿主注入的 Lang 是本端权威语言：先按它校正服务端语言（不一致时 PUT /settings），再拉全量设置。
+  // 顺序不能反：load 的 apply 会回灌服务端语言，先 load 就把宿主语言顶掉了。
+  void (async () => {
+    await settingsStore.syncHostLanguage(baseInfo.lang);
+    if (currentPath !== "pages/persona-awakening/index") await settingsStore.load();
+  })();
   watchLateStartupParams();
   await systemStore.initPhoneSizesInfo();
   initializeDeviceInfo();

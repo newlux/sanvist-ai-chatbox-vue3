@@ -54,6 +54,12 @@ export const useSettingsStore = defineStore("settings", () => {
    * 本机偏好，不走 /settings 接口，存 uni storage，重启后保留，缺省为开。
    */
   const autoTtsEnabled = ref(readAutoTtsEnabled());
+  /**
+   * 启动时宿主注入的 Lang（壳子 launch query）：这一端以它为准。
+   * 有值时 `apply` 不再用服务端语言覆盖界面语言 —— 否则刚按宿主切到英文，
+   * `load()` 一回来又被服务端旧的中文顶掉。
+   */
+  const hostLanguage = ref("");
 
   function readAutoTtsEnabled(): boolean {
     try {
@@ -79,7 +85,8 @@ export const useSettingsStore = defineStore("settings", () => {
     if (!data) return;
     confirmed.value = data;
 
-    if (data.language) void systemStore.setLanguage(toAppLanguage(data.language));
+    // 宿主注入过 Lang 时以它为准：服务端旧值不回灌界面语言（接口值仍由 syncHostLanguage 校正）
+    if (data.language && !hostLanguage.value) void systemStore.setLanguage(toAppLanguage(data.language));
     if (data.appearance) systemStore.setAppearance(data.appearance);
 
     /**
@@ -115,6 +122,35 @@ export const useSettingsStore = defineStore("settings", () => {
     }
     catch (error) {
       logger.warn("get settings failed", error);
+      return null;
+    }
+  }
+
+  /**
+   * 启动时用宿主注入的 Lang（壳子 launch query）校正服务端语言。
+   *
+   * 壳子传下来的 Lang 是这一端的权威语言，比服务端上一次记录更准：
+   * - 先占住 `hostLanguage`，后面的 `load()` / `apply()` 不再用服务端旧值覆盖界面语言；
+   * - 服务端记录的接口语言（只认 zh / en）与宿主不一致时，PUT `/settings` 回写一次；
+   * - 一致就不发请求，避免每次冷启动都白跑一次写接口。
+   */
+  async function syncHostLanguage(lang: string): Promise<AppSettings | null> {
+    const raw = String(lang || "").trim();
+    if (!raw) return null;
+    hostLanguage.value = raw;
+
+    const target = toApiLanguage(raw.toLowerCase().startsWith("zh") ? "zh_CN" : "en_US");
+    try {
+      const data = await getSettings();
+      if (data) confirmed.value = data;
+      if (data?.language === target) return data;
+      logger.info("[settings] 宿主语言与服务端不一致，回写", { host: raw, server: data?.language, target });
+      await save({ language: target });
+      return confirmed.value;
+    }
+    catch (error) {
+      // 拉不到服务端设置时不影响界面语言（它已经按宿主 Lang 生效了），下次启动再校正
+      logger.warn("sync host language failed", { host: raw, error });
       return null;
     }
   }
@@ -184,8 +220,9 @@ export const useSettingsStore = defineStore("settings", () => {
     return save({ appearance: value });
   }
 
-  /** 界面语言：先切 i18n，再落服务端（接口只认 zh / en） */
+  /** 界面语言：先切 i18n，再落服务端（接口只认 zh / en）。用户手动切换后以用户选择为准 */
   function setLanguage(value: "zh_CN" | "en_US") {
+    hostLanguage.value = "";
     void systemStore.setLanguage(value);
     return save({ language: toApiLanguage(value) });
   }
@@ -201,6 +238,7 @@ export const useSettingsStore = defineStore("settings", () => {
     autoTtsEnabled,
     load,
     save,
+    syncHostLanguage,
     setMemory,
     setPureMode,
     setDialogueMode,
