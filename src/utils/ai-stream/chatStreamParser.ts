@@ -214,25 +214,39 @@ function reduceEventToBlocks(
       const answerBlocks = blocks.filter(block => block.type === "answer");
       // 低端安卓 WebView 不支持 ES2022 的 Array.prototype.at
       const lastBlock = blocks[blocks.length - 1];
-      const lastAnswerBlock = answerBlocks[answerBlocks.length - 1];
       /**
        * replace 只表示「这一段是完整正文，覆盖旧的」（Dify 的 message_replace /
        * Agent 收尾整段回包），不是「另起一段」。之前按 `!event.replace` 判断会新开
        * `answer-1`，于是流式正文和收尾整段同时存在 —— 气泡里同一条回复出现两份。
-       * 有 answer 块就写回它本身；一个都没有才是首块。
+       *
+       * 覆盖时从**第一段** answer 开始写：完整正文的第一段本来就该落在最前面的 answer 上，
+       * 表格 / 图表之后的分段由后续分片自然接回末尾（见下面的清空逻辑）。
        */
       const answerId = event.replace
-        ? (lastAnswerBlock?.id || "answer-0")
+        ? (answerBlocks[0]?.id || "answer-0")
         : (lastBlock?.type === "answer" ? lastBlock.id : `answer-${answerBlocks.length}`);
       const answerIndex = blocks.findIndex(block => block.id === answerId);
       const previousContent = answerIndex < 0
         ? ""
         : String(blocks[answerIndex].payload.content || "");
+      const content = mergeAnswerContent(previousContent, event.answer, Boolean(event.replace));
+      let nextBlocks = upsertBlock(blocks, answerId, "answer", { content });
+      if (event.replace) {
+        /**
+         * 整段正文替换要落回**第一段** answer：完整正文从第一段重新排起，后面表格 / 图表的
+         * 位置才不会被推到最后。其余 answer 块里装的是已被覆盖的旧正文，先清空内容
+         * （块保留占位），后续分片到达时自然写回末尾那一块。
+         *
+         * 之前写回「最后一个 answer 块」，等于把表格前的正文塞到表格之后：
+         * 气泡里就成了「两段文字连在一起 + 表格在最下面」。
+         */
+        nextBlocks = nextBlocks.map(block => block.type === "answer" && block.id !== answerId
+          ? { ...block, payload: { ...block.payload, content: "" } }
+          : block);
+      }
       return {
         ...base,
-        blocks: upsertBlock(blocks, answerId, "answer", {
-          content: mergeAnswerContent(previousContent, event.answer, Boolean(event.replace)),
-        }),
+        blocks: nextBlocks,
         receivedContent: true,
       };
     }

@@ -175,16 +175,23 @@ function collectAnswerText(blocks: ReturnType<typeof buildInitialBlocks>) {
 }
 
 /**
- * 把气泡里的答案正文换成标签正文（<QRCODE> 与 <OWNER> 这类标签共用）。
- * 标签源码不能落到气泡里，正文统一放在第一段 answer 上，其余 answer 清空。
+ * 气泡正文里的协议标签源码（QRCODE / OWNER / VOICE_STYLE / REPORT_STYLE / WORK_REPORT / EMERGENCY）。
+ * 只删标签本身，尖括号里的正文原样保留，**段落边界与卡片位置都不动**。
+ *
+ * 之前是把「剥完标签的整段正文」塞进第一段 answer、其余清空，表格 / 图表前后的正文
+ * 因此被挤到一起、卡片被留在末尾 —— 气泡里成了「两段文字连在一起 + 表格在最下面」。
  */
-function withAnswerText(blocks: ReturnType<typeof buildInitialBlocks>, text: string) {
-  let placed = false;
+const ANSWER_TAG_SOURCE = /<\/?(?:OWNER|ADMIN|OPERATOR|VOICE_STYLE|REPORT_STYLE|WORK_REPORT|QRCODE|EMERGENCY)\b[^>]*>/gi;
+/** `<EMERGENCY>true</EMERGENCY>` 这类纯标记：标签体不是给人看的正文，整段丢掉 */
+const ANSWER_TAG_FLAG = /<EMERGENCY\b[^>]*>\s*(?:true|false|1|0|yes|no)\s*<\/EMERGENCY>/gi;
+
+/** 第二参数沿用原签名（调用方传「剥完标签的整段正文」），不再用于重排正文 */
+function withAnswerText(blocks: ReturnType<typeof buildInitialBlocks>, _text: string) {
   return blocks.map((block) => {
     if (block.type !== "answer") return block;
-    const content = placed ? "" : text;
-    placed = true;
-    return { ...block, payload: { ...block.payload, content } };
+    const content = String(block.payload.content || "");
+    const next = content.replace(ANSWER_TAG_FLAG, "").replace(ANSWER_TAG_SOURCE, "");
+    return next === content ? block : { ...block, payload: { ...block.payload, content: next } };
   });
 }
 
