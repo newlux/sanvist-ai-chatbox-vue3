@@ -24,7 +24,7 @@ const logger = createLogger("app");
  * 置空时请求不会带 Authorization 头（见 utils/request 的 getRequestHeaders）。
  * 注意：这串会打进产物，正式上线前需要确认是否保留。
  */
-const LOCAL_AUTHORIZATION_FALLBACK = "bearer a308fa40-c4f3-472d-9b3f-2cbd47545396";
+const LOCAL_AUTHORIZATION_FALLBACK = "bearer 52e45cbb-263f-44b1-93d5-5a35966a33e5";
 
 type StartupQuery = Record<string, any>;
 

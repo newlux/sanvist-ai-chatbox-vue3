@@ -45,25 +45,69 @@ export function toRelativePublicAssets(html: string): string {
   return html.replace(/(\s(?:src|href)=")\/(?:\.\/)?(scriptError\.js|scriptStyle\.css)"/g, "$1./$2\"");
 }
 
-async function createZip(outDir: string): Promise<string> {
-  const zipName = path.basename(outDir);
-  const zipPath = path.join(path.dirname(outDir), `${zipName}.zip`);
-  await fs.rm(zipPath, { force: true });
+/**
+ * 打一次 zip：先写 `<名字>.zip.tmp`，成功后再改名 —— 中途失败不会在目标文件名上留下半个包。
+ *
+ * 之前只 `pipe` 了输出流、没挂 `error` 监听：Windows 上磁盘写入被中断
+ * （文件被解压软件 / 网盘 / 杀毒软件占用，或写入被拒绝）时底层会报 `UNKNOWN`，
+ * 未处理的 `'error'` 事件直接把构建进程打断，现场只留一个坏 zip。
+ * 这里统一收集 output / archive 的错误，失败时清掉临时文件再抛出。
+ */
+async function createZipOnce(outDir: string, zipPath: string): Promise<void> {
+  const tempPath = `${zipPath}.tmp`;
+  await fs.rm(tempPath, { force: true });
 
-  const output = createWriteStream(zipPath);
+  const output = createWriteStream(tempPath);
   const archive = new ZipArchive({ zlib: { level: 9 } });
+  const errors: Error[] = [];
+  output.on("error", error => errors.push(error));
+  archive.on("error", error => errors.push(error));
   archive.on("warning", (error) => {
     if (error.code !== "ENOENT") {
-      throw error;
+      console.warn(`[h5-post-build] 压缩警告：${error.message}`);
     }
   });
 
   archive.pipe(output);
   archive.directory(outDir, path.basename(outDir));
-  await archive.finalize();
-  await finished(output);
+  await archive.finalize().catch(error => errors.push(error));
+  // output 出错时 finished 会 reject，这里统一看上面的 errors，避免再抛一次
+  await finished(output).catch(() => {});
+  if (errors.length) {
+    output.destroy();
+    await fs.rm(tempPath, { force: true });
+    throw errors[0];
+  }
 
-  return zipPath;
+  await fs.rm(zipPath, { force: true });
+  await fs.rename(tempPath, zipPath);
+}
+
+async function createZip(outDir: string): Promise<string> {
+  const zipName = path.basename(outDir);
+  const zipPath = path.join(path.dirname(outDir), `${zipName}.zip`);
+
+  let lastError: unknown;
+  // 写盘失败多半是瞬时占用（预览 / 同步 / 扫描），重试一次基本都能过
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await createZipOnce(outDir, zipPath);
+      return zipPath;
+    }
+    catch (error) {
+      lastError = error;
+      console.warn(`[h5-post-build] 第 ${attempt} 次打包 ${zipName}.zip 失败：${String((error as Error)?.message || error)}`);
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 800));
+    }
+  }
+
+  const code = (lastError as NodeJS.ErrnoException)?.code || "写入失败";
+  throw new Error(
+    `打包 ${zipName}.zip 失败（${code}）。请按顺序排查：`
+    + `1) 关闭解压软件 / 压缩包预览 / 网盘同步 / 杀毒软件对该文件的占用；`
+    + `2) 手动删除 dist/${zipName}.zip 与 dist/${zipName}.zip.tmp 后重试；`
+    + `3) 仍报 EPERM / UNKNOWN 时重启电脑，或对该磁盘执行 chkdsk /f，再重试`,
+  );
 }
 
 interface H5PostBuildOptions {
@@ -134,11 +178,21 @@ export function h5PostBuild(options: H5PostBuildOptions = {}): Plugin {
         await assertMaterializedAssets(path.resolve(config.root, "public"));
         const distDir = path.resolve(config.root, "dist");
         await fs.mkdir(distDir, { recursive: true });
-        await Promise.all(
-          (await fs.readdir(distDir)).map(entry =>
-            fs.rm(path.join(distDir, entry), { recursive: true, force: true }),
-          ),
-        );
+        // 清空 dist：保证每次构建只留下本次产物，避免旧版本混进包里。
+        // 个别文件可能被解压软件 / 网盘 / 杀毒软件占着（Windows 上直接 EPERM），
+        // 删不掉就跳过并告警 —— 不能因为一个旧文件挡住整次构建。
+        const entries = await fs.readdir(distDir);
+        await Promise.all(entries.map(async (entry) => {
+          try {
+            await fs.rm(path.join(distDir, entry), { recursive: true, force: true });
+          }
+          catch (error) {
+            console.warn(
+              `[h5-post-build] 旧产物删不掉，已跳过：${entry}（${String((error as Error)?.message || error)}）。`
+              + `请关闭占用它的程序后手动删除`,
+            );
+          }
+        }));
       }
     },
     buildEnd(error) {

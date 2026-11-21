@@ -537,10 +537,15 @@ function renderDomChart() {
     if (sizeRetry < MAX_SIZE_RETRY) {
       sizeRetry += 1;
       scheduleRenderChart();
-    } else {
-      logger.warn("容器尺寸为 0，降级为数据清单");
-      failed.value = true;
+      return;
     }
+    /**
+     * 尺寸一直是 0 不能判成「渲染失败」：页面被压栈隐藏时（进作业指导 / 任务协同再返回）
+     * 容器尺寸必然是 0。一旦置 failed，canvas 就被 v-show 掉，尺寸永远停在 0，
+     * ResizeObserver 再也收不到变化 —— 返回后图表会永久退化成下面的数据清单（看起来像表格）。
+     * 这里只把计数清零，等尺寸恢复时由 ResizeObserver 重新触发渲染。
+     */
+    sizeRetry = 0;
     return;
   }
 

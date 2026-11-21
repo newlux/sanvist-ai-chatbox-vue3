@@ -7,6 +7,7 @@ import type {
 } from "@/utils/ai-stream";
 import { useI18n } from "vue-i18n";
 import { interruptChat } from "@/api/chat";
+import { updateUserRole } from "@/api/user-role";
 import { useChatStream } from "@/hooks/useChatStream";
 import { saveReportStyleCode } from "@/hooks/useReportStyle";
 import { markReportVoiceSyncing, saveReportVoiceByStyle } from "@/hooks/useReportVoice";
@@ -620,6 +621,8 @@ export function useChatSend(scope?: string, handlers?: {
     let appliedColorSwitch = "";
     /** 本轮已经触发过的「异常全部加急」：标签随每一拍快照重复出现，只处理第一次 */
     let emergencyUrgentStarted = false;
+    /** 本轮已经回写过的身份码：标签随每一拍快照重复出现，只回写第一次 */
+    let syncedRoleCode = "";
 
     /**
      * 音色切换标签落库：本机存储 + `/settings.voiceCode` 两处都写。
@@ -832,11 +835,16 @@ export function useChatSend(scope?: string, handlers?: {
            * 正文去掉标签，只留尖括号里的提示文字；角色码落到 userStore ——
            * setVisitorRole 会写 uni storage（visitor_role），Guest-Role 请求头由 App.vue 对
            * visitorRole 的 watch（flush: "sync"）在同一拍同步，这里不重复调 setGuestRole。
+           *
+           * 标签出现就说明后端已经把身份切过去了，前端再把角色码回写一次 `/user/role`
+           * （`roleCode` 直接取标签名）；同一轮只回写一次，失败只记日志、不影响气泡。
            */
           const roleTurn = resolveRoleTagTurn(displayBlocks);
-          if (roleTurn.role && userStore.visitorRole !== roleTurn.role) {
+          if (roleTurn.role && syncedRoleCode !== roleTurn.role) {
+            syncedRoleCode = roleTurn.role;
             userStore.setVisitorRole(roleTurn.role);
             logger.info("[chat] visitor role switched by answer tag", roleTurn.role);
+            void updateUserRole(roleTurn.role).catch(error => logger.warn("[chat] sync user role failed", error));
           }
           if (roleTurn.tagged) displayBlocks = withAnswerText(displayBlocks, roleTurn.text);
 

@@ -20,3 +20,13 @@ export function getOperatorRoles() {
 export function getTodayAwakeningPrompt() {
   return request.get<AwakeningPrompt>("/prompts/awakening/today").json();
 }
+
+/**
+ * 切换当前账号身份。
+ *
+ * 对话回答里出现 `<OWNER>` / `<ADMIN>` / `<OPERATOR>` 标签，就代表后端已经把身份切过去了，
+ * 前端再把角色码回写到账号上（`roleCode` 就是标签名，不再映射）。
+ */
+export function updateUserRole(roleCode: string) {
+  return request.post<unknown>("/user/role", { roleCode }).json();
+}
