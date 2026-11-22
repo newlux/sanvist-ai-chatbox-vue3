@@ -95,7 +95,7 @@ onMounted(() => {
     <view class="guide-finish__brand">
       <image class="guide-finish__brand-icon" :src="saniIcon" mode="aspectFit" />
       <text class="guide-finish__brand-text">
-        NEO
+        Neo
       </text>
       <view
         v-if="ttsEnabled"

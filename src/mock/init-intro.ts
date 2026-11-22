@@ -31,7 +31,7 @@ const GUIDE_ZH: AiBlock[] = [
     id: "guide-lead-mock",
     type: "guide-lead",
     payload: {
-      text: "你好，我是 NEO，您的作业指导助手。\n按键怎么看、操作怎么做、作业前检查什么，都可以问我。\n我依据机型资料，新手分步讲，老师傅重点讲差异，提醒关键安全事项，现场操作请按规程确认。",
+      text: "你好，我是 Neo，您的作业指导助手。\n按键怎么看、操作怎么做、作业前检查什么，都可以问我。\n我依据机型资料，新手分步讲，老师傅重点讲差异，提醒关键安全事项，现场操作请按规程确认。",
       lead_text: "可以和我说选择哪个设备（单选）",
       options: [
         "A｜320吨智混履带起重机 SCC3200T-EV",
@@ -49,7 +49,7 @@ const GUIDE_EN: AiBlock[] = [
     id: "guide-lead-mock",
     type: "guide-lead",
     payload: {
-      text: "Hello, I'm NEO, your operation guidance assistant.\nYou can ask me how to read controls, perform operations, and carry out pre-operation checks.\nI use model-specific documentation, explain steps for beginners and key differences for experienced operators, and highlight essential safety points. Follow the applicable procedures for on-site operations.",
+      text: "Hello, I'm Neo, your operation guidance assistant.\nYou can ask me how to read controls, perform operations, and carry out pre-operation checks.\nI use model-specific documentation, explain steps for beginners and key differences for experienced operators, and highlight essential safety points. Follow the applicable procedures for on-site operations.",
       lead_text: "Which device would you like to select? (single choice)",
       options: [
         "A｜SCC3200T-EV crawler crane",
@@ -90,27 +90,34 @@ const ROLE_OPTIONS_EN: TaskIntroCopy["options"] = [
 const TASK_TITLE_ZH = "你想体验哪个身份？";
 const TASK_TITLE_EN = "Which role would you like to try?";
 const TASK_DESC_ZH = "三个身份对应不同的现场异常，能体验的业务动作相同。";
-const TASK_DESC_EN = "Each role starts with a different site issue. You can try the same actions in all three roles.";
+const TASK_DESC_EN =
+  "Each role starts with a different site issue. You can try the same actions in all three roles.";
 
 /** 三套中文开场文案（顺序与文档一致） */
 const TASK_ZH: TaskIntroCopy[] = [
   {
-    content: "你好，我是 NEO，任务协同 AI 助理。\n\n为了让你更好地体验任务协同，我们准备了三个身份。你可以选一个，看看遇到现场异常和任务冲突时，我会怎样帮你分析影响、协调任务、讨论调整办法。",
-    voice: "你好，我是 NEO，任务协同 AI 助理。为了方便你体验，我们准备了三个身份。选一个，我带你看看现场遇到异常冲突时，任务会受什么影响、又该怎么协调调整。",
+    content:
+      "你好，我是 NEO，任务协同 AI 助理。\n\n为了让你更好地体验任务协同，我们准备了三个身份。你可以选一个，看看遇到现场异常和任务冲突时，我会怎样帮你分析影响、协调任务、讨论调整办法。",
+    voice:
+      "你好，我是 NEO，任务协同 AI 助理。为了方便你体验，我们准备了三个身份。选一个，我带你看看现场遇到异常冲突时，任务会受什么影响、又该怎么协调调整。",
     title: TASK_TITLE_ZH,
     description: TASK_DESC_ZH,
     options: ROLE_OPTIONS_ZH,
   },
   {
-    content: "你好，我是 NEO，任务协同 AI 助理。\n\n第一次体验，可以从我们准备的三个身份里选一个。我会结合对应的现场异常，和你一起看看哪些任务受到影响、该怎么协调，以及有哪些调整办法。",
-    voice: "你好，我是 NEO，任务协同 AI 助理。初次体验，我们准备了三个身份供你选择。选一个，我们从对应的现场异常看起，分析任务受到的影响，再讨论怎么协调和调整。",
+    content:
+      "你好，我是 NEO，任务协同 AI 助理。\n\n第一次体验，可以从我们准备的三个身份里选一个。我会结合对应的现场异常，和你一起看看哪些任务受到影响、该怎么协调，以及有哪些调整办法。",
+    voice:
+      "你好，我是 NEO，任务协同 AI 助理。初次体验，我们准备了三个身份供你选择。选一个，我们从对应的现场异常看起，分析任务受到的影响，再讨论怎么协调和调整。",
     title: TASK_TITLE_ZH,
     description: TASK_DESC_ZH,
     options: ROLE_OPTIONS_ZH,
   },
   {
-    content: "你好，我是 NEO，任务协同 AI 助理。\n\n为了让你更直观地了解我能做什么，我们准备了三个身份供你体验。你可以选一个，和我一起分析现场的异常冲突，看看任务怎样协调、安排如何调整。",
-    voice: "你好，我是 NEO，任务协同 AI 助理。我们准备了三个身份，让你体验我怎样协助处理现场的异常冲突。你可以选一个，和我一起看影响、讨论任务怎么协调和调整。",
+    content:
+      "你好，我是 NEO，任务协同 AI 助理。\n\n为了让你更直观地了解我能做什么，我们准备了三个身份供你体验。你可以选一个，和我一起分析现场的异常冲突，看看任务怎样协调、安排如何调整。",
+    voice:
+      "你好，我是 NEO，任务协同 AI 助理。我们准备了三个身份，让你体验我怎样协助处理现场的异常冲突。你可以选一个，和我一起看影响、讨论任务怎么协调和调整。",
     title: TASK_TITLE_ZH,
     description: TASK_DESC_ZH,
     options: ROLE_OPTIONS_ZH,
@@ -120,22 +127,28 @@ const TASK_ZH: TaskIntroCopy[] = [
 /** 三套英文开场文案：与中文一一对应 */
 const TASK_EN: TaskIntroCopy[] = [
   {
-    content: "Hello, I'm NEO, your Task.Collaboration AI assistant.\n\nTo help you try Task.Collaboration, we've prepared three roles to choose from. Pick one to see how I can help you assess the impact of site issues and task conflicts, coordinate tasks, and discuss possible adjustments.",
-    voice: "Hello, I'm NEO, your Task.Collaboration AI assistant. We've prepared three roles to help you get started. Choose one, and I'll show you how site issues and conflicts can affect tasks and how we can coordinate and adjust the work.",
+    content:
+      "Hello, I'm Neo, your Task.Collaboration AI assistant.\n\nTo help you try Task.Collaboration, we've prepared three roles to choose from. Pick one to see how I can help you assess the impact of site issues and task conflicts, coordinate tasks, and discuss possible adjustments.",
+    voice:
+      "Hello, I'm Neo, your Task.Collaboration AI assistant. We've prepared three roles to help you get started. Choose one, and I'll show you how site issues and conflicts can affect tasks and how we can coordinate and adjust the work.",
     title: TASK_TITLE_EN,
     description: TASK_DESC_EN,
     options: ROLE_OPTIONS_EN,
   },
   {
-    content: "Hello, I'm NEO, your Task.Collaboration AI assistant.\n\nStart your first visit by choosing one of the three roles we've prepared. We'll look at the site issue for that role, see which tasks it affects, and discuss how to coordinate the work and what adjustments we could make.",
-    voice: "Hello, I'm NEO, your Task.Collaboration AI assistant. We've prepared three roles for you to try on your first visit. Choose one, and we'll start with the site issue for that role, look at its impact on tasks, and discuss how to coordinate and adjust the work.",
+    content:
+      "Hello, I'm Neo, your Task.Collaboration AI assistant.\n\nStart your first visit by choosing one of the three roles we've prepared. We'll look at the site issue for that role, see which tasks it affects, and discuss how to coordinate the work and what adjustments we could make.",
+    voice:
+      "Hello, I'm Neo, your Task.Collaboration AI assistant. We've prepared three roles for you to try on your first visit. Choose one, and we'll start with the site issue for that role, look at its impact on tasks, and discuss how to coordinate and adjust the work.",
     title: TASK_TITLE_EN,
     description: TASK_DESC_EN,
     options: ROLE_OPTIONS_EN,
   },
   {
-    content: "Hello, I'm NEO, your Task.Collaboration AI assistant.\n\nTo help you see what I can do, we've prepared three roles for you to try. Choose one, and we'll look at site issues and conflicts, discuss how to coordinate tasks, and consider changes to the schedule.",
-    voice: "Hello, I'm NEO, your Task.Collaboration AI assistant. We've prepared three roles to show you how I help with site issues and conflicts. Choose one, and we'll look at their impact and discuss how to coordinate and adjust the work.",
+    content:
+      "Hello, I'm Neo, your Task.Collaboration AI assistant.\n\nTo help you see what I can do, we've prepared three roles for you to try. Choose one, and we'll look at site issues and conflicts, discuss how to coordinate tasks, and consider changes to the schedule.",
+    voice:
+      "Hello, I'm Neo, your Task.Collaboration AI assistant. We've prepared three roles to show you how I help with site issues and conflicts. Choose one, and we'll look at their impact and discuss how to coordinate and adjust the work.",
     title: TASK_TITLE_EN,
     description: TASK_DESC_EN,
     options: ROLE_OPTIONS_EN,
@@ -181,10 +194,10 @@ function cloneBlocks(blocks: AiBlock[]): AiBlock[] {
  * 优先用消息上带的那份。
  */
 export function getInitIntroSpeech(blocks: AiBlock[]): string {
-  const answer = blocks.find(block => block.type === "answer");
+  const answer = blocks.find((block) => block.type === "answer");
   if (answer) return String(answer.payload.content || "").trim();
 
-  const lead = blocks.find(block => block.type === "guide-lead");
+  const lead = blocks.find((block) => block.type === "guide-lead");
   return lead ? String(lead.payload.text || "").trim() : "";
 }
 
@@ -198,7 +211,10 @@ export function getInitIntroSpeech(blocks: AiBlock[]): string {
  * 后续渲染和播报都用这同一份，不要分别调用两次。
  */
 export function getInitIntroContent(scene: InitIntroScene, language?: string): InitIntroContent {
-  const isEnglish = String(language || "").trim().toLowerCase().startsWith("en");
+  const isEnglish = String(language || "")
+    .trim()
+    .toLowerCase()
+    .startsWith("en");
 
   if (scene === "task") {
     const copies = isEnglish ? TASK_EN : TASK_ZH;

@@ -295,7 +295,7 @@ function resolveRootElement(): HTMLElement | null {
     <view v-else class="guide-check-block__brand">
       <image class="guide-check-block__brand-icon" :src="saniIcon" mode="aspectFit" />
       <text class="guide-check-block__brand-text">
-        NEO
+        Neo
       </text>
       <!-- PC 车机版顶部品牌行不再挂播报按钮：统一沉到卡片底部免责声明行，与回答气泡同款 -->
       <view

@@ -364,10 +364,10 @@ const showWaiting = computed(
 const processStatusText = computed(() => {
   const status = props.processStatus as { phase?: string; title?: string } | null;
   // 历史回答没有 processStatus，同样署品牌名（见 isHistoryAnswer）
-  if (!status) return isHistoryAnswer.value ? "NEO" : "";
+  if (!status) return isHistoryAnswer.value ? "Neo" : "";
   if (status.phase === "failed") return t("process-status-failed");
   if (status.phase === "stopped") return t("process-status-stopped");
-  return "NEO";
+  return "Neo";
 });
 
 /**
