@@ -50,23 +50,23 @@ onBeforeUnmount(() => {
   pointer-events: none;
   animation: voice-live-in 180ms ease-out both;
 }
-/* 两行高度 = 行高 × 2（84 = 42 × 2），改行高时同步（见 .voice-live__text） */
+/* 两行高度 = 行高 × 2（80 = 40 × 2），改行高时同步（见 .voice-live__text） */
 .voice-live__box {
   position: relative;
-  height: 84rpx;
+  height: 80rpx;
   overflow: hidden;
 }
 /* 与回复框正文（ai-bubble-v2 回答正文的 p / li）同一套字：
-   28rpx / 42rpx / #2f323c / 常规字重，实时文字与下方回复不再一粗一细、一黑一灰 */
+   24rpx / 40rpx（12px / 20px）/ #2f323c / 常规字重，实时文字与下方回复不再一粗一细、一黑一灰 */
 .voice-live__text {
   position: absolute;
   right: 0;
   bottom: 0;
   left: 0;
   color: #2f323c;
-  font-size: 28rpx;
+  font-size: 24rpx;
   font-weight: 400;
-  line-height: 42rpx;
+  line-height: 40rpx;
   white-space: pre-wrap;
   word-break: break-word;
   -webkit-user-select: none;
