@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import type { GuideCheckPayload, GuideStepSelectEvent } from "@/api/chat/types";
-import { computed, inject, onMounted, provide, ref, watch } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconShare from "@/assets/img/icon-action-share.svg";
 import saniIcon from "@/assets/img/icon-sani.png";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
+import { useTypewriter } from "@/hooks/useTypewriter";
 import { useSettingsStore } from "@/stores";
 import { normalizeGuideUrl } from "@/utils/guide-content";
+import { consumeStepCardKeepPosition, requestStepCardKeepPosition } from "@/utils/guide-step-card-focus";
 import { consumeStepTtsSwitch, consumeSummaryTts, requestStepTtsSwitch } from "@/utils/guide-step-tts";
 import { stripOptionPrefix } from "@/utils/option-label";
 import GuideImageBlock from "./GuideImageBlock.vue";
@@ -44,6 +46,11 @@ const props = defineProps({
    * 需要外层显式传下来（与 GanttBlock 的 dark 同一套）。
    */
   dark: { type: Boolean, default: false },
+  /**
+   * 正文是否走打字机：消息列表按「这条消息是不是本轮刚生成的」传（历史轮次传 false，
+   * 避免切历史会话时整卡正文逐字重播）；不传（null）时按页面级开关决定。
+   */
+  typewriter: { type: Boolean, default: null },
 });
 
 /**
@@ -59,8 +66,16 @@ const emit = defineEmits<{
   (e: "pick", text: string): void;
   /** 最后一步确认完：上抛给消息列表，进入「小结 + 推荐问题」完成态 */
   (e: "finish"): void;
-  /** 这张卡真正挂到 DOM 上了：外层据此把它滚到对话区顶部（切步骤时卡会整块重挂载） */
-  (e: "card-ready"): void;
+  /**
+   * 这张卡真正挂到 DOM 上了：外层据此把它滚到对话区顶部（切步骤时卡会整块重挂载）。
+   * keepPosition=true 表示这次挂载来自「点步骤条 / 左右滑动切步」，外层保持视口不动。
+   */
+  (e: "card-ready", payload: { keepPosition: boolean }): void;
+  /**
+   * 卡片实测高度（px）：消息列表按「这一轮见过的最高卡片」托住容器高度，
+   * 切到内容更少的一步时整段内容不缩水，滚动位置就不会被钳到新底部、卡片原地不动。
+   */
+  (e: "card-height", height: number): void;
   /** 播报：summary 模式带小结文本，普通模式不带（由消息列表按 step action 兜底） */
   (e: "tts-click", text?: string): void;
   (e: "copy-click", payload: { text: string }): void;
@@ -116,9 +131,38 @@ const summary = computed(() => String(props.payload?.summary || "").trim());
 /** 小结标题（payload.summary_title，如「步骤小结」）：渲染在小结正文上方 */
 const summaryTitle = computed(() => String(props.payload?.summary_title || "").trim());
 const isSummaryMode = computed(() => Boolean(summary.value));
+
 const stepIndex = computed(() => Math.max(0, Number(props.payload?.step_index) || 0));
 const stepTotal = computed(() => Math.max(0, Number(props.payload?.step_total) || 0));
 const showStep = computed(() => stepTotal.value > 0 && stepIndex.value > 0);
+
+/* —— 打字机（与回答气泡同一套 useTypewriter）——
+   步骤正文与小结都是一次性下发的（guide_check 事件带完整 payload），整块刷出会把卡片
+   高度一次撑高，紧随其后的置顶 / 贴底对齐只能整屏跳一下；逐字揭示后高度平滑增长，
+   滚动跟随也就平了。只影响渲染，播报 / 复制仍读原始 content / summary。
+   开关：页面级 provide（只有作业指导页打开）+ 消息列表按「本轮是否刚生成」传下来的标记。 */
+const pageTypewriterRequested = inject<boolean>("ai-answer-typewriter", false);
+/**
+ * 这次挂载是不是「点步骤条 / 左右滑动切步」来的。
+ * 必须在 setup 里就消费掉：打字机在 setup 阶段就要决定打不打，
+ * 等到 onMounted 再判断会让首帧先闪一下全文。同一个信号同时用于 card-ready（见 onMounted）。
+ */
+const mountedFromStepSwitch = consumeStepCardKeepPosition(stepIndex.value);
+const typewriterEnabled = computed(() => {
+  if (!pageTypewriterRequested) return false;
+  if (props.typewriter === false) return false;
+  // 多步骤：只有第一步的正文要打字机；后面步骤是用户推进 / 切换过来的，有心理预期，直接全文
+  if (stepIndex.value > 1) return false;
+  // 从后面的步骤再切回第一步也不重播
+  if (mountedFromStepSwitch) return false;
+  return true;
+});
+const { visible: typedContent, typing: typedContentTyping } = useTypewriter(() => content.value, {
+  enabled: () => typewriterEnabled.value,
+});
+const { visible: typedSummary, typing: typedSummaryTyping } = useTypewriter(() => summary.value, {
+  enabled: () => typewriterEnabled.value,
+});
 /**
  * 进度：轨道按步等分，只亮「当前这一步」，不累积已完成的步。
  * 只显示当前步是为了让「我在第几步」一眼可见（累积填充读起来像总进度条，
@@ -149,6 +193,8 @@ function onSelectStep(index: number) {
   // 完成态切回前面步骤：期望播报「该步正文 + 步骤小结」，把小结文本随翻页信号带上，
   // 新卡认领后拼进播报文本（普通步骤间切换没有小结，保持原来的 stepId 兜底）。
   requestStepTtsSwitch(index, summary.value);
+  // 点步骤条是「横向换一步看」，不是往下推进：新卡挂载后保持当前视口，不要顶到对话区顶部。
+  requestStepCardKeepPosition(index);
   emit("select-step", { index, stepId: String(props.payload?.step_id || "") });
 }
 
@@ -234,6 +280,38 @@ function onCardTouchEnd(e: TouchEvent) {
 }
 
 /**
+ * 上报卡片实测高度：外层按「这一轮见过的最高卡片」托住容器高度，
+ * 切到内容更少的一步时整段内容不缩水，滚动位置才不会被钳到新底部。
+ */
+function reportHeight() {
+  const el = resolveRootElement();
+  if (!el || typeof el.getBoundingClientRect !== "function") return;
+  const height = Math.round(el.getBoundingClientRect().height);
+  if (height > 0) emit("card-height", height);
+}
+
+/**
+ * 盯着卡片高度：参考图、字体是渲染完才撑开的，挂载那一刻量到的偏小，
+ * 用 ResizeObserver 每次撑高都补报一次，外层记的高度下限才是真实的最大高度。
+ */
+let cardResizeObserver: ResizeObserver | null = null;
+
+function observeCardHeight() {
+  // #ifdef H5
+  const el = resolveRootElement();
+  if (!el || typeof ResizeObserver === "undefined") return;
+  cardResizeObserver?.disconnect();
+  cardResizeObserver = new ResizeObserver(reportHeight);
+  cardResizeObserver.observe(el);
+  // #endif
+}
+
+onBeforeUnmount(() => {
+  cardResizeObserver?.disconnect();
+  cardResizeObserver = null;
+});
+
+/**
  * 翻页续播：点「确认，进入下一步」后本卡被卸载、下一步卡片重新挂载，
  * 挂载时若认领到「翻页」标记，就把这一步的播报点一下
  * （页面会先停旧语音，再按新的 step_id 取文本播放）。
@@ -251,8 +329,14 @@ onMounted(() => {
   }
   swipeEnterFrom = null;
   // 先告诉外层「卡已经在了」，让它把视图滚到这张卡（切步骤时新卡是重新挂载的，
-  // 页面在改 stepCardStepId 那一下 nextTick 滚，滚的还是上一张卡，所以必须等挂载后再说）
-  emit("card-ready");
+  // 页面在改 stepCardStepId 那一下 nextTick 滚，滚的还是上一张卡，所以必须等挂载后再说）。
+  // 点步骤条 / 滑动切步来的挂载要带 keepPosition：只是横向换一步，视口必须原地不动。
+  // 切步标记已在 setup 里消费（打字机要用），这里直接复用同一份结果
+  emit("card-ready", { keepPosition: mountedFromStepSwitch });
+  // 高度上报给外层兜住容器：挂载时先量一次，之后跟着 ResizeObserver 补报
+  // （量早了偏小无妨，撑高后会顶到真实高度，高度下限只升不降）
+  observeCardHeight();
+  reportHeight();
   const summaryText = consumeStepTtsSwitch(stepIndex.value);
   if (summaryText === null) return;
   if (!props.ttsEnabled) return;
@@ -325,7 +409,7 @@ function resolveRootElement(): HTMLElement | null {
     @touchstart="onCardTouchStart"
     @touchend="onCardTouchEnd"
   >
-    <!-- 卡片左上角品牌署名：SANY NEO logo + SANY Neo + 语音播报控制（与气泡里的完成态同一套观感） -->
+    <!-- 卡片左上角品牌署名：SANY Neo logo + SANY Neo + 语音播报控制（与气泡里的完成态同一套观感） -->
     <view class="guide-check-block__brand">
       <image class="guide-check-block__brand-icon" :src="saniIcon" mode="aspectFit" />
       <text class="guide-check-block__brand-text">
@@ -384,7 +468,7 @@ function resolveRootElement(): HTMLElement | null {
          用 MarkdownRenderer 解析渲染，与回答气泡同一套 markdown 能力，
          深色由上面 provide 的 ai-bubble-dark 接管 -->
     <view v-if="content" class="guide-check-block__content">
-      <MarkdownRenderer :content="content" />
+      <MarkdownRenderer :content="typedContent" :streaming="typedContentTyping" />
     </view>
 
     <!-- 这一步的参考图：渲染在「参考来源」上方。
@@ -429,7 +513,7 @@ function resolveRootElement(): HTMLElement | null {
       <text v-if="summaryTitle" class="guide-check-block__summary-title">
         {{ summaryTitle }}
       </text>
-      <MarkdownRenderer :content="summary" />
+      <MarkdownRenderer :content="typedSummary" :streaming="typedSummaryTyping" />
     </view>
 
     <!-- 参考来源：与回答气泡里的参考资料同款（标题 + 条目）；精简版不展示 -->
@@ -511,7 +595,7 @@ function resolveRootElement(): HTMLElement | null {
   }
 }
 
-/* 左上角品牌署名：SANY NEO logo + SANY Neo + 播报按钮（与气泡完成态同一套观感） */
+/* 左上角品牌署名：SANY Neo logo + SANY Neo + 播报按钮（与气泡完成态同一套观感） */
 .guide-check-block__brand {
   display: flex;
   align-items: center;

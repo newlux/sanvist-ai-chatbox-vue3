@@ -1,19 +1,33 @@
 <script setup lang="ts">
+import type { Ref } from "vue";
+import { inject } from "vue";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
+import { useTypewriter } from "@/hooks/useTypewriter";
 
 defineOptions({ name: "AnswerBlock" });
 
-defineProps({
+const props = defineProps({
   content: { type: String, default: "" },
   embedded: { type: Boolean, default: false },
   // 未结束的回答按流式处理，降低解析频率
   streaming: { type: Boolean, default: false },
 });
+
+/**
+ * 打字机（只有作业指导页打开，见 ai-bubble-v2 的 provide）：
+ * 把已到达的正文逐字放出，避免整段回答一次刷出、列表高度一次撑高导致整屏跳动。
+ * 没拿到开关（首页 / 任务协同 / 听汇报 / guide-pc 等）时 visible 恒等于 content，行为不变。
+ */
+const typewriterOn = inject<Ref<boolean> | null>("ai-bubble-typewriter", null);
+const { visible, typing } = useTypewriter(() => props.content, {
+  enabled: () => Boolean(typewriterOn?.value),
+});
 </script>
 
 <template>
   <view class="answer-block" :class="[{ 'answer-block--embedded': embedded }]">
-    <MarkdownRenderer :content="content" :streaming="streaming" />
+    <!-- 打字机还在吐字时按流式交给 markdown：走它自己的节流 + 落定动效，不会每帧重排 -->
+    <MarkdownRenderer :content="visible" :streaming="streaming || typing" />
   </view>
 </template>
 

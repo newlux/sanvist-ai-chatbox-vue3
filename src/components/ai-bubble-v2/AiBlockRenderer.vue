@@ -92,6 +92,16 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  /**
+   * 核对卡正文是否走打字机逐字揭示。
+   * 卡片由消息列表在气泡外独立渲染，拿不到 ai-bubble-typewriter 的 provide，
+   * 只能由消息列表按「这条消息是不是本轮刚生成的」显式传下来；
+   * 不传（null）时由卡片自己按页面级开关决定。
+   */
+  typewriter: {
+    type: Boolean,
+    default: null,
+  },
 });
 
 const emit = defineEmits([
@@ -105,6 +115,7 @@ const emit = defineEmits([
   "guide-check-step-select",
   "guide-check-finish",
   "card-ready",
+  "card-height",
   "gantt-open",
   "tts-click",
   "copy-click",
@@ -158,9 +169,17 @@ function onGuideCheckFinish() {
   emit("guide-check-finish");
 }
 
-/** 核对卡挂载完成：继续往上抛，页面据此把这张卡滚到对话区顶部 */
-function onGuideCheckReady() {
-  emit("card-ready");
+/**
+ * 核对卡挂载完成：继续往上抛，页面据此把这张卡滚到对话区顶部；
+ * keepPosition=true 表示这次挂载来自点步骤条 / 滑动切步，页面保持视口不动。
+ */
+function onGuideCheckReady(payload?: { keepPosition?: boolean }) {
+  emit("card-ready", payload);
+}
+
+/** 核对卡实测高度：继续上抛，列表按「这一轮见过的最高卡片」托住容器高度 */
+function onGuideCheckHeight(height: number) {
+  emit("card-height", height);
 }
 
 /** 核对卡动作区：播报 / 复制 / 分享都由页面复用现成能力，这里只透传。完成态带小结文本上来 */
@@ -238,12 +257,14 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     :show-actions="showCardActions"
     :compact="compactGuideCard"
     :dark="dark"
+    :typewriter="typewriter"
     :tts-enabled="ttsEnabled"
     :tts-loading="ttsLoading"
     :tts-playing="ttsPlaying"
     @select-step="onGuideCheckStepSelect"
     @finish="onGuideCheckFinish"
     @card-ready="onGuideCheckReady"
+    @card-height="onGuideCheckHeight"
     @pick="onSuggestionTap"
     @tts-click="onGuideCheckTts"
     @copy-click="onGuideCheckCopy"

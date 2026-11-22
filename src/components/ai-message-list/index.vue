@@ -226,7 +226,7 @@ const emit = defineEmits([
   "guide-step-open",
   "guide-suggestion-open",
   "guide-check-step-select",
-  /** 核对卡（新的一步）挂载完成：页面据此把视图滚到这张卡 */
+  /** 核对卡（新的一步）挂载完成：页面据此把视图滚到这张卡（带 keepPosition 时保持视口不动） */
   "step-card-ready",
   "gantt-open",
   "tts-click",
@@ -366,6 +366,17 @@ const scrollTopPx = ref(0);
  * 混进去会把「被输入栏盖住的高度」算多，落点跟着漂。
  */
 const shortReplySpacerPx = ref(0);
+/**
+ * 每一轮步骤卡「见过的最大高度」（px，按消息 key 记），用作卡片容器的高度下限。
+ *
+ * 为什么要托住：切步骤是整卡卸载重挂载，切到内容更少的一步时整段内容会变短，
+ * 浏览器把滚动位置钳到新的底部 —— 整屏内容（含卡片）就往下跳一截（贴底时从长步骤切回短步骤必现）。
+ * 卡在高处不动就要求内容高度不变，所以按这一轮见过的最高卡片把容器撑住：
+ * 切到短步骤只是下面留白，视口与卡片都原地不动；切回长步骤高度也没变，同样不跳。
+ *
+ * 按消息 key 记，不同对话轮次各算各的，互不影响。
+ */
+const stepCardMinHeight = ref<Record<string, number>>({});
 /** 「垫白再定位」最多连续做几次：布局每次都会变（图标 / 输入栏换成录音条），一次量不准 */
 const PIN_LIFT_MAX_TRIES = 3;
 
@@ -998,6 +1009,7 @@ watch(
   (length) => {
     if (length) return;
     shortReplySpacerPx.value = 0;
+    stepCardMinHeight.value = {};
     scrollTopPx.value = 0;
   },
 );
@@ -1121,9 +1133,29 @@ function onGuideCheckStepSelect(messageIndex: number, message: UiChatMessage, pa
  * 核对卡真正挂上 DOM 了（翻页时新卡是重新挂载的）：交给页面把它滚到对话区顶部。
  * 页面在改 stepCardStepId 那一下的 nextTick 里滚，此时换卡还没发生（要等下一轮渲染），
  * 滚的是上一张卡，所以真正的滚动时机放在这里。
+ * keepPosition=true 时页面保持视口不动（点步骤条 / 滑动切步，不是往下推进）。
  */
-function onStepCardReady() {
-  emit("step-card-ready");
+function onStepCardReady(payload?: { keepPosition?: boolean }) {
+  emit("step-card-ready", payload);
+}
+
+/**
+ * 卡片上报自己的实测高度（挂载时 + 图片字体撑开后的两次补量）：把这一轮的高度下限顶上去。
+ *
+ * 只升不降 —— 高度下限就是「这一轮见过的最高卡片」，切到矮的一步才撑得住、不会缩水。
+ * 按 (index, msg) 归属到具体的对话轮次（历史轮次重新挂载时也能记到对的那一轮）。
+ */
+function onStepCardHeight(messageIndex: number, message: UiChatMessage, height: number) {
+  const key = stepCardMessageKey(message, messageIndex);
+  const value = Math.round(Number(height) || 0);
+  if (value <= 0 || value <= (stepCardMinHeight.value[key] || 0)) return;
+  stepCardMinHeight.value = { ...stepCardMinHeight.value, [key]: value };
+}
+
+/** 卡片容器的高度下限：这一轮见过的最高卡片（没量到就不写内联样式） */
+function stepCardMinHeightStyle(messageIndex: number, message: UiChatMessage) {
+  const height = stepCardMinHeight.value[stepCardMessageKey(message, messageIndex)];
+  return height ? { minHeight: `${height}px` } : undefined;
 }
 
 /**
@@ -1301,6 +1333,17 @@ function onListenReport() {
 function hidesBody(message: UiChatMessage) {
   return message?.role === "ai"
     && (message?.blocks || []).some(block => block?.type === "guide-step");
+}
+
+/**
+ * 这条消息是不是本轮刚生成的回答（而不是历史回看）。
+ *
+ * 核对卡在气泡外独立渲染，气泡那层的 ai-bubble-typewriter 传不进去，只能由列表显式告诉卡片：
+ * loading / interrupted / processStatus 任一存在即为本轮新生成；历史会话拉回来的消息
+ * 这三个都没有（落库不带 processStatus），切历史时不该把旧卡正文再逐字重播一遍。
+ */
+function isFreshMessage(message: UiChatMessage) {
+  return Boolean(message?.loading || message?.interrupted || message?.processStatus);
 }
 
 /** 参考来源：低端安卓 WebView 不支持 flatMap，这里手写合并 */
@@ -1784,10 +1827,12 @@ watch(
               @copy-click="onCopyClick(index, msg)"
             />
             <!-- 核对/步骤卡独立成卡，不放进回答气泡；一轮问答一张，多轮各留一张 -->
+            <!-- 容器高度按这一轮见过的最高卡片托住：切到更短的一步时内容不缩水，视口与卡片都不动 -->
             <view
               v-for="block in standaloneBlocks(msg, index)"
               :key="block.id"
               class="chat-box__card"
+              :style="stepCardMinHeightStyle(index, msg)"
             >
               <!-- domId 并进消息 id：同一份指导重复触发时 block id 会撞，滚动定位要能区分是哪一轮 -->
               <AiBlockRenderer
@@ -1796,12 +1841,14 @@ watch(
                 :show-card-actions="msg?.role === 'ai' && !msg.loading && !msg.interrupted"
                 :compact-guide-card="compactGuideCard"
                 :dark="props.dark"
+                :typewriter="isFreshMessage(msg)"
                 :tts-enabled="!!msg.ttsEnabled"
                 :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
                 :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
                 @guide-check-step-select="onGuideCheckStepSelect(index, msg, $event)"
                 @guide-check-finish="onGuideCheckFinish(index)"
                 @card-ready="onStepCardReady"
+                @card-height="onStepCardHeight(index, msg, $event)"
                 @suggestion-tap="onSuggestionTap($event, index)"
                 @tts-click="onTtsClick(index, $event)"
                 @copy-click="onGuideCheckCopy(index, msg, $event)"

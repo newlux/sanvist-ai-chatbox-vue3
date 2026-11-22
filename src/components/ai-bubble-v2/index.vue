@@ -2,7 +2,7 @@
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import type { ChatMessageAttachment } from "@/stores/chat-types";
 import type { AiBlock } from "@/utils/ai-stream";
-import { computed, nextTick, onBeforeUnmount, provide, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import iconCopy from "@/assets/img/icon-action-copy.svg";
@@ -282,6 +282,23 @@ const isHistoryAnswer = computed(() => {
   if (props.assistantCallbackTitle || hideBody.value) return false;
   return Boolean(props.content) || contentBlocks.value.length > 0;
 });
+
+/**
+ * 打字机开关的透传：页面 provide `ai-answer-typewriter`（目前只有作业指导页打开）
+ * 决定这一页要不要逐字揭示回答正文，这里再排除两种情况：
+ * - 用户消息：用户自己输入的内容不该再慢慢「打字」一遍；
+ * - 历史回看：会话记录拉回来的回答一进来就该是全文，逐字重播反而像又生成了一次。
+ * 「是否本轮新生成」只看 loading / interrupted / processStatus ——
+ * 历史消息这三个都没有（落库不带 processStatus），流式过程和刚收尾的回答至少占一个。
+ * 中间层（AiContentBlocks / AiBlockRenderer / AnswerGroupBlock）不用逐级传 prop，
+ * AnswerBlock 直接 inject 这个标记即可。
+ */
+const answerTypewriterRequested = inject<boolean>("ai-answer-typewriter", false);
+const isFreshAnswer = computed(() => !isUser.value
+  && Boolean(props.loading || props.interrupted || props.processStatus));
+provide("ai-bubble-typewriter", computed(() =>
+  Boolean(answerTypewriterRequested) && isFreshAnswer.value,
+));
 
 /**
  * 消息里带独立卡片（核对卡 / 调度视图入口卡）时，气泡正文为空属于正常情况，
@@ -1577,7 +1594,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     color: #5d5d5d;
   }
 
-  // 品牌行「SANY NEO」：深色下固定 #FFFFFF。
+  // 品牌行「SANY Neo」：深色下固定 #FFFFFF。
   // 浅色那套是 background-clip: text 的灰色流光，深底上又暗又花，所以连背景图、
   // -webkit-text-fill-color、动画一起清掉；失败 / 停止两态（红 / 灰文案）保持原色不动。
   .ai-bubble-v2__process-status:not(.ai-bubble-v2__process-status--failed):not(.ai-bubble-v2__process-status--stopped) .ai-bubble-v2__process-text {
