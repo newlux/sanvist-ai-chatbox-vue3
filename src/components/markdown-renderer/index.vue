@@ -10,6 +10,12 @@ const props = defineProps({
   content: { type: String, default: "" },
   // 流式阶段：合并高频更新，降低全量解析与渲染频率
   streaming: { type: Boolean, default: false },
+  /**
+   * 文字「落定」动效（段末压淡一下再淡回）总开关，默认开。
+   * 打字机逐字揭示时要关掉：可见文本每 40ms 变一次，落定动画会被反复打断 / 重启，
+   * 观感上就是文字出现后还在抖（见 AnswerBlock / GuideCheckBlock 的传值）。
+   */
+  settle: { type: Boolean, default: true },
 });
 const emit = defineEmits(["ready"]);
 const logger = createLogger("markdown");
@@ -153,8 +159,19 @@ const LONG_STREAM_RENDER_INTERVAL_MS = 200;
 const VERY_LONG_STREAM_RENDER_INTERVAL_MS = 300;
 
 const renderedHtml = ref("");
-/** 分片中的 Markdown 结构可能暂时不完整；HTML 更新后重建 mp-html，避免残留临时列表/换行节点。 */
+/** 落定动效专用版本号：内容没变也要整棵重挂一次，才能挂上新的行内动画（见 decorateSettle）。 */
 const renderVersion = ref(0);
+/**
+ * mp-html 的 key：
+ * - 开 settle（历史回看 / 听播等非打字机场景）时用自增版本号，靠整体重建把落定动画挂上去；
+ * - 关 settle（打字机逐字揭示）时用稳定 key，交给 mp-html 自己的 content watcher 原地更新。
+ *   逐字揭示期间每 ~100ms 整棵重建一次，文字会闪一下、下方高度也跟着抖一下；
+ *   而 mp-html 的 setContent 本来就是整体替换 nodes，原地更新不会残留半截列表 / 换行节点。
+ * 深浅色切换仍要重挂一次才吃得到新的 tagStyle，所以深浅各占一个稳定 key。
+ */
+const renderKey = computed(() =>
+  props.settle ? `settle-${renderVersion.value}` : `static-${darkContainer.value ? "dark" : "light"}`,
+);
 let pendingContent = "";
 let lastRenderedContent = "";
 let renderTimer = null;
@@ -183,7 +200,7 @@ const TRUSTED_HTML_PREFIX = "<!--html-->";
  * —— opacity 0.7 起手，SETTLE_MS 内淡回正文色。生成中的文字保持正常不透明度：
  * 逐字流过的那部分如果也做淡入，反而会整段发虚，和录屏里「写完了才落一下」对不上。
  *
- * 关键点：mp-html 每帧都按 `:key="renderVersion"` 整体重建，元素上的 CSS 动画会从 0 重跑，
+ * 关键点：开 settle 时 mp-html 每帧都按 `:key="renderKey"` 整体重建，元素上的 CSS 动画会从 0 重跑，
  * 所以落定动画只在「停更之后」开一次，并用负的 animation-delay 记录已经走了多少，
  * 中途被重建也能接着走，不会跳回起点。
  *
@@ -275,7 +292,7 @@ function decorateSettle(tokens: MarkdownToken[], content: string) {
   }
 }
 
-function parseMarkdown(content) {
+function parseMarkdown(content, settle = true) {
   const trimmed = content.trim();
   if (!trimmed) return "";
   if (trimmed.startsWith(TRUSTED_HTML_PREFIX)) {
@@ -285,7 +302,7 @@ function parseMarkdown(content) {
     // 先出 token 再自己 render：落定动效要挂在块级 token 的 style 上，纯 render 拿不到这一层
     const env = {};
     const tokens = markdown.parse(content, env);
-    decorateSettle(tokens, content);
+    if (settle) decorateSettle(tokens, content);
     return markdown.renderer.render(tokens, markdown.options, env);
   }
   catch (error) {
@@ -325,6 +342,11 @@ function scheduleSettleCheck() {
     clearTimeout(settleTimer);
     settleTimer = null;
   }
+  // 落定动效整体关掉（打字机逐字揭示）：不挂动画，也不用为它补渲染
+  if (!props.settle) {
+    settlePending = false;
+    return;
+  }
   if (!settlePending) return;
   const scheduledFor = pendingContent;
   settleTimer = setTimeout(() => {
@@ -340,7 +362,7 @@ function scheduleSettleCheck() {
 function renderLatest() {
   clearRenderTimer();
   if (pendingContent === lastRenderedContent) return;
-  let html = parseMarkdown(pendingContent);
+  let html = parseMarkdown(pendingContent, props.settle);
   // 深色容器里给表格补正文色（mp-html 会覆盖 tagStyle 注入的 color）
   if (html && darkContainer.value) html = paintTableText(html);
   // 有正文却解析不出任何标签，说明 markdown-it 在当前运行环境失效了，
@@ -359,11 +381,11 @@ function renderLatest() {
 }
 
 watch(
-  () => [props.content, props.streaming],
-  ([content, streaming]) => {
-    pendingContent = content || "";
+  () => [props.content, props.streaming, props.settle],
+  () => {
+    pendingContent = props.content || "";
 
-    if (!streaming) {
+    if (!props.streaming) {
       renderLatest();
       return;
     }
@@ -417,7 +439,7 @@ function onParseError(e) {
 <template>
   <mpHtml
     ref="markdownRoot"
-    :key="renderVersion"
+    :key="renderKey"
     class="markdown-renderer"
     :class="{ 'markdown-renderer--dark': darkContainer }"
     :content="renderedHtml"

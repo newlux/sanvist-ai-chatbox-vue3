@@ -703,7 +703,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           class="ai-bubble-v2__process-status"
           :class="`ai-bubble-v2__process-status--${processStatusPhase}`"
         >
-          <!-- 品牌署名：SANY Neo 图标 26×26（52rpx）+ 文案 SANY Neo，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
+          <!-- 品牌署名：SANY Neo 图标 18×18（36rpx）+ 文案 SANY Neo，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
           <image
             v-if="showBrandStatus"
             class="ai-bubble-v2__process-icon-img"
@@ -867,9 +867,9 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   border-radius: 0;
   background: transparent;
 }
-/* 实时转写最多铺三行（3 × 44rpx = 132rpx）：录音里说成一段也不会把下面整屏内容顶走 */
+/* 实时转写最多铺三行（3 × 40rpx = 120rpx）：录音里说成一段也不会把下面整屏内容顶走 */
 .ai-bubble-v2--user.ai-bubble-v2--asr-pending .ai-bubble-v2__asr {
-  max-height: 132rpx;
+  max-height: 120rpx;
   overflow: hidden;
 }
 .ai-bubble-v2--user.ai-bubble-v2--selected {
@@ -904,14 +904,15 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   user-select: text;
 }
 /* ===== AI 回答卡：设计稿 1187:14 / 1187:56「AI Answer Card」=====
-   底色 #F3F3F3 / 描边 1px #EFEFEF / 圆角 20px / 内边距 20px /
+   底色 #F3F3F3 / 描边 1px #EFEFEF / 圆角 20px /
+   内边距 上下 20px、左右 30px（左右比上下宽一档，正文不贴边） /
    纵向 gap 12px（卡片内各区域统一用 gap 排布，不再用 margin 凑）/
    阴影 0 2px 8px rgba(0,0,0,0.04)（设计稿 effects 里 visible=false，按原值写出） */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
   display: flex;
   flex-direction: column;
   gap: 10rpx 24rpx;
-  padding: 40rpx;
+  padding: 40rpx 60rpx; // 上/下 20px、左/右 30px
   // border: 1px solid #efefef;
   // border-radius: 40rpx;
   // background: #f3f3f3;
@@ -1054,11 +1055,11 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
 .ai-bubble-v2__body--highlighted {
   background: rgba(248, 49, 94, 0.06);
 }
-/* 用户正文：设计稿 1187:84「User Question」14px / 22px / #0D0D0D */
+/* 用户正文：12px / 20px / #0D0D0D（与回复框正文同一档字号） */
 .ai-bubble-v2--user .ai-bubble-v2__user-content {
   color: #0d0d0d;
-  font-size: 28rpx;
-  line-height: 44rpx;
+  font-size: 24rpx; // 12px
+  line-height: 40rpx; // 20px
   white-space: pre-wrap;
   word-break: break-word;
   // 允许划词选中复制；长按仍走整条复制
@@ -1071,13 +1072,13 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
 .ai-bubble-v2__asr {
   display: block;
   color: #0d0d0d;
-  font-size: 28rpx;
-  line-height: 44rpx;
+  font-size: 24rpx; // 12px
+  line-height: 40rpx; // 20px
   white-space: pre-wrap;
   word-break: break-word;
 }
-/* 录音中不再单独放大字号（原 32rpx / 500）：沿用基类 28rpx / 44rpx / 常规字重，
-   与顶部实时提词（ai-voice-transcript）同档，收进气泡时字号与字重都不跳 */
+/* 录音中不再单独放大字号（原 32rpx / 500）：沿用基类 24rpx / 40rpx / 常规字重，
+   收进气泡时字号与字重都不跳 */
 .ai-bubble-v2--dark.ai-bubble-v2--asr-pending .ai-bubble-v2__asr {
   color: #f2f3f5;
 }
@@ -1307,11 +1308,11 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   font-size: 24rpx;
   line-height: 36rpx;
 }
-/* 完成态品牌图标：26×26（52rpx），与 SANY Neo 文字同排、垂直居中；
+/* 品牌图标（icon-sani.png）：18×18（36rpx），与 SANY Neo 文字同排、垂直居中；
    图标与文字的间距沿用 status 行的 gap，不额外加 margin */
 .ai-bubble-v2__process-icon-img {
-  width: 48rpx; // 24px
-  height: 48rpx; // 24px
+  width: 36rpx; // 18px
+  height: 36rpx; // 18px
   flex-shrink: 0;
 }
 .ai-bubble-v2__process-text {
@@ -1409,13 +1410,14 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
 }
 
 /* ===== 回答正文：设计稿 1187:14「设备运行状态正常…」/ 1187:37 参数列表 =====
-   14px / 20px / #1A1A1E（正文主色 #0D0D0D 80%）；
-   markdown-renderer 是全局组件，这里只在气泡作用域内对齐设计稿的字号与配色 */
-.ai-bubble-v2__body :deep(p),
-.ai-bubble-v2__body :deep(li) {
-  color: #1a1a1e;
-  font-size: 28rpx;
-  line-height: 40rpx;
+   12px / 20px（正文颜色由 markdown-renderer 的 tagStyle 按深浅色给，这里只管字号）。
+   markdown-renderer 把排版写成 mp-html 的行内 style，普通声明压不住 inline，
+   字号 / 行高必须带 !important（与 GuideStepFinishBlock 的 summary 同一口径）；
+   选择器只落在回答正文 .answer-block 内，气泡里其它卡片（步骤卡 / 导语 / 提示）各有自己的字号，不受影响 */
+.ai-bubble-v2__body :deep(.answer-block p),
+.ai-bubble-v2__body :deep(.answer-block li) {
+  font-size: 24rpx !important; // 12px
+  line-height: 40rpx !important; // 20px
 }
 .ai-bubble-v2__action-btn {
   width: 32rpx;

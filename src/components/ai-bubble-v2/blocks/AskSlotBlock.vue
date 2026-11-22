@@ -250,7 +250,7 @@ function submitRemark() {
 .ask-slot__option-letter {
   flex-shrink: 0;
   font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 28rpx;
+  font-size: 24rpx; /* 12px */
   font-weight: 600;
   line-height: 40rpx;
   color: #1a1a1a;
@@ -270,7 +270,7 @@ function submitRemark() {
   white-space: normal;
   word-break: break-word;
   font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 28rpx; /* 14px */
+  font-size: 24rpx; /* 12px */
   font-weight: 400;
   line-height: 40rpx; /* 20px */
   color: #1a1a1a;
@@ -301,13 +301,13 @@ function submitRemark() {
   width: 100%;
   min-height: 40rpx;
   color: #000000;
-  font-size: 28rpx;
+  font-size: 24rpx; /* 12px */
   line-height: 40rpx;
 }
 
 .ask-slot__remark-placeholder {
   color: #666666;
-  font-size: 28rpx;
+  font-size: 24rpx; /* 12px */
 }
 
 /* ===== 深色：与身份选择胶囊（GuideSuggestionBlock）同一套材质 ===== */

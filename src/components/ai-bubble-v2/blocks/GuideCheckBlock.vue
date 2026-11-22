@@ -468,7 +468,12 @@ function resolveRootElement(): HTMLElement | null {
          用 MarkdownRenderer 解析渲染，与回答气泡同一套 markdown 能力，
          深色由上面 provide 的 ai-bubble-dark 接管 -->
     <view v-if="content" class="guide-check-block__content">
-      <MarkdownRenderer :content="typedContent" :streaming="typedContentTyping" />
+      <!-- 打字机开着就关掉落定动效（settle）：逐字揭示时落定动画会被反复重启，看起来像在抖 -->
+      <MarkdownRenderer
+        :content="typedContent"
+        :streaming="typedContentTyping"
+        :settle="!typewriterEnabled"
+      />
     </view>
 
     <!-- 这一步的参考图：渲染在「参考来源」上方。
@@ -513,7 +518,11 @@ function resolveRootElement(): HTMLElement | null {
       <text v-if="summaryTitle" class="guide-check-block__summary-title">
         {{ summaryTitle }}
       </text>
-      <MarkdownRenderer :content="typedSummary" :streaming="typedSummaryTyping" />
+      <MarkdownRenderer
+        :content="typedSummary"
+        :streaming="typedSummaryTyping"
+        :settle="!typewriterEnabled"
+      />
     </view>
 
     <!-- 参考来源：与回答气泡里的参考资料同款（标题 + 条目）；精简版不展示 -->
@@ -811,7 +820,7 @@ function resolveRootElement(): HTMLElement | null {
 .guide-check-block__option-letter {
   flex-shrink: 0;
   font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 28rpx;
+  font-size: 24rpx; // 12px
   font-weight: 600;
   line-height: 40rpx;
   color: #1a1a1a;
@@ -829,7 +838,7 @@ function resolveRootElement(): HTMLElement | null {
 .guide-check-block__option-label {
   min-width: 0;
   font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 28rpx;
+  font-size: 24rpx; // 12px
   font-weight: 400;
   line-height: 40rpx;
   color: #1a1a1a;

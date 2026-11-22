@@ -1981,10 +1981,11 @@ watch(
   padding: var(--chat-box-top-padding) 40rpx 0;
 }
 /* 独立于回答气泡的卡片（核对/步骤卡）
-   左右补 40rpx，与回答气泡 body 的内边距对齐：卡片外框宽度和答复卡一致，
-   否则卡片会比上方的回答宽出一圈、左边缘也不齐 */
+   左右补 60rpx，与回答气泡 body 的左右内边距（30px = 60rpx，见 ai-bubble-v2 的 AI 回答卡）
+   对齐：卡片外框的左右缘继续和上方答复正文齐平，
+   否则卡片会比回答宽出一圈、左边缘也不齐 */
 .chat-box__card {
-  margin: 24rpx 40rpx;
+  margin: 24rpx 60rpx;
 }
 
 /* 调度视图入口卡（4708:743）：跟随气泡时上方留 13px，左右 20px 由 .chat-box 的 padding 提供 */

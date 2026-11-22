@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Ref } from "vue";
-import { inject } from "vue";
+import { computed, inject } from "vue";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { useTypewriter } from "@/hooks/useTypewriter";
 
@@ -19,15 +19,22 @@ const props = defineProps({
  * 没拿到开关（任务协同 / 听汇报 / guide-pc 等）时 visible 恒等于 content，行为不变。
  */
 const typewriterOn = inject<Ref<boolean> | null>("ai-bubble-typewriter", null);
+const typewriterEnabled = computed(() => Boolean(typewriterOn?.value));
 const { visible, typing } = useTypewriter(() => props.content, {
-  enabled: () => Boolean(typewriterOn?.value),
+  enabled: () => typewriterEnabled.value,
 });
 </script>
 
 <template>
   <view class="answer-block" :class="[{ 'answer-block--embedded': embedded }]">
-    <!-- 打字机还在吐字时按流式交给 markdown：走它自己的节流 + 落定动效，不会每帧重排 -->
-    <MarkdownRenderer :content="visible" :streaming="streaming || typing" />
+    <!-- 打字机还在吐字时按流式交给 markdown：走它自己的节流，不会每帧重排。
+         打字机开着就关掉落定动效（settle）：逐字揭示时可见文本每 40ms 变一次，
+         落定动画会被反复打断重启，观感就是文字出现后还在抖 -->
+    <MarkdownRenderer
+      :content="visible"
+      :streaming="streaming || typing"
+      :settle="!typewriterEnabled"
+    />
   </view>
 </template>
 
