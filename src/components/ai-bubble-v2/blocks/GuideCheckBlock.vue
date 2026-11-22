@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { GuideCheckPayload, GuideStepSelectEvent } from "@/api/chat/types";
-import { computed, inject, onMounted, provide, ref, watch } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
@@ -71,6 +71,11 @@ const emit = defineEmits<{
    * keepPosition=true 表示这次挂载来自「点步骤条 / 左右滑动切步」，外层保持视口不动。
    */
   (e: "card-ready", payload: { keepPosition: boolean }): void;
+  /**
+   * 卡片实测高度（px）：消息列表按「这一轮见过的最高卡片」托住容器高度，
+   * 切到内容更少的一步时整段内容不缩水，滚动位置就不会被钳到新底部、卡片原地不动。
+   */
+  (e: "card-height", height: number): void;
   /** 播报：summary 模式带小结文本，普通模式不带（由消息列表按 step action 兜底） */
   (e: "tts-click", text?: string): void;
   (e: "copy-click", payload: { text: string }): void;
@@ -275,6 +280,38 @@ function onCardTouchEnd(e: TouchEvent) {
 }
 
 /**
+ * 上报卡片实测高度：外层按「这一轮见过的最高卡片」托住容器高度，
+ * 切到内容更少的一步时整段内容不缩水，滚动位置才不会被钳到新底部。
+ */
+function reportHeight() {
+  const el = resolveRootElement();
+  if (!el || typeof el.getBoundingClientRect !== "function") return;
+  const height = Math.round(el.getBoundingClientRect().height);
+  if (height > 0) emit("card-height", height);
+}
+
+/**
+ * 盯着卡片高度：参考图、字体是渲染完才撑开的，挂载那一刻量到的偏小，
+ * 用 ResizeObserver 每次撑高都补报一次，外层记的高度下限才是真实的最大高度。
+ */
+let cardResizeObserver: ResizeObserver | null = null;
+
+function observeCardHeight() {
+  // #ifdef H5
+  const el = resolveRootElement();
+  if (!el || typeof ResizeObserver === "undefined") return;
+  cardResizeObserver?.disconnect();
+  cardResizeObserver = new ResizeObserver(reportHeight);
+  cardResizeObserver.observe(el);
+  // #endif
+}
+
+onBeforeUnmount(() => {
+  cardResizeObserver?.disconnect();
+  cardResizeObserver = null;
+});
+
+/**
  * 翻页续播：点「确认，进入下一步」后本卡被卸载、下一步卡片重新挂载，
  * 挂载时若认领到「翻页」标记，就把这一步的播报点一下
  * （页面会先停旧语音，再按新的 step_id 取文本播放）。
@@ -296,6 +333,10 @@ onMounted(() => {
   // 点步骤条 / 滑动切步来的挂载要带 keepPosition：只是横向换一步，视口必须原地不动。
   // 切步标记已在 setup 里消费（打字机要用），这里直接复用同一份结果
   emit("card-ready", { keepPosition: mountedFromStepSwitch });
+  // 高度上报给外层兜住容器：挂载时先量一次，之后跟着 ResizeObserver 补报
+  // （量早了偏小无妨，撑高后会顶到真实高度，高度下限只升不降）
+  observeCardHeight();
+  reportHeight();
   const summaryText = consumeStepTtsSwitch(stepIndex.value);
   if (summaryText === null) return;
   if (!props.ttsEnabled) return;

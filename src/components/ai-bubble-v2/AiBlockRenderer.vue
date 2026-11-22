@@ -115,6 +115,7 @@ const emit = defineEmits([
   "guide-check-step-select",
   "guide-check-finish",
   "card-ready",
+  "card-height",
   "gantt-open",
   "tts-click",
   "copy-click",
@@ -174,6 +175,11 @@ function onGuideCheckFinish() {
  */
 function onGuideCheckReady(payload?: { keepPosition?: boolean }) {
   emit("card-ready", payload);
+}
+
+/** 核对卡实测高度：继续上抛，列表按「这一轮见过的最高卡片」托住容器高度 */
+function onGuideCheckHeight(height: number) {
+  emit("card-height", height);
 }
 
 /** 核对卡动作区：播报 / 复制 / 分享都由页面复用现成能力，这里只透传。完成态带小结文本上来 */
@@ -258,6 +264,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     @select-step="onGuideCheckStepSelect"
     @finish="onGuideCheckFinish"
     @card-ready="onGuideCheckReady"
+    @card-height="onGuideCheckHeight"
     @pick="onSuggestionTap"
     @tts-click="onGuideCheckTts"
     @copy-click="onGuideCheckCopy"

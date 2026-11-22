@@ -353,14 +353,6 @@ const PIN_SPACER_SLACK_PX = 8;
 const CHAT_BOX_TOP_PADDING_VAR = `var(--chat-box-top-padding, 20px)`;
 let lastScrollTop = 0;
 
-/**
- * 点步骤条 / 左右滑动切步前记下的滚动快照（滚动位置 + 内容高）。
- * 切到更短一步时内容会变短，浏览器把 scrollTop clamp 到新底部（卡片向下跳一下）；
- * 记下切步前的值，等新卡挂载后按差额垫白并还原滚动位置（见 onStepCardReady 的 keepPosition 分支）。
- * 只 H5 走 px 定位需要，小程序端不写。
- */
-let pendingCardScroll: { scrollTop: number; innerHeight: number } | null = null;
-
 /** 绑给 scroll-view 的像素滚动位置：只在「落到内容末尾」时赋值，不回写 @scroll 的值 */
 const scrollTopPx = ref(0);
 
@@ -375,11 +367,16 @@ const scrollTopPx = ref(0);
  */
 const shortReplySpacerPx = ref(0);
 /**
- * 步骤卡切到更短一步时垫在内容末尾的空白（px）：内容变短会被浏览器 clamp 滚动位置、卡片向下跳，
- * 补上「旧卡比新卡高出」的那段空白，滚动位置才保持得住、卡片原地不动（见 onStepCardReady）。
- * 与 shortReplySpacerPx 分开：那是「把提问顶到上方」用的，有自己的一套收回时机。
+ * 每一轮步骤卡「见过的最大高度」（px，按消息 key 记），用作卡片容器的高度下限。
+ *
+ * 为什么要托住：切步骤是整卡卸载重挂载，切到内容更少的一步时整段内容会变短，
+ * 浏览器把滚动位置钳到新的底部 —— 整屏内容（含卡片）就往下跳一截（贴底时从长步骤切回短步骤必现）。
+ * 卡在高处不动就要求内容高度不变，所以按这一轮见过的最高卡片把容器撑住：
+ * 切到短步骤只是下面留白，视口与卡片都原地不动；切回长步骤高度也没变，同样不跳。
+ *
+ * 按消息 key 记，不同对话轮次各算各的，互不影响。
  */
-const cardKeepSpacerPx = ref(0);
+const stepCardMinHeight = ref<Record<string, number>>({});
 /** 「垫白再定位」最多连续做几次：布局每次都会变（图标 / 输入栏换成录音条），一次量不准 */
 const PIN_LIFT_MAX_TRIES = 3;
 
@@ -1012,7 +1009,7 @@ watch(
   (length) => {
     if (length) return;
     shortReplySpacerPx.value = 0;
-    cardKeepSpacerPx.value = 0;
+    stepCardMinHeight.value = {};
     scrollTopPx.value = 0;
   },
 );
@@ -1119,15 +1116,6 @@ function onGuideSuggestionOpen(payload, auto = false) {
  */
 function onGuideCheckStepSelect(messageIndex: number, message: UiChatMessage, payload: GuideStepSelectEvent) {
   stepCardActiveKey.value = stepCardMessageKey(message, messageIndex);
-  // 切步前记下滚动位置与内容高：换卡是「旧卡卸载、新卡挂载」，等新卡挂载后才知道内容变短了多少，
-  // 这里量「切步前」，onStepCardReady 量「切步后」算差额（配合 keepPosition，见 guide-step-card-focus）。
-  // #ifdef H5
-  const inner = document.querySelector(".msg-list__inner");
-  const scroller = inner ? (findScrollableAncestor(inner) || findScrollLayer(inner)) : null;
-  pendingCardScroll = inner && scroller
-    ? { scrollTop: scroller.scrollTop, innerHeight: inner.getBoundingClientRect().height }
-    : null;
-  // #endif
   // 直接定位目标步，不依赖页面回传 step-card-step-id 的 watch：
   // 页面 guideStepCardStepId 跨轮不重置，多轮分步骤 step_id 重叠时，算出的目标步
   // 恰好等于残留值 → watch 值不变不触发 → selectStepCard 不被调用 → 卡不切换（A 点击无响应）。
@@ -1148,32 +1136,26 @@ function onGuideCheckStepSelect(messageIndex: number, message: UiChatMessage, pa
  * keepPosition=true 时页面保持视口不动（点步骤条 / 滑动切步，不是往下推进）。
  */
 function onStepCardReady(payload?: { keepPosition?: boolean }) {
-  // #ifdef H5
-  const snapshot = pendingCardScroll;
-  pendingCardScroll = null;
-  if (payload?.keepPosition && snapshot) {
-    const inner = document.querySelector(".msg-list__inner");
-    if (inner) {
-      // 内容变短的部分 = 旧卡比新卡高出的高度：垫同样多的空白，滚动位置才不会被 clamp 到新底部
-      const delta = Math.max(0, snapshot.innerHeight - inner.getBoundingClientRect().height);
-      cardKeepSpacerPx.value = delta;
-      if (delta > 0) {
-        // 垫白渲染进 DOM 后再还原滚动位置，卡片顶部才能停在切步前的位置（原地不动）
-        nextTick(() => {
-          const scroller = findScrollableAncestor(inner) || findScrollLayer(inner);
-          if (!scroller) return;
-          scroller.scrollTop = snapshot.scrollTop;
-          scrollTopPx.value = snapshot.scrollTop;
-          lastScrollTop = snapshot.scrollTop;
-        });
-      }
-    }
-  } else {
-    // 往下推进（确认进入下一步）的翻页会把卡顶到对话区顶部，垫的空白一起收回
-    cardKeepSpacerPx.value = 0;
-  }
-  // #endif
   emit("step-card-ready", payload);
+}
+
+/**
+ * 卡片上报自己的实测高度（挂载时 + 图片字体撑开后的两次补量）：把这一轮的高度下限顶上去。
+ *
+ * 只升不降 —— 高度下限就是「这一轮见过的最高卡片」，切到矮的一步才撑得住、不会缩水。
+ * 按 (index, msg) 归属到具体的对话轮次（历史轮次重新挂载时也能记到对的那一轮）。
+ */
+function onStepCardHeight(messageIndex: number, message: UiChatMessage, height: number) {
+  const key = stepCardMessageKey(message, messageIndex);
+  const value = Math.round(Number(height) || 0);
+  if (value <= 0 || value <= (stepCardMinHeight.value[key] || 0)) return;
+  stepCardMinHeight.value = { ...stepCardMinHeight.value, [key]: value };
+}
+
+/** 卡片容器的高度下限：这一轮见过的最高卡片（没量到就不写内联样式） */
+function stepCardMinHeightStyle(messageIndex: number, message: UiChatMessage) {
+  const height = stepCardMinHeight.value[stepCardMessageKey(message, messageIndex)];
+  return height ? { minHeight: `${height}px` } : undefined;
 }
 
 /**
@@ -1845,10 +1827,12 @@ watch(
               @copy-click="onCopyClick(index, msg)"
             />
             <!-- 核对/步骤卡独立成卡，不放进回答气泡；一轮问答一张，多轮各留一张 -->
+            <!-- 容器高度按这一轮见过的最高卡片托住：切到更短的一步时内容不缩水，视口与卡片都不动 -->
             <view
               v-for="block in standaloneBlocks(msg, index)"
               :key="block.id"
               class="chat-box__card"
+              :style="stepCardMinHeightStyle(index, msg)"
             >
               <!-- domId 并进消息 id：同一份指导重复触发时 block id 会撞，滚动定位要能区分是哪一轮 -->
               <AiBlockRenderer
@@ -1864,6 +1848,7 @@ watch(
                 @guide-check-step-select="onGuideCheckStepSelect(index, msg, $event)"
                 @guide-check-finish="onGuideCheckFinish(index)"
                 @card-ready="onStepCardReady"
+                @card-height="onStepCardHeight(index, msg, $event)"
                 @suggestion-tap="onSuggestionTap($event, index)"
                 @tts-click="onTtsClick(index, $event)"
                 @copy-click="onGuideCheckCopy(index, msg, $event)"
@@ -1893,12 +1878,6 @@ watch(
           v-if="shortReplySpacerPx > 0"
           class="msg-list__spacer"
           :style="{ height: `${shortReplySpacerPx}px` }"
-        />
-        <!-- 步骤卡切到更短一步时垫的空白：内容变短会被 clamp 滚动位置，补上差额让卡片原地不动 -->
-        <view
-          v-if="cardKeepSpacerPx > 0"
-          class="msg-list__spacer"
-          :style="{ height: `${cardKeepSpacerPx}px` }"
         />
       </view>
       <!-- 底部锚点用于流式输出时触发滚动到底部，不额外制造底部间距 -->
