@@ -70,7 +70,7 @@ const rawTagStyle = {
   h4: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 600; line-height: 1.4;",
   h5: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 600; line-height: 1.4;",
   h6: "margin: 20rpx 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 600; line-height: 1.4;",
-  p: "margin: 0 0 12rpx; color: #2f323c; font-size: 28rpx; font-weight: 400; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
+  p: "margin: 0 0 32rpx; color: #2f323c; font-size: 28rpx; font-weight: 400; line-height: 42rpx; word-break: normal; overflow-wrap: break-word;",
   strong: "font-weight: bolder; color: #1a1a1e;",
   em: "font-style: italic;",
   // 列表序号/圆点用 list-style-position: outside，由浏览器画在列表容器（ol/ul）的
