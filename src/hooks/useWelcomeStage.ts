@@ -19,8 +19,11 @@ import { computed, nextTick, onBeforeUnmount, ref } from "vue";
  * - `<view v-if="stage === 'chat'" class="ai-page__chat ai-page__chat--enter" :style="{ ...chatViewportStyle, '--chat-enter-delay': ... }">`
  */
 
-/** 起飞动画时长（ms）：逐帧位移跑满这么久 */
-export const WELCOME_FLY_MS = 640;
+/**
+ * 起飞动画时长（ms）：参考录屏，点击后的光晕扩散峰值（440ms）一过就开始飞，
+ * 图标约 480ms 内旋转着直线升到顶部，比原来的 640ms 更利落。
+ */
+export const WELCOME_FLY_MS = 480;
 /** 落位后留给「欢迎层 logo 淡出 → 头部灵动岛图标接上」的时间 */
 const WELCOME_LAND_FADE_MS = 160;
 /**
@@ -28,15 +31,21 @@ const WELCOME_LAND_FADE_MS = 160;
  * 动图还在涨的时候就走，会显得后半段被吃掉。
  */
 export const WELCOME_LISTEN_HOLD_MS = 440;
-/** 对话页整体淡入的延迟：与起飞同时开始，避免 logo 还停在中间时对话页已经铺满 */
-const WELCOME_CHAT_ENTER_DELAY_MS = Math.max(0, WELCOME_LISTEN_HOLD_MS - 120);
+/**
+ * 对话页整体淡入的延迟：点击后立即开始（0），不等起飞 / 落位。
+ * 起飞前那 440ms 光晕阶段对话页背景与头部就已经铺好，图标是飞在对话页之上的。
+ */
+const WELCOME_CHAT_ENTER_DELAY_MS = 0;
 
-/** 飞行曲线的侧向弧线幅度（px）：首尾都在屏幕中线上，靠它画出抛物线 */
-const WELCOME_FLY_ARC_X = 18;
-/** 中段最大放大倍数：先慢慢变大，末段再收敛回灵动岛图标尺寸 */
-const WELCOME_FLY_PEAK_SCALE = 1.16;
-/** 放大达到峰值的进度点（0~1） */
-const WELCOME_FLY_PEAK_AT = 0.45;
+/**
+ * 起飞轨迹（参考录屏）：中间图标**直线向上**，不做左右抛物线弧；
+ * 一边按 p^1.9 加速上升、一边从原尺寸单调缩小到灵动岛图标尺寸（不再先放大），
+ * 同时绕自身中心顺时针整圈自转 —— 前段几乎不转，末段随冲刺快速转满一圈回正。
+ */
+/** 旋转总角度（deg）：取整圈，落位角度与 0° 视觉一致，交接给灵动岛图标时不歪 */
+const WELCOME_FLY_SPIN_DEG = 360;
+/** 旋转进度幂次：比位移的 1.9 更陡，前段几乎不动、末段快速转完 */
+const WELCOME_FLY_SPIN_POWER = 2.6;
 
 /** 欢迎层 logo 的飞行层（量起点） */
 const WELCOME_LOGO_SELECTOR = ".welcome__logo-fly";
@@ -74,11 +83,12 @@ async function waitChatLayoutSettled() {
 }
 
 /**
- * 抛物线式飞行：逐帧写 transform。
+ * 旋转着直线升上去：逐帧写 transform（对齐参考录屏 2.4s→2.9s 那一段）。
  *
- * - 位移：进度取 1.9 次幂 → 起手慢、越往后越快（末段「冲刺」）；
- * - 轨迹：叠一条 sin 弧线，中段偏离中线最多、两端归零，看起来才是抛物线；
- * - 尺寸：0 → 45% 从 1 放大到 1.16 倍，之后收到灵动岛图标的实际比例。
+ * - 位移：进度取 1.9 次幂 → 起手几乎不动，末段加速冲到顶部；x 全程锁在中线上，不走弧线；
+ * - 尺寸：从 1 线性收敛到灵动岛图标的实际比例，起飞过程中持续缩小，不再先膨胀；
+ * - 旋转：绕自身中心顺时针整圈自转（0° → 360°），幂次 2.6 比位移更陡 ——
+ *   前半程只是微微侧一下，后半程跟着冲刺快速转满一圈，落位正好回正。
  */
 function runWelcomeFly(from: DOMRect, to: DOMRect, onDone: () => void, onFrame: (style: Record<string, string>) => void) {
   const dx = to.left + to.width / 2 - (from.left + from.width / 2);
@@ -90,13 +100,10 @@ function runWelcomeFly(from: DOMRect, to: DOMRect, onDone: () => void, onFrame: 
   const frame = (now: number) => {
     const p = Math.min(1, (now - startedAt) / WELCOME_FLY_MS);
     const travel = p ** 1.9;
-    const arc = Math.sin(Math.PI * p) * WELCOME_FLY_ARC_X;
-    const scale = p <= WELCOME_FLY_PEAK_AT
-      ? 1 + (WELCOME_FLY_PEAK_SCALE - 1) * (p / WELCOME_FLY_PEAK_AT)
-      : WELCOME_FLY_PEAK_SCALE
-        + (targetScale - WELCOME_FLY_PEAK_SCALE) * ((p - WELCOME_FLY_PEAK_AT) / (1 - WELCOME_FLY_PEAK_AT));
+    const scale = 1 + (targetScale - 1) * p;
+    const spin = WELCOME_FLY_SPIN_DEG * (p ** WELCOME_FLY_SPIN_POWER);
 
-    onFrame({ transform: `translate3d(${dx * travel + arc}px, ${dy * travel}px, 0) scale(${scale})` });
+    onFrame({ transform: `translate3d(${dx * travel}px, ${dy * travel}px, 0) scale(${scale}) rotate(${spin}deg)` });
 
     if (p < 1) {
       rafId = requestAnimationFrame(frame);
@@ -117,6 +124,8 @@ export function useWelcomeStage() {
   const leaving = ref(false);
   /** 已到顶：欢迎层 logo 淡出，交给对话页自己的灵动岛图标接上 */
   const landed = ref(false);
+  /** 图标已经开始上升：标题 / 标语 / 输入条跟这一步一起淡出（不是点击瞬间就清空） */
+  const flying = ref(false);
   /** 欢迎层 logo 的落点 transform：按灵动岛图标的真实坐标算出来 */
   const logoStyle = ref<Record<string, string>>({});
   /** 对话页淡入延迟：语音起飞时等 listen.gif 扩散，文字起飞立即淡入 */
@@ -177,6 +186,7 @@ export function useWelcomeStage() {
     clearFlyTimer();
     leaving.value = false;
     landed.value = false;
+    flying.value = false;
     logoStyle.value = {};
     chatEnterDelayMs.value = WELCOME_CHAT_ENTER_DELAY_MS;
     stage.value = "welcome";
@@ -211,6 +221,9 @@ export function useWelcomeStage() {
     // 中途被回退 / 直接切走：不再起飞
     if (!leaving.value) return;
 
+    // 起飞真正开始：图标上升的同时标题 / 标语 / 输入条一起淡出（对齐参考录屏）
+    flying.value = true;
+
     /** 落位收尾：先淡出欢迎层 logo（对话页图标同位置同尺寸接上），再卸载欢迎层 */
     const land = () => {
       stopFly();
@@ -220,6 +233,7 @@ export function useWelcomeStage() {
         flyTimer = null;
         leaving.value = false;
         landed.value = false;
+        flying.value = false;
         logoStyle.value = {};
         resolveLandWaiters();
       }, WELCOME_LAND_FADE_MS);
@@ -252,6 +266,7 @@ export function useWelcomeStage() {
     stage,
     leaving,
     landed,
+    flying,
     logoStyle,
     showWelcome,
     chatEnterDelayMs,

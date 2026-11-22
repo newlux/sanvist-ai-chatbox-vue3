@@ -712,12 +712,10 @@ onBeforeUnmount(() => {
                Ardot 722:69（浅色思考中）/ 722:489（浅色回答中）：胶囊只在生成中出现
                未生成时只留圆形灵动岛，胶囊整体不渲染 -->
           <view v-if="showIsland" class="chat-header__island-wrap">
-            <view
-              class="chat-header__island"
-              :class="{ 'chat-header__island--thinking': thinking }"
-            >
+            <view class="chat-header__island">
               <!-- 圆形玻璃底盘（.chat-header__island-glass）与 1px 白描边已按需求去掉，
-                   容器只作为呼吸动画的载体 + 图标的定位基准，本身不再有任何可见形状 -->
+                   容器只作为图标的定位基准，本身不再有任何可见形状；
+                   思考中的形态变化交给岛内的 think.webp 动图，容器不再做呼吸缩放 -->
               <!-- 长按进度环：按住才出现，5s 走满一圈；松手 / 滑动 / 计时结束都会卸载，
                    卸载即复位，下次按住重新从 0 开始 -->
               <view
@@ -1374,9 +1372,9 @@ onBeforeUnmount(() => {
   height: 160rpx;
   box-sizing: border-box;
   // 圆形已去掉：不再有描边 / 圆角 / 圆形外投影，也不再裁剪内层
-  // 独立合成层：呼吸缩放过程中保持独立图层，避免 WebView 反复重绘
+  // 独立合成层：子层动图淡入 / 放大时父级不跟着反复重绘
   transform: translateZ(0);
-  // 缩放过渡做柔：480ms + 两端平滑的缓动曲线，变大/变小都不是硬切
+  // 容器本身已不再做呼吸缩放（思考中交给 think.webp），这条过渡留给后续容器动效复用
   transition: transform 480ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -1441,27 +1439,8 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 只有「思考中」呼吸放大：160rpx → 200rpx（设计稿 80px → 100px）循环；
-   一旦出字（回答中）就回落到原始 160rpx（80px），其他状态尺寸不变 */
-.chat-header__island--thinking {
-  // 呼吸节奏放慢：1.6s → 2.2s（一轮放大+回落），起伏更舒缓
-  animation: island-breathe 2.2s ease-in-out infinite;
-}
-
-/* 呼吸动效：两端平滑、无跳变；translateZ(0) 保持独立合成层，
-   避免 WebView 在缩放过程中重新裁剪圆角。
-   峰值按设计稿 722:96 Group 134 = 100px = 200rpx：
-   基数 160rpx，200 / 160 = 1.25 */
-@keyframes island-breathe {
-  0%,
-  100% {
-    transform: translateZ(0) scale(1); // 160rpx（80px）
-  }
-
-  50% {
-    transform: translateZ(0) scale(1.25); // 200rpx（100px）
-  }
-}
+/* 思考中不再做整岛呼吸缩放（原 island-breathe 已去掉）：
+   这是「生成中」的提示，形态变化完全交给岛内的 think.webp 动图本身。 */
 
 /* 圆形玻璃底盘整层删除：原来它负责圆形轮廓、透明底 + BACKGROUND_BLUR 2 与圆角裁切，
    现在圆形不再需要，容器本身已是透明的，只剩 Logo */
@@ -1545,20 +1524,24 @@ onBeforeUnmount(() => {
   transform: translate(-3rpx, 2rpx) scale(1.69);
 }
 
-/* think.webp（正在思考）：画布沿用旧 gif 的 2:1 构图（源 1920×960 缩到 480×240），图案只占中间（宽约 33%、高约 58%），两侧是透明留白。
-   1) 留白用 aspectFill 裁掉，图案正好撑满 62×62 的位；
-   2) 换算下来图案仍比原图小约 15%（340/400 的缩放差），要放大到 1.18 才与原图视觉等大；
-   3) 图案中心在画布上偏下约 2.5%（y 210 / 400），上移 3rpx 让中心仍落在原位置。 */
+/* think.webp（正在思考）：画布沿用旧 gif 的 2:1 构图（源 1920×960 缩到 480×240），
+   图案只占中间（宽约 33%、高约 58%），两侧是透明留白。
+   1) 留白用 aspectFill 裁掉（盒高 124rpx 铺满画布，缩放系数 124/240 ≈ 0.517），
+      盒内图案实际只显示约 82×72rpx；
+   2) 另外三层（idle / tell / listen）的图案视觉尺寸都是 ~124rpx，
+      想和它们等大就按面积对齐：√(124² / (82 × 72)) ≈ 1.62，
+      放大后图案约 132×116rpx，观感与其它状态一致；
+   3) 图案中心在画布上偏下约 2.5%（盒内约 3.1rpx），按 1.62 放大后上移 4rpx 复位。 */
 .chat-header__island-logo--think {
   z-index: 3;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-3rpx) scale(1);
+  transform: translateY(-4rpx) scale(1);
 }
 
 .chat-header__island-logo--think-on {
   opacity: 1;
-  transform: translateY(-3rpx) scale(1.18);
+  transform: translateY(-4rpx) scale(1.62);
 }
 
 // --- icons (用 CSS 近似 Figma 形状，后续可替换为 svg 资源) ---

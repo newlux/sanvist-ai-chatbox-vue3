@@ -856,9 +856,9 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   border-radius: 0;
   background: transparent;
 }
-/* 实时转写最多铺三行：录音里说成一段也不会把下面整屏内容顶走 */
+/* 实时转写最多铺三行（3 × 44rpx = 132rpx）：录音里说成一段也不会把下面整屏内容顶走 */
 .ai-bubble-v2--user.ai-bubble-v2--asr-pending .ai-bubble-v2__asr {
-  max-height: 144rpx;
+  max-height: 132rpx;
   overflow: hidden;
 }
 .ai-bubble-v2--user.ai-bubble-v2--selected {
@@ -1065,12 +1065,8 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   white-space: pre-wrap;
   word-break: break-word;
 }
-/* 录音中按「顶部提词」的字号铺字：32rpx / 48rpx，与原来的浮层提词保持一致 */
-.ai-bubble-v2--asr-pending .ai-bubble-v2__asr {
-  font-size: 32rpx;
-  font-weight: 500;
-  line-height: 48rpx;
-}
+/* 录音中不再单独放大字号（原 32rpx / 500）：沿用基类 28rpx / 44rpx / 常规字重，
+   与顶部实时提词（ai-voice-transcript）同档，收进气泡时字号与字重都不跳 */
 .ai-bubble-v2--dark.ai-bubble-v2--asr-pending .ai-bubble-v2__asr {
   color: #f2f3f5;
 }

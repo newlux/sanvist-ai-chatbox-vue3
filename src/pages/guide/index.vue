@@ -181,6 +181,7 @@ const {
   stage: pageStage,
   leaving: welcomeLeaving,
   landed: welcomeLanded,
+  flying: welcomeFlying,
   logoStyle: welcomeLogoStyle,
   showWelcome,
   chatEnterDelayMs,
@@ -1488,6 +1489,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
       :share-all-checked="shareAllChecked"
       :share-selected-round-count="shareSelectedRoundCount"
       :voice-listening="voiceQueryActive || duplexListening"
+      :island-hidden="welcomeLeaving && !welcomeLanded"
       restartable
       :back-on-left="!pureMode"
       close-on-right
@@ -1508,6 +1510,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
     <AiWelcome
       v-if="(showWelcome && welcomeDecisionReady) || voiceHoldActive"
       :leaving="welcomeLeaving || !showWelcome"
+      :flying="welcomeFlying"
       :landed="welcomeLanded || !showWelcome"
       :logo-style="welcomeLogoStyle"
       :dark="isDark"
@@ -1892,10 +1895,10 @@ $color-white: #ffffff;
 }
 
 /* 欢迎层 → 对话页：整页淡入。
-   延迟由 --chat-enter-delay 控制（语音起飞会等 listen.gif 扩散），
-   让淡入跟起飞同时开始，不会出现「logo 还挂在中间、对话页已经铺满」的割裂感 */
+   点击就立即开始（--chat-enter-delay 现为 0），360ms 内铺满 —— 等图标起飞时
+   对话页已经就位，logo 是飞在对话页之上的 */
 .ai-page__chat--enter {
-  animation: ai-page-chat-in 720ms cubic-bezier(0.22, 0.61, 0.36, 1) var(--chat-enter-delay, 0ms) both;
+  animation: ai-page-chat-in 360ms cubic-bezier(0.22, 0.61, 0.36, 1) var(--chat-enter-delay, 0ms) both;
 }
 
 @keyframes ai-page-chat-in {

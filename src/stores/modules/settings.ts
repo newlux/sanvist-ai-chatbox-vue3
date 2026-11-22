@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { getSettings, updateSettings } from "@/api/settings";
 import { AUTO_TTS_ENABLED_KEY } from "@/config";
+import { saveReportVoiceByStyle } from "@/hooks/useReportVoice";
 import { createLogger } from "@/utils/logger";
 import { useSystemStore } from "@/stores/modules/system";
 
@@ -48,6 +49,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const speechRate = ref(1.2);
   /** 最近一次服务端确认过的全量值，写失败时用它回滚 */
   const confirmed = ref<AppSettings | null>(null);
+  /** 最近一次同步进本机存储的音色，避免同一个值反复读写 storage */
+  let lastSyncedVoice = "";
   /**
    * 语音播报总开关（顶部头部回主页按钮旁边的喇叭）：
    * 只管「回答边出边自动播报」，气泡里手动点的播报按钮不受它控制。
@@ -80,6 +83,22 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  /**
+   * 服务端音色 → 本机听播音色记忆（`ai-report-voice`）。
+   *
+   * TTS / 听播页 / 三方 H5 取音色读的都是这份本机记忆（resolveReportVoiceId），
+   * 而音色可能在别的端、或者 `<VOICE_STYLE>` 标签之外被改过：`load()` / PUT 回显拿到新值时必须
+   * 一起写进本机存储，否则就是「设置里是新音色、实际播报还是旧的」。
+   *
+   * 认不出的值（空串 / 描述性文案）由 saveReportVoiceByStyle 自己过滤，这里不额外判断。
+   */
+  function syncVoiceToLocal(value: string) {
+    const next = String(value || "").trim();
+    if (!next || next === lastSyncedVoice) return;
+    lastSyncedVoice = next;
+    saveReportVoiceByStyle(next);
+  }
+
   /** 把服务端全量值分发到各自的归属地 */
   function apply(data: AppSettings | null | undefined) {
     if (!data) return;
@@ -97,7 +116,11 @@ export const useSettingsStore = defineStore("settings", () => {
     if (typeof data.memoryEnabled === "boolean") memoryEnabled.value = data.memoryEnabled;
     if (typeof data.pureMode === "boolean") pureMode.value = data.pureMode;
     dialogueMode.value = data.dialogueMode === "realtime" ? "realtime" : "push";
-    if (typeof data.voiceCode === "string") voiceCode.value = data.voiceCode;
+    if (typeof data.voiceCode === "string") {
+      voiceCode.value = data.voiceCode;
+      // 音色变了就同步落本机：TTS / 听播读的是这份记忆，不是 store
+      syncVoiceToLocal(data.voiceCode);
+    }
     if (typeof data.speechRate === "number") speechRate.value = data.speechRate;
   }
 
@@ -182,7 +205,16 @@ export const useSettingsStore = defineStore("settings", () => {
       if (typeof patch.pureMode === "boolean" && typeof data?.pureMode === "boolean" && data.pureMode !== patch.pureMode) {
         logger.warn("settings pureMode 被服务端改写", { sent: patch.pureMode, got: data.pureMode });
       }
-      if (patch.voiceCode && !data?.voiceCode) voiceCode.value = patch.voiceCode;
+      /**
+       * 音色以**本次提交值**为准，不跟响应走：`<VOICE_STYLE>` 标签 / 声音设置页刚写进
+       * 本机记忆（`ai-report-voice`）的值就是权威值。而 `apply()` 会按响应里的 voiceCode
+       * 再同步一次本机存储 —— 响应不带该字段、或带回服务端上一拍的旧值（写入未即时生效）时，
+       * 刚写进去的新音色会被写回旧值，表现就是「标签出现了、本地记忆却没变，下一句还是旧声音」。
+       */
+      if (patch.voiceCode) {
+        voiceCode.value = patch.voiceCode;
+        syncVoiceToLocal(patch.voiceCode);
+      }
       if (typeof patch.speechRate === "number" && typeof data?.speechRate !== "number") {
         speechRate.value = patch.speechRate;
       }
@@ -192,6 +224,14 @@ export const useSettingsStore = defineStore("settings", () => {
     catch (error) {
       logger.warn("update settings failed", { patch, error });
       apply(confirmed.value);
+      /**
+       * 音色不参与失败回滚：标签 / 设置页已经明确切过去的音色继续在本机生效，
+       * 否则 `apply(confirmed)` 会把刚写的 `ai-report-voice` 覆盖回旧值。
+       */
+      if (patch.voiceCode) {
+        voiceCode.value = patch.voiceCode;
+        syncVoiceToLocal(patch.voiceCode);
+      }
       return false;
     }
   }

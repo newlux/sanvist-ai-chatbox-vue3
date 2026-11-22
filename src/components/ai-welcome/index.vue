@@ -4,6 +4,8 @@ import type { PropType } from "vue";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+// 中心 SANI 图标静态图：动图就绪前先打底，避免 1MB 的 webp 慢网下先空白
+import saniLogoStatic from "@/assets/img/header-island-logo.png";
 import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
 import microphoneIcon from "@/assets/img/icon-mic-red.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
@@ -11,9 +13,11 @@ import voiceWaveBlueDark from "@/assets/img/icon-voice-wave-blue-dark.svg";
 import voiceWaveBlueLight from "@/assets/img/icon-voice-wave-blue-light.svg";
 import voiceWaveLight from "@/assets/img/icon-voice-wave-light.svg";
 import voiceWaveOnDark from "@/assets/img/icon-waveform-darck.svg";
+// 起飞段的中间大图与对话页灵动岛用同一套深浅色 webp（图案占比不同，样式里已按主题补偿 scale）
+import listenLogoDark from "@/assets/img/listen-dark.webp";
+import listenLogoLight from "@/assets/img/listen-light.webp";
 import listenLogo from "@/assets/img/listen.gif";
-// 中心 SANI 图标：先静态图打底，动图加载完成后再无缝切过去（避免 1MB 的 webp 慢网下先空白）
-import saniLogoStatic from "@/assets/img/header-island-logo.png";
+// 动图加载完成后与静态图交叉溶解，用户只看到「图标从静止变动态」
 import saniLogoWebp from "@/assets/img/sani-logo.webp";
 import titleDark from "@/assets/img/sany-neo-dark.svg";
 import titleLight from "@/assets/img/sany-neo-light.svg";
@@ -48,8 +52,14 @@ const props = defineProps({
   duplexEnabled: { type: Boolean, default: false },
   duplexActive: { type: Boolean, default: false },
   duplexStarting: { type: Boolean, default: false },
-  /** 起飞态：底色让位给下面的对话页，标题 / 输入条淡出，logo 按 logoStyle 滑向顶部 */
+  /** 起飞态：底色让位给下面的对话页，logo 按 logoStyle 滑向顶部 */
   leaving: { type: Boolean, default: false },
+  /**
+   * 图标真正开始往上飞（起飞前还有一段 listen 扩散的停留）。
+   * 标题 / 标语 / 输入条跟着这一步淡出，与参考录屏一致 ——
+   * 点下去文字先留着，图标飞起时才一起让位，而不是点击瞬间就清空。
+   */
+  flying: { type: Boolean, default: false },
   /** 已到顶：logo 淡出，由对话页自己的灵动岛图标接上，避免最后 1-2px 的跳变被看见 */
   landed: { type: Boolean, default: false },
   /** logo 的目标 transform（由父页面按灵动岛实际坐标算出） */
@@ -89,6 +99,14 @@ const { pureMode } = storeToRefs(useSettingsStore());
  * 按主题切图：浅色 `sany-neo-light.svg`、深色 `sany-neo-dark.svg`（都是 120×29 的整行字标）。
  */
 const titleImage = computed(() => (props.dark ? titleDark : titleLight));
+
+/**
+ * 标语 / 副标题按字符拆开：起飞时逐字做波浪扭曲。
+ * 录屏里文字是被图标「拉扯」的液态变形（有的字被拉宽上浮、有的缩小下沉），
+ * 整段文字统一 skew 出不来这种效果，只能按字给不同相位。
+ */
+const sloganChars = computed(() => Array.from(t("init-brand-slogan")));
+const descChars = computed(() => Array.from(t("init-brand-desc-1")));
 
 /**
  * 声波图标：**未触发**（没开实时语音）时用未激活态切图，**触发后**换成蓝色声波 + 白色胶囊（截图两态）。
@@ -131,10 +149,44 @@ function onSaniLogoLoad() {
  * 浏览器一定从第 0 帧开始播，于是「480ms 后扩散到最大」才是准的。
  */
 const listenMounted = ref(false);
-/** 起飞中（点击说话 + listen.gif 已挂载）：两种 SANI 图都要让位给 listen.gif */
-const logoDeparting = computed(() => props.leaving && listenMounted.value);
+/** listen 图真正可显示（load / 退回 gif 后 load）：没就绪前飞行继续用 sani 动图，不露空 */
+const listenReady = ref(false);
+/**
+ * listen 图接管常态图：必须等到图片真就绪才切换。
+ * 之前直接跟着 leaving 走 —— 常态图淡出了、listen 图还在下载中，
+ * 飞上去的半天是静态 png 的残影甚至空白，到顶才换成 sani-logo.webp。
+ */
+const listenShowing = computed(() => props.leaving && listenMounted.value && listenReady.value);
 /** 兜底时长：个别容器命中缓存不派发 load，不能让页面卡在欢迎页 */
 const LISTEN_READY_TIMEOUT_MS = 120;
+
+/**
+ * 起飞段中间那张 listen 图：与对话页灵动岛同一套深浅色 webp，老内核不认 webp 时退回 gif。
+ * 模板一直引用着 `listenLogoSrc` / `onListenLogoError`，这两个必须是真实定义：
+ * 否则 `:src` 拿到 undefined，常态 logo 又已经淡出，飞起来的是一张空图 ——
+ * 表现就是「点说话直接切到对话页录音态，中间动效不见了」。
+ */
+const listenLogoFailed = ref(false);
+const listenLogoSrc = computed(() => {
+  if (listenLogoFailed.value) return listenLogo;
+  return props.dark ? listenLogoDark : listenLogoLight;
+});
+/**
+ * 常态就预热 listen 图：真机上点击时才开始下载 1MB 级 webp 大概率来不及，
+ * 起飞时它还没就绪就只能靠 sani 动图兜底，光晕扩散那一段就没了。
+ */
+const listenPreloaded = new Set<string>();
+watch(() => listenLogoSrc.value, (src) => {
+  if (typeof Image === "undefined" || !src || listenPreloaded.has(src)) return;
+  listenPreloaded.add(src);
+  new Image().src = src;
+}, { immediate: true });
+/** 加载失败：换回 gif，同时立刻放行起飞（src 换掉后不会再派发 load，别等兜底定时器） */
+function onListenLogoError() {
+  listenLogoFailed.value = true;
+  listenReady.value = false;
+  fireStart();
+}
 
 let startFired = false;
 let readyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -150,6 +202,7 @@ function fireStart(mode?: "hold", target?: EventTarget) {
 }
 
 function onListenLoad() {
+  listenReady.value = true;
   if (listenMounted.value) fireStart();
 }
 
@@ -352,6 +405,7 @@ onBeforeUnmount(() => {
     class="welcome"
     :class="{
       'welcome--leaving': leaving,
+      'welcome--flying': flying,
       'welcome--landed': landed,
       'welcome--dark': dark,
       'welcome--pure': pureMode,
@@ -368,20 +422,21 @@ onBeforeUnmount(() => {
            点下去先切成 listen.gif（与对话页灵动岛同一套交叉溶解），再往上走 -->
       <view class="welcome__logo">
         <view class="welcome__logo-fly" :style="logoStyle">
-          <!-- 静态图打底：动图就绪前一直显示，就绪后与动图交叉淡出（无感知切换） -->
+          <!-- 静态图打底：listen 动图就绪接管前都不撤（哪怕 webp 还没加载完），飞行中不露空 -->
           <image
             class="welcome__logo-img"
             :class="{
-              'welcome__logo-img--covered': saniLogoReady && !logoDeparting,
-              'welcome__logo-img--out': logoDeparting,
+              'welcome__logo-img--covered': saniLogoReady && !listenShowing,
+              'welcome__logo-img--out': listenShowing,
             }"
             :src="saniLogoStatic"
             mode="aspectFit"
           />
-          <!-- 动图：加载期间保持透明（已在后台下载），load 后淡入；起飞时一起让位给 listen 动图 -->
+          <!-- 动图：加载期间保持透明（已在后台下载），load 后淡入；
+               起飞时若 listen 图还没就绪，由它继续飞，就绪后再交叉让位 -->
           <image
             class="welcome__logo-img welcome__logo-img--gif"
-            :class="{ 'welcome__logo-img--in': saniLogoReady && !logoDeparting }"
+            :class="{ 'welcome__logo-img--in': saniLogoReady && !listenShowing }"
             :src="saniLogoWebp"
             mode="aspectFit"
             @load="onSaniLogoLoad"
@@ -389,7 +444,10 @@ onBeforeUnmount(() => {
           <image
             v-if="listenMounted"
             class="welcome__logo-listen"
-            :class="{ 'welcome__logo-listen--light': !dark }"
+            :class="{
+              'welcome__logo-listen--light': !dark,
+              'welcome__logo-listen--on': listenShowing,
+            }"
             :src="listenLogoSrc"
             mode="aspectFit"
             @load="onListenLoad"
@@ -401,11 +459,23 @@ onBeforeUnmount(() => {
       <!-- 品牌文案组：图标下方「随时，为你而在」+ 一行灰字，
            文案沿用引导页那套 i18n（init-brand-slogan / init-brand-desc-1） -->
       <view class="welcome__caption">
+        <!-- 逐字拆开：起飞时每个字按相位做波浪扭曲（录屏里文字是被「拉扯」变形的，
+             整段文字整体 skew 做不出这种不均匀形变） -->
         <text class="welcome__slogan">
-          {{ t("init-brand-slogan") }}
+          <text
+            v-for="(ch, i) in sloganChars"
+            :key="`slogan-${i}`"
+            class="welcome__char"
+            :class="`welcome__char--p${i % 4}`"
+          >{{ ch }}</text>
         </text>
         <text class="welcome__desc">
-          {{ t("init-brand-desc-1") }}
+          <text
+            v-for="(ch, i) in descChars"
+            :key="`desc-${i}`"
+            class="welcome__char welcome__char--small"
+            :class="`welcome__char--p${i % 4}`"
+          >{{ ch }}</text>
         </text>
       </view>
     </view>
@@ -617,7 +687,8 @@ onBeforeUnmount(() => {
   background-size: 100% calc(176rpx + env(safe-area-inset-bottom) + 4rem);
 }
 
-/* 起飞态：底色让位（下面的对话页露出来），文字与输入条先淡出，只有 logo 继续往上滑 */
+/* 起飞态：底色先让位（下面的对话页露出来），文字留着 ——
+   等图标真正开始上升（--flying）再一起淡出 */
 .welcome--leaving {
   background: transparent;
   pointer-events: none;
@@ -628,13 +699,118 @@ onBeforeUnmount(() => {
   content: none;
 }
 
-.welcome--leaving .welcome__title,
-.welcome--leaving .welcome__nav,
-.welcome--leaving .welcome__caption,
-.welcome--leaving .welcome__composer,
-.welcome--leaving .welcome__disclaimer {
+/* 文字随飞行淡出：对齐录屏实测 —— 前 200ms 几乎不变暗，末段 120ms 内快速消失，
+   边缘同时轻微发散（模糊）。所以用 ease-in 曲线（前慢后快），
+   观感是「图标飞过标题时把文字带走」，而不是一上来就整片变淡。 */
+.welcome--flying .welcome__title,
+.welcome--flying .welcome__caption {
   opacity: 0;
-  transition: opacity 240ms ease;
+  filter: blur(1.2px);
+  transition:
+    opacity 320ms cubic-bezier(0.55, 0, 1, 0.45),
+    filter 320ms cubic-bezier(0.55, 0, 1, 0.45);
+}
+
+/* 输入条与免责声明只走透明度：它们和对话页同位置的控件压在一起，
+   模糊会让人看出两层轮廓 */
+.welcome--flying .welcome__nav,
+.welcome--flying .welcome__composer,
+.welcome--flying .welcome__disclaimer {
+  opacity: 0;
+  transition: opacity 320ms cubic-bezier(0.55, 0, 1, 0.45);
+}
+
+/* ===== 起飞瞬间的文字扭曲 =====
+   录屏里文字不是整体平移/缩放，而是像被图标「拉扯」：有的字被拉宽上浮、
+   相邻的字缩小下沉，越靠近图标越明显。整段文字统一 skew 出不来，
+   所以标语 / 副标题按字符拆开，四组相位轮流（奇偶反向），
+   在 320ms 内先扭出去再回正，和淡出叠加就是「扭着散掉」。 */
+.welcome__char {
+  display: inline-block;
+  white-space: pre;
+}
+
+.welcome--flying .welcome__char {
+  animation: welcome-char-warp 320ms cubic-bezier(0.55, 0, 1, 0.45) both;
+}
+
+/* 四组相位：错开起步时间、上下反向、幅度各不相同 ——
+   录屏里相邻的字并不是同频抖动，而是有的被拉宽上浮、有的被压缩下沉 */
+.welcome__char--p0 {
+  --warp-dir: 1;
+  --warp-amp: 1.15;
+  animation-delay: 0ms;
+}
+
+.welcome__char--p1 {
+  --warp-dir: -1;
+  --warp-amp: 0.8;
+  animation-delay: 12ms;
+}
+
+.welcome__char--p2 {
+  --warp-dir: 1;
+  --warp-amp: 1;
+  animation-delay: 24ms;
+}
+
+.welcome__char--p3 {
+  --warp-dir: -1;
+  --warp-amp: 0.9;
+  animation-delay: 36ms;
+}
+
+@keyframes welcome-char-warp {
+  0% {
+    transform: translateY(0) scale(1) skewX(0deg);
+  }
+
+  35% {
+    transform:
+      translateY(calc(-4px * var(--warp-dir) * var(--warp-amp, 1) * var(--warp-small, 1)))
+      scale(calc(1 + 0.3 * var(--warp-amp, 1) * var(--warp-small, 1)), calc(1 + 0.1 * var(--warp-amp, 1) * var(--warp-small, 1)))
+      skewX(calc(-8deg * var(--warp-dir) * var(--warp-amp, 1) * var(--warp-small, 1)));
+  }
+
+  70% {
+    transform:
+      translateY(calc(2px * var(--warp-dir) * var(--warp-amp, 1) * var(--warp-small, 1)))
+      scale(calc(1 - 0.12 * var(--warp-amp, 1) * var(--warp-small, 1)), calc(1 - 0.04 * var(--warp-amp, 1) * var(--warp-small, 1)))
+      skewX(calc(4deg * var(--warp-dir) * var(--warp-amp, 1) * var(--warp-small, 1)));
+  }
+
+  100% {
+    transform: translateY(0) scale(1) skewX(0deg);
+  }
+}
+
+/* 副标题字号小，同样的幅度会显得过火，整体收一档 */
+.welcome__char--small {
+  --warp-small: 0.6;
+}
+
+/* 标题是整行 SVG 字标（无法逐字拆），用整体 skew + scaleX 抖一次，
+   近似录屏里「Neo 被拉宽、N 错位」的观感 */
+.welcome--flying .welcome__title-img {
+  animation: welcome-title-warp 320ms cubic-bezier(0.55, 0, 1, 0.45) both;
+}
+
+@keyframes welcome-title-warp {
+  0% {
+    transform: skewX(0deg) scaleX(1);
+  }
+
+  32% {
+    transform: skewX(-6deg) scaleX(1.06);
+  }
+
+  66% {
+    transform: skewX(3deg) scaleX(0.97);
+  }
+
+  100% {
+    transform: skewX(0deg) scaleX(1);
+  }
 }
 
 /* 标题 + 图标一组，垂直水平居中；底部输入条固定占最后一行 */
@@ -737,8 +913,9 @@ onBeforeUnmount(() => {
 }
 
 /* 溶解/放大要在「扩散到最大」之前跑完：峰值在点击后 480ms（见 index.vue 的
-   WELCOME_LISTEN_PEAK_MS），这里给 400ms，留 80ms 让整张图已经满不透明 */
-.welcome--leaving .welcome__logo-listen {
+   WELCOME_LISTEN_PEAK_MS），这里给 400ms，留 80ms 让整张图已经满不透明。
+   用 --on（图片就绪）而不是 leaving 触发：图片还在下载时亮 opacity:1 也是空白 */
+.welcome__logo-listen--on {
   opacity: 1;
   transform: translate(3.5rpx, 3.5rpx) scale(2.49);
   transition:
@@ -753,7 +930,7 @@ onBeforeUnmount(() => {
   transform: translate(-5rpx, 3.5rpx) scale(1.6);
 }
 
-.welcome--leaving .welcome__logo-listen--light {
+.welcome__logo-listen--light.welcome__logo-listen--on {
   opacity: 1;
   transform: translate(-5rpx, 3.5rpx) scale(1.69);
 }

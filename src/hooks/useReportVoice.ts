@@ -28,7 +28,10 @@ export function saveReportVoice(voice: ReportVoiceOption) {
   }
 }
 
-/** 本机记住的音色值：可能是本地配置里的 id（xieshurou_v3.1），也可能是后台新下发的音色码（Cherry…） */
+/**
+ * 本机记住的音色值：可能是本地配置里的 id（xieshurou_v3.1）、后台音色码（Cherry…），
+ * 也可能是 `<VOICE_STYLE style="…">` 下发的性格码（gentle_healing）—— 标签给什么就存什么。
+ */
 function readSavedVoiceValue(): string {
   let raw = null;
   try {
@@ -40,15 +43,20 @@ function readSavedVoiceValue(): string {
   return String((typeof raw === "string" ? raw : raw?.id) || "").trim();
 }
 
-/** 读取已保存的音色，按 id 还原完整选项（含 hero/avatar/preview）；无保存或不是本地选项返回 null。 */
+/**
+ * 读取已保存的音色，按 id 还原完整选项（含 hero/avatar/preview）；无保存或不是本地选项返回 null。
+ *
+ * 本机存的可能是标签下发的 style 原值（性格码 / 后台音色码），不一定等于本地选项的 id：
+ * 精确匹配不到时再用性格标签兜一次，避免听播页把「存了别的口径的音色」误判成没选过。
+ */
 export function loadReportVoice(): ReportVoiceOption | null {
   const id = readSavedVoiceValue();
   if (!id) return null;
-  return REPORT_VOICE_OPTIONS.find(voice => voice.id === id) || null;
+  return REPORT_VOICE_OPTIONS.find(voice => voice.id === id) ?? matchVoiceOption(id);
 }
 
 /**
- * 当前生效的音色 id：每次调用现读本机存储。
+ * 当前生效的音色值：每次调用现读本机存储（与 `PUT /settings.voiceCode` 是同一个串）。
  *
  * 音色随时可能被 `…<VOICE_STYLE style="…">` 标签改写，所以 TTS 请求不要在进页 / 建会话时
  * 把音色固定下来，发请求那一刻现取，下一句播报就能用上新音色。没选过时返回空串（按后端默认音色）。
@@ -68,35 +76,45 @@ function matchVoiceOption(value: string): ReportVoiceOption | null {
 }
 
 /**
- * 「<VOICE_STYLE style="…">」标签下发的音色值落库，返回最终生效的音色码（空串 = 没取到）。
+ * 「<VOICE_STYLE style="…">」标签下发的音色值落库，返回写入本机 / 上送服务端的音色值
+ * （空串 = 值不可用、没写）。
  *
- * 标签值有三种口径，都要认：
- * - 本地音色 id（xieshurou_v3.1）：命中选项，连试听 / 头像一起存；
- * - 性格码（gentle_healing）：按 tagKey 后缀映射到对应选项；
- * - 后台声音列表里的新音色码（Cherry…）：本地没有对应的展示资源，就原样记住。
- * 以前只认前两种，匹配不上整条丢掉 —— 后台换成第三种口径后，表现就是「说了切换音色但没切」。
+ * 存储口径：**标签给什么就存什么** —— 本机记忆的 id 与 `PUT /settings.voiceCode` 用同一个值，
+ * 这样 TTS 现取的音色、服务端记录的音色、下一次 `load()` 回显的音色才是同一份。
+ * 不再把性格码 / 后台音色码映射成本地选项 id（映射后服务端与本地就对不上了）。
+ *
+ * 命中本地音色时顺手把展示字段（人设名 / 描述 / 性别）一起存，听播页的选中卡片不用再猜；
+ * 匹配不到也只是少几个展示字段，不影响取值。
  */
 export function saveReportVoiceByStyle(styleValue: string): string {
   const raw = String(styleValue || "").trim();
   if (!raw) return "";
-  const option = matchVoiceOption(raw);
-  if (option) {
-    saveReportVoice(option);
-    return option.id;
-  }
-  // 认不出的值只在「长得像音色码」时才记（Cherry / cherry_v3.1）；
-  // 中文名之类的描述性文案当音色码发给 TTS 会把整句合成搞坏，直接忽略
+  /**
+   * 非常规音色码（中文名 / 带空格）只提示、不丢弃：标签给什么就存什么，
+   * `PUT /settings.voiceCode` 也传什么 —— 否则「标签出现了但音色没切、接口也没调」。
+   * 端上不替后端收敛取值，认不出的音色由后端决定如何处理。
+   */
   if (!/^[\w.-]+$/.test(raw)) {
-    logger.warn("音色标签值既不是本地音色也不是音色码，忽略", { styleValue: raw });
-    return "";
+    logger.warn("音色标签值不是常规音色码，仍按原值落库", { styleValue: raw });
   }
+  const option = matchVoiceOption(raw);
+  const saved = option
+    ? {
+        id: raw,
+        voiceName: option.voiceName,
+        nameKey: option.nameKey,
+        descriptionKey: option.descriptionKey,
+        tagKey: option.tagKey,
+        gender: option.gender,
+      }
+    : { id: raw };
   try {
-    uni.setStorageSync(REPORT_VOICE_STORAGE_KEY, { id: raw });
+    uni.setStorageSync(REPORT_VOICE_STORAGE_KEY, saved);
   } catch (error) {
     logger.error("保存报告音色失败", error);
     return "";
   }
-  logger.info("音色标签值不在本地配置里，按后台音色码记住", { styleValue: raw });
+  logger.info("音色标签值已写入本机记忆", { styleValue: raw, matchedLocal: Boolean(option) });
   return raw;
 }
 

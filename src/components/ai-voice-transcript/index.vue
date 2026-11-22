@@ -50,20 +50,23 @@ onBeforeUnmount(() => {
   pointer-events: none;
   animation: voice-live-in 180ms ease-out both;
 }
+/* 两行高度 = 行高 × 2（84 = 42 × 2），改行高时同步（见 .voice-live__text） */
 .voice-live__box {
   position: relative;
-  height: 96rpx;
+  height: 84rpx;
   overflow: hidden;
 }
+/* 与回复框正文（ai-bubble-v2 回答正文的 p / li）同一套字：
+   28rpx / 42rpx / #2f323c / 常规字重，实时文字与下方回复不再一粗一细、一黑一灰 */
 .voice-live__text {
   position: absolute;
   right: 0;
   bottom: 0;
   left: 0;
-  color: #0d0d0d;
-  font-size: 32rpx;
-  font-weight: 500;
-  line-height: 48rpx;
+  color: #2f323c;
+  font-size: 28rpx;
+  font-weight: 400;
+  line-height: 42rpx;
   white-space: pre-wrap;
   word-break: break-word;
   -webkit-user-select: none;
@@ -85,7 +88,8 @@ onBeforeUnmount(() => {
 .voice-live__dot:nth-child(3) { animation-delay: 0.4s; }
 .voice-live--dark {
   background: linear-gradient(180deg, #0d0d0d 0%, #0d0d0d 80%, rgba(13, 13, 13, 0) 100%);
-  .voice-live__text { color: #f2f3f5; }
+  // 深色下与回复正文同色（ai-bubble-v2 的 p / li 深色档为纯白）
+  .voice-live__text { color: #ffffff; }
 }
 @keyframes voice-live-dot-blink {
   0%, 20%, 100% { opacity: 0.2; }

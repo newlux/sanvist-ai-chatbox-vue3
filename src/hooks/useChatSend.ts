@@ -625,11 +625,14 @@ export function useChatSend(scope?: string, handlers?: {
     let syncedRoleCode = "";
 
     /**
-     * 音色切换标签落库：本机存储 + `/settings.voiceCode` 两处都写。
+     * 音色切换标签落库：本机存储 + `PUT /settings { voiceCode }` 两处都写。
      *
      * 只写本机存储的话，服务端合成仍按 `/settings` 里的 voiceCode 取音色，
      * 听感上就是「说了切换音色但没切」；反过来只写服务端，听播页 / 内嵌页读本机存储的那几处又对不上。
      * 两处写同一个值（saveReportVoiceByStyle 返回最终生效的音色码）。
+     *
+     * 标签一出现就发一次 PUT（同一轮内只处理第一次），不因本机已是同值而跳过 ——
+     * 别的端可能刚改过服务端，这一轮的标签才是最终口径。
      */
     function applyVoiceStyle(styleValue: string) {
       if (!styleValue || styleValue === appliedVoiceStyle) return;
@@ -637,7 +640,6 @@ export function useChatSend(scope?: string, handlers?: {
       if (!voiceCode) return;
       appliedVoiceStyle = styleValue;
       logger.info("[chat] voice style switched by answer tag", { style: styleValue, voiceCode });
-      if (settingsStore.voiceCode === voiceCode) return;
       // 先改本地（下一句 TTS 立刻用新音色），再落服务端；失败由 store 自己回滚
       settingsStore.voiceCode = voiceCode;
       /**
@@ -816,6 +818,15 @@ export function useChatSend(scope?: string, handlers?: {
           if (outputsStyleParsed.matched && turnMetadata) {
             turnMetadata = { ...turnMetadata, outputs_answer: outputsStyleParsed.text };
           }
+          /**
+           * 音色标签同样可能只写在 workflow_finished.outputs.answer 里（正文流不带标签）：
+           * 先把源码从 outputs_answer 摘掉（二维码判定 / 听播兜底文案都取它），
+           * 音色值记下来，下面与正文流里的标签合并后一起落库。
+           */
+          const outputsVoiceParsed = parseVoiceStyleTag(String(turnMetadata?.outputs_answer || ""));
+          if (outputsVoiceParsed.matched && turnMetadata) {
+            turnMetadata = { ...turnMetadata, outputs_answer: outputsVoiceParsed.text };
+          }
           // metadata.emergency 来自 workflow_finished（标签可能在 outputs 的非 answer 字段里），
           // 正文 / outputs_answer 命中则作为双保险；两者都只触发一次。
           if ((emergencyTurn.matched || Boolean(snapshot.metadata?.emergency)) && !emergencyUrgentStarted) {
@@ -859,15 +870,19 @@ export function useChatSend(scope?: string, handlers?: {
           /**
            * 音色切换标签 `<VOICE_STYLE style="…">正文</VOICE_STYLE>`：
            * 正文留在气泡里，style 属性里的音色值按听播音色的同一份存储写进去
-           * （saveReportVoiceByStyle：先按音色 id、再按性格标签匹配 REPORT_VOICE_OPTIONS）。
+           * （saveReportVoiceByStyle），再 `PUT /settings { voiceCode }` 落到服务端。
            * 开标签到齐即落库，不等闭合标签；标签源码不进气泡，也不会被流式听播念出来
            * （下面的听播增量取的就是 displaySnapshot 里剥完标签的正文）。
+           *
+           * 解析必须用**未剥离**的 snapshot.blocks：上面的 <EMERGENCY> / <QRCODE> / <OWNER> /
+           * <WORK_REPORT> 任一命中都会调 withAnswerText 把正文里的协议标签源码一起剥掉，
+           * 在 displayBlocks 上再解析，同一轮里既有身份切换又有音色切换时就永远取不到 style ——
+           * 本机存储不写、`PUT /settings` 也不发。outputs.answer 里的标签同样兜住。
            */
-          const voiceStyleTurn = resolveVoiceStyleTurn(displayBlocks);
+          const voiceStyleTurn = resolveVoiceStyleTurn(snapshot.blocks);
           if (voiceStyleTurn.tagged) displayBlocks = withAnswerText(displayBlocks, voiceStyleTurn.text);
-          if (voiceStyleTurn.matched && voiceStyleTurn.style) {
-            applyVoiceStyle(voiceStyleTurn.style);
-          }
+          const voiceStyleCode = voiceStyleTurn.style || outputsVoiceParsed.style;
+          if (voiceStyleCode) applyVoiceStyle(voiceStyleCode);
 
           /**
            * 语言切换指令 `<COMPONENT type="language_switch" data.language=en|zh>`：

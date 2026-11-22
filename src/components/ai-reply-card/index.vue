@@ -228,7 +228,7 @@ onUnmounted(() => {
 
     <!-- 底部安全提示 -->
     <text class="ai-reply-card__disclaimer">
-      内容由AI生成，请核实重要信息
+      Powered by IROOTECH
     </text>
   </view>
 </template>

@@ -80,6 +80,13 @@ const props = defineProps({
    */
   voiceListening: { type: Boolean, default: false },
   /**
+   * 初始页起飞期间：头部灵动岛整组先不显示。
+   * 否则点下「点击说话」的一瞬间，对话页头部就先亮起 listen 大图，
+   * 而欢迎层那个图标还停在屏幕中间没飞上来 —— 看起来像两个图标同时在。
+   * 父页面在落位那一刻（landed 置 true）才放开，与飞过来的图标同款同尺寸交接。
+   */
+  islandHidden: { type: Boolean, default: false },
+  /**
    * 从初始页飞进来的那一段：岛内先继续放 listen.gif（和飞过来的那张图同一张），
    * 让「中间放大 → 顶部落位」是同一张动图在延续，不出现落位后换回三角图的硬切。
    * 由首页在起飞后打开、播完这一段再关掉，其它页面不传。
@@ -709,13 +716,15 @@ onBeforeUnmount(() => {
           <!-- 顶部中间「灵动岛」+ 下方状态胶囊
                Ardot 722:69（浅色思考中）/ 722:489（浅色回答中）：胶囊只在生成中出现
                未生成时只留圆形灵动岛，胶囊整体不渲染 -->
-          <view v-if="showIsland" class="chat-header__island-wrap">
-            <view
-              class="chat-header__island"
-              :class="{ 'chat-header__island--thinking': thinking }"
-            >
+          <view
+            v-if="showIsland"
+            class="chat-header__island-wrap"
+            :class="{ 'chat-header__island-wrap--hidden': islandHidden }"
+          >
+            <view class="chat-header__island">
               <!-- 圆形玻璃底盘（.chat-header__island-glass）与 1px 白描边已按需求去掉，
-                   容器只作为呼吸动画的载体 + 图标的定位基准，本身不再有任何可见形状 -->
+                   容器只作为图标的定位基准，本身不再有任何可见形状；
+                   思考中的形态变化交给岛内的 think.webp 动图，容器不再做呼吸缩放 -->
               <!-- 长按进度环：按住才出现，5s 走满一圈；松手 / 滑动 / 计时结束都会卸载，
                    卸载即复位，下次按住重新从 0 开始 -->
               <view
@@ -1312,11 +1321,18 @@ onBeforeUnmount(() => {
   align-items: center;
   transform: translateX(-50%);
   pointer-events: none;
+  // 落位瞬间放开隐藏：120ms 淡入，与欢迎层那颗同款图标的 160ms 淡出交叉，
+  // 看起来是同一张图在继续，不会「先空一下再冒出来」
+  transition: opacity 120ms ease;
 }
 
-/* 双工模式状态条（开启中 / 聆听中 / 实时转写）：
-   文字与录音时的实时提词同色（ai-voice-transcript 的 .voice-live__text 浅色 #0d0d0d），
-   不再用原来的蓝灰 #526a80 */
+/* 初始页起飞期间整组隐藏（图标 + 下方状态胶囊）：等飞到位再亮 */
+.chat-header__island-wrap--hidden {
+  opacity: 0;
+}
+
+/* 双工模式状态条（开启中 / 聆听中 / 实时转写）：深色文字，
+   不再是原来的蓝灰 #526a80 */
 .chat-header__duplex-status {
   display: flex;
   align-items: center;
@@ -1359,9 +1375,9 @@ onBeforeUnmount(() => {
   height: 160rpx;
   box-sizing: border-box;
   // 圆形已去掉：不再有描边 / 圆角 / 圆形外投影，也不再裁剪内层
-  // 独立合成层：呼吸缩放过程中保持独立图层，避免 WebView 反复重绘
+  // 独立合成层：子层动图淡入 / 放大时父级不跟着反复重绘
   transform: translateZ(0);
-  // 缩放过渡做柔：480ms + 两端平滑的缓动曲线，变大/变小都不是硬切
+  // 容器本身已不再做呼吸缩放（思考中交给 think.webp），这条过渡留给后续容器动效复用
   transition: transform 480ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -1426,27 +1442,8 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 只有「思考中」呼吸放大：160rpx → 200rpx（设计稿 80px → 100px）循环；
-   一旦出字（回答中）就回落到原始 160rpx（80px），其他状态尺寸不变 */
-.chat-header__island--thinking {
-  // 呼吸节奏放慢：1.6s → 2.2s（一轮放大+回落），起伏更舒缓
-  animation: island-breathe 2.2s ease-in-out infinite;
-}
-
-/* 呼吸动效：两端平滑、无跳变；translateZ(0) 保持独立合成层，
-   避免 WebView 在缩放过程中重新裁剪圆角。
-   峰值按设计稿 722:96 Group 134 = 100px = 200rpx：
-   基数 160rpx，200 / 160 = 1.25 */
-@keyframes island-breathe {
-  0%,
-  100% {
-    transform: translateZ(0) scale(1); // 160rpx（80px）
-  }
-
-  50% {
-    transform: translateZ(0) scale(1.25); // 200rpx（100px）
-  }
-}
+/* 思考中不再做整岛呼吸缩放（原 island-breathe 已去掉）：
+   这是「生成中」的提示，形态变化完全交给岛内的 think.webp 动图本身。 */
 
 /* 圆形玻璃底盘整层删除：原来它负责圆形轮廓、透明底 + BACKGROUND_BLUR 2 与圆角裁切，
    现在圆形不再需要，容器本身已是透明的，只剩 Logo */
@@ -1530,20 +1527,24 @@ onBeforeUnmount(() => {
   transform: translate(-3rpx, 2rpx) scale(1.69);
 }
 
-/* think.webp（正在思考）：画布沿用旧 gif 的 2:1 构图（源 1920×960 缩到 480×240），图案只占中间（宽约 33%、高约 58%），两侧是透明留白。
-   1) 留白用 aspectFill 裁掉，图案正好撑满 62×62 的位；
-   2) 换算下来图案仍比原图小约 15%（340/400 的缩放差），要放大到 1.18 才与原图视觉等大；
-   3) 图案中心在画布上偏下约 2.5%（y 210 / 400），上移 3rpx 让中心仍落在原位置。 */
+/* think.webp（正在思考）：画布沿用旧 gif 的 2:1 构图（源 1920×960 缩到 480×240），
+   图案只占中间（宽约 33%、高约 58%），两侧是透明留白。
+   1) 留白用 aspectFill 裁掉（盒高 124rpx 铺满画布，缩放系数 124/240 ≈ 0.517），
+      盒内图案实际只显示约 82×72rpx；
+   2) 另外三层（idle / tell / listen）的图案视觉尺寸都是 ~124rpx，
+      想和它们等大就按面积对齐：√(124² / (82 × 72)) ≈ 1.62，
+      放大后图案约 132×116rpx，观感与其它状态一致；
+   3) 图案中心在画布上偏下约 2.5%（盒内约 3.1rpx），按 1.62 放大后上移 4rpx 复位。 */
 .chat-header__island-logo--think {
   z-index: 3;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-3rpx) scale(1);
+  transform: translateY(-4rpx) scale(1);
 }
 
 .chat-header__island-logo--think-on {
   opacity: 1;
-  transform: translateY(-3rpx) scale(1.18);
+  transform: translateY(-4rpx) scale(1.62);
 }
 
 // --- icons (用 CSS 近似 Figma 形状，后续可替换为 svg 资源) ---

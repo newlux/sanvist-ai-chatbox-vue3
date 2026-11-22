@@ -993,8 +993,11 @@ function toggleQuickList(show: boolean) {
   chatStore.showQuickList = show;
 }
 
-/** 起飞动画时长：必须与 .welcome__logo-img 的 transform transition 对齐 */
-const WELCOME_FLY_MS = 640;
+/**
+ * 起飞动画时长（ms）：参考录屏，点击后的光晕扩散峰值（440ms）一过就开始飞，
+ * 图标约 480ms 内旋转着直线升到顶部，比原来的 640ms 更利落。
+ */
+const WELCOME_FLY_MS = 480;
 /** 落位后留给「欢迎层 logo 淡出 → 对话页 logo 接上」的时间 */
 const WELCOME_LAND_FADE_MS = 160;
 let welcomeFlyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1036,15 +1039,22 @@ const WELCOME_LISTEN_PEAK_MS = 480;
 const WELCOME_LISTEN_LOAD_LAG_MS = 40;
 /** 切到 listen.gif 之后先停留多久再起飞（= 峰值时刻 - 已播掉的那 1 帧） */
 const WELCOME_LISTEN_HOLD_MS = Math.max(0, WELCOME_LISTEN_PEAK_MS - WELCOME_LISTEN_LOAD_LAG_MS);
-/** 对话页淡入从起飞那一刻开始，避免 logo 还停在中间时对话页已经铺满整屏 */
-const CHAT_ENTER_DELAY_MS = Math.max(0, WELCOME_LISTEN_HOLD_MS - 120);
+/**
+ * 对话页淡入延迟：点击后立即开始（0），不等起飞 / 落位。
+ * 起飞前那 440ms 光晕阶段对话页背景与头部就已经铺好，图标是飞在对话页之上的；
+ * 之前推迟到起飞前 120ms、动画又给 720ms，看起来像「飞到快顶部才出现对话页」。
+ */
+const CHAT_ENTER_DELAY_MS = 0;
 
-/** 飞行曲线的侧向弧线幅度（px）：首尾都在屏幕中线上，靠它画出「抛物线」的弧 */
-const WELCOME_FLY_ARC_X = 18;
-/** 中段最大放大倍数：先慢慢变大，末段再收敛回灵动岛图标尺寸 */
-const WELCOME_FLY_PEAK_SCALE = 1.16;
-/** 放大达到峰值的进度点（0~1）：前半程膨胀，后半程收小并加速冲刺 */
-const WELCOME_FLY_PEAK_AT = 0.45;
+/**
+ * 起飞轨迹（参考录屏）：中间图标**直线向上**，不做左右抛物线弧；
+ * 一边按 p^1.9 加速上升、一边从原尺寸单调缩小到灵动岛图标尺寸（不再先放大），
+ * 同时绕自身中心顺时针整圈自转 —— 前段几乎不转，末段随冲刺快速转满一圈回正。
+ */
+/** 旋转总角度（deg）：取整圈，落位角度与 0° 视觉一致，交接给灵动岛图标时不歪 */
+const WELCOME_FLY_SPIN_DEG = 360;
+/** 旋转进度幂次：比位移的 1.9 更陡，前段几乎不动、末段快速转完 */
+const WELCOME_FLY_SPIN_POWER = 2.6;
 
 /** 落位后 listen.gif 在岛内再呼吸多久，然后交回空闲态 sani-logo.webp */
 const WELCOME_LISTEN_IDLE_MS = 900;
@@ -1708,12 +1718,12 @@ function stopWelcomeFly() {
 }
 
 /**
- * 抛物线式飞行：逐帧算 transform。
+ * 旋转着直线升上去：逐帧算 transform（对齐参考录屏 2.4s→2.9s 那一段）。
  *
- * - 位移：进度取 1.9 次幂 → 起手慢、越往后越快（末段「冲刺」）；
- * - 轨迹：叠一条 sin 弧线，中段偏离中线最多、两端归零，看起来才是抛物线而不是直线；
- * - 尺寸：0 → 45% 从 1 放大到 1.16 倍，之后收到灵动岛图标的实际比例（62/110），
- *   落位时大小与顶部图标完全一致。
+ * - 位移：进度取 1.9 次幂 → 起手几乎不动，末段加速冲到顶部；x 全程锁在中线上，不走弧线；
+ * - 尺寸：从 1 线性收敛到灵动岛图标的实际比例（62/110），起飞过程中持续缩小，不再先膨胀；
+ * - 旋转：绕自身中心顺时针整圈自转（0° → 360°），幂次 2.6 比位移更陡 ——
+ *   前半程只是微微侧一下，后半程跟着冲刺快速转满一圈，落位正好回正。
  */
 function runWelcomeFly(from: DOMRect, to: DOMRect, onDone: () => void) {
   const dx = to.left + to.width / 2 - (from.left + from.width / 2);
@@ -1725,14 +1735,12 @@ function runWelcomeFly(from: DOMRect, to: DOMRect, onDone: () => void) {
   const frame = (now: number) => {
     const p = Math.min(1, (now - startedAt) / WELCOME_FLY_MS);
     const travel = p ** 1.9;
-    const arc = Math.sin(Math.PI * p) * WELCOME_FLY_ARC_X;
-    const scale = p <= WELCOME_FLY_PEAK_AT
-      ? 1 + (WELCOME_FLY_PEAK_SCALE - 1) * (p / WELCOME_FLY_PEAK_AT)
-      : WELCOME_FLY_PEAK_SCALE
-        + (targetScale - WELCOME_FLY_PEAK_SCALE) * ((p - WELCOME_FLY_PEAK_AT) / (1 - WELCOME_FLY_PEAK_AT));
+    const scale = 1 + (targetScale - 1) * p;
+    const spin = WELCOME_FLY_SPIN_DEG * (p ** WELCOME_FLY_SPIN_POWER);
 
     welcomeLogoStyle.value = {
-      transform: `translate3d(${dx * travel + arc}px, ${dy * travel}px, 0) scale(${scale})`,
+      // rotate 放在 translate3d / scale 之后：绕自身中心转，不会把落点位置带偏
+      transform: `translate3d(${dx * travel}px, ${dy * travel}px, 0) scale(${scale}) rotate(${spin}deg)`,
     };
 
     if (p < 1) {
@@ -2960,10 +2968,10 @@ $color-white: #ffffff;
 }
 
 /* 初始页 → 对话页：整页淡入。
-   延迟由 --chat-enter-delay 控制（= listen.gif 停留时间），让淡入跟起飞同时开始，
-   不会出现「logo 还挂在中间、对话页已经铺满」的割裂感 */
+   点击就立即开始（--chat-enter-delay 现为 0），360ms 内铺满 —— 等图标起飞时
+   对话页已经就位，logo 是飞在对话页之上的，不会「飞到快顶部才出现对话页」 */
 .ai-page__chat--enter {
-  animation: ai-page-chat-in 720ms cubic-bezier(0.22, 0.61, 0.36, 1) var(--chat-enter-delay, 0ms) both;
+  animation: ai-page-chat-in 360ms cubic-bezier(0.22, 0.61, 0.36, 1) var(--chat-enter-delay, 0ms) both;
 }
 
 @keyframes ai-page-chat-in {
