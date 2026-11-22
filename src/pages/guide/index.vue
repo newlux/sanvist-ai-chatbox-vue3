@@ -4,7 +4,7 @@ import { useDuplexVoice } from "@/hooks/useDuplexVoice";
 import { useVoiceQueryGesture } from "@/hooks/useVoiceQueryGesture";
 import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
-import { computed, nextTick, onMounted, provide, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { VoiceMessageOrigin } from "@/utils/voice-message-motion";
 import { chatMessageAnchorDomId } from "@/stores/modules/chat";
@@ -69,6 +69,11 @@ const chatScope = provideChatScope("guide");
  * 车载端 guide-pc 等其它页面不 provide（默认关闭），保持点击切步不变。
  */
 provide("guide-check-swipe-step", true);
+/**
+ * 回答正文逐字揭示（打字机）：沿用听播页字幕的同一套手感，避免整段回答一次刷出来、
+ * 列表高度瞬间撑高导致整屏跳动。只有本页打开，首页 / 任务协同 / 听汇报 / 车载 guide-pc 不受影响。
+ */
+provide("ai-answer-typewriter", true);
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
 // 首包返回会话 ID 时保持组件与读秒，切换已有会话/重置才重新挂载列表。
@@ -585,8 +590,13 @@ const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 /**
  * 把当前显示的那张核对卡（对话区的 .chat-box__card）顶到对话区最上方。
  * 步骤卡出现、翻页、卡片高度变化后都用它：卡片顶在上方才整张可见。
+ *
+ * keepPosition=true 是例外：点步骤条 / 左右滑动切步只是横向换一步看，
+ * 视口原地不动（卡片重挂载后若再顶置，内容少的一步会往下跳、内容多的一步会往上跳）。
+ * 只有「已经确认，进入下一步」这种往下推进的翻页才顶置。
  */
-function focusGuideStepCardAtTop() {
+function focusGuideStepCardAtTop(payload?: { keepPosition?: boolean }) {
+  if (payload?.keepPosition) return;
   // 顶成功了才关掉贴底跟随：卡片还没渲染出来（focusStepBlock 没命中）时保持跟随，
   // 否则流式回答会停在可视区外面，看着就是「回复不滚动」。
   const stepId = String(guideStepCardStepId.value || "").trim();
@@ -793,8 +803,9 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   if (nextStepId && nextStepId !== String(guideStepCardStepId.value || "")) realtimeTts.stop();
   guideStepCardStepId.value = nextStepId;
   guideStepRequestedIndex.value = index;
-  // 切步先关贴底跟随，再靠卡片重挂载后的 card-ready 顶到对话区顶部：
-  // 关晚了换卡那帧 content-grow 会把视口先拽到回复末尾（见 focusGuideStepCardAtTop）。
+  // 切步先关贴底跟随：关晚了换卡那帧 content-grow 会把视口先拽到回复末尾。
+  // 点步骤条是横向换一步看，卡片重挂载后不顶置（卡片带 keepPosition，见 focusGuideStepCardAtTop），
+  // 视口保持在原地；只有「已经确认，进入下一步」的翻页才会顶到对话区顶部。
   chatStore.setPinnedToBottom(false);
   // 内联卡片模式：卡片自己翻页，只切对话里那张卡，不弹白板
   if (INLINE_STEP_CARD) return;
@@ -1213,6 +1224,39 @@ function onScrollToBottomTap() {
 }
 
 /**
+ * 内容长高后的贴底跟随（消息列表 ResizeObserver 回调）。
+ *
+ * 打字机逐字增长会让正文每 40ms 变一次高度，而消息列表每收到一次 content-grow 就会
+ * 走一遍 scrollToBottom → replyEndToken → alignToReplyEnd（内含 150/450/900ms 三次补量），
+ * 一秒几十次滚动对齐既费 DOM 查询又容易和「提问顶到头部下沿」的垫白互相拉扯。
+ * 这里做 100ms 节流：跟手程度不受影响，滚动对齐频率降到每秒 10 次以内。
+ */
+const CONTENT_GROW_THROTTLE_MS = 100;
+let contentGrowTimer: ReturnType<typeof setTimeout> | null = null;
+/** 节流窗口内又被撑高过：窗口结束时补一次，保证最后一次贴底不会被丢掉 */
+let contentGrowPending = false;
+function onContentGrow() {
+  if (contentGrowTimer) {
+    contentGrowPending = true;
+    return;
+  }
+  contentGrowTimer = setTimeout(() => {
+    contentGrowTimer = null;
+    void chatStore.scrollToBottom();
+    if (contentGrowPending) {
+      contentGrowPending = false;
+      onContentGrow();
+    }
+  }, CONTENT_GROW_THROTTLE_MS);
+}
+onUnmounted(() => {
+  contentGrowPending = false;
+  if (!contentGrowTimer) return;
+  clearTimeout(contentGrowTimer);
+  contentGrowTimer = null;
+});
+
+/**
  * 消息列表上报贴底状态，不能直接绑 setPinnedToBottom：
  * 用户自己滑回底部时要把本轮的「提问封顶」一起撤掉，
  * 否则下一帧内容长高，对齐又会把视图拽回提问那边（表现为「滑到底又弹回去」）。
@@ -1583,7 +1627,7 @@ const startVoiceQueryFromGesture = useVoiceQueryGesture({
         :pin-step-card="guideStepSheetVisible"
         :compact-guide-card="true"
         @card-space-change="onGuideStepCardSpaceChange"
-        @content-grow="chatStore.scrollToBottom()"
+        @content-grow="onContentGrow"
         :awakening="userStore.awakeningPrompt"
         :awakening-loading="awakeningLoading"
         :pinned-to-bottom="pinnedToBottom"
