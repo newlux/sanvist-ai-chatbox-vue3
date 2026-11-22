@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { GuideCheckPayload, GuideStepSelectEvent } from "@/api/chat/types";
-import { computed, onMounted, provide, ref, watch } from "vue";
+import { computed, inject, onMounted, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import iconCopy from "@/assets/img/icon-action-copy.svg";
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
@@ -180,6 +180,60 @@ function onOptionTap(index: number) {
 }
 
 /**
+ * 左右滑动切步：只有作业指导页 provide 这把开关（车载端 guide-pc 不 provide，保持点击切步）。
+ * inject 必须在 setup 顶层同步调用，包进 computed 会在渲染期才执行而丢上下文。
+ */
+const swipeStepInjected = inject<boolean>("guide-check-swipe-step", false);
+const swipeEnabled = computed(() => Boolean(swipeStepInjected));
+
+/** 认定切步滑动的最小横向位移（px），距离不够当普通触摸 */
+const SWIPE_THRESHOLD_PX = 60;
+/** 滑动方向信号：切步后新卡重挂载，据此播一段方向感知的入场动画（带 TTL，过期不播） */
+const SWIPE_ENTER_TTL_MS = 400;
+let swipeEnterFrom: "left" | "right" | null = null;
+let swipeEnterAt = 0;
+let swipeStart: { x: number; y: number; fromImage: boolean } | null = null;
+
+/** 滑动切步后的入场动画类：只在「刚滑动过（TTL 内）」这一次挂载生效，点击切步 / 首次渲染不播 */
+const enterClass = ref<"" | "left" | "right">("");
+
+function onCardTouchStart(e: TouchEvent) {
+  const t = e.touches?.[0];
+  if (!t) return;
+  // 参考图区（GuideImageBlock 多图 swiper）内的横向滑动属于图片轮播，不切步骤
+  const fromImage = Boolean((e.target as HTMLElement | null)?.closest?.(".guide-image-block"));
+  swipeStart = { x: t.clientX, y: t.clientY, fromImage };
+}
+
+function onCardTouchEnd(e: TouchEvent) {
+  if (!swipeEnabled.value || !swipeStart) return;
+  const { x, y, fromImage } = swipeStart;
+  swipeStart = null;
+  if (fromImage) return;
+  const t = e.changedTouches?.[0];
+  if (!t) return;
+  const dx = t.clientX - x;
+  const dy = t.clientY - y;
+  // 距离够远且横向为主（|dx| ≥ 1.5×|dy|）才切步，否则当纵向滚动列表
+  if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+  if (dx < 0) {
+    // 左滑 → 下一步；最后一步左滑等价点「确认完成」，已在完成态则不重复触发
+    if (isLast.value) {
+      if (!isSummaryMode.value) emit("finish");
+      return;
+    }
+    swipeEnterFrom = "right";
+    swipeEnterAt = Date.now();
+    onSelectStep(stepIndex.value + 1);
+    return;
+  }
+  // 右滑 → 上一步（onSelectStep 自带边界拦截与「正文 + 小结」播报口径）
+  swipeEnterFrom = "left";
+  swipeEnterAt = Date.now();
+  onSelectStep(stepIndex.value - 1);
+}
+
+/**
  * 翻页续播：点「确认，进入下一步」后本卡被卸载、下一步卡片重新挂载，
  * 挂载时若认领到「翻页」标记，就把这一步的播报点一下
  * （页面会先停旧语音，再按新的 step_id 取文本播放）。
@@ -192,6 +246,10 @@ function onOptionTap(index: number) {
  * 旧判断会直接 return，表现为「确认后不播下一步」。
  */
 onMounted(() => {
+  if (swipeEnterFrom && Date.now() - swipeEnterAt < SWIPE_ENTER_TTL_MS) {
+    enterClass.value = swipeEnterFrom;
+  }
+  swipeEnterFrom = null;
   // 先告诉外层「卡已经在了」，让它把视图滚到这张卡（切步骤时新卡是重新挂载的，
   // 页面在改 stepCardStepId 那一下 nextTick 滚，滚的还是上一张卡，所以必须等挂载后再说）
   emit("card-ready");
@@ -256,7 +314,17 @@ function resolveRootElement(): HTMLElement | null {
 </script>
 
 <template>
-  <view ref="rootRef" class="guide-check-block" :class="{ 'guide-check-block--dark': dark }">
+  <view
+    ref="rootRef"
+    class="guide-check-block"
+    :class="[
+      { 'guide-check-block--dark': dark },
+      enterClass === 'left' ? 'guide-check-block--enter-left' : '',
+      enterClass === 'right' ? 'guide-check-block--enter-right' : '',
+    ]"
+    @touchstart="onCardTouchStart"
+    @touchend="onCardTouchEnd"
+  >
     <!-- 卡片左上角品牌署名：SANY NEO logo + SANY Neo + 语音播报控制（与气泡里的完成态同一套观感） -->
     <view class="guide-check-block__brand">
       <image class="guide-check-block__brand-icon" :src="saniIcon" mode="aspectFit" />
@@ -407,6 +475,40 @@ function resolveRootElement(): HTMLElement | null {
   flex-direction: column;
   box-sizing: border-box;
   width: 100%;
+}
+
+/* 滑动切步后的入场动画：左滑（去下一步）新卡从右侧滑入，右滑（回上一步）从左侧滑入；
+   只在滑动切步那一次挂载时由 enterClass 带上，点击切步 / 首次渲染不播 */
+.guide-check-block--enter-left {
+  animation: guide-check-enter-left 0.24s ease both;
+}
+
+.guide-check-block--enter-right {
+  animation: guide-check-enter-right 0.24s ease both;
+}
+
+@keyframes guide-check-enter-left {
+  from {
+    transform: translateX(-40rpx);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes guide-check-enter-right {
+  from {
+    transform: translateX(40rpx);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 /* 左上角品牌署名：SANY NEO logo + SANY Neo + 播报按钮（与气泡完成态同一套观感） */

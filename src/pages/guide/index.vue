@@ -4,7 +4,7 @@ import { useDuplexVoice } from "@/hooks/useDuplexVoice";
 import { useVoiceQueryGesture } from "@/hooks/useVoiceQueryGesture";
 import { onHide, onLoad, onShow, onUnload } from "@dcloudio/uni-app";
 import { storeToRefs } from "pinia";
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { VoiceMessageOrigin } from "@/utils/voice-message-motion";
 import { chatMessageAnchorDomId } from "@/stores/modules/chat";
@@ -64,6 +64,11 @@ const logger = createLogger("guide-page");
 const { t } = useI18n();
 
 const chatScope = provideChatScope("guide");
+/**
+ * 步骤卡左右滑动切步开关：只有本页 provide，GuideCheckBlock 才启用滑动手势。
+ * 车载端 guide-pc 等其它页面不 provide（默认关闭），保持点击切步不变。
+ */
+provide("guide-check-swipe-step", true);
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
 // 首包返回会话 ID 时保持组件与读秒，切换已有会话/重置才重新挂载列表。
