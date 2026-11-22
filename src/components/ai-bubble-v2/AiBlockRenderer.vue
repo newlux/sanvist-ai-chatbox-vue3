@@ -197,11 +197,14 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
 </script>
 
 <template>
+  <!-- tips 是后端一次下发的过程提示短句，不走打字机：只有回答正文才逐字揭示 -->
   <AnswerBlock
     v-if="block.type === 'answer' || block.type === 'tips'"
     :content="block.payload.content || ''"
     :streaming="!block.complete"
+    :replayed="Boolean(block.payload.replayed)"
     :embedded="embedded"
+    :typewriter="block.type === 'tips' ? false : null"
   />
   <ThinkBlock
     v-else-if="block.type === 'think'"

@@ -148,7 +148,7 @@ function onPick(label: string) {
 .guide-suggestion__option-letter {
   flex-shrink: 0;
   font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 24rpx; // 12px
+  font-size: 28rpx; // 14px
   font-weight: 600;
   line-height: 40rpx;
   color: #1a1a1a;
@@ -168,7 +168,7 @@ function onPick(label: string) {
   white-space: normal;
   word-break: break-word;
   font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 24rpx; // 12px
+  font-size: 28rpx; // 14px
   font-weight: 400;
   line-height: 40rpx;
   color: #1a1a1a;

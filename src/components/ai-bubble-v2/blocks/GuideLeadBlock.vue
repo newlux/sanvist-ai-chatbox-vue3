@@ -127,7 +127,7 @@ function pick(option: string) {
 .guide-lead__option-text {
   min-width: 0;
   font-family: "PingFang SC", sans-serif;
-  font-size: 24rpx; // 12px
+  font-size: 28rpx; // 14px
   font-weight: 400;
   line-height: 40rpx;
   color: #0d0d0d;

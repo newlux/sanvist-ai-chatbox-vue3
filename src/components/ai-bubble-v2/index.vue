@@ -867,9 +867,9 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   border-radius: 0;
   background: transparent;
 }
-/* 实时转写最多铺三行（3 × 40rpx = 120rpx）：录音里说成一段也不会把下面整屏内容顶走 */
+/* 实时转写最多铺三行（3 × 44rpx = 132rpx）：录音里说成一段也不会把下面整屏内容顶走 */
 .ai-bubble-v2--user.ai-bubble-v2--asr-pending .ai-bubble-v2__asr {
-  max-height: 120rpx;
+  max-height: 132rpx;
   overflow: hidden;
 }
 .ai-bubble-v2--user.ai-bubble-v2--selected {
@@ -905,14 +905,18 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
 }
 /* ===== AI 回答卡：设计稿 1187:14 / 1187:56「AI Answer Card」=====
    底色 #F3F3F3 / 描边 1px #EFEFEF / 圆角 20px /
-   内边距 上下 20px、左右 30px（左右比上下宽一档，正文不贴边） /
+   内边距 上下 20px、左右 18px（= 40rpx 36rpx；1px = 2rpx） /
    纵向 gap 12px（卡片内各区域统一用 gap 排布，不再用 margin 凑）/
    阴影 0 2px 8px rgba(0,0,0,0.04)（设计稿 effects 里 visible=false，按原值写出） */
 .ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body {
   display: flex;
   flex-direction: column;
   gap: 10rpx 24rpx;
-  padding: 40rpx 60rpx; // 上/下 20px、左/右 30px
+  /**
+   * 回答正文（连同状态行、操作栏）四周都收在卡片内边距里：
+   * 左右 18px 对称，正文右缘距气泡右边线就是一档内边距，不再额外多缩一截。
+   */
+  padding: 40rpx 36rpx; // 上/下 20px、左/右 18px
   // border: 1px solid #efefef;
   // border-radius: 40rpx;
   // background: #f3f3f3;
@@ -1055,11 +1059,11 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
 .ai-bubble-v2__body--highlighted {
   background: rgba(248, 49, 94, 0.06);
 }
-/* 用户正文：12px / 20px / #0D0D0D（与回复框正文同一档字号） */
+/* 用户正文：14px / 22px / #0D0D0D（与回复框正文同一档字号） */
 .ai-bubble-v2--user .ai-bubble-v2__user-content {
   color: #0d0d0d;
-  font-size: 24rpx; // 12px
-  line-height: 40rpx; // 20px
+  font-size: 28rpx; // 14px
+  line-height: 44rpx; // 22px
   white-space: pre-wrap;
   word-break: break-word;
   // 允许划词选中复制；长按仍走整条复制
@@ -1072,12 +1076,12 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
 .ai-bubble-v2__asr {
   display: block;
   color: #0d0d0d;
-  font-size: 24rpx; // 12px
-  line-height: 40rpx; // 20px
+  font-size: 28rpx; // 14px
+  line-height: 44rpx; // 22px
   white-space: pre-wrap;
   word-break: break-word;
 }
-/* 录音中不再单独放大字号（原 32rpx / 500）：沿用基类 24rpx / 40rpx / 常规字重，
+/* 录音中不再单独放大字号（原 32rpx / 500）：沿用基类 28rpx / 44rpx / 常规字重，
    收进气泡时字号与字重都不跳 */
 .ai-bubble-v2--dark.ai-bubble-v2--asr-pending .ai-bubble-v2__asr {
   color: #f2f3f5;
@@ -1409,15 +1413,15 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   color: #8f8f8f;
 }
 
-/* ===== 回答正文：设计稿 1187:14「设备运行状态正常…」/ 1187:37 参数列表 =====
-   12px / 20px（正文颜色由 markdown-renderer 的 tagStyle 按深浅色给，这里只管字号）。
+/* ===== 回答正文：14px / 22px（正文颜色由 markdown-renderer 的 tagStyle 按深浅色给，这里只管字号） =====
+   段落间距沿用 tagStyle 里 p 的 margin-bottom 32rpx（16px），这里不重复声明。
    markdown-renderer 把排版写成 mp-html 的行内 style，普通声明压不住 inline，
    字号 / 行高必须带 !important（与 GuideStepFinishBlock 的 summary 同一口径）；
    选择器只落在回答正文 .answer-block 内，气泡里其它卡片（步骤卡 / 导语 / 提示）各有自己的字号，不受影响 */
 .ai-bubble-v2__body :deep(.answer-block p),
 .ai-bubble-v2__body :deep(.answer-block li) {
-  font-size: 24rpx !important; // 12px
-  line-height: 40rpx !important; // 20px
+  font-size: 28rpx !important; // 14px
+  line-height: 44rpx !important; // 22px
 }
 .ai-bubble-v2__action-btn {
   width: 32rpx;

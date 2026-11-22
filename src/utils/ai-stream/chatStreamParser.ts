@@ -201,10 +201,21 @@ function reduceEventToBlocks(
     }
     case "tips": {
       if (!event.text.trim() || hasFinalReply(blocks)) return base;
-      const tipsIndex = blocks.filter(block => block.type === "tips").length;
+      /**
+       * 提示固定占一个位置：后到的 TIPS **覆盖**当前这条，不再按条数新开块。
+       *
+       * 原来 id 取 `tips-${已有条数}`，后端在正文前连发几条「正在…」占位时，
+       * 气泡里就是一行提示接一行提示地往外冒 —— 看着像文字还在流式输出（tips 本身是
+       * 一次下发的完整短句，不该有这种增长过程）。覆盖之后始终只有一行，文案整句换掉。
+       */
+      const tipBlocks = blocks.filter(block => block.type === "tips");
+      const tipId = tipBlocks[0]?.id || "tips-0";
+      const nextBlocks = upsertBlock(blocks, tipId, "tips", { content: event.text }, true)
+        // 旧快照里可能已经叠了多条占位：只留当前这条
+        .filter(block => block.type !== "tips" || block.id === tipId);
       return {
         ...base,
-        blocks: upsertBlock(blocks, `tips-${tipsIndex}`, "tips", { content: event.text }, true),
+        blocks: nextBlocks,
         receivedContent: true,
       };
     }
@@ -387,9 +398,19 @@ function reduceEventToBlocks(
       }
       // 重建序列没有任何可展示块（如 outputs.answer 只剩播报层）时保留原块，避免丢内容
       if (!rebuilt.length) return base;
+      /**
+       * 给重建出来的 answer 块打 `replayed` 标记：重放会把正文按 outputs.answer 的权威顺序
+       * 重新分配（典型：流式时「正文含表格 + 表格块」被拆成「表格前正文 + 表格 + 表格后正文」），
+       * 分出来的新块第一次挂载时 complete 已经为 true。渲染层据此不再从第一个字重打，
+       * 否则上方正文会先整段消失、表格被顶上去，再逐字长回来把表格顶下去。
+       * 只标 answer：其它块（表格 / 图表 / 追问卡）在后续去重里会用到 payloadKey，多一个键会让去重失配。
+       */
+      const marked = rebuilt.map(block => (block.type === "answer"
+        ? { ...block, payload: { ...block.payload, replayed: true } }
+        : block));
       return {
         ...base,
-        blocks: rebuilt,
+        blocks: marked,
         receivedContent: true,
         ...(assistantScene ? { assistantScene } : {}),
         ...(languageSwitch ? { languageSwitch } : {}),

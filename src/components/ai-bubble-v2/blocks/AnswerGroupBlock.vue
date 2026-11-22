@@ -30,6 +30,7 @@ const visibleBlocks = computed(() => (Array.isArray(props.blocks) ? props.blocks
         v-if="block.type === 'answer'"
         :content="String(block.payload.content || '')"
         :streaming="!block.complete"
+        :replayed="Boolean(block.payload.replayed)"
         embedded
       />
       <ChartBlock

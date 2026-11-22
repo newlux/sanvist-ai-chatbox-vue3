@@ -49,24 +49,56 @@ function tableKey(columns: unknown, rows: unknown) {
   return JSON.stringify([Array.isArray(columns) ? columns : [], Array.isArray(rows) ? rows : []]);
 }
 
+/**
+ * 流式友好的表格识别：表头 + 分隔行合法就认成表格，后面逐行按列数往下吃；
+ * 遇到列数不对的行就停（那是还没吐完的一行），把它留给正文，下一帧补齐后再并进表格。
+ *
+ * 不能用严格版 parseMarkdownTable 把整段「|」行一次性校验：流式时最后一行几乎总是半截，
+ * 一校验失败整块表格就被判回正文 —— 正文里突然多出表格源码、表格块被卸载，
+ * 下一帧又还原。用户看到的就是文字闪一下、表格上下跳。
+ */
+function parseStreamingTable(lines: string[], start: number): (MarkdownTable & { end: number }) | null {
+  const columns = splitRow(lines[start] ?? "");
+  const separator = splitRow(lines[start + 1] ?? "");
+  if (!columns.length || separator.length !== columns.length
+    || !separator.every(cell => /^:?-{3,}:?$/.test(cell))) {
+    return null;
+  }
+  const rows: string[][] = [];
+  let cursor = start + 2;
+  while (cursor < lines.length && lines[cursor].includes("|")) {
+    const cells = splitRow(lines[cursor]);
+    if (cells.length !== columns.length) break;
+    rows.push(cells);
+    cursor += 1;
+  }
+  return { columns, rows, end: cursor };
+}
+
 function expandAnswerBlock(block: AiBlock, seen: Set<string>): AiBlock[] {
   const lines = String(block.payload.content || "").split(/\r?\n/);
   const pieces: AiBlock[] = [];
   const textLines: string[] = [];
   let codeFence = false;
+  /** 正文片 / 表格片各自的序号：分开计数，表格片被吞掉（重复下发）时正文片 id 不会跟着挪 */
+  let textCount = 0;
+  let tableCount = 0;
   /** 是否吞掉过「已经以结构化块下发过的表」——正文只有这张表时才需要连 answer 块一起丢掉 */
   let droppedTable = false;
 
   function appendText() {
     const content = textLines.join("\n");
     textLines.length = 0;
-    if (content.trim()) {
-      pieces.push({
-        ...block,
-        id: `${block.id}-text-${pieces.length}`,
-        payload: { content },
-      });
-    }
+    if (!content.trim()) return;
+    pieces.push({
+      ...block,
+      // 第一段正文沿用原块 id：同一段正文在「还没成表格 / 已拆出表格」两种形态下 id 不变，
+      // Vue 才会复用同一个 AnswerBlock，打字机进度不会归零重打
+      id: textCount === 0 ? block.id : `${block.id}-text-${textCount}`,
+      // payload 要整份带上：complete / replayed 等标记不能在这里丢掉
+      payload: { ...block.payload, content },
+    });
+    textCount += 1;
   }
 
   let index = 0;
@@ -79,9 +111,7 @@ function expandAnswerBlock(block: AiBlock, seen: Set<string>): AiBlock[] {
     }
 
     if (!codeFence && lines[index].includes("|") && lines[index + 1]?.includes("|")) {
-      let end = index + 2;
-      while (end < lines.length && lines[end].includes("|")) end += 1;
-      const table = parseMarkdownTable(lines.slice(index, end));
+      const table = parseStreamingTable(lines, index);
       if (table) {
         appendText();
         // 这张表已经以结构化 table block 下发过了：不再重复渲染一份
@@ -90,13 +120,14 @@ function expandAnswerBlock(block: AiBlock, seen: Set<string>): AiBlock[] {
         }
         else {
           pieces.push({
-            id: `${block.id}-table-${pieces.length}`,
+            id: `${block.id}-table-${tableCount}`,
             type: "table",
             payload: table as unknown as Record<string, unknown>,
             complete: true,
           });
+          tableCount += 1;
         }
-        index = end;
+        index = table.end;
         continue;
       }
     }
