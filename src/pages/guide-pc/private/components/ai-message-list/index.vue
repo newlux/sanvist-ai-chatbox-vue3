@@ -311,16 +311,24 @@ function findConversationGroup(aiIndex) {
   }
   return group;
 }
-// 用滚动方向而不是高度差判断是否贴底：
-// 流式追加时列表高度一直在变，量高度既要额外查询节点，又容易误判。
-// 向上滑一定距离即视为用户在看历史，滚到底（scrolltolower）再恢复跟随。
 /**
  * 消息区在固定底部 UI（输入栏 / 底部卡片）之外再留的空隙（px）：贴底时最后一条不贴着输入栏。
  * 页面传来的 bottomInset 只表示「被盖住」的高度，空隙由这里加（见 listPadStyle）。
  * 空隙不能算进「被盖住」里，否则回复末尾会把参考来源的头几个像素留在空隙中，看着像被输入栏裁了一半。
  */
 const MESSAGE_LIST_EXTRA_GAP_PX = 16;
+/** 换向判定的抖动容差（px）：scrollTop 变化不到这么多不算换向，只当手指抖动 */
 const UNPIN_SCROLL_UP_PX = 12;
+/**
+ * 回底按钮的滞回阈值（px，按「距内容底部还有多远」算）：
+ * - 上滑：离底超过 SHOW 才算「在看历史」并取消贴底，回底按钮随之出现。
+ *   原来上滑 12px 就取消贴底，手指刚一动按钮就弹出来；
+ * - 下滑：离底不足 HIDE 就提前恢复贴底，按钮当场收掉。原来要真滚到底
+ *   （scrolltolower）才收，按钮一直挂到最后一刻。
+ * SHOW 与 HIDE 之间是死区，来回微滑时按钮不会闪。
+ */
+const SCROLL_BOTTOM_SHOW_GAP_PX = 120;
+const SCROLL_BOTTOM_HIDE_GAP_PX = 40;
 /**
  * 提问顶到上方时，气泡顶边距离列表顶部的目标位置（px）：
  * 取 130，落在 200rpx（100px）实色头部的下沿之下，留 30px 呼吸位。
@@ -476,11 +484,41 @@ function bindScrollGesture() {
   // #endif
 }
 
+/**
+ * 距内容底部的距离（px）：scrollHeight − clientHeight − scrollTop。
+ * uni 的 scroll 事件 detail 只有 scrollTop，高度得从滚动层自己量；
+ * 量不到（未挂载 / 找不到滚动层）时返回 NaN，调用方退回「真滚到底才算贴底」。
+ */
+function distanceToBottom(): number {
+  // #ifdef H5
+  const inner = document.querySelector(".msg-list__inner");
+  if (inner) {
+    const scroller = findScrollableAncestor(inner) || findScrollLayer(inner);
+    if (scroller) {
+      return Math.max(0, scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
+    }
+  }
+  // #endif
+  return Number.NaN;
+}
+
 function onScroll(e: { detail?: { scrollTop?: number } }) {
   const scrollTop = Number(e?.detail?.scrollTop) || 0;
-  // 只认用户手势：程序化的上移（自动对齐收回）不能把跟随关掉
-  if (userScrollGesture && scrollTop < lastScrollTop - UNPIN_SCROLL_UP_PX) setPinned(false);
+  const delta = scrollTop - lastScrollTop;
   lastScrollTop = scrollTop;
+  // 只认用户手势：程序化的上移（自动对齐收回）不能把跟随关掉
+  if (!userScrollGesture) return;
+  if (delta < -UNPIN_SCROLL_UP_PX) {
+    // 上滑：离底还近就先不动，等真翻远了再取消贴底（回底按钮这时才出现）
+    const gap = distanceToBottom();
+    if (!Number.isFinite(gap) || gap > SCROLL_BOTTOM_SHOW_GAP_PX) setPinned(false);
+    return;
+  }
+  // 下滑：进到「快到底」的范围就提前恢复贴底，按钮当场收掉，不用等滚到头
+  if (delta > 0 && !props.pinnedToBottom) {
+    const gap = distanceToBottom();
+    if (Number.isFinite(gap) && gap <= SCROLL_BOTTOM_HIDE_GAP_PX) setPinned(true);
+  }
 }
 
 function onScrollToLower() {
