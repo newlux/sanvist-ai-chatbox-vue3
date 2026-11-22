@@ -20,6 +20,14 @@ export interface TypewriterOptions {
   catchUpTicks?: number;
 }
 
+/** 新旧文本的公共前缀长度：整段被覆盖时用它兜住已经放出来的字 */
+function commonPrefixLength(a: string, b: string) {
+  const max = Math.min(a.length, b.length);
+  let index = 0;
+  while (index < max && a.charCodeAt(index) === b.charCodeAt(index)) index += 1;
+  return index;
+}
+
 export function useTypewriter(source: () => string, options: TypewriterOptions = {}) {
   const tickMs = options.tickMs ?? 40;
   const catchUpTicks = Math.max(1, options.catchUpTicks ?? 50);
@@ -72,10 +80,32 @@ export function useTypewriter(source: () => string, options: TypewriterOptions =
       return;
     }
     /**
-     * 不是在上一次文本后面追加（整段覆盖 / 清空 / 换了一段正文）就从头打：
-     * 流式追加一定以旧文本为前缀，前缀对不上只可能是被替换了。
+     * 不是在上一次文本后面追加（整段覆盖 / 清空 / 换了一段正文）时，只把进度退回到
+     * 新旧文本的公共前缀长度，**不直接清零**。
+     *
+     * 触发场景：长回答还在逐字揭示时，workflow_finished 会重放 answer_layout 把整段正文
+     * 重新覆盖一次（空白 / 协议标记归一化后和流式期间不完全一致，前缀对不上）。
+     * 以前这里清零 —— 整段文字先消失、再从第一个字重打一遍，看起来就是「闪一下」。
+     * 按公共前缀回退后，已经放出来的字保持可见，只重打真正变化的那一截。
      */
-    if (!text.startsWith(previousText)) revealed.value = 0;
+    if (!text.startsWith(previousText)) {
+      const prefix = commonPrefixLength(text, previousText);
+      // 公共前缀已经盖住已打出的字：进度不受影响，不必再往下判断
+      if (prefix < revealed.value) {
+        /**
+         * 正文被「删掉一段」时不要按公共前缀回退：流式期间正文里还带着 Markdown 表格源码，
+         * 表格被拆成独立的 table 块后这段源码从正文里消失（可能出现在开头，也可能在中间），
+         * 前缀可能只剩开头几句甚至 0 —— 已经打出来的字会整段收回去再逐字重打一遍，
+         * 看起来就是「文字整段消失又出现」。新文本仍是旧文本的一部分时，进度夹到新长度以内即可。
+         */
+        if (text && previousText.includes(text)) {
+          revealed.value = Math.min(revealed.value, text.length);
+        }
+        else {
+          revealed.value = prefix;
+        }
+      }
+    }
     previousText = text;
     if (revealed.value > text.length) revealed.value = text.length;
     if (revealed.value < text.length) start();
@@ -83,10 +113,13 @@ export function useTypewriter(source: () => string, options: TypewriterOptions =
   }
 
   watch(source, sync, { immediate: true });
-  // 开关中途打开（例如消息从历史态被重新认定为新鲜回答）：立刻按新状态重算一次
-  watch(() => enabled(), (on) => {
-    if (on) sync();
-  });
+  /**
+   * 开关中途变化时都同步一次：
+   * - 打开（例如重放块直接整段显示后又被重新认定为新鲜回答）：按新状态重算，从当前位置继续吐字；
+   * - 关闭：只把 previousText 跟到最新（见 sync 的 !enabled 分支，不动已放出的进度），
+   *   否则再次打开时拿的是关闭前的旧文本，等于把「开关关闭期间已经换过一遍的内容」误判成整段替换。
+   */
+  watch(() => enabled(), sync);
 
   const visible = computed(() => {
     const text = source() || "";

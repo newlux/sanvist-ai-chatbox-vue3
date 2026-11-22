@@ -197,7 +197,7 @@ function submitInput(index: number) {
 .suggestion-block__letter {
   flex-shrink: 0;
   font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 24rpx; // 12px
+  font-size: 28rpx; // 14px
   font-weight: 600;
   line-height: 40rpx;
   color: #1a1a1a;
@@ -216,7 +216,7 @@ function submitInput(index: number) {
   min-width: 0;
   color: #1a1a1a;
   font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 24rpx; // 12px
+  font-size: 28rpx; // 14px
   font-weight: 400;
   line-height: 40rpx;
   white-space: normal;
@@ -232,13 +232,13 @@ function submitInput(index: number) {
   min-width: 0;
   height: 56rpx;
   color: #1a1a1a;
-  font-size: 24rpx; // 12px
+  font-size: 28rpx; // 14px
   line-height: 56rpx;
 }
 
 .suggestion-block__input-placeholder {
   color: #666666;
-  font-size: 24rpx; // 12px
+  font-size: 28rpx; // 14px
 }
 
 .suggestion-block__send {

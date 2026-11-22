@@ -37,10 +37,6 @@ function parseChartPayload(raw: string) {
   }
 }
 
-function answerBlock(id: string, content: string, complete: boolean): AiBlock {
-  return { id, type: "answer", payload: { content }, complete };
-}
-
 /**
  * 展开单个 answer 块。没有可解析的图表时原样返回，避免制造无谓的新对象。
  */
@@ -50,29 +46,53 @@ function expandAnswerBlock(block: AiBlock): AiBlock[] {
 
   const pieces: AiBlock[] = [];
   let lastIndex = 0;
-  let chartIndex = 0;
+  /** 正文片 / 图表片各自计数，规则与 tableFence 保持一致 */
+  let textCount = 0;
+  let chartCount = 0;
   FENCE_PATTERN.lastIndex = 0;
+
+  /**
+   * 追加一段正文片。
+   *
+   * 第一段沿用原块 id：图表围栏闭合、块被拆开的瞬间，Vue 才会复用同一个 AnswerBlock，
+   * 打字机进度不会归零重打（与 tableFence 的约定一致）。
+   * 后缀用 `-chart-text-` 而不是 `-text-`：两个展开器串行跑（先表格后图表），
+   * 图表拆分拿到的正是表格拆分保留下来的原 id，同款后缀会撞出重复 key。
+   *
+   * payload 整份带上：replayed / speechText 等标记不能在这里丢掉，
+   * 否则重放块会退回逐字重打、播报稿也会缺一段（与 tableFence 一致）。
+   */
+  function appendText(raw: string, complete: boolean) {
+    const text = raw.trim();
+    if (!text) return;
+    pieces.push({
+      ...block,
+      id: textCount === 0 ? block.id : `${block.id}-chart-text-${textCount}`,
+      payload: { ...block.payload, content: text },
+      complete,
+    });
+    textCount += 1;
+  }
 
   for (let matched = FENCE_PATTERN.exec(content); matched; matched = FENCE_PATTERN.exec(content)) {
     const chartPayload = parseChartPayload(matched[2]);
     // ```json 里也可能是普通 JSON，认不出 option 就留在正文里当代码块
     if (!chartPayload) continue;
 
-    const before = content.slice(lastIndex, matched.index).trim();
-    if (before) pieces.push(answerBlock(`${block.id}-text-${pieces.length}`, before, true));
+    appendText(content.slice(lastIndex, matched.index), true);
     pieces.push({
-      id: `${block.id}-chart-${chartIndex += 1}`,
+      id: `${block.id}-chart-${chartCount}`,
       type: "chart",
       payload: chartPayload,
       complete: true,
     });
+    chartCount += 1;
     lastIndex = matched.index + matched[0].length;
   }
 
   if (!pieces.length) return [block];
 
-  const rest = content.slice(lastIndex).trim();
-  if (rest) pieces.push(answerBlock(`${block.id}-text-${pieces.length}`, rest, block.complete));
+  appendText(content.slice(lastIndex), block.complete);
   return pieces;
 }
 
