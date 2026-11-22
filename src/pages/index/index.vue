@@ -2011,6 +2011,8 @@ onMounted(() => {
   syncWindowHeight();
   loadAwakeningPrompt();
   uni.$on("listen-report-marked", refreshListenReportState);
+  // 容器返回（甘特离线包 / 场景窗口）不保证走 onShow，靠可见性把遥控器接管补回来
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", handleHostVisible);
 });
 function refreshListenReportState() {
   listenReportRefreshKey.value += 1;
@@ -2022,7 +2024,21 @@ const stopNativeResume = onNativeEvent("resume", () => {
   // 维修助理是独立场景窗口：关窗回到本页时原 webview 一直在，不会经历 onHide/onShow，
   // 只靠 onShow 消费回调会漏，这里在原生 resume 上补一次（重复调用有 pending 判空，安全）。
   startRepairSummaryCallback();
+  // 与可见性兜底同理：resume 也是「回到本页」的信号，遥控器接管一并恢复
+  remoteKeyActive.value = true;
 });
+
+/**
+ * 页面重新可见 = 上层容器（甘特离线包 / 场景窗口）已经关掉。
+ *
+ * 与作业协同页同一套口径：宿主新开 webview 盖住本页再关掉时不保证走 onShow，
+ * 也不一定推原生 resume，可见性变化是唯一稳定的信号。遥控器接管必须在这里补回来 ——
+ * onHide 已经把 remoteKeyActive 置成 false，只挂 onShow 会让音量键（语音输入）注册不回来。
+ */
+function handleHostVisible() {
+  if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+  remoteKeyActive.value = true;
+}
 
 onShow(() => {
   syncWindowHeight();
@@ -2063,11 +2079,13 @@ onHide(() => {
 onUnload(() => {
   remoteKeyActive.value = false;
   realtimeTts.stop();
+  if (typeof document !== "undefined") document.removeEventListener("visibilitychange", handleHostVisible);
 });
 onBeforeUnmount(() => {
   speechEndDetector.reset();
   clearRepairSummaryPolling();
   stopNativeResume();
+  if (typeof document !== "undefined") document.removeEventListener("visibilitychange", handleHostVisible);
   uni.$off("listen-report-marked", refreshListenReportState);
   cancelActiveStream();
   realtimeTts.stop();

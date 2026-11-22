@@ -72,6 +72,12 @@ const logger = createLogger("task-page");
 const { t } = useI18n();
 
 const chatScope = provideChatScope("task");
+/**
+ * 回答正文逐字揭示（打字机）：与作业指导页 / 首页同一套手感（见 useTypewriter），
+ * 把已到达的正文按节奏放出来，避免整段回答一次刷出、列表高度瞬间撑高导致整屏跳动。
+ * 只对本轮刚生成的回答生效，切历史会话拉回来的旧回答仍直接显示全文。
+ */
+provide("ai-answer-typewriter", true);
 const userStore = useUserStore();
 const chatStore = useChatStore(chatScope);
 // 注入 --safe-top-px：悬浮头部的高度补偿（--chat-header-height）要按真实状态栏算
@@ -523,6 +529,8 @@ async function flushOfflineGanttAsk() {
 }
 
 const stopNativeResume = onNativeEvent("resume", () => {
+  // 与可见性兜底同理：resume 也是「回到本页」的信号，遥控器接管一并恢复
+  restoreRemoteKey();
   void flushOfflineGanttAsk();
 });
 
@@ -533,6 +541,13 @@ const stopNativeResume = onNativeEvent("resume", () => {
  */
 function handleHostVisible() {
   if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+  /**
+   * 遥控器接管要和待发问题一起恢复：打开甘特离线包时宿主可能走了 onHide 把
+   * remoteKeyActive 置成 false，而关容器回来不一定走 onShow —— 只挂在 onShow 上，
+   * 音量键（语音输入）就再也注册不回来。可见性变化是这条路径上唯一稳定的信号。
+   * 值本来就 true 时是无变化的幂等赋值，不会重复注册（useRemoteKey 内部有守卫）。
+   */
+  restoreRemoteKey();
   void flushOfflineGanttAsk();
 }
 const {
@@ -1041,6 +1056,17 @@ function onBack() {
  * 所以初值给 false，跟着下面的 onShow / onHide / onUnload 走。
  */
 const remoteKeyActive = ref(false);
+
+/**
+ * 从容器（甘特离线包 / 场景窗口）回到本页时，重新打开遥控器接管。
+ *
+ * 供 handleHostVisible / 原生 resume 调用：这两个入口在 setup 前段就要用，
+ * 而开关本身声明在这里（遥控器分区），所以单独包一层函数，避免前向引用。
+ */
+function restoreRemoteKey() {
+  remoteKeyActive.value = true;
+}
+
 /** 连按保护：startVoiceQuery 起手要先等双工释放，这段时间 voiceQueryActive 还是 false，挡住第二次 */
 let remoteKeyStarting = false;
 

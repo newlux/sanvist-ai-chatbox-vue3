@@ -71,7 +71,7 @@ const chatScope = provideChatScope("guide");
 provide("guide-check-swipe-step", true);
 /**
  * 回答正文逐字揭示（打字机）：沿用听播页字幕的同一套手感，避免整段回答一次刷出来、
- * 列表高度瞬间撑高导致整屏跳动。首页也打开（同一套手感）；任务协同 / 听汇报 / 车载 guide-pc 不开。
+ * 列表高度瞬间撑高导致整屏跳动。首页 / 任务协同同样打开（同一套手感）；听汇报 / 车载 guide-pc 不开。
  */
 provide("ai-answer-typewriter", true);
 const userStore = useUserStore();

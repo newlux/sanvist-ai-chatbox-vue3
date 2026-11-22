@@ -44,6 +44,16 @@ const SYNC_GUARD_MS = 500;
 const SYNC_RETRY_MS = 600;
 
 /**
+ * 注册连续超时多少次才判定「宿主不支持」。
+ *
+ * `registerRemoteKeyListener` 走 bridge 调用，容器切换（openH5Container 关容器回来、
+ * 场景窗口关闭）那一拍原生侧可能还没准备好，表现为 3s 超时。一次超时就把 supported
+ * 置 false，会让整页遥控器永久失效（start / sync 都被挡住），只能重载页面恢复 ——
+ * 所以超时按次数容错，连续失败到阈值才真正降级。
+ */
+const REGISTER_FAIL_TOLERANCE = 3;
+
+/**
  * 遥控器音量键 → 语音输入 的总开关（配置项：环境变量 `VITE_REMOTE_VOICE_KEY`）。
  *
  * 原生注册是「把整套遥控按键都拦截」（见 mpaas.registerRemoteKeyListener 的说明），
@@ -72,6 +82,8 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
   const supported = ref(true);
   let unsubscribe: (() => void) | null = null;
   let starting = false;
+  /** 连续注册失败次数（成功一次即清零），用来区分「临时超时」和「宿主不支持」 */
+  let registerFailures = 0;
   /** 正在重连（sync）：避免和 start / stop 并发注册 */
   let syncing = false;
   /** 最近一次重连时刻，配合 SYNC_GUARD_MS 节流 */
@@ -146,6 +158,8 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
       return false;
     }
     registered.value = true;
+    // 注册成功说明原生侧可用，之前的超时计数作废
+    registerFailures = 0;
     return true;
   }
 
@@ -163,7 +177,22 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
       await connect(token);
     }
     catch (error) {
-      // 宿主没实现 / 没注入 bridge：退订并永久降级，别每次进页面都重试刷日志
+      /**
+       * 注册失败分两种，处理方式不同：
+       * - bridge 超时：容器刚切换（openH5Container 关容器回来 / 场景窗口关闭）时原生侧
+       *   还没准备好接受注册，属于临时状态。保留 supported 等下一次可见性变化重试，
+       *   否则一次超时就会把整页遥控器永久废掉，只能重载页面恢复；
+       * - 明确报错（宿主返回了错误码）：实现了 JSAPI 却调不通，直接降级，别反复重试刷日志。
+       */
+      registerFailures += 1;
+      const timeout = error instanceof Error && error.message.includes("超时");
+      if (timeout && registerFailures < REGISTER_FAIL_TOLERANCE) {
+        logger.warn("遥控器按键监听注册超时，等下一次可见性变化重试", {
+          failures: registerFailures,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
       supported.value = false;
       unsubscribe?.();
       unsubscribe = null;
@@ -241,6 +270,30 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
   let hostHidden = false;
 
   /**
+   * 降级标记的复位节流：回到前台本身是低频事件，但 visibilitychange / resume / onShow
+   * 可能同时到达，别让三个信号各触发一次「注册 → 超时」。
+   */
+  const REVIVE_GUARD_MS = 10_000;
+  let lastReviveAt = 0;
+
+  /**
+   * 回到前台时给一次重新注册的机会。
+   *
+   * 之前因为容器切换（openH5Container 关容器回来）导致注册超时、或宿主返回错误码而降级的，
+   * 这里把 supported 与失败计数一起复位 —— 否则「音量键触发语音输入」会一直失效到用户重载页面。
+   * 真不支持时下一次仍会失败并再次降级，10s 内不重复尝试。
+   */
+  function revive() {
+    if (supported.value) return;
+    const now = Date.now();
+    if (now - lastReviveAt < REVIVE_GUARD_MS) return;
+    lastReviveAt = now;
+    supported.value = true;
+    registerFailures = 0;
+    logger.info("遥控器按键监听：回到前台，重新尝试注册");
+  }
+
+  /**
    * 页面重新可见 = 上层容器已经关掉 / 本页重新回到前台，是「回来」这件事最稳的信号
    * （宿主新开 webview 时不保证走 onShow，也不保证推原生 resume）。
    */
@@ -252,6 +305,7 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
     }
     if (!hostHidden) return;
     hostHidden = false;
+    revive();
     void sync();
   }
 
@@ -260,14 +314,21 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
   }
   // 原生 resume 是同义信号（场景窗口 / pushWindow 关闭），两个通道都接，重复触发有节流
   const offResume = onNativeEvent("resume", () => {
+    revive();
     void sync();
   });
 
   watch(
     options.enabled,
     (enabled) => {
-      if (enabled) void start();
-      else void stop();
+      if (enabled) {
+        // 页面重新接管遥控器：之前被降级的（容器切换导致的临时失败）在这里复位
+        revive();
+        void start();
+      }
+      else {
+        void stop();
+      }
     },
     { immediate: true },
   );
@@ -279,6 +340,7 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
    * 不会重复注册。
    */
   onShow(() => {
+    revive();
     void sync();
   });
 
