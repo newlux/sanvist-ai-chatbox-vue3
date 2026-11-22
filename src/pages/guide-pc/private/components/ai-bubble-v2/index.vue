@@ -297,7 +297,7 @@ const hideBody = computed(() => !isUser.value && hasGuideStepCard.value);
  * 历史消息（从会话记录拉回来的回答）不带 `processStatus` —— 品牌行原本是「生成过程」的产物，
  * 落库时就没带回来，于是点开历史对话只看到一坨没有出处的正文。
  * 这里把它补回来：非用户消息、已经收尾、没有过程状态、正文也没被独立卡片顶掉、且确实有内容，
- * 就按「已完成」渲染同一条品牌行（SANY NEO 图标 + SANY Neo + 右侧播报按钮）。
+ * 就按「已完成」渲染同一条品牌行（SANY Neo 图标 + SANY Neo + 右侧播报按钮）。
  */
 const isHistoryAnswer = computed(() => {
   if (isUser.value || props.loading || props.interrupted || props.processStatus) return false;
@@ -318,7 +318,7 @@ const showWaiting = computed(() => Boolean(props.waitingText) && props.loading &
 
 /**
  * 过程状态行文案随当前语言切换（英文界面下不再出现中文）：
- * 进行中不再显示后端下发的节点名（如「调用运营助手...」），与完成态统一成品牌署名 SANY NEO，
+ * 进行中不再显示后端下发的节点名（如「调用运营助手...」），与完成态统一成品牌署名 SANY Neo，
  * 前面由模板配 SANY Neo 图标（26×26），停止状态在品牌名后补充提示。
  */
 const processStatusText = computed(() => {
@@ -504,7 +504,7 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
   emit("guide-check-step-select", payload);
 }
 
-/** 语音播报：按钮已移到过程状态行（SANY NEO 后面），这里只把点击往上抛 */
+/** 语音播报：按钮已移到过程状态行（SANY Neo 后面），这里只把点击往上抛 */
 function onTtsTap() {
   if (!props.ttsEnabled) return;
   emit("tts-click");
@@ -698,7 +698,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           class="ai-bubble-v2__process-status"
           :class="`ai-bubble-v2__process-status--${processStatusPhase}`"
         >
-          <!-- 品牌署名：SANY NEO 图标 26×26（52rpx）+ 文案 SANY NEO，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
+          <!-- 品牌署名：SANY Neo 图标 26×26（52rpx）+ 文案 SANY Neo，进行中与完成态共用，替代原来的「调用运营助手...」/「✓ 已完成」 -->
           <image
             v-if="showBrandStatus"
             class="ai-bubble-v2__process-icon-img"
@@ -708,11 +708,11 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           <text class="ai-bubble-v2__process-text">
             {{ isStopped ? "SANY Neo" : processStatusText }}
           </text>
-          <!-- 生成中实时秒数（单位 S），紧跟 SANY NEO；可以播报后自动消失，位置让给语音图标 -->
+          <!-- 生成中实时秒数（单位 S），紧跟 SANY Neo；可以播报后自动消失，位置让给语音图标 -->
           <!-- <text v-if="elapsedText" class="ai-bubble-v2__process-elapsed">
             {{ elapsedText }}
           </text> -->
-          <!-- 语音播报按钮：SANY NEO 后面常显（拉流 → spinner，播放 → 声波起伏，其余 → 静态语音图标）；
+          <!-- 语音播报按钮：SANY Neo 后面常显（拉流 → spinner，播放 → 声波起伏，其余 → 静态语音图标）；
                历史回答没有 processStatus（见 isHistoryAnswer），同样要能点播 -->
           <view
             v-if="!isStopped && (props.processStatus?.phase === 'succeeded' || isHistoryAnswer) && props.showActions && props.ttsEnabled"
@@ -1587,7 +1587,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     color: #5d5d5d;
   }
 
-  // 品牌行「SANY NEO」：深色下固定 #FFFFFF。
+  // 品牌行「SANY Neo」：深色下固定 #FFFFFF。
   // 浅色那套是 background-clip: text 的灰色流光，深底上又暗又花，所以连背景图、
   // -webkit-text-fill-color、动画一起清掉；失败 / 停止两态（红 / 灰文案）保持原色不动。
   .ai-bubble-v2__process-status:not(.ai-bubble-v2__process-status--failed):not(.ai-bubble-v2__process-status--stopped) .ai-bubble-v2__process-text {

@@ -316,7 +316,7 @@ const hideBody = computed(() => !isUser.value && hasGuideStepCard.value);
  * 历史消息（从会话记录拉回来的回答）不带 `processStatus` —— 品牌行原本是「生成过程」的产物，
  * 落库时就没带回来，于是点开历史对话只看到一坨没有出处的正文。
  * 这里把它补回来：非用户消息、已经收尾、没有过程状态、正文也没被独立卡片顶掉、且确实有内容，
- * 就按「已完成」渲染同一条品牌行（sani 图标 + NEO + 右侧播报按钮）。
+ * 就按「已完成」渲染同一条品牌行（sani 图标 + Neo + 右侧播报按钮）。
  */
 const isHistoryAnswer = computed(() => {
   if (isUser.value || props.loading || props.interrupted || props.processStatus)
@@ -414,7 +414,7 @@ const isGenerating = computed(() => {
 
 /**
  * 生成中实时秒数：后端只在工作流结束时才下发耗时，所以这里本地计时。
- * 一旦「可以播报」（ttsEnabled 为 true）就收掉，位置让给 NEO 后面的语音图标。
+ * 一旦「可以播报」（ttsEnabled 为 true）就收掉，位置让给 Neo 后面的语音图标。
  */
 const elapsedSeconds = ref(0);
 const showElapsed = computed(() => isGenerating.value && !props.ttsEnabled);
@@ -463,7 +463,7 @@ const showProcessStatus = computed(
  *
  * 后端会把中英两套节点名用「|」拼成一条（如「前置直接回复 | Direct Reply正在执行」），
  * 这里只留对应那一半：中文取带汉字的那段（分隔后的第一个），英文取不带汉字的那段（第二个）；
- * 再把尾部的执行状态（正在执行 / 执行完成 / 已完成…）摘掉 —— 状态已经由上面那行 NEO 表达，
+ * 再把尾部的执行状态（正在执行 / 执行完成 / 已完成…）摘掉 —— 状态已经由上面那行 Neo 表达，
  * 副标题只留节点名本身。
  *
  * 语种跟**本轮语音识别的语言**走（WebSocket ASR 回传的 language，见 utils/asr/voice-language），
@@ -807,7 +807,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
             {{ completedDurationText }}
           </text>
         </view>
-        <!-- PC 车机版：回答卡内不再显示品牌署名（sani logo / NEO 文案），
+        <!-- PC 车机版：回答卡内不再显示品牌署名（sani logo / Neo 文案），
              播报按钮下沉到卡片底部免责声明行最左侧；
              过程状态行只保留副标题（生成中的节点名），无副标题时不占行 -->
         <view
@@ -905,7 +905,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
           </text>
         </view>
         <!-- PC 车机版：底部页脚行 = 最左侧语音播报按钮 + 右侧「内容由AI生成，请核实重要信息」
-             （Ardot 747340735267872；播报按钮原在过程状态行 NEO 后，下沉到这里） -->
+             （Ardot 747340735267872；播报按钮原在过程状态行 Neo 后，下沉到这里） -->
         <view
           v-if="props.pcLayout"
           class="ai-bubble-v2__disclaimer-row"
@@ -1410,7 +1410,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   font-size: 24rpx;
   line-height: 36rpx;
 }
-/* 行高固定，进度显隐不改正文位置；长文案只裁切剩余宽度，图标与 NEO 不收缩。 */
+/* 行高固定，进度显隐不改正文位置；长文案只裁切剩余宽度，图标与 Neo 不收缩。 */
 .ai-bubble-v2__process-subtitle {
   display: flex;
   align-items: center;
@@ -1483,7 +1483,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 生成中实时秒数：字号继承品牌行，与 NEO 保持一致。 */
+/* 生成中实时秒数：字号继承品牌行，与 Neo 保持一致。 */
 .ai-bubble-v2__process-elapsed {
   flex-shrink: 0;
   color: #8f8f8f;
@@ -1555,7 +1555,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   padding-top: 24rpx;
 }
 /* 过程状态行内的语音播报按钮（原设计稿 1187:18 Actions Bar 的 TTS）。
-   16×16（32rpx）见 .ai-bubble-v2__action-btn；与 NEO 文字之间留 4px，
+   16×16（32rpx）见 .ai-bubble-v2__action-btn；与 Neo 文字之间留 4px，
    加上状态行本身的 gap 4px，视觉间距 8px，不用 margin 撑 */
 .ai-bubble-v2__process-tts {
   flex-shrink: 0;

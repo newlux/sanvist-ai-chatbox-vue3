@@ -1598,7 +1598,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
     color: #5d5d5d;
   }
 
-  // 品牌行「SANY NEO」：深色下固定 #FFFFFF。
+  // 品牌行「SANY Neo」：深色下固定 #FFFFFF。
   // 浅色那套是 background-clip: text 的灰色流光，深底上又暗又花，所以连背景图、
   // -webkit-text-fill-color、动画一起清掉；失败 / 停止两态（红 / 灰文案）保持原色不动。
   .ai-bubble-v2__process-status:not(.ai-bubble-v2__process-status--failed):not(.ai-bubble-v2__process-status--stopped) .ai-bubble-v2__process-text {

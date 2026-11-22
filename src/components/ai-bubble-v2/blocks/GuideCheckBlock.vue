@@ -409,7 +409,7 @@ function resolveRootElement(): HTMLElement | null {
     @touchstart="onCardTouchStart"
     @touchend="onCardTouchEnd"
   >
-    <!-- 卡片左上角品牌署名：SANY NEO logo + SANY Neo + 语音播报控制（与气泡里的完成态同一套观感） -->
+    <!-- 卡片左上角品牌署名：SANY Neo logo + SANY Neo + 语音播报控制（与气泡里的完成态同一套观感） -->
     <view class="guide-check-block__brand">
       <image class="guide-check-block__brand-icon" :src="saniIcon" mode="aspectFit" />
       <text class="guide-check-block__brand-text">
@@ -595,7 +595,7 @@ function resolveRootElement(): HTMLElement | null {
   }
 }
 
-/* 左上角品牌署名：SANY NEO logo + SANY Neo + 播报按钮（与气泡完成态同一套观感） */
+/* 左上角品牌署名：SANY Neo logo + SANY Neo + 播报按钮（与气泡完成态同一套观感） */
 .guide-check-block__brand {
   display: flex;
   align-items: center;
