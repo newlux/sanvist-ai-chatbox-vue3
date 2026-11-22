@@ -1472,8 +1472,8 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
 /* 完成态品牌图标：26×26（52rpx），与 NEO文字同排、垂直居中；
    图标与文字的间距沿用 status 行的 gap，不额外加 margin */
 .ai-bubble-v2__process-icon-img {
-  width: 52rpx; // 26px
-  height: 52rpx; // 26px
+  width: 48rpx; // 24px
+  height: 48rpx; // 24px
   flex-shrink: 0;
 }
 .ai-bubble-v2__process-text {

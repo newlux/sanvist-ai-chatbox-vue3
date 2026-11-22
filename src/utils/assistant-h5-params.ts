@@ -4,19 +4,26 @@
  * 两边「参数一致、地址不同」，音色 / 界面语言 / 身份信息的取值方式抽到这里，
  * 避免两条链路各写一份、改一处漏一处。
  */
-import { REPORT_VOICE_OPTIONS } from "@/config/report-voices";
-import { loadReportVoice } from "@/hooks/useReportVoice";
+import { resolveReportVoiceId } from "@/hooks/useReportVoice";
 import { i18n } from "@/i18n";
 import { useSystemStore, useUserStore } from "@/stores";
 import { resolveLaunchQuery } from "@/utils/launch-query";
 import { getRequestAuth } from "@/utils/request";
 
+/** 三方页（维修助理 / 配件助手）在没选过音色时用的默认音色：龙哲 */
+export const DEFAULT_ASSISTANT_VOICE_ID = "longzhe_v3.1";
+
 /**
- * 当前选中的音色 id：读本机记忆的音色（听播页 saveReportVoice 写入的同一份数据），
- * 没选过时与听播页保持一致的兜底口径 —— 取音色列表第一项。
+ * 当前选中的音色 id：读本机记忆的音色（听播页 saveReportVoice 写入的同一份数据）。
+ *
+ * 没选过时兜底为 `longzhe_v3.1` —— **不是**音色列表第一项，列表顺序是听播页的展示顺序，
+ * 和两个三方页约定的默认音色无关（之前取第一项，内嵌地址上带的就是错的值）。
+ *
+ * 取值用 `resolveReportVoiceId()` 的原始串：后台可能下发本地没有展示资源的音色码（Cherry…），
+ * 走 `loadReportVoice()` 会因为匹配不到选项而误判成「没选过」。
  */
 export function resolveSelectedVoiceId() {
-  return loadReportVoice()?.id || REPORT_VOICE_OPTIONS[0]?.id || "";
+  return resolveReportVoiceId() || DEFAULT_ASSISTANT_VOICE_ID;
 }
 
 /**
