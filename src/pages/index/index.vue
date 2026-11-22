@@ -79,6 +79,12 @@ const { t } = useI18n();
 const { safeAreaStyle } = useSafeArea();
 const userStore = useUserStore();
 provideChatScope(DEFAULT_CHAT_SCOPE);
+/**
+ * 回答正文逐字揭示（打字机）：与作业指导页同一套手感（见 useTypewriter），
+ * 把已到达的正文按节奏放出来，避免整段回答一次刷出、列表高度瞬间撑高导致整屏跳动。
+ * 只对本轮刚生成的回答生效，切历史会话拉回来的旧回答仍直接显示全文。
+ */
+provide("ai-answer-typewriter", true);
 const chatStore = useChatStore(DEFAULT_CHAT_SCOPE);
 // 新会话首包只补齐服务端 ID，不重建消息列表；切换已有会话或清空时才重建。
 const chatListKey = ref(0);

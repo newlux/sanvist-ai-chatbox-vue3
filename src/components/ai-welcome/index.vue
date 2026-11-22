@@ -190,6 +190,12 @@ function onListenLogoError() {
 
 let startFired = false;
 let readyTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * 底部输入条（加号 + 点击说话/输入框 + 右侧图标）是否收起：
+ * 点「点击说话」或键盘填完点发送后立刻收掉，不等 --flying 的淡出，
+ * 否则起飞/落位那一帧这一行还压在对话页底部。回到初始页时复位。
+ */
+const composerHidden = ref(false);
 
 function fireStart(mode?: "hold", target?: EventTarget) {
   if (startFired) return;
@@ -212,6 +218,8 @@ function onListenLoad() {
  */
 function beginDepart() {
   if (startFired) return;
+  // 先收掉底部这一行：父页面马上要播起飞/落位，等 --flying 再淡出会多留一帧压在对话页上
+  composerHidden.value = true;
   listenMounted.value = true;
   readyTimer = setTimeout(fireStart, LISTEN_READY_TIMEOUT_MS);
 }
@@ -261,6 +269,8 @@ const duplexGesture = useDuplexButtonGesture({
 });
 watch(() => props.leaving, leaving => {
   if (leaving) duplexGesture.cancel();
+  // 退回初始页（离开起飞态）时把输入条放回来，下一轮还要能点
+  else composerHidden.value = false;
 });
 
 function onDuplexTap() {
@@ -379,6 +389,8 @@ function sendDraft() {
   const content = draft.value.trim();
   if (!content) return;
   draft.value = "";
+  // 与「点击说话」一致：这一行立刻收掉，不留到起飞淡出
+  composerHidden.value = true;
   // 先收键盘：父页面紧接着要播落位动画，键盘继续弹着会让对话页底部跟着上下抽动
   uni.hideKeyboard();
   emit("send-text", content);
@@ -489,7 +501,7 @@ onBeforeUnmount(() => {
     <!-- 底部输入条（Ardot 1204:337 Toolbar）：加号 44×44 + 中间 219×44 + 右侧 44×44，gap 10
          语音态中间是「点击说话」；点键盘后在原地换成文本输入框（不离开初始页），
          填完点右侧发送才抛 send-text 交给父页面 -->
-    <view class="welcome__composer">
+    <view class="welcome__composer" :class="{ 'welcome__composer--hidden': composerHidden }">
       <view class="welcome__composer-plus" @tap.stop="showAttachmentComingSoon">
         <image
           class="welcome__composer-plus-icon"
@@ -996,6 +1008,15 @@ onBeforeUnmount(() => {
   padding: 16rpx 48rpx; // 上下 8px / 左右 24px（截图：加号左边距 96−57=39px÷1.63≈24px）
   box-sizing: border-box;
   transition: opacity 240ms ease;
+}
+
+/* 点「点击说话」或键盘填完点发送后立刻收掉这一行（含左右图标）：
+   --flying 那条 320ms 淡出是给文字起飞配的节奏，等它走完这一行还会压在对话页底部，
+   所以这里单独给一档更快的过渡（三级选择器压过 .welcome--flying 那条） */
+.welcome .welcome__composer.welcome__composer--hidden {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
 }
 
 /* 加号：44×44 圆钮，与「点击说话」胶囊 / 键盘钮同一材质（#0D0D0D30，约 19% 黑，

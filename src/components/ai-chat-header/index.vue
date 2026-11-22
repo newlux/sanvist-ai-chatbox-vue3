@@ -149,6 +149,12 @@ const darkPlain = computed(() => props.plainBg && !props.shareMode && systemStor
  */
 const listenLogoFailed = ref(false);
 const tellLogoFailed = ref(false);
+/**
+ * think.webp 确认解不出来（老内核不认这张动画 webp）才回退常态图。
+ * 不能用「@load 成功才允许切换」当闸门：个别 WebView 不派发 image 的 load 事件，
+ * 结果就是发问后等接口那一段一直停在常态的 sani-logo.webp，think 永远出不来。
+ */
+const thinkLogoFailed = ref(false);
 
 const listenLogoSrc = computed(() => {
   if (listenLogoFailed.value) return listenLogoGif;
@@ -172,7 +178,7 @@ function onTellLogoError() {
 }
 /**
  * 自动播报开关图标：关闭态统一走 icon-tts-auto-off.svg（#5D5D5D 线稿 + 斜杠缺口），浅色 / 深色同一张。
- * 走这张图时不能套头部的统一反相，否则线稿会被整片染白、缺口糊掉，见样式里 tts-switch--off 的 filter: none。
+ * 深色下与其余头部图标吃同一份滤镜（brightness(0) invert(0.686) → #AFAFAF），关闭态不再单独免反相。
  */
 const autoTtsIcon = computed(() => (autoTtsEnabled.value ? autoTtsOnIcon : autoTtsOffSvgIcon));
 const answering = computed(() => {
@@ -216,7 +222,19 @@ const recording = computed(() => props.voiceListening);
 // 替代图加载成功后才隐藏常态图；资源缺失或尚未解码时仍保留可见的三角图。
 const stateGifLoaded = ref({ listen: false, tell: false, think: false });
 const answeringGifOn = computed(() => !recording.value && telling.value && stateGifLoaded.value.tell);
-const thinkingGifOn = computed(() => !recording.value && !telling.value && thinking.value && stateGifLoaded.value.think);
+/**
+ * 思考态 = 发问后到 /v1/chat-messages 吐出第一段正文之前（含等接口、等首包那一段）。
+ * 不再用 @load 当闸门：图还没解码完时也先切过去（一解码就显示），
+ * 只有确认解码失败（thinkLogoFailed）才退回常态的 sani-logo.webp。
+ */
+const thinkingGifOn = computed(
+  () => !recording.value && !telling.value && thinking.value && !thinkLogoFailed.value,
+);
+/** think.webp 解码失败：思考态回退常态图，不留空白 */
+function onThinkLogoError() {
+  thinkLogoFailed.value = true;
+  stateGifLoaded.value.think = false;
+}
 /** 从初始页飞入那一段（落位时是同一张图在延续）；有状态时让位给状态图 */
 const listeningGifOn = computed(
   () => !telling.value && !recording.value && !thinking.value && props.listenIdle,
@@ -669,6 +687,21 @@ function onIslandPressMove(e: any) {
   }
 }
 
+/**
+ * 预加载 think.webp：它在岛内是 opacity: 0 的叠层，靠 @load 才置位。
+ * 发问往往就在页面刚打开那几秒，图还没解码完就会晚一拍才亮；挂载后主动拉一遍。
+ */
+onMounted(() => {
+  // #ifdef H5
+  if (typeof Image === "undefined") return;
+  const preload = new Image();
+  preload.onload = () => {
+    stateGifLoaded.value.think = true;
+  };
+  preload.src = thinkLogoWebp;
+  // #endif
+});
+
 onBeforeUnmount(() => {
   clearTimeout(sessionScrollIdleTimer);
   clearTimeout(historyReloadTimer);
@@ -783,14 +816,15 @@ onBeforeUnmount(() => {
                 @load="stateGifLoaded.tell = true"
                 @error="onTellLogoError"
               />
-              <!-- think.webp：正在思考（480×240 画布，留白用 aspectFill 裁掉，换算见 --think 注释） -->
+              <!-- think.webp：正在思考（480×240 画布，留白用 aspectFill 裁掉，换算见 --think 注释）。
+                   只在确认解码失败时回退常态图，不靠 @load 当闸门，见 thinkingGifOn -->
               <image
                 class="chat-header__island-logo chat-header__island-logo--think"
                 :class="{ 'chat-header__island-logo--think-on': thinkingGifOn }"
                 :src="thinkLogoWebp"
                 mode="aspectFill"
                 @load="stateGifLoaded.think = true"
-                @error="stateGifLoaded.think = false"
+                @error="onThinkLogoError"
               />
             </view>
             <view v-if="duplexDisplayText" class="chat-header__duplex-status" role="status">
@@ -1173,8 +1207,8 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 深色主题：首页问答态头部（Ardot 1193:2097 → 1193:2129 Component 2） =====
-   渐隐底色 722:341 换成页面底 #0D0D0D；左右图标 722:342 / 722:345 在深色稿里是白线，
-   svg / 位图统一 filter 反白：不新增资源，也不影响浅色稿（浅色下不加这个类） */
+   渐隐底色 722:341 换成页面底 #0D0D0D；左右图标深色下统一 #AFAFAF（不再是纯白），
+   svg / 位图走同一份滤镜：不新增资源，也不影响浅色稿（浅色下不加这个类） */
 .ai-chat-header--plain.ai-chat-header--dark {
   // background: linear-gradient(
   //   180deg,
@@ -1188,13 +1222,9 @@ onBeforeUnmount(() => {
   .chat-header__icon-atlas-img,
   .chat-header__icon-back-img,
   .chat-header__icon-tts-img {
-    filter: brightness(0) invert(1);
-  }
-
-  // 自动播报「关闭态」走 icon-tts-auto-off.svg（#5D5D5D 线稿 + 斜杠缺口），
-  // 套反相会被整片染白、缺口糊掉，所以这一种情况免掉反相
-  .chat-header__tts-switch--off .chat-header__icon-tts-img {
-    filter: none;
+    // brightness(0) 把线稿 / 位图压成纯黑，再反相到 0.686 × 255 ≈ #AFAFAF。
+    // 自动播报的关闭态（icon-tts-auto-off.svg）也吃这一条，与开启态同色值。
+    filter: brightness(0) invert(0.686);
   }
 }
 
@@ -1592,14 +1622,10 @@ onBeforeUnmount(() => {
 }
 
 /* 语音播报总开关（回主页左边）：24×24（48rpx），与其他头部图标同尺寸同色值；
-   关闭态只靠「喇叭 + ×」图标区分，再压一点透明度让状态更好辨 */
+   关闭态只靠「喇叭 + ×」图标区分，深浅色都保持同一色值，不再额外压透明度 */
 .chat-header__icon-tts-img {
   width: 48rpx;
   height: 48rpx;
-}
-
-.chat-header__tts-switch--off .chat-header__icon-tts-img {
-  opacity: 0.6;
 }
 
 .chat-header__check-all {

@@ -14,9 +14,9 @@ const props = defineProps({
 });
 
 /**
- * 打字机（只有作业指导页打开，见 ai-bubble-v2 的 provide）：
+ * 打字机（作业指导页 / 首页打开，见 ai-bubble-v2 的 provide）：
  * 把已到达的正文逐字放出，避免整段回答一次刷出、列表高度一次撑高导致整屏跳动。
- * 没拿到开关（首页 / 任务协同 / 听汇报 / guide-pc 等）时 visible 恒等于 content，行为不变。
+ * 没拿到开关（任务协同 / 听汇报 / guide-pc 等）时 visible 恒等于 content，行为不变。
  */
 const typewriterOn = inject<Ref<boolean> | null>("ai-bubble-typewriter", null);
 const { visible, typing } = useTypewriter(() => props.content, {
