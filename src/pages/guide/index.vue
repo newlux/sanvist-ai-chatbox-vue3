@@ -1938,6 +1938,41 @@ $color-white: #ffffff;
   --chat-top-inset: max(calc(env(safe-area-inset-top, 0px) + 300rpx), calc(var(--safe-top-px, 0px) + 260rpx));
 }
 
+/* ===== 回答正文 / 多步骤卡与顶部左右按钮精确对齐 =====
+   目标：正文与多步骤卡的文字最左侧 = 返回按钮（左）圆形背景最左侧；
+         正文与多步骤卡的文字最右侧 = 主页按钮（右）圆形背景最右侧。
+
+   推导（1px = 2rpx）：
+   · 顶部按钮组在 .chat-header__bar 内，bar 有 padding: 0 40rpx（左右各 20px），
+     圆钮 84rpx 宽、border-radius: 50%：
+     - 左侧返回按钮**最左侧** = 40rpx（20px，含描边）；
+     - 右侧主页按钮**最右侧** = 100% − 40rpx（bar 的 padding-right，20px）。
+   · 普通回答正文缩进 = .chat-box 的横向 padding（左右各 40rpx，见 ai-message-list）
+     + .ai-bubble-v2__body 的横向 padding（左右各 40rpx，见 ai-bubble-v2）
+     + 0（answer-group-block / answer-block 均无横向 padding）
+     = 左右各 80rpx（40px），比顶部按钮深了 40rpx（20px）。
+   · 多步骤卡文字缩进 = .chat-box 的横向 padding（左右各 40rpx）
+     + .chat-box__card 的横向 margin（左右各 40rpx，见 ai-message-list）
+     + 0（guide-check-block 无横向 padding，卡片直接铺底、无白框外壳）
+     = 左右各 80rpx（40px），同样比顶部按钮深了 40rpx（20px）。
+   · 作业指导页正文与多步骤卡都直接铺底、无卡片外壳（见 AnswerBlock / GuideCheckBlock 注释），
+     这两层 40rpx 的横向留白是「有卡片外壳」的通用气泡 / 卡片留给外壳的，
+     在这里只当缩进用，纯属多余。
+   · 精确修复：只在本页作用域内去掉上述两层多余的横向留白，
+     文字左右缘回到 .chat-box 的 40rpx，正好与顶部返回 / 主页按钮对齐。
+
+   仅作用于 AI 回答（:not(.ai-bubble-v2--user)）：用户提问气泡右对齐、不受影响；
+   多步骤卡只覆盖 .chat-box__card 的左右 margin（上下 24rpx 间距保留，gantt 卡本就是左右 0）；
+   只在本页（guide）生效：首页 / 任务协同 / 听汇报仍走共享的 40rpx 留白。 */
+.ai-page__chat :deep(.ai-bubble-v2:not(.ai-bubble-v2--user) .ai-bubble-v2__body) {
+  padding-left: 0;
+  padding-right: 0;
+}
+.ai-page__chat :deep(.chat-box__card) {
+  margin-left: 0;
+  margin-right: 0;
+}
+
 /* 欢迎层 → 对话页：整页淡入。
    点击就立即开始（--chat-enter-delay 现为 0），360ms 内铺满 —— 等图标起飞时
    对话页已经就位，logo 是飞在对话页之上的 */
