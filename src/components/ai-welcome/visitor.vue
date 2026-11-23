@@ -1564,13 +1564,10 @@ onMounted(async () => {
         </view>
       </view>
 
-      <!-- 文案组：306:2780 副标题 + 306:2800 描述一行（收尾态淡出）
+      <!-- 文案组：306:2780 副标题（收尾态淡出）；描述行「你的三一设备伙伴」已按需求去掉
            点这里等同于说对唤醒词：直接进「欢迎了解日常运营AI助手」的自我介绍播报，播完继续走身份选择 -->
       <view class="welcome-visitor__caption" @tap.stop="onCaptionTap">
         <text class="welcome-visitor__slogan">随时，为你而在</text>
-        <view class="welcome-visitor__desc">
-          <text class="welcome-visitor__desc-line">你的三一设备伙伴</text>
-        </view>
       </view>
     </view>
   </view>
@@ -2320,11 +2317,6 @@ onMounted(async () => {
   -webkit-text-fill-color: currentColor;
 }
 
-/* 1193:4240：描述 #8E8E8E，整体 75% 不透明度（浅色稿是不透明的 #8E8E8E） */
-.welcome-visitor--dark .welcome-visitor__desc {
-  opacity: 0.75;
-}
-
 /* 自我介绍三行（「欢迎了解日常运营AI助手 / 设备有事早知道，/ 少跑现场少翻表」）：
    深色下统一纯白。浅色稿的「首行 #0D0D0D、二三行紫蓝粉渐变」只在浅色生效 ——
    深底上深色字和低饱和渐变都读不清，这里把字色一起收白，入场动画与排版不动 */
@@ -2515,22 +2507,4 @@ onMounted(async () => {
   -webkit-text-fill-color: transparent;
 }
 
-/* 306:2800：16px / 行高 24px，两行居中，#8E8E8E */
-.welcome-visitor__desc {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 480rpx; // 240px
-  font-size: 32rpx; // 16px
-  font-weight: 500;
-  line-height: 48rpx; // 24px
-  text-align: center;
-  color: #8e8e8e;
-}
-
-.welcome-visitor__desc-line {
-  display: block;
-  width: 100%;
-  text-align: center;
-}
 </style>

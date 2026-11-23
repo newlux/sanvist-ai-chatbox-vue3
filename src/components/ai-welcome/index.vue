@@ -104,7 +104,6 @@ const titleImage = computed(() => (props.dark ? titleDark : titleLight));
  * 整段文字统一 skew 出不来这种效果，只能按字给不同相位。
  */
 const sloganChars = computed(() => Array.from(t("init-brand-slogan")));
-const descChars = computed(() => Array.from(t("init-brand-desc-1")));
 
 /**
  * 声波图标（纯展示，点击等同「点击说话」）按主题取图：
@@ -461,8 +460,8 @@ onBeforeUnmount(() => {
         </view>
       </view>
 
-      <!-- 品牌文案组：图标下方「随时，为你而在」+ 一行灰字，
-           文案沿用引导页那套 i18n（init-brand-slogan / init-brand-desc-1） -->
+      <!-- 品牌文案组：图标下方只留「随时，为你而在」，
+           副标题「你的三一设备伙伴」已按需求去掉（i18n 的 init-brand-desc-1 不再使用） -->
       <view class="welcome__caption">
         <!-- 逐字拆开：起飞时每个字按相位做波浪扭曲（录屏里文字是被「拉扯」变形的，
              整段文字整体 skew 做不出这种不均匀形变） -->
@@ -471,14 +470,6 @@ onBeforeUnmount(() => {
             v-for="(ch, i) in sloganChars"
             :key="`slogan-${i}`"
             class="welcome__char"
-            :class="`welcome__char--p${i % 4}`"
-          >{{ ch }}</text>
-        </text>
-        <text class="welcome__desc">
-          <text
-            v-for="(ch, i) in descChars"
-            :key="`desc-${i}`"
-            class="welcome__char welcome__char--small"
             :class="`welcome__char--p${i % 4}`"
           >{{ ch }}</text>
         </text>
@@ -752,11 +743,6 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 副标题字号小，同样的幅度会显得过火，整体收一档 */
-.welcome__char--small {
-  --warp-small: 0.6;
-}
-
 /* 标题是整行 SVG 字标（无法逐字拆），用整体 skew + scaleX 抖一次，
    近似录屏里「Neo 被拉宽、N 错位」的观感 */
 .welcome--flying .welcome__title-img {
@@ -932,14 +918,6 @@ onBeforeUnmount(() => {
   margin-bottom: 20rpx;
 }
 
-.welcome__desc {
-  max-width: 560rpx; // 280px
-  color: #8e8e8e;
-  font-size: 26rpx; // 16px
-  font-weight: 400;
-  line-height: 40rpx; // 24px
-  text-align: center;
-}
 
 /* 快捷入口槽位：胶囊导航自带底色 / 内边距 / 高度，这里只负责在 flex 列里占一行 */
 .welcome__nav {
@@ -1205,10 +1183,6 @@ onBeforeUnmount(() => {
     color: #ffffff;
     // 深色稿标语不动（上提只针对浅色）
     transform: none;
-  }
-
-  .welcome__desc {
-    color: rgba(255, 255, 255, 0.45);
   }
 }
 
