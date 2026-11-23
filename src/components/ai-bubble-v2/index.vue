@@ -85,6 +85,11 @@ const emit = defineEmits([
   "share-click",
   "feedback-change",
   "copy-click",
+  /**
+   * 正文收尾（本轮不再生成、也不再逐字）时抛一条，参数为是否已收尾。
+   * 气泡外的独立卡（甘特入口卡由消息列表渲染）拿不到气泡内的打字计数，靠它延后出现。
+   */
+  "body-settled",
   "select-toggle",
   "longpress-copy",
   "assistant-callback-open",
@@ -324,6 +329,17 @@ const suggestionsVisible = computed(() => !isUser.value
   && suggestionBlocks.value.length > 0
   && !props.loading
   && answerTypingCount.value === 0);
+
+/**
+ * 正文是否已经收尾（本轮不再生成、也不再逐字）。
+ *
+ * 气泡内的参考资料 / 选项由 AiContentBlocks 自己压（见 bodyPending），
+ * 但气泡外的独立卡（甘特入口卡在消息列表里成卡）拿不到气泡内的打字计数 ——
+ * 这里统一往上抛一条「收尾」事件，由消息列表据此延后渲染，保证
+ * 「正文 → 参考资料 → 选项 → 甘特卡」的先后顺序。
+ */
+const bodySettled = computed(() => !props.loading && answerTypingCount.value === 0);
+watch(bodySettled, settled => emit("body-settled", settled), { immediate: true });
 
 /**
  * 【临时排查 · 打字机观感】搜索 `typewriter-diagnose` 可定位，排查完整段删掉。
@@ -903,10 +919,25 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
   flex-wrap: wrap;
   row-gap: 24rpx;
 }
+/* 追问区在正文收尾后才挂载（见 suggestionsVisible）：延迟 0.16s 淡入上移，
+   让「正文 → 参考资料 → 选项 → 独立卡」有一个可读的浮现节奏，而不是整屏同时跳出来 */
 .ai-bubble-v2__suggestions {
   flex: 0 0 100%;
   min-width: 0;
   box-sizing: border-box;
+  animation: ai-suggestions-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) 0.16s both;
+}
+
+@keyframes ai-suggestions-in {
+  from {
+    opacity: 0;
+    transform: translateY(8rpx);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 /* 勾选态：右侧让出勾选框宽度，追问与气泡左边缘对齐（不是间距，是缩进对齐） */
 .ai-bubble-v2--selected .ai-bubble-v2__suggestions {

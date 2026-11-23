@@ -173,6 +173,22 @@ const { visible: typedSummary, typing: typedSummaryTyping } = useTypewriter(() =
  */
 const typingReporter = inject<Ref<number> | null>("ai-bubble-answer-typing", null);
 const cardTyping = computed(() => typedContentTyping.value || typedSummaryTyping.value);
+
+/**
+ * 参考图等正文打完再出现：正文还在一个字一个字地长，图片已经挂在下面（还会自己加载完），
+ * 图先于文字「好」了，和「正文 → 图片 → 选项」的阅读顺序对不上（选项同样卡在 cardTyping 上）。
+ *
+ * 用锁存标记而不是直接绑 cardTyping：完成态会给同一张卡注入小结，typedSummary 会再打一次字，
+ * 直接绑会把已经显示过的图片收回、再弹出来一次。
+ * 历史回看 / 切步过来的卡片 cardTyping 一开始就是 false，immediate 直接放行，不额外等待。
+ *
+ * 同时监听图片条数：正文先打完、image 事件随后才到（见 tests/test.log 的 answer → image 顺序）
+ * 时，cardTyping 早就停在 false 不再变化，只监听它会让后到的图片永远不揭示。
+ */
+const imagesRevealed = ref(false);
+watch([cardTyping, () => images.value.length], ([typing, count]) => {
+  if (!typing && count) imagesRevealed.value = true;
+}, { immediate: true });
 let reportedTyping = false;
 watch(cardTyping, (on) => {
   if (!typingReporter || on === reportedTyping) return;
@@ -470,8 +486,9 @@ function resolveRootElement(): HTMLElement | null {
     <!-- 这一步的参考图：渲染在「参考来源」上方。
          复用 GuideImageBlock：多张图片用 swiper 左右滑动切换（堆叠显示），单图保持简单样式，
          图片名称 / 圆点指示 / 深色主题都由它自己接管 -->
+    <!-- 正文打完（imagesRevealed）才挂载：图片跟着打字机的节奏走，不抢在正文前面 -->
     <GuideImageBlock
-      v-if="images.length"
+      v-if="images.length && imagesRevealed"
       class="guide-check-block__images"
       :payload="{ items: images }"
     />
@@ -546,9 +563,24 @@ function resolveRootElement(): HTMLElement | null {
 
 <style lang="scss" scoped>
 /* 这一步的参考图：宽高自适应（widthFix），与对话框里的参考图同一套观感 */
-/* 这一步的参考图区：复用 GuideImageBlock（自带上边距由自身管理），这里只留上方间距 */
+/* 这一步的参考图区：复用 GuideImageBlock（自带上边距由自身管理），这里只留上方间距。
+   正文打完后才挂载（见 imagesRevealed）：淡入上移，选项再让一拍（0.08s），
+   浮现顺序是「正文 → 图片 → 选项」 */
 .guide-check-block__images {
   margin-top: 24rpx;
+  animation: guide-check-images-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes guide-check-images-in {
+  from {
+    opacity: 0;
+    transform: translateY(8rpx);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .guide-check-block__sources {
@@ -759,13 +791,14 @@ function resolveRootElement(): HTMLElement | null {
 }
 
 /* 选项组：纵向排列、左对齐，胶囊按内容宽度收缩，不铺满整行。
-   选项在正文打完那一刻才挂载（见模板上的 cardTyping），补一次淡入上移 */
+   选项在正文打完那一刻才挂载（见模板上的 cardTyping），补一次淡入上移；
+   延迟 0.08s 让参考图先出现，顺序是「正文 → 图片 → 选项」 */
 .guide-check-block__options {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   margin-top: 24rpx;
-  animation: guide-check-options-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation: guide-check-options-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) 0.08s both;
 }
 
 @keyframes guide-check-options-in {
