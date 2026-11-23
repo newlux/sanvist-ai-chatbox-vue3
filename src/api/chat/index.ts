@@ -272,10 +272,23 @@ export function deleteConversation(conversationId: Identifier, user: string) {
 
 export async function batchDeleteConversations(params: BatchDeleteConversationsParams): Promise<BatchDeleteResult> {
   // Dify 没有批量删除会话接口，保留原有批量操作体验，逐条调用标准 DELETE 接口。
-  await Promise.all(params.conversationIds.map(conversationId => (
-    deleteConversation(conversationId, params.user)
+  //
+  // 用 allSettled 而不是 all：一条 404（会话已被删）/ 超时不该把其余已经删掉的记录也判成失败。
+  // 之前一个 reject 就整体失败，调用方连列表都不刷新，用户会对着已经不存在的会话反复删、反复报错。
+  const results = await Promise.allSettled(params.conversationIds.map((conversationId, index) => (
+    deleteConversation(conversationId, params.user).catch((error) => {
+      logger.warn("[chat] 删除会话失败", { conversationId, index, error });
+      throw error;
+    })
   )));
-  return { deleted: params.conversationIds.length };
+  const failed: Identifier[] = [];
+  results.forEach((result, index) => {
+    if (result.status === "rejected") failed.push(params.conversationIds[index]);
+  });
+  const deleted = params.conversationIds.length - failed.length;
+  // 一条都没删掉才算整体失败：交给调用方提示「批量删除失败」
+  if (!deleted) throw new Error("批量删除会话失败");
+  return { deleted, failed };
 }
 
 export function renameConversation(conversationId: Identifier, params: RenameConversationParams) {

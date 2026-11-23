@@ -496,21 +496,44 @@ function bindScrollGesture() {
 }
 
 /**
- * 距内容底部的距离（px）：scrollHeight − clientHeight − scrollTop。
+ * 距「最后一行正文」的距离（px）。
+ *
+ * 不能直接用 scrollHeight − clientHeight − scrollTop：末尾那段 paddingBottom 是给输入栏让位的，
+ * `shortReplySpacerPx` 那段垫白是给封顶垫的，两段都不算「还没看到的内容」。
+ * 不减掉它们的话，正文其实已经全露出来了，gap 仍有一整条输入栏那么高（150~250px），
+ * 于是回底按钮照样弹出来、正好浮在最后一行正文上。
+ *
  * uni 的 scroll 事件 detail 只有 scrollTop，高度得从滚动层自己量；
  * 量不到（未挂载 / 找不到滚动层）时返回 NaN，调用方退回「真滚到底才算贴底」。
  */
 function distanceToBottom(): number {
   // #ifdef H5
-  const inner = document.querySelector(".msg-list__inner");
+  const inner = document.querySelector(".msg-list__inner") as HTMLElement | null;
   if (inner) {
     const scroller = findScrollableAncestor(inner) || findScrollLayer(inner);
     if (scroller) {
-      return Math.max(0, scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
+      const padBottom = Number.parseFloat(getComputedStyle(inner).paddingBottom) || 0;
+      const endSpace = padBottom + shortReplySpacerPx.value;
+      return Math.max(0, scroller.scrollHeight - endSpace - scroller.clientHeight - scroller.scrollTop);
     }
   }
   // #endif
   return Number.NaN;
+}
+
+/**
+ * 布局落定后按「还剩多少正文没露出来」决定要不要上报未贴底（回底按钮据此出现）。
+ *
+ * 用 rAF 是为了等这一次 scrollTop 落下去再量：同一条链路里先对齐、后测量，
+ * 量出来才是用户真正看到的画面。只差一两行时不上报，按钮就不会浮在最后一行正文上。
+ */
+function unpinIfContentHidden() {
+  // #ifdef H5
+  requestAnimationFrame(() => {
+    const gap = distanceToBottom();
+    if (Number.isFinite(gap) && gap > SCROLL_BOTTOM_SHOW_GAP_PX) setPinned(false);
+  });
+  // #endif
 }
 
 function onScroll(e: { detail?: { scrollTop?: number } }) {
@@ -761,12 +784,12 @@ function alignToReplyEnd(forceUp = false, attempt = 0) {
             ? Math.min(capTarget, bottomTarget)
             : capTarget;
           /**
-           * 封顶说明下方还有内容露不出来（回答比可视区高）：收尾后上报「未贴底」，
-           * 页面那边才显示「回到底部」。
+           * 收尾后按「还剩多少正文没露出来」决定要不要上报「未贴底」，页面那边才显示「回到底部」。
+           * 只差一两行就不上报：按钮会浮在最后一行正文上，看着像把字挡了。
            * 流式期间**不能**上报 —— 一旦 setPinned(false)，content-grow 不再触发，
            * 后面长出来的内容就完全不跟随了，正好是「回答时气泡憋在下面、结束才跳出来」。
            */
-          if (isLastAnswerSettled() && capTarget < bottomTarget - 1) setPinned(false);
+          if (isLastAnswerSettled()) unpinIfContentHidden();
         }
       }
       else {

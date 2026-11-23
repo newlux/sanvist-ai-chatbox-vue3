@@ -24,7 +24,7 @@ const logger = createLogger("app");
  * 置空时请求不会带 Authorization 头（见 utils/request 的 getRequestHeaders）。
  * 注意：这串会打进产物，正式上线前需要确认是否保留。
  */
-const LOCAL_AUTHORIZATION_FALLBACK = "bearer d8613261-e6f5-4d40-bdf6-5b7ba9abff5a";
+const LOCAL_AUTHORIZATION_FALLBACK = "bearer 7a0727d9-b617-41c3-92a9-9eca6e43fd21";
 
 type StartupQuery = Record<string, any>;
 
@@ -194,6 +194,9 @@ function initializeSystem(query: StartupQuery, launchOptions?: LaunchOptions) {
   const country = String(query.country || "");
   const version = String(query.version || "");
   const username = String(query.username || "");
+  // 业务用户 id：宿主拼在启动地址 query 上（&userId=123），key 的大小写 / 下划线写法不统一，
+  // 按 userId → user_id → UserId 依次取；一个都没有时留空，resolveUserId 还会再去读用户信息兜底
+  const userId = String(query.userId || query.user_id || query.UserId || "").trim();
   const timezone = query.Timezone;
   const demoMode = query.DemoMode === true || query.DemoMode === "true";
   // 接口地址固定用 env 配置，忽略宿主启动参数里的 baseUrl：
@@ -229,6 +232,8 @@ function initializeSystem(query: StartupQuery, launchOptions?: LaunchOptions) {
   // 宿主注入的状态栏高度最准，H5 自己是取不到的
   systemStore.setStatusBarHeight(Number(query.statusBarHeight || query.StatusBarHeight) || 0);
   userStore.setUsername(username);
+  // 用户 id 与 username 同源落库：别处读 useUserStore().userId 时不必再各自解析启动参数
+  userStore.setUserId(userId);
   uni.setStorageSync("prevPageName", String(query.pageName || ""));
 
   return { authorization, baseUrl, lang, version };

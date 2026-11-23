@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useDuplexButtonGesture } from "@/hooks/useDuplexButtonGesture";
 import type { PropType } from "vue";
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
@@ -9,8 +8,6 @@ import saniLogoStatic from "@/assets/img/header-island-logo.png";
 import keyboardIcon from "@/assets/img/icon-keyboard-dark.svg";
 import microphoneIcon from "@/assets/img/icon-mic-red.svg";
 import sendUpIcon from "@/assets/img/icon-send-up.svg";
-import voiceWaveBlueDark from "@/assets/img/icon-voice-wave-blue-dark.svg";
-import voiceWaveBlueLight from "@/assets/img/icon-voice-wave-blue-light.svg";
 import voiceWaveLight from "@/assets/img/icon-voice-wave-light.svg";
 import voiceWaveOnDark from "@/assets/img/icon-waveform-darck.svg";
 // 起飞段的中间大图与对话页灵动岛用同一套深浅色 webp（图案占比不同，样式里已按主题补偿 scale）
@@ -24,6 +21,7 @@ import titleLight from "@/assets/img/sany-neo-light.svg";
 import { useSafeArea } from "@/hooks/useSafeArea";
 import { useSettingsStore } from "@/stores";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
+import { suppressNextClick } from "@/utils/suppress-next-click";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
 
 /**
@@ -109,16 +107,10 @@ const sloganChars = computed(() => Array.from(t("init-brand-slogan")));
 const descChars = computed(() => Array.from(t("init-brand-desc-1")));
 
 /**
- * 声波图标：**未触发**（没开实时语音）时用未激活态切图，**触发后**换成蓝色声波 + 白色胶囊（截图两态）。
- * 两种态都按主题取不同切图：
- *
- * | | 浅色主题 | 深色主题 |
- * | --- | --- | --- |
- * | 未触发 | `icon-voice-wave-light.svg`（白胶囊 + 灰声波） | `icon-waveform-darck.svg`（纯白声波） |
- * | 触发后 | `icon-voice-wave-blue-light.svg`（深蓝 #1166D6） | `icon-voice-wave-blue-dark.svg`（亮蓝 #47B5FF） |
+ * 声波图标（纯展示，点击等同「点击说话」）按主题取图：
+ * 浅色主题 `icon-voice-wave-light.svg`（白胶囊 + 灰声波），深色主题 `icon-waveform-darck.svg`（纯白声波）。
  */
 const waveIconIdle = computed(() => (props.dark ? voiceWaveOnDark : voiceWaveLight));
-const waveIconActive = computed(() => (props.dark ? voiceWaveBlueDark : voiceWaveBlueLight));
 
 /**
  * 中心图标「静态图 → 动图」的无感知切换。
@@ -262,22 +254,23 @@ function onSpeakPressMove(event: unknown) {
   if (Math.abs(point.x - holdOrigin.x) > 12 || Math.abs(point.y - holdOrigin.y) > 12) clearSpeakHold();
 }
 
-const duplexGesture = useDuplexButtonGesture({
-  onClick: () => onSpeakTap(),
-  onHold: () => onDuplexTap(),
-  onPressStart: () => clearSpeakHold(),
-});
-watch(() => props.leaving, leaving => {
-  if (leaving) duplexGesture.cancel();
-  // 退回初始页（离开起飞态）时把输入条放回来，下一轮还要能点
-  else composerHidden.value = false;
-});
-
-function onDuplexTap() {
-  if (props.leaving || startFired || listenMounted.value) return;
+/**
+ * 抬手收尾（pointerup 通道）：胶囊和输入栏那颗一样带 `touch-action: none`，
+ * 部分 WebView 会把随后的 click(tap) 吞掉，这里补一次「点击说话」。
+ * `startFired` 已拦住长按起飞后的重复触发。
+ */
+function onSpeakRelease() {
   clearSpeakHold();
-  emit('duplex-toggle');
+  if (props.leaving || startFired) return;
+  // 抬手即起飞：这一手势随后补发的 click 会落到刚出现的对话页元素上，先吞掉
+  suppressNextClick();
+  onSpeakTap();
 }
+
+watch(() => props.leaving, leaving => {
+  // 退回初始页（离开起飞态）时把输入条放回来，下一轮还要能点
+  if (!leaving) composerHidden.value = false;
+});
 
 /**
  * 点键盘：
@@ -531,35 +524,14 @@ onBeforeUnmount(() => {
           @blur="emit('input-blur')"
           @confirm="sendDraft()"
         />
+        <!-- 声波图标（纯展示，不再做实时语音开关）：点在图标上等同点整条胶囊（点击说话） -->
         <view
           v-if="duplexEnabled"
-          class="welcome__composer-wave"
-          :class="{
-            'welcome__composer-wave--active': duplexActive,
-            'welcome__composer-wave--starting': duplexStarting,
-          }"
-          role="button"
-          :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
-          :aria-pressed="duplexActive"
-          tabindex="0"
-          @pointerdown.stop.prevent="duplexGesture.start"
-          @pointermove.stop.prevent="duplexGesture.move"
-          @pointerup.stop.prevent="duplexGesture.end"
-          @pointercancel.stop="duplexGesture.cancel"
-          @lostpointercapture="duplexGesture.cancel"
-          @touchstart.stop="duplexGesture.start"
-          @touchend.stop="duplexGesture.end"
-          @touchmove.stop="duplexGesture.move"
-          @touchcancel.stop="duplexGesture.cancel"
-          @mousedown.stop="duplexGesture.start"
-          @mouseup.stop="duplexGesture.end"
-          @tap.stop="duplexGesture.tap"
-          @keydown.enter.stop.prevent="onSpeakTap()"
-          @keydown.space.stop.prevent="onSpeakTap()"
+          class="welcome__composer-wave welcome__composer-wave--passive"
         >
           <image
             class="welcome__composer-wave-icon"
-            :src="duplexActive ? waveIconActive : waveIconIdle"
+            :src="waveIconIdle"
             mode="aspectFit"
             aria-hidden="true"
           />
@@ -571,43 +543,22 @@ onBeforeUnmount(() => {
         class="welcome__composer-voice"
         @touchstart="onSpeakPressStart" @touchmove="onSpeakPressMove"
         @touchend="clearSpeakHold" @touchcancel="clearSpeakHold"
+        @pointerdown="onSpeakPressStart" @pointermove="onSpeakPressMove"
+        @pointerup="onSpeakRelease" @pointercancel="clearSpeakHold"
         @mousedown="onSpeakPressStart" @mouseup="clearSpeakHold"
         @tap="onSpeakTap"
       >
         <text class="welcome__composer-voice-label">
           {{ t("welcome-tap-to-speak") }}
         </text>
-        <!-- 声波芯片（实时语音）：嵌在胶囊右端内部，不另占一列（截图 x450..526 / y352..409）；
-             与对话页 .input-bar__wave-chip 同口径：未开启不铺底，开启后 #FFFFFF20 + 蓝色声波 -->
+        <!-- 声波图标（纯展示，不再做实时语音开关）：点在图标上等同点整条胶囊（点击说话） -->
         <view
           v-if="duplexEnabled"
-          class="welcome__composer-wave"
-          :class="{
-            'welcome__composer-wave--active': duplexActive,
-            'welcome__composer-wave--starting': duplexStarting,
-          }"
-          role="button"
-          :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
-          :aria-pressed="duplexActive"
-          tabindex="0"
-          @pointerdown.stop.prevent="duplexGesture.start"
-          @pointermove.stop.prevent="duplexGesture.move"
-          @pointerup.stop.prevent="duplexGesture.end"
-          @pointercancel.stop="duplexGesture.cancel"
-          @lostpointercapture="duplexGesture.cancel"
-          @touchstart.stop="duplexGesture.start"
-          @touchend.stop="duplexGesture.end"
-          @touchmove.stop="duplexGesture.move"
-          @touchcancel.stop="duplexGesture.cancel"
-          @mousedown.stop="duplexGesture.start"
-          @mouseup.stop="duplexGesture.end"
-          @tap.stop="duplexGesture.tap"
-          @keydown.enter.stop.prevent="onSpeakTap()"
-          @keydown.space.stop.prevent="onSpeakTap()"
+          class="welcome__composer-wave welcome__composer-wave--passive"
         >
           <image
             class="welcome__composer-wave-icon"
-            :src="duplexActive ? waveIconActive : waveIconIdle"
+            :src="waveIconIdle"
             mode="aspectFit"
             aria-hidden="true"
           />
@@ -651,6 +602,11 @@ onBeforeUnmount(() => {
 .welcome__composer-wave {
   touch-action: none;
   user-select: none;
+}
+
+/* 声波图标只做展示：点在图标上等同点整条胶囊（点击说话） */
+.welcome__composer-wave--passive {
+  pointer-events: none;
 }
 
 /* 起飞动画期间要和「对话页」同时存在：欢迎层铺满视口并压在上面，

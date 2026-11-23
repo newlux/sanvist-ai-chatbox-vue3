@@ -564,7 +564,10 @@ export interface BatchDeleteConversationsParams {
 }
 
 export interface BatchDeleteResult {
+  /** 真正删掉的条数 */
   deleted: number;
+  /** 没删掉的会话 id：部分失败时由调用方决定是否提示 / 重试 */
+  failed: Identifier[];
 }
 
 export interface RenameConversationParams {

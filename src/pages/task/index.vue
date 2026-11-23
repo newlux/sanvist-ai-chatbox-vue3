@@ -1194,9 +1194,12 @@ async function onSessionDeleteBatch(ids: Array<string | number>) {
   const uniqueIds = Array.from(new Set((ids || []).map(id => String(id))));
   if (!uniqueIds.length) return;
   try {
-    await sessionStore.removeSessions(uniqueIds);
+    const result = await sessionStore.removeSessions(uniqueIds);
     await chatHeader.value?.reloadSessions?.();
-    if (chatStore.aiSessionId && uniqueIds.includes(String(chatStore.aiSessionId))) {
+    // 只有当前会话确实删掉了才清空：部分失败时它可能还在 failed 里
+    const currentId = String(chatStore.aiSessionId || "");
+    const failedIds = (result?.failed || []).map(id => String(id));
+    if (currentId && uniqueIds.includes(currentId) && !failedIds.includes(currentId)) {
       chatStore.resetConversation();
     }
     uni.showToast({ title: t("delete-success"), icon: "none" });

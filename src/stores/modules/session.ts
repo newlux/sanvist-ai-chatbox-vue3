@@ -207,24 +207,54 @@ export const useSessionStore = defineStore("session", () => {
   }
 
   /**
+   * 当前这一批历史消息的请求序号。
+   *
+   * 载入 / 上翻都是异步的，期间可能切了会话、或把这条会话直接删了 ——
+   * 回包落到新会话 / 已清空的列表上，就是「删掉的历史又冒出来」那种串写。
+   * 每次载入领一个新号，回包时对不上就丢弃。
+   */
+  const historyRequestSeq = ref(0);
+
+  /** 这批历史是否已经失效：序号被后一次载入顶掉，或当前会话已经不是它 */
+  function isStaleHistory(seq: number, sessionId: Identifier, chatStore: ChatStore) {
+    return seq !== historyRequestSeq.value || String(chatStore.aiSessionId) !== String(sessionId);
+  }
+
+  /**
    * 载入某个会话的历史消息（最近一页）。
    * chatStore 由调用方传入：首页和智能体页面各有自己的会话域，
    * 这里默认取一个的话就会写错页面。
    */
   async function loadHistory(sessionId: Identifier, chatStore: ChatStore) {
-    const page = await getMessages({
-      conversationId: sessionId,
-      limit: HISTORY_PAGE_SIZE,
-    });
-    const rows = page?.data || [];
-    chatStore.messages = mapHistoryMessages(rows, sessionId, { hideNoviceVoice: chatStore.scope !== "task" });
-    // 接口按时间正序返回，最早的一条就是下一页的游标
-    historyFirstId.value = (rows[0]?.id ?? null) as Identifier | null;
-    historyHasMore.value = Boolean(page?.hasMore);
-    historyLoading.value = false;
-    chatStore.showQuickPrompts = false;
-    chatStore.showQuickList = false;
-    chatStore.scrollToBottom(true);
+    const seq = ++historyRequestSeq.value;
+    try {
+      const page = await getMessages({
+        conversationId: sessionId,
+        limit: HISTORY_PAGE_SIZE,
+      });
+      /**
+       * 回包时再判一次：打开历史会话的过程中，用户可能已经点开了别的会话，
+       * 或者把这条会话删掉了（删除会 resetConversation，aiSessionId 被清空）。
+       * 此时这批消息已经不属于当前列表，写进去就是「已删除的会话消息复活」——
+       * 表现是删完还挂着旧消息、再发问又新开一个会话。
+       */
+      if (isStaleHistory(seq, sessionId, chatStore)) return;
+      const rows = page?.data || [];
+      chatStore.messages = mapHistoryMessages(rows, sessionId, { hideNoviceVoice: chatStore.scope !== "task" });
+      // 接口按时间正序返回，最早的一条就是下一页的游标
+      historyFirstId.value = (rows[0]?.id ?? null) as Identifier | null;
+      historyHasMore.value = Boolean(page?.hasMore);
+      chatStore.showQuickPrompts = false;
+      chatStore.showQuickList = false;
+      chatStore.scrollToBottom(true);
+    } catch (error) {
+      // 会话已经被切走 / 删掉时，这个失败（多为 404）是预期的，不再往上抛，
+      // 否则页面会弹一个「加载历史失败」——删除当前会话时最容易被看到
+      if (isStaleHistory(seq, sessionId, chatStore)) return;
+      throw error;
+    } finally {
+      historyLoading.value = false;
+    }
   }
 
   /**
@@ -236,6 +266,8 @@ export const useSessionStore = defineStore("session", () => {
     if (!sessionId || !historyHasMore.value || historyLoading.value) return false;
     if (!historyFirstId.value) return false;
 
+    // 与 loadHistory 共用同一个序号：上翻期间切会话 / 删会话，这一页也不能插进来
+    const seq = historyRequestSeq.value;
     historyLoading.value = true;
     try {
       const page = await getMessages({
@@ -243,6 +275,7 @@ export const useSessionStore = defineStore("session", () => {
         firstId: historyFirstId.value,
         limit: HISTORY_PAGE_SIZE,
       });
+      if (isStaleHistory(seq, sessionId, chatStore)) return false;
       const rows = page?.data || [];
       if (!rows.length) {
         historyHasMore.value = false;
@@ -258,10 +291,19 @@ export const useSessionStore = defineStore("session", () => {
     }
   }
 
+  /**
+   * Dify 用来校验会话归属的 user 标识。
+   *
+   * 口径必须和「创建会话」时完全一致 —— 也就是 /chat-messages 请求体里的那个 user
+   * （见 useChatSend 的 `userStore.userId || "guest"`）：归属对不上，DELETE 会按
+   * 会话不存在处理，前端只能看到「删除失败」。
+   *
+   * 所以这里不再抛「缺少 Dify 用户标识」，而是按同一套兜底到 "guest"：
+   * 之前宿主没传 userId 的容器里 store 是空的，会话列表接口又不带 user、照样能加载，
+   * 结果就是「列表能看、点删除必定失败」，删除 / 批量删除 / 重命名一起失效。
+   */
   function getDifyUser() {
-    const user = String(useUserStore().userId || "").trim();
-    if (!user) throw new Error("缺少 Dify 用户标识");
-    return user;
+    return String(useUserStore().userId || "").trim() || "guest";
   }
 
   async function removeSession(sessionId: Identifier) {
@@ -269,12 +311,21 @@ export const useSessionStore = defineStore("session", () => {
     await loadSessions();
   }
 
+  /**
+   * 批量删除。
+   *
+   * 部分成功不抛错：删掉的那部分已经从服务端消失，列表必须刷新，
+   * 否则用户会对着已经不存在的会话反复删、反复收「批量删除失败」。
+   * 返回 failed（没删掉的 id），调用方可据此提示或重试；
+   * 一条都没删掉时 api 层仍然抛错，页面照常提示失败。
+   */
   async function removeSessions(ids: Identifier[]) {
-    await batchDeleteConversations({
+    const result = await batchDeleteConversations({
       conversationIds: ids,
       user: getDifyUser(),
     });
     await loadSessions();
+    return result;
   }
 
   async function renameSession(sessionId: Identifier, name: string) {

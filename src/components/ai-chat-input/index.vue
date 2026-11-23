@@ -2,26 +2,18 @@
 import { storeToRefs } from "pinia";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import iconWaveBlueDark from "@/assets/img/icon-voice-wave-blue-dark.svg";
-import iconWaveBlueLight from "@/assets/img/icon-voice-wave-blue-light.svg";
 import iconWaveLight from "@/assets/img/icon-voice-wave-light.svg";
 import iconWaveOnDark from "@/assets/img/icon-waveform-darck.svg";
 import AiChatAttachments from "@/components/ai-chat-attachments/index.vue";
 import { useComposerAttachments } from "@/hooks/useComposerAttachments";
 import { showAttachmentComingSoon } from "@/utils/attachment-notice";
 import { resolveMotionElement } from "@/utils/voice-message-motion";
-import { useDuplexButtonGesture } from "@/hooks/useDuplexButtonGesture";
 import { usePressDelay } from "@/hooks/usePressDelay";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useSettingsStore } from "@/stores";
 import { createLogger } from "@/utils/logger";
 import { getMicrophoneVolume } from "@/utils/platform/mpaas";
-
-const duplexGesture = useDuplexButtonGesture({
-  onClick: () => onVoiceQueryStartTap(),
-  onHold: () => emit("duplex-toggle"),
-  onPressStart: () => onVoiceQueryPressEnd(),
-});
+import { suppressNextClick } from "@/utils/suppress-next-click";
 
 const logger = createLogger("chat-input");
 
@@ -93,16 +85,10 @@ const emit = defineEmits([
 const { t } = useI18n();
 
 /**
- * 声波图标：**未触发**（没开实时语音）时用未激活态切图，**触发后**换成蓝色声波 + 白色胶囊（截图两态）。
- * 两种态都按主题取不同切图：
- *
- * | | 浅色主题 | 深色主题 |
- * | --- | --- | --- |
- * | 未触发 | `icon-voice-wave-light.svg`（白胶囊 + 灰声波） | `icon-waveform-darck.svg`（纯白声波） |
- * | 触发后 | `icon-voice-wave-blue-light.svg`（深蓝 #1166D6） | `icon-voice-wave-blue-dark.svg`（亮蓝 #47B5FF） |
+ * 声波图标（纯展示，点击等同「点击说话」）按主题取图：
+ * 浅色主题 `icon-voice-wave-light.svg`（白胶囊 + 灰声波），深色主题 `icon-waveform-darck.svg`（纯白声波）。
  */
 const waveIconIdle = computed(() => (props.dark ? iconWaveOnDark : iconWaveLight));
-const waveIconActive = computed(() => (props.dark ? iconWaveBlueDark : iconWaveBlueLight));
 
 /**
  * 输入框的本地副本。父组件清空 v-model 是异步的（发送链路里还要过一次 store），
@@ -713,15 +699,22 @@ function clearHoldTimer() {
 }
 
 /**
+ * 现在能不能开一轮语音提问（加载中 / 400ms 去重窗口内都不行）。
+ * 抬手收尾那条路径要先问一句，再决定要不要吞掉补发的 click。
+ */
+function canEmitVoiceQueryStart() {
+  return !props.isLoading && Date.now() - lastVoiceQueryStartAt >= VOICE_QUERY_START_DEDUPE_MS;
+}
+
+/**
  * 开一轮语音提问：不进入内部的长按状态机（那套是整段录音 + 上传识别），
  * 直接把「开始一轮语音提问」交给页面，由页面的流式 ASR 链路接管。
  */
 function emitVoiceQueryStart(mode?: "hold", target?: EventTarget) {
-  if (props.isLoading) return;
-  const now = Date.now();
-  if (now - lastVoiceQueryStartAt < VOICE_QUERY_START_DEDUPE_MS) return;
-  lastVoiceQueryStartAt = now;
+  if (!canEmitVoiceQueryStart()) return false;
+  lastVoiceQueryStartAt = Date.now();
   emit("voice-query-start", mode, target);
+  return true;
 }
 
 /**
@@ -782,6 +775,36 @@ function onVoiceQueryPressEnd() {
 }
 
 /**
+ * 抬手收尾（pointerup 通道）。
+ *
+ * 「点击说话」原来只靠 `@tap`（H5 下就是 click）：胶囊带 `touch-action: none`，
+ * 上一次按住又挂过 capture 阶段的 preventDefault，部分 WebView 会把这次 click 吞掉，
+ * 表现就是这块胶囊「点了没反应」。这里在抬手时补一次点击，
+ * `holdStarted` 与 400ms 去重保证它和随后可能补发的 click 不会开两轮。
+ */
+function onVoiceQueryRelease() {
+  // 按住 ≥350ms 已经由定时器开过一轮：这次抬手只清计时器，不重复开
+  const held = holdStarted;
+  onVoiceQueryPressEnd();
+  if (held) return;
+  if (!canEmitVoiceQueryStart()) return;
+  /**
+   * 抬手这一刻就开录，页面会立刻把输入栏换成录音条；同一手势随后补发的 click
+   * 会落到录音条上（声纹区 / 发送键都是 `@tap` 提交），表现为「刚开录就结束、
+   * 提示未识别到语音内容」。所以先吞掉这次补发的 click，再开录。
+   */
+  suppressNextClick();
+  onVoiceQueryStartTap();
+}
+
+/** 文本态那颗声波图标：抬手即开录，同样要吞掉补发的 click，否则会点到录音条上 */
+function onVoiceIconRelease() {
+  if (!canEmitVoiceQueryStart()) return;
+  suppressNextClick();
+  onVoiceQueryStartTap();
+}
+
+/**
  * 供外部调用（步骤卡拍照）：先切到文本模式，再聚焦文本输入框。
  * 走的是 textarea 自己的 focus 链路，键盘与底部间距沿用原有逻辑。
  */
@@ -822,7 +845,6 @@ async function cancelGlobalVoiceHold() {
  * 注意 appendAttachments 对应 hook 里的 appendUploadedAttachments，两处名字必须一致。
  */
 defineExpose({
-  cancelDuplexPress: duplexGesture.cancel,
   appendAttachments: appendUploadedAttachments,
   focusTextInput,
   startGlobalVoiceHold,
@@ -1130,40 +1152,22 @@ onBeforeUnmount(() => {
           @touchmove="onVoiceQueryPressMove"
           @touchend="onVoiceQueryPressEnd"
           @touchcancel="onVoiceQueryPressEnd"
+          @pointerdown="onVoiceQueryPressStart"
+          @pointermove="onVoiceQueryPressMove"
+          @pointerup="onVoiceQueryRelease"
+          @pointercancel="onVoiceQueryPressEnd"
           @mousedown="onVoiceQueryPressStart"
           @mouseup="onVoiceQueryPressEnd"
           @tap="onVoiceQueryStartTap"
         >
           <text class="input-bar__hold-label">{{ t("welcome-tap-to-speak") }}</text>
-          <!-- 声波芯片（实时语音）：截图里嵌在灰胶囊右端内部，不另占一列（x450..526 / y352..409）；
-               未开启 = 不铺底（只有图标），开启后 = #FFFFFF20 底 + 蓝色声波 -->
+          <!-- 声波图标（纯展示，不再做实时语音开关）：pointer-events 关掉后点它等同点整条胶囊，
+               也就是「点击说话」这条链路 -->
           <view
             v-if="duplexEnabled"
-            class="input-bar__wave-chip"
-            :class="{
-              'input-bar__wave-chip--active': duplexActive,
-              'input-bar__duplex--starting': duplexStarting,
-            }"
-            role="button"
-            :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
-            :aria-pressed="duplexActive"
-            tabindex="0"
-            @pointerdown.stop.prevent="duplexGesture.start"
-            @pointermove.stop.prevent="duplexGesture.move"
-            @pointerup.stop.prevent="duplexGesture.end"
-            @pointercancel.stop="duplexGesture.cancel"
-            @lostpointercapture="duplexGesture.cancel"
-            @touchstart.stop="duplexGesture.start"
-            @touchend.stop="duplexGesture.end"
-            @touchmove.stop="duplexGesture.move"
-            @touchcancel.stop="duplexGesture.cancel"
-            @mousedown.stop="duplexGesture.start"
-            @mouseup.stop="duplexGesture.end"
-            @tap.stop="duplexGesture.tap"
-            @keydown.enter.stop.prevent="onVoiceQueryStartTap()"
-            @keydown.space.stop.prevent="onVoiceQueryStartTap()"
+            class="input-bar__wave-chip input-bar__wave-chip--passive"
           >
-            <image :src="duplexActive ? waveIconActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
+            <image :src="waveIconIdle" mode="aspectFit" aria-hidden="true" />
           </view>
         </view>
         <view
@@ -1211,34 +1215,19 @@ onBeforeUnmount(() => {
             @focus="onTextareaFocus"
             @blur="onTextareaBlur"
           />
+          <!-- 声波图标：文本态也当「点击说话」用 —— 点一下直接开一轮语音提问，
+               pointerup 是 click 在某些 WebView 里被吞掉时的兜底，400ms 去重保证只开一轮 -->
           <view
             v-if="duplexEnabled"
             class="input-bar__wave-chip"
-            :class="{
-              'input-bar__wave-chip--active': duplexActive,
-              'input-bar__duplex--starting': duplexStarting,
-            }"
             role="button"
-            :aria-label="t(duplexActive || duplexStarting ? 'duplex-close' : 'duplex-open')"
-            :aria-pressed="duplexActive"
-            tabindex="0"
-            @pointerdown.stop.prevent="duplexGesture.start"
-            @pointermove.stop.prevent="duplexGesture.move"
-            @pointerup.stop.prevent="duplexGesture.end"
-            @pointercancel.stop="duplexGesture.cancel"
-            @lostpointercapture="duplexGesture.cancel"
-            @touchstart.stop="duplexGesture.start"
-            @touchend.stop="duplexGesture.end"
-            @touchmove.stop="duplexGesture.move"
-            @touchcancel.stop="duplexGesture.cancel"
-            @mousedown.stop="duplexGesture.start"
-            @mouseup.stop="duplexGesture.end"
-            @tap.stop="duplexGesture.tap"
-            @keydown.enter.stop.prevent="onVoiceQueryStartTap()"
-            @keydown.space.stop.prevent="onVoiceQueryStartTap()"
+            :aria-label="t('welcome-tap-to-speak')"
+            @tap.stop.prevent="onVoiceQueryStartTap"
+            @pointerup.stop="onVoiceIconRelease"
+            @keydown.enter.stop.prevent="onVoiceQueryStartTap"
+            @keydown.space.stop.prevent="onVoiceQueryStartTap"
           >
-            <!-- 声波：未触发是深色 6 段声波，触发后才是纯蓝（#1166D6），不渐变 -->
-            <image :src="duplexActive ? waveIconActive : waveIconIdle" mode="aspectFit" aria-hidden="true" />
+            <image :src="waveIconIdle" mode="aspectFit" aria-hidden="true" />
           </view>
         </view>
 
@@ -1289,6 +1278,11 @@ onBeforeUnmount(() => {
 .input-bar__wave-chip {
   touch-action: none;
   user-select: none;
+}
+
+/* 语音态胶囊里的声波图标只做展示：点在图标上等同点整条胶囊（点击说话） */
+.input-bar__wave-chip--passive {
+  pointer-events: none;
 }
 
 .chat-input {

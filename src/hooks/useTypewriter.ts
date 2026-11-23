@@ -100,8 +100,7 @@ export function useTypewriter(source: () => string, options: TypewriterOptions =
          */
         if (text && previousText.includes(text)) {
           revealed.value = Math.min(revealed.value, text.length);
-        }
-        else {
+        } else {
           revealed.value = prefix;
         }
       }

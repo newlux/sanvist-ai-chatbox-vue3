@@ -219,10 +219,17 @@ function normalizeCategoryAxis(axis: any, categoryWidth?: number) {
     axisLabel: {
       interval: 0,
       hideOverlap: false,
-      overflow: "break",
       lineHeight: Math.ceil(fontSize * 1.35),
       ...axisLabel,
       ...(labelWidth ? { width: labelWidth } : {}),
+      /**
+       * 类目名**单行截断**：超宽的就用省略号收尾，不再折成两三行。
+       * 折行会把轴标签区顶得很高、把柱子压扁，长设备名（「临港吊车02（CC0350CG0023）」这类）
+       * 尤其明显；截断后每根柱子下面只占一行。
+       * 放在 `...axisLabel` 之后是为了压掉后端可能给的 break / breakAll。
+       */
+      overflow: "truncate",
+      ellipsis: "...",
       rotate: 0,
     },
   };
@@ -274,27 +281,17 @@ function axisBottomSpace(axis: any) {
   const labels = Array.isArray(axis?.data) ? axis.data.map(textOf) : [];
   const fontSize = Number(axis?.axisLabel?.fontSize) || DEFAULT_FONT_SIZE;
   const lineHeight = Number(axis?.axisLabel?.lineHeight) || Math.ceil(fontSize * 1.35);
-  const labelWidth = Number(axis?.axisLabel?.width) || 0;
   /**
    * 标签与轴线之间的间距（echarts 默认 8px）必须算进来：
-   * 这里只留 labelHeight 的话，最后一行会正好贴着画布底边，被切掉小半截
-   * （柱状图底部「临港自卸车09 (25ZX3241013)」这类两行标签就是这样被裁的）。
+   * 这里只留 labelHeight 的话，标签最后一行会正好贴着画布底边，被切掉小半截。
    */
   const marginValue = Number(axis?.axisLabel?.margin);
   const labelMargin = Number.isFinite(marginValue) ? marginValue : 8;
-  const lineCount = (label: string) => {
-    const explicitLines = label.split("\n");
-    if (!labelWidth) return explicitLines.length;
-    /**
-     * 折行宽度按 95% 折算：canvas 测量与实际渲染之间有几个像素的字体回退差，
-     * 估算偏乐观就会少算一行，导致最下面一行整个落到画布外。
-     * 宁可多算半行，也不能让文字被裁。
-     */
-    const usableWidth = Math.max(1, labelWidth * 0.95);
-    return explicitLines.reduce((count, line) => {
-      return count + Math.max(1, Math.ceil(longestLineWidth(line, axis.axisLabel) / usableWidth));
-    }, 0);
-  };
+  /**
+   * 类目名已在 normalizeCategoryAxis 里改成 `overflow: truncate` 单行省略，
+   * 这里只按文本里显式写的换行算行数，不再按宽度估算折行。
+   */
+  const lineCount = (label: string) => label.split("\n").length;
   const labelHeight = lineHeight * Math.max(1, ...labels.map(lineCount));
   const axisNameSpace = String(axis?.name || "").trim()
     ? Number(axis?.nameGap) || DEFAULT_AXIS_NAME_GAP
