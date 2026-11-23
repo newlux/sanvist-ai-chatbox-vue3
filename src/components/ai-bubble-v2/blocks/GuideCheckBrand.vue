@@ -2,50 +2,45 @@
 import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import saniIcon from "@/assets/img/icon-sani.png";
 
-defineOptions({
-  name: "GuideCheckBrand",
-});
+defineOptions({ name: "GuideCheckBrand" });
 
 /**
- * 步骤卡左上角的品牌署名行：SANY Neo logo + 「SANY Neo」+ 语音播报按钮。
+ * 步骤卡的品牌署名行：SANY Neo 图标 + SANY Neo + 语音播报控制。
  *
- * 从 GuideCheckBlock 里抽出来、由消息列表放在卡片容器的固定层：
- * 切一步 = 换一个 block.id = 下面的内容卡整块重挂载，品牌行留在卡片里就会跟着重建
- * （图标重插、播放态跳回静止、入场动画连它一起平移）。这里只做展示和点击，
- * 播报文案由消息列表按「当前展示的那张卡」组装，组件本身不认识 payload。
+ * 从 GuideCheckBlock 里独立出来，由消息列表渲染在卡片容器的固定层（见 ai-message-list 的
+ * standaloneBlocks 那一层）：步骤卡每切一步都会整块重挂载（key 是 block.id，一步一块），
+ * 品牌行留在卡片内就会跟着一起重建 —— 图标重新插一次、播报按钮的播放态跳回静止、
+ * 滑动切步的入场动画还会把它连内容一起平移，看上去就是「SANY Neo 那行在闪」。
+ * 放在容器层后，切步只有下面的内容卡重挂载，这一行纹丝不动。
+ *
+ * 只负责 UI：播报文案由外层按当前展示的那张卡组装（见 ai-message-list 的 onStepCardTts）。
  */
-const props = defineProps<{
-  /** 深色主题：文字转白、声波用亮蓝 */
-  dark?: boolean;
-  /** 语音播报总开关（关掉时连按钮都不出现） */
-  ttsEnabled?: boolean;
-  /** 播报请求中：按钮位置显示转圈 */
-  ttsLoading?: boolean;
-  /** 正在播报：按钮位置显示跳动的声波 */
-  ttsPlaying?: boolean;
-}>();
+defineProps({
+  /** 深色：与卡片内容同一套（#FFF 文字） */
+  dark: { type: Boolean, default: false },
+  /** 这一轮是否支持语音播报：不支持时不画按钮 */
+  ttsEnabled: { type: Boolean, default: false },
+  /** 拉流中（spinner） */
+  ttsLoading: { type: Boolean, default: false },
+  /** 播放中（蓝色声波） */
+  ttsPlaying: { type: Boolean, default: false },
+});
 
 const emit = defineEmits<{
   (e: "tts-click"): void;
 }>();
-
-function onTtsTap() {
-  if (!props.ttsEnabled) return;
-  emit("tts-click");
-}
 </script>
 
 <template>
   <view class="guide-check-brand" :class="{ 'guide-check-brand--dark': dark }">
-    <image class="guide-check-brand__icon" :src="saniIcon" mode="aspectFit" aria-hidden="true" />
+    <image class="guide-check-brand__icon" :src="saniIcon" mode="aspectFit" />
     <text class="guide-check-brand__text">
       SANY Neo
     </text>
     <view
       v-if="ttsEnabled"
       class="guide-check-brand__tts"
-      data-share-poster-ignore
-      @tap.stop="onTtsTap"
+      @tap.stop="emit('tts-click')"
     >
       <view v-if="ttsLoading" class="guide-check-brand__spinner" />
       <view v-else-if="ttsPlaying" class="guide-check-brand__wave">
@@ -62,7 +57,6 @@ function onTtsTap() {
 </template>
 
 <style lang="scss" scoped>
-/* 左上角品牌署名：SANY Neo logo + SANY Neo + 播报按钮（与气泡完成态同一套观感） */
 .guide-check-brand {
   display: flex;
   align-items: center;
@@ -149,7 +143,7 @@ function onTtsTap() {
   }
 }
 
-/* ===== 深色：与气泡内其它块同一套材质 ===== */
+/* ===== 深色：与卡片其它块同一套材质 ===== */
 .guide-check-brand--dark {
   .guide-check-brand__text {
     color: #fff;
@@ -162,6 +156,11 @@ function onTtsTap() {
 
   .guide-check-brand__wave-bar {
     background: #4c8dff;
+  }
+
+  /* 播报图标的 svg 在深底上偏暗，整体提亮一档（与卡片动作区同做法） */
+  .guide-check-brand__action-icon {
+    filter: brightness(1.7);
   }
 }
 </style>

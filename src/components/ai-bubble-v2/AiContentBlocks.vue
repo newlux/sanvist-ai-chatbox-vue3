@@ -173,7 +173,12 @@ const renderItems = computed(() => {
   });
   appendGroup();
 
-  return [...items, ...slotBlocks, ...trailingSlots];
+  /**
+   * 只追加 trailingSlots（= 正文收尾后才放出来的 ask-slot），**不能**再拼一次 slotBlocks：
+   * 它是 trailingSlots 的来源，bodyPending 为 false 时两者是同一批块 —— 欢迎语那种
+   * 既不打字也没有 loading 的消息，追问卡会被渲染两遍（任务协同开场选身份最典型）。
+   */
+  return [...items, ...trailingSlots];
 });
 
 /**
