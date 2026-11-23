@@ -105,8 +105,37 @@ const bodyPending = computed(() => Boolean(props.loading) || bodyTyping.value);
 /** 需要等正文打完才出现的选项类块 */
 const OPTION_BLOCK_TYPES = new Set(["ask-slot", "suggestion", "guide-suggestion", "assistant-navigation"]);
 
+/**
+ * 正文里的参考图（image）：与参考资料一样压到正文收尾后再挂载。
+ *
+ * 图片事件往往紧跟在正文后面到达（见 tests/test.log：answer 分段 → image → source），
+ * 但图片一旦挂载就会立刻撑高容器、并且自己还会异步加载完 —— 打字机还在一个字一个字
+ * 吐正文时，图已经稳稳摆在下面了，观感就是「文字还在长、图先好了」。
+ * 压到正文打完再挂载，顺序才是「正文 → 图片 → 参考资料 → 选项」。
+ */
+const MEDIA_BLOCK_TYPES = new Set(["image"]);
+
+/**
+ * 参考资料（source）：正文打完后再接在正文下方。
+ * 它在气泡内、位置紧挨正文，所以比气泡外的选项 / 独立卡早一步浮现（见样式里的延迟阶梯）。
+ */
+const REFERENCE_BLOCK_TYPES = new Set(["source"]);
+
 function isOptionBlock(block: AiBlock) {
   return OPTION_BLOCK_TYPES.has(block.type);
+}
+
+function isMediaBlock(block: AiBlock) {
+  return MEDIA_BLOCK_TYPES.has(block.type);
+}
+
+function isReferenceBlock(block: AiBlock) {
+  return REFERENCE_BLOCK_TYPES.has(block.type);
+}
+
+/** 正文收尾前要压住的块：选项类 + 正文里的图片 + 参考资料 */
+function isDeferredBlock(block: AiBlock) {
+  return isOptionBlock(block) || isMediaBlock(block) || isReferenceBlock(block);
 }
 
 /**
@@ -139,11 +168,12 @@ const renderItems = computed(() => {
   const visibleVoiceBlocks = renderVoiceBlock ? voiceBlocks : [];
   const slotBlocks = rest.filter(block => block.type === "ask-slot");
   /**
-   * 正文逐字 / 本轮生成期间先摘掉选项类块（追问卡 / 推荐问题 / 跳转卡），正文收尾后再放回来。
+   * 正文逐字 / 本轮生成期间先摘掉选项类块（追问卡 / 推荐问题 / 跳转卡）、正文里的图片
+   * 与参考资料，正文收尾后再按「图片 → 参考资料 → 选项」的顺序放回来。
    * 只影响渲染：store 里的块序不变，播报 / 分享按块取内容不受影响。
    */
   const contentBlocks = rest.filter(block => block.type !== "ask-slot"
-    && !(bodyPending.value && isOptionBlock(block)));
+    && !(bodyPending.value && isDeferredBlock(block)));
   const trailingSlots = bodyPending.value ? [] : slotBlocks;
 
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
@@ -333,7 +363,11 @@ watch(
       <AiBlockRenderer
         v-else
         :block="item"
-        :class="{ 'ai-content-blocks__option': isOptionBlock(item) }"
+        :class="{
+          'ai-content-blocks__option': isOptionBlock(item),
+          'ai-content-blocks__media': isMediaBlock(item),
+          'ai-content-blocks__reference': isReferenceBlock(item),
+        }"
         :force-thinking-expanded="forceThinkingExpanded"
         :embedded="noAnswerGroup"
         :loading="loading"
@@ -361,13 +395,24 @@ watch(
 <style lang="scss" scoped>
 .ai-content-blocks { display: flex; flex-direction: column; width: 100%; min-width: 0; gap: 0; }
 
-/* 选项类块在正文打完那一刻才挂载（见 renderItems）：补一次淡入上移，
-   否则会整块「啪」地出现在正文末尾，像是被硬塞进来的 */
-.ai-content-blocks__option {
-  animation: ai-option-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+/* 正文打完那一刻才挂载（见 renderItems）：补一次淡入上移，
+   否则会整块「啪」地出现在正文末尾，像是被硬塞进来的。
+   四档延迟形成「正文 → 图片 → 参考资料 → 选项 → 气泡外独立卡」的浮现顺序：
+   图片紧随正文（0s），参考资料让一拍（0.08s），选项再让一拍（0.16s），
+   独立卡最后一档（见 ai-bubble-v2 的 .ai-bubble-v2__suggestions 与 ai-message-list 的甘特卡）。 */
+.ai-content-blocks__media {
+  animation: ai-block-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
-@keyframes ai-option-in {
+.ai-content-blocks__reference {
+  animation: ai-block-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) 0.08s both;
+}
+
+.ai-content-blocks__option {
+  animation: ai-block-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) 0.16s both;
+}
+
+@keyframes ai-block-in {
   from {
     opacity: 0;
     transform: translateY(8rpx);

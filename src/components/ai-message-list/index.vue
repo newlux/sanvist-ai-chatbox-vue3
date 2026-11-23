@@ -1630,6 +1630,35 @@ function ganttBlocks(message: UiChatMessage) {
 }
 
 /**
+ * 每条回答的正文是否已经收尾，由气泡通过 body-settled 上报（见 ai-bubble-v2 的 bodySettled）。
+ *
+ * 甘特入口卡在气泡外独立成卡，拿不到气泡内的打字计数：流式时后端常在正文后面才推
+ * gantt 事件，卡片一到就摆到气泡下方，正文却还在一个字一个字地长 ——
+ * 看着就是「卡片先好了、文字在后面补」。这里压到正文收尾后再放出来，
+ * 顺序就是「正文 → 参考资料 → 选项 → 甘特卡」。
+ *
+ * 历史消息不会收到事件（气泡不会重新播打字机），按「不在生成中」兜底为已收尾。
+ */
+const bodySettledMap = ref<Record<string, boolean>>({});
+
+function onBodySettled(msg: UiChatMessage, settled: boolean) {
+  const id = String(msg?.id || "");
+  if (!id) return;
+  bodySettledMap.value[id] = Boolean(settled);
+}
+
+function isBodySettled(msg: UiChatMessage) {
+  const id = String(msg?.id || "");
+  if (id && id in bodySettledMap.value) return bodySettledMap.value[id];
+  return !msg?.loading;
+}
+
+/** 正文收尾后才放出来的甘特入口卡（v-for 直接用它，避免 v-if 与 v-for 同节点） */
+function visibleGanttBlocks(msg: UiChatMessage) {
+  return isBodySettled(msg) ? ganttBlocks(msg) : [];
+}
+
+/**
  * 同一条回答里的推荐问题（guide-suggestion 块）：
  * 步骤卡「全部步骤确认完」后要把推荐问题接在小结下面，
  * 而核对卡只看得到自己的 payload，所以在这里把整块取出来，由消息列表独立渲染。
@@ -1957,6 +1986,7 @@ watch(
               @select-toggle="onSelectToggle(index)"
               @feedback-change="onFeedbackChange(index, msg, $event)"
               @copy-click="onCopyClick(index, msg)"
+              @body-settled="onBodySettled(msg, $event)"
             />
             <!-- 核对/步骤卡独立成卡，不放进回答气泡；一轮问答一张，多轮各留一张 -->
             <!-- 品牌署名行（SANY Neo + 播报按钮）固定在容器这一层：切一步 = 换一个 block.id =
@@ -2012,7 +2042,7 @@ watch(
             </view>
             <!-- 调度视图入口卡：同样独立于回答气泡，紧跟在气泡下方 -->
             <view
-              v-for="block in ganttBlocks(msg)"
+              v-for="block in visibleGanttBlocks(msg)"
               :key="`gantt-${block.id}`"
               class="chat-box__card chat-box__card--gantt"
             >
@@ -2097,9 +2127,24 @@ watch(
   margin: 24rpx 36rpx;
 }
 
-/* 调度视图入口卡（4708:743）：跟随气泡时上方留 13px，左右 20px 由 .chat-box 的 padding 提供 */
+/* 调度视图入口卡（4708:743）：跟随气泡时上方留 13px，左右 20px 由 .chat-box 的 padding 提供。
+   它压到正文收尾后才挂载（见 visibleGanttBlocks），淡入延迟排在最后一档：
+   正文 → 参考资料(0s) → 选项胶囊(0.16s) → 甘特卡(0.24s) */
 .chat-box__card--gantt {
   margin: 13px 0 0;
+  animation: chat-box-gantt-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) 0.24s both;
+}
+
+@keyframes chat-box-gantt-in {
+  from {
+    opacity: 0;
+    transform: translateY(8rpx);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .business-overview {
   // 顶部留白 148rpx（74px）
