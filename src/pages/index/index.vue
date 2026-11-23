@@ -1517,6 +1517,18 @@ function onWelcomeDuplexToggle() {
  */
 const remoteKeyActive = ref(false);
 /**
+ * 本页是否被站内路由压栈隐藏（onHide 置 true，onShow 置回 false）。
+ *
+ * 「页面重新可见 / 原生 resume」是全局信号，页面栈里**所有**页面都会收到：
+ * 从本页 navigateTo 进任务协同、再在那边开甘特离线包（安卓 openH5Container，不走路由），
+ * 关容器回来时本页也会收到 visibilitychange —— 于是本页和任务协同页同时把遥控器接管抢回来，
+ * 音量键被两页各接一次：一次语音输入起两轮识别，播报也跟着播两段。
+ *
+ * 容器盖住本页时 onHide 并不触发（标记仍是 false），那才是真需要兜底恢复的场景；
+ * 被压栈时 onHide 必定触发，标记为 true，兜底逻辑据此把自己排除掉。
+ */
+let pagePushedAway = false;
+/**
  * 遥控器连按保护：startVoiceQuery 起手要先 await 双工释放，这段时间 voiceQueryActive
  * 还没置 true，再按一次会重复起一轮采集。用一个同步标志挡住第二次。
  */
@@ -1571,6 +1583,22 @@ function restoreRemoteKey(source: string) {
   remoteKeyActive.value = true;
   logger.info("恢复遥控器接管", { source, changed });
   void remoteKey.sync(source);
+}
+
+/**
+ * 只有本页确实在前台时才把遥控器接管抢回来。
+ *
+ * 可见性 / resume 是全局事件，被压栈的页面同样收得到（见 pagePushedAway 的说明）：
+ * 不加这道门，从任务协同（栈顶）关掉甘特容器后，压栈的本页会一起恢复注册，
+ * 音量键被两页重复接住 —— 一次语音输入起两轮，播报播两段。
+ * 真正回到本页时 onShow 会把 remoteKeyActive 置 true，不依赖这里。
+ */
+function restoreRemoteKeyIfActive(source: string) {
+  if (pagePushedAway) {
+    logger.debug("本页已被压栈，跳过遥控器恢复", { source });
+    return;
+  }
+  restoreRemoteKey(source);
 }
 
 /**
@@ -2044,7 +2072,8 @@ const stopNativeResume = onNativeEvent("resume", () => {
   // 只靠 onShow 消费回调会漏，这里在原生 resume 上补一次（重复调用有 pending 判空，安全）。
   startRepairSummaryCallback();
   // 与可见性兜底同理：resume 也是「回到本页」的信号，遥控器接管一并恢复（含重建注册）
-  restoreRemoteKey("resume");
+  // 用 IfActive：resume 同样是全局事件，被压栈的页面（任务协同 / 作业指导）也会收到
+  restoreRemoteKeyIfActive("resume");
 });
 
 /**
@@ -2060,12 +2089,15 @@ function handleHostVisible() {
    * 只改开关不够：安卓容器切换时 onHide 常常没触发，remoteKeyActive 一直是 true，
    * 赋值不变就不会触发 useRemoteKey 里的 watch，而原生监听已经失效 ——
    * 必须显式 sync() 重建（见 restoreRemoteKey 的说明）。
+   * 用 IfActive：本页若只是被压栈（任务协同 / 作业指导在上面），不能跟着抢遥控器。
    */
-  restoreRemoteKey("visibilitychange");
+  restoreRemoteKeyIfActive("visibilitychange");
 }
 
 onShow(() => {
   syncWindowHeight();
+  // 回到本页：解除「被压栈」标记，可见性 / resume 兜底重新对本页生效
+  pagePushedAway = false;
   // 页面可见才接管遥控器：注册后原生会拦截按键（含返回键），压在栈里时必须放回去
   remoteKeyActive.value = true;
   const sessionId = consumePendingHistorySession("ASK", "PODCAST");
@@ -2096,6 +2128,8 @@ onShow(() => {
 // useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
   chatInputRef.value?.cancelDuplexPress?.();
+  // 记下「本页被压栈」：此后全局的可见性 / resume 恢复都要跳过本页，遥控器交给子页面
+  pagePushedAway = true;
   // 遥控器按键还给系统：被压栈后继续拦截，子页面与系统返回键都会失灵
   remoteKeyActive.value = false;
   realtimeTts.stop();
