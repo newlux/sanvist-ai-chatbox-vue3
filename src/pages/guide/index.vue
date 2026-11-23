@@ -1042,6 +1042,15 @@ function onBack() {
  * 所以初值给 false，跟着下面的 onShow / onHide / onUnload 走。
  */
 const remoteKeyActive = ref(false);
+/**
+ * 本页是否被站内路由压栈隐藏（onHide 置 true，onShow 置回 false）。
+ *
+ * 「页面重新可见 / 原生 resume」是全局信号，页面栈里**所有**页面都会收到：本页如果在
+ * 首页之上（首页 → 作业指导），关掉容器回来时首页也会收到 visibilitychange，
+ * 两页同时把遥控器接管抢回来，音量键被各接一次 —— 一次语音输入起两轮，播报播两段。
+ * 被压栈时 onHide 必定触发，标记为 true，兜底逻辑据此把自己排除掉。
+ */
+let pagePushedAway = false;
 /** 连按保护：startVoiceQuery 起手要先等双工释放，这段时间 voiceQueryActive 还是 false，挡住第二次 */
 let remoteKeyStarting = false;
 
@@ -1097,12 +1106,29 @@ function restoreRemoteKey(source: string) {
 }
 
 /**
+ * 只有本页确实在前台时才把遥控器接管抢回来。
+ *
+ * 可见性 / resume 是全局事件，被压栈的页面同样收得到（见 pagePushedAway 的说明）：
+ * 不加这道门，栈顶页面关掉容器回来时，压栈的首页会一起恢复注册，
+ * 音量键被两页重复接住 —— 一次语音输入起两轮，播报播两段。
+ * 真正回到本页时 onShow 会把 remoteKeyActive 置 true，不依赖这里。
+ */
+function restoreRemoteKeyIfActive(source: string) {
+  if (pagePushedAway) {
+    logger.debug("本页已被压栈，跳过遥控器恢复", { source });
+    return;
+  }
+  restoreRemoteKey(source);
+}
+
+/**
  * 页面重新可见 = 上层容器已经关掉。安卓容器切换不保证走 onShow，也不一定推原生 resume，
  * 可见性变化 + window.focus（hook 内部已接）是这条路径上最可靠的信号。
  */
 function handleHostVisible() {
   if (typeof document === "undefined" || document.visibilityState !== "visible") return;
-  restoreRemoteKey("visibilitychange");
+  // 用 IfActive：本页若只是被压栈（更上层的页面在看），不能跟着抢遥控器
+  restoreRemoteKeyIfActive("visibilitychange");
 }
 
 /**
@@ -1480,6 +1506,8 @@ onMounted(() => {
 
 onShow(() => {
   syncWindowHeight();
+  // 回到本页：解除「被压栈」标记，可见性 / resume 兜底重新对本页生效
+  pagePushedAway = false;
   // 页面可见才接管遥控器：注册后原生会拦截按键（含返回键），压在栈里时必须放回去。
   // 这里只改开关：useRemoteKey 内部 onShow 会 sync 一次，不必重复注册。
   remoteKeyActive.value = true;
@@ -1493,7 +1521,8 @@ onShow(() => {
  * 遥控器接管一并恢复（含重建原生注册）。
  */
 const stopNativeResume = onNativeEvent("resume", () => {
-  restoreRemoteKey("resume");
+  // 用 IfActive：resume 是全局事件，被压栈的页面（首页）也会收到
+  restoreRemoteKeyIfActive("resume");
   const sessionId = consumePendingHistorySession("GUIDE");
   if (sessionId) void openLocalHistory(sessionId, true);
 });
@@ -1502,6 +1531,8 @@ const stopNativeResume = onNativeEvent("resume", () => {
 // 两个 TTS hook 自带的 onBeforeUnmount 清理不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
   chatInputRef.value?.cancelDuplexPress?.();
+  // 记下「本页被压栈」：此后全局的可见性 / resume 恢复都要跳过本页，遥控器交给子页面
+  pagePushedAway = true;
   // 遥控器按键还给系统：被压栈后继续拦截，子页面与系统返回键都会失灵
   remoteKeyActive.value = false;
   cancelVoiceArrival?.();

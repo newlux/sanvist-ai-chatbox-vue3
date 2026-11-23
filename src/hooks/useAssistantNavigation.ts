@@ -16,7 +16,7 @@ export function useAssistantNavigation(
      * 页面用来掐掉自动听播：这类跳转不触发 onHide，音频会挂到用户从场景窗口回来才播，
      * 回来后再念「正在进入维修助理」是多余的（见 useRealtimeTts 的 stopForSceneLeave）。
      */
-    onLeavePage?: () => void;
+    onLeavePage?: () => void | Promise<void>;
   } = {},
 ) {
   const userStore = useUserStore();
@@ -29,9 +29,9 @@ export function useAssistantNavigation(
     assistantNavigationVisible.value = true;
   }
 
-  function onAssistantNavigationConfirm(payload: AssistantNavigationPayload, _action?: AssistantNavigationAction) {
+  async function onAssistantNavigationConfirm(payload: AssistantNavigationPayload, _action?: AssistantNavigationAction) {
     if (payload.target === "parts_assistant") {
-      options.onLeavePage?.();
+      await options.onLeavePage?.();
       void openPartsAssistant();
       return;
     }
@@ -48,7 +48,7 @@ export function useAssistantNavigation(
     if (aiAskConversationId && aiAskSessionId) {
       stashPendingRepairCallback({ aiAskConversationId, aiAskSessionId });
     }
-    options.onLeavePage?.();
+    await options.onLeavePage?.();
     void openRepairAssistant({
       sessionId: aiAskSessionId,
       conversationId: aiAskConversationId,
