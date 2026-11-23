@@ -27,9 +27,6 @@ const { t } = useI18n();
       <text class="pc-welcome__slogan">
         {{ t("guide-pc-slogan") }}
       </text>
-      <text class="pc-welcome__desc">
-        {{ t("init-brand-desc-1") }}
-      </text>
     </view>
     <!-- 底部蓝色氛围光：三层椭圆径向渐变，被底部 Dock 覆盖（宿主绘制） -->
     <view class="pc-welcome__glow" aria-hidden="true" />
@@ -88,16 +85,6 @@ const { t } = useI18n();
   line-height: 41px;
 }
 
-/* 说明 28px 白（标语下 19px，y=573+41 → 633） */
-.pc-welcome__desc {
-  display: block;
-  margin-top: 19px;
-  color: rgba(255, 255, 255, 0.8);
-  font-family: "Source Han Sans CN", "PingFang SC", sans-serif;
-  font-size: 28px;
-  font-weight: 400;
-  line-height: 41px;
-}
 
 /* 底部蓝色氛围光：y≈863 起三层椭圆（#1B72CF / #8ABFF8 / #F9FDFF），向下渐变，被 Dock 覆盖 */
 .pc-welcome__glow {

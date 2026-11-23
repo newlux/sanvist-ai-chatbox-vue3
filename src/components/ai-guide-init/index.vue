@@ -1410,9 +1410,6 @@ onBeforeUnmount(() => {
             <text class="gi__brand-slogan">
               {{ t("init-brand-slogan") }}
             </text>
-            <text class="gi__brand-desc">
-              {{ t("init-brand-desc-1") }}
-            </text>
           </view>
         </view>
       </view>
@@ -1760,16 +1757,6 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-/* 306:2800：16px / 行高 24px，两行居中，#8E8E8E */
-.gi__brand-desc {
-  max-width: 480rpx; // 240px
-  color: #8e8e8e;
-  font-size: 32rpx; // 16
-  font-weight: 500;
-  line-height: 48rpx; // 24
-  text-align: center;
-}
-
 
 .gi__layer {
   position: absolute;
@@ -1897,10 +1884,6 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 
-.gi--dark .gi__brand-desc {
-  color: rgba(255, 255, 255, 0.45);
-}
-
 /* 方案 4「全息升维翻展」：与首页欢迎页身份球 / 开始体验胶囊同一套关键帧 */
 @keyframes gi-bubble-holo {
   0% {
@@ -1959,11 +1942,6 @@ onBeforeUnmount(() => {
   line-height: 44rpx;
 }
 
-.gi--en .gi__brand-desc {
-  max-width: 560rpx;
-  font-size: 28rpx;
-  line-height: 42rpx;
-}
 
 .gi--en .gi__pill-text {
   font-size: 26rpx; // 13
