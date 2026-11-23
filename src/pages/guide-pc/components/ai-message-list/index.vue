@@ -535,8 +535,10 @@ function onScroll(e: { detail?: { scrollTop?: number } }) {
     if (!Number.isFinite(gap) || gap > SCROLL_BOTTOM_SHOW_GAP_PX) setPinned(false);
     return;
   }
-  // 下滑：进到「快到底」的范围就提前恢复贴底，按钮当场收掉，不用等滚到头
-  if (delta > 0 && !props.pinnedToBottom) {
+  // 下滑：进到「快到底」的范围就提前恢复贴底，按钮当场收掉，不用等滚到头。
+  // 封顶轮次（capRoundAtTop）里跳过：流式对齐（alignToReplyEnd）会程序化向下改 scrollTop，
+  // 被这里误判成「用户下滑」就会 setPinned(true) 撤掉垫白、与自动对齐互相拉扯（整屏上下抖）。
+  if (delta > 0 && !props.pinnedToBottom && !props.capRoundAtTop) {
     const gap = distanceToBottom();
     if (Number.isFinite(gap) && gap <= SCROLL_BOTTOM_HIDE_GAP_PX) setPinned(true);
   }
