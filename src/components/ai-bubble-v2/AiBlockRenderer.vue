@@ -120,7 +120,13 @@ const emit = defineEmits([
   "tts-click",
   "copy-click",
   "share-click",
+  "typing",
 ]);
+
+/** 正文块打字机状态上报：AiContentBlocks 用它给表格 / 图表压顺序闸门 */
+function onAnswerTyping(block, typing: boolean) {
+  emit("typing", { id: block.id, typing });
+}
 
 function onSuggestionTap(suggestion: unknown) {
   emit("suggestion-tap", suggestion);
@@ -205,6 +211,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     :replayed="Boolean(block.payload.replayed)"
     :embedded="embedded"
     :typewriter="block.type === 'tips' ? false : null"
+    @typing="onAnswerTyping(block, $event)"
   />
   <ThinkBlock
     v-else-if="block.type === 'think'"

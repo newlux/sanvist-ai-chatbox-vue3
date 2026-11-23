@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Ref } from "vue";
-import { computed, inject } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, watch } from "vue";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { useTypewriter } from "@/hooks/useTypewriter";
 
@@ -20,6 +20,8 @@ const props = defineProps({
    */
   typewriter: { type: Boolean, default: null },
 });
+
+const emit = defineEmits(["typing"]);
 
 /**
  * 打字机（首页 / 作业指导页 / 任务协同页打开，见 ai-bubble-v2 的 provide）：
@@ -58,6 +60,18 @@ const typewriterActive = computed(() => typewriterAllowed.value && !replayedAsFi
 const { visible, typing } = useTypewriter(() => props.content, {
   enabled: () => typewriterActive.value,
 });
+/**
+ * 把「这一块还在逐字揭示」上报给上层（AiContentBlocks 汇总）。
+ *
+ * 用途：表格 / 图表块要等它前面的正文打完字再出现（见 AiContentBlocks 的媒体闸门）。
+ * 流式时后端先推正文、再推表格事件，打字机还落后一大截，表格却已经渲染在正文下方 ——
+ * 用户看到的就是「文字还在一个字一个字往外长，表格已经摆好了」。
+ */
+watch(typing, value => emit("typing", Boolean(value)));
+// 初始态等挂载后再补一条：setup 阶段就往上抛会在父组件渲染途中改状态
+onMounted(() => emit("typing", Boolean(typing.value)));
+// 卸载时补一条 false：否则压着后续媒体块的那条「还在打字」永远不会解除
+onBeforeUnmount(() => emit("typing", false));
 </script>
 
 <template>

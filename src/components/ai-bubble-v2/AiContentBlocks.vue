@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import type { AiBlock } from "@/utils/ai-stream/chatStreamParser";
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useChatScope } from "@/stores";
 import { expandChartFences, expandMarkdownTables } from "@/utils/ai-stream";
 import AiBlockRenderer from "./AiBlockRenderer.vue";
@@ -144,6 +144,52 @@ const renderItems = computed(() => {
   return [...items, ...slotBlocks];
 });
 
+/**
+ * 各正文块是否还在逐字揭示（block.id → typing），由 AnswerBlock 逐块上报、这里汇总。
+ *
+ * 用途是给表格 / 图表压一道顺序闸门：流式时后端先推正文、再推表格事件，
+ * 打字机还落后一大截，表格却已经渲染到正文下方 —— 用户看到的是
+ * 「文字还在一个字一个字往外长，表格（图表）已经摆好了」。
+ */
+const typingMap = ref<Record<string, boolean>>({});
+
+function onBlockTyping(payload?: { id?: string; typing?: boolean }) {
+  const id = String(payload?.id || "");
+  if (!id) return;
+  const typing = Boolean(payload?.typing);
+  if (Boolean(typingMap.value[id]) === typing) return;
+  typingMap.value = { ...typingMap.value, [id]: typing };
+}
+
+/** 这一项里还有没有正文在打字：answer-group 看组内每个 answer */
+function itemTyping(item: any) {
+  if (item?.type === "answer-group") {
+    return (item.blocks || []).some((block: AiBlock) => Boolean(typingMap.value[block.id]));
+  }
+  return Boolean(typingMap.value[item?.id]);
+}
+
+/**
+ * 顺序闸门：第一个「前面还有正文在打字」的表格 / 图表，连同它后面的一切先不渲染，
+ * 等文字打完再一次性放出来。后面的段落此时才挂载、才开始自己的打字机，
+ * 顺序不会错（不会出现「表格还没出、表格后的文字先冒出来」再被顶下去）。
+ *
+ * 组内的图表由 AnswerGroupBlock 用同一套规则处理（组本身不在这里被压住）。
+ */
+const visibleItems = computed(() => {
+  // 海报模式是静态快照（逐块平铺，等打完字再截图就来不及了）：不做顺序闸门，
+  // 否则表格 / 图表会被压住，导出的海报里直接缺一块
+  if (props.noAnswerGroup) return renderItems.value;
+  const items = renderItems.value;
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const isMedia = item?.type === "table" || item?.type === "chart";
+    if (!isMedia) continue;
+    if (items.slice(0, index).some(prev => itemTyping(prev))) return items.slice(0, index);
+  }
+  return items;
+});
+
 function onSuggestionTap(suggestion) {
   emit("suggestion-tap", suggestion);
 }
@@ -191,10 +237,12 @@ function onGanttOpen(payload) {
 <template>
   <view class="ai-content-blocks">
     <!-- key 必须落在 template 上：放到分支子节点上编译到小程序会丢掉 a:key，只能按下标 diff -->
-    <template v-for="item in renderItems" :key="item.id">
+    <template v-for="item in visibleItems" :key="item.id">
       <AnswerGroupBlock
         v-if="item.type === 'answer-group'"
         :blocks="item.blocks"
+        :typing-map="typingMap"
+        @typing="onBlockTyping"
       />
       <AiBlockRenderer
         v-else
@@ -202,6 +250,7 @@ function onGanttOpen(payload) {
         :force-thinking-expanded="forceThinkingExpanded"
         :embedded="noAnswerGroup"
         :loading="loading"
+        @typing="onBlockTyping"
         @suggestion-tap="onSuggestionTap"
         @ask-slot-open="onAskSlotOpen"
         @ask-slot-pick="onAskSlotPick"

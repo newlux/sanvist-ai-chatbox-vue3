@@ -62,7 +62,13 @@ onBeforeUnmount(() => {
   position: absolute;
   right: 0;
   bottom: 0;
-  left: 0;
+  /**
+   * 左缩进 36rpx（18px）= 回答卡正文的左内边距（见 ai-bubble-v2 的 AI 回答卡 padding-left）。
+   * 外框仍是 40rpx（那圈页面底色渐隐要盖满整个横向），文字再往里让一档，
+   * 左缘正好和下方回复里的 SANY Neo 图标（icon-sani.png，位于状态行行首）对齐：
+   * 40rpx（列表 padding）+ 36rpx（回答卡 padding）= 76rpx。
+   */
+  left: 36rpx;
   color: #2f323c;
   font-size: 28rpx;
   font-weight: 400;
