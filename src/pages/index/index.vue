@@ -70,7 +70,7 @@ import { getRepairConversationId } from "@/utils/repair-bridge";
 import { clearPendingRepairCallback, consumePendingRepairCallback, parseRepairCallbackSummary, parseRepairCaseReport, repairCaseReportStatusText } from "@/utils/repair-callback";
 import { openRepairAssistant } from "@/utils/repair-h5";
 import { clearReturnToWelcome, consumeReturnToWelcome, markReturnToWelcome, navigateToScene } from "@/utils/scene-navigation";
-import { consumePendingHistorySession, getSessionId, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
+import { consumePendingHistorySession, getSessionId, getSessionScene, navigateToSessionScene, peekPendingHistorySession, readSessionIdFromOptions } from "@/utils/session-scene";
 import VoiceRecorder from "@/utils/voiceRecorder.js";
 
 defineOptions({ name: "AiChatPage" });
@@ -119,6 +119,7 @@ const chatInputRef = ref<{
   appendAttachments?: (meta: ChatMessageAttachment[]) => void;
   focusTextInput?: () => void;
   cancelDuplexPress?: () => void;
+  releaseVoice?: () => Promise<void>;
 } | null>(null);
 const shareSheetBottomInset = ref("");
 const pageStage = ref<"welcome" | "chat">("welcome");
@@ -184,7 +185,9 @@ const navActiveKey = ref("");
 const navOffsetStyle = computed(() => ({ bottom: composerDockOffset.value }));
 // 提前到 useChatSend 之前：onAiAnswerDelta 回调里要用它做流式听播。
 const realtimeTts = useRealtimeTts();
+const voicePageActive = ref(false);
 const duplex = useDuplexVoice({
+  enabled: () => voicePageActive.value,
   cancelManual() {
     return resetVoiceQuery();
   },
@@ -335,7 +338,7 @@ const askSlotDrawerHeight = ref(0);
 const { assistantNavigationPayload, assistantNavigationVisible, onAssistantNavigationOpen, onAssistantNavigationConfirm } = useAssistantNavigation(sendUserPrompt, {
   // 进维修助理 / 配件助手是 pushWindow 开新 webview，本页不会 onHide：
   // 不在这里掐掉，这一轮的语音会挂到回来之后才念出来（「正在进入维修助理」）。
-  onLeavePage: () => realtimeTts.stopForSceneLeave(),
+  onLeavePage: releasePageVoice,
 });
 /** 底部「配件助手」点击后的地址输入弹层 */
 const partsJumpVisible = ref(false);
@@ -345,13 +348,13 @@ const REPAIR_SUMMARY_POLL_INTERVAL_MS = 5_000;
 const REPAIR_SUMMARY_MAX_ATTEMPTS = 30;
 
 /** 点维修助理回流卡：pushWindow 直达三方维修 H5 的详情页；已生成的回流结果看过就不再重复拉取。 */
-function onAssistantCallbackOpen(conversationId: string) {
+async function onAssistantCallbackOpen(conversationId: string) {
   const id = String(conversationId || "").trim();
   if (!id) return;
   logger.info("维修助理回流卡点「看详情」", { conversationId: id });
   clearPendingRepairCallback();
   // 同一类场景窗口跳转：离开前先掐掉自动听播，回来不再接着念
-  realtimeTts.stopForSceneLeave();
+  await releasePageVoice();
   void openRepairAssistant({
     chatConversationId: id,
     // 降级回本地壳页时要把会话 id 带上，壳页据此拼 `/repair/{id}`
@@ -364,7 +367,8 @@ function onAssistantCallbackOpen(conversationId: string) {
  * 参数一致、只有地址不同（见 config 的 PARTS_ASSISTANT_EMBED_URL），
  * 原生容器不可用时才降级到本地壳页 `/pages/parts/index?url=...`。
  */
-function enterPartsAssistant() {
+async function enterPartsAssistant() {
+  await releasePageVoice();
   void openPartsAssistant();
 }
 
@@ -798,7 +802,8 @@ function startNewConversation() {
  * 跳掉播报页里「选助手 → 选汇报内容」那一步（风格设置页）。
  * 播报页的偏好设置入口仍在，用户想改偏好可以自己进去。
  */
-function enterListenReport() {
+async function enterListenReport() {
+  await releasePageVoice();
   saveCurrentListenReportDate(listenBroadcast.value?.bizDate);
   void navigateToScene("/pages/podcast/index?direct=1");
 }
@@ -814,9 +819,10 @@ function readPartsEmbedUrl(route: string) {
  * 配件助手跳转：弹层里填的是完整地址，作为 pushWindow 的目标地址（不校验域名），
  * 参数与维修助理一致，由 utils/parts-h5 统一补上。
  */
-function onPartsJump(url: string) {
+async function onPartsJump(url: string) {
   const target = String(url || "").trim();
   if (!target) return;
+  await releasePageVoice();
   void openPartsAssistant({ url: target });
 }
 
@@ -833,7 +839,7 @@ function onGoListenReport() {
  * - 听汇报：先固定当天早报日期，再在当前页进播报页（与卡片入口同一套逻辑）；
  * - 作业指导 / 任务协同 / 听汇报都在当前 mPaaS 内跳转，左滑回到上一页，而不是关掉整个容器。
  */
-function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; url?: string }) {
+async function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; url?: string }) {
   if (item?.mode === "inline") {
     const subagent = String(item?.subagent || "");
     if (!subagent) return;
@@ -845,6 +851,7 @@ function onNavItemClick(item: { key?: string; subagent?: string; mode?: string; 
 
   const targetUrl = String(item?.url || "");
   if (!targetUrl) return;
+  await releasePageVoice();
   // 从初始页跳出去的：场景页的返回键要回到 Hey,SANI，而不是对话页（见 markReturnToWelcome）
   if (pageStage.value === "welcome") markReturnToWelcome();
   if (targetUrl === "/pages/podcast/index") {
@@ -984,6 +991,7 @@ const voiceLevel = ref(0);
 const voiceSeconds = ref(0);
 let voiceSession: AsrStreamSession | null = null;
 let voiceCapture: PcmCapture | null = null;
+let pendingVoiceCapture: Promise<PcmCapture> | null = null;
 /** 每轮一个序号：重置 / 重开时让旧回调自行作废 */
 let voiceSeq = 0;
 /** 已发过 finish、正在等 final：静音检测 / 手动发送都可能触发，用它防重 */
@@ -1035,7 +1043,7 @@ interface VoiceRecorderInstance {
   start: (options?: { sampleRate?: number; timeSlice?: number }) => Promise<{ success?: boolean; error?: string; data?: NativeRecorderAudio } | undefined>;
   stop: () => Promise<{ success?: boolean; error?: string; data?: NativeRecorderAudio } | undefined>;
   cancel?: () => void;
-  release?: () => void;
+  release?: () => void | Promise<void>;
 }
 
 /**
@@ -1072,14 +1080,18 @@ function resetVoiceQuery() {
     voiceTickTimer = null;
   }
   const captureReleased = voiceCapture?.stop();
+  const pendingCapture = pendingVoiceCapture;
+  pendingVoiceCapture = null;
+  const pendingNative = nativeVoiceStartup;
   voiceCapture = null;
   voiceSession?.close();
   voiceSession = null;
   // 降级到原生录音的那一轮：停轮询、放掉录音器（正常收尾时 finishNativeVoiceQuery 已经置空）
   stopNativeLevelPolling();
+  let nativeReleased: void | Promise<void> = undefined;
   if (nativeVoiceRecorder) {
     try {
-      (nativeVoiceRecorder.release ?? nativeVoiceRecorder.cancel)?.call(nativeVoiceRecorder);
+      nativeReleased = (nativeVoiceRecorder.release ?? nativeVoiceRecorder.cancel)?.call(nativeVoiceRecorder);
     }
     catch (error) {
       logger.warn("native recorder release failed", error);
@@ -1096,7 +1108,12 @@ function resetVoiceQuery() {
     chatStore.showQuickPrompts = true;
     chatStore.showQuickList = true;
   }
-  return captureReleased;
+  return Promise.allSettled([
+    captureReleased,
+    nativeReleased,
+    pendingCapture?.then(capture => capture.stop()),
+    pendingNative,
+  ]);
 }
 
 function failVoiceQuery(title: string) {
@@ -1141,10 +1158,11 @@ function resolveVoiceAnchorId() {
 }
 
 async function startVoiceQuery() {
+  if (!voicePageActive.value) return;
   const duplexRelease = duplex.stop();
   const pendingVoiceSeq = voiceSeq;
   await duplexRelease;
-  if (pendingVoiceSeq !== voiceSeq) return;
+  if (pendingVoiceSeq !== voiceSeq || !voicePageActive.value) return;
   /**
    * 按下「点击说话」的第一件事：把正在播的语音掐掉。
    * 一是用户要开口了，播报继续响会盖住他；二是外放的声音会被麦克风原样收进 ASR，
@@ -1236,21 +1254,24 @@ async function startVoiceQuery() {
     });
     voiceSession = session;
 
-    const capture = useNativePcm
-      ? await startNativePcmCapture({
+    const captureStartup = useNativePcm
+      ? startNativePcmCapture({
         onFrame: frame => session.pushFrame(frame),
         onLevel: onVoiceLevel,
         // 原生推流中途报错：换整段识别那条线，别让这一轮白说
         onError: message => degradeToNativeVoice(`pcm-stream:${message}`),
       })
-      : await startPcmCapture({
+      : startPcmCapture({
         onFrame: frame => session.pushFrame(frame),
         onLevel: onVoiceLevel,
         // 采集起来了但拿不到可用音频（没回调 / 采到静音）：这一轮降到原生录音，别让用户白说一句
         onUnavailable: reason => degradeToNativeVoice(reason),
       });
-    if (seq !== voiceSeq) {
-      capture.stop();
+    pendingVoiceCapture = captureStartup;
+    const capture = await captureStartup;
+    if (pendingVoiceCapture === captureStartup) pendingVoiceCapture = null;
+    if (seq !== voiceSeq || !voicePageActive.value) {
+      await capture.stop();
       return;
     }
     voiceCapture = capture;
@@ -1334,7 +1355,7 @@ async function startNativeVoiceQuery(seq: number) {
     const recorder = new VoiceRecorder() as unknown as VoiceRecorderInstance;
     const started = await recorder.start();
     if (seq !== voiceSeq) {
-      (recorder.release ?? recorder.cancel)?.call(recorder);
+      await (recorder.release ?? recorder.cancel)?.call(recorder);
       return;
     }
     if (!started?.success) {
@@ -1542,6 +1563,7 @@ let remoteKeyStarting = false;
  * - 生成中 / 双工模式：不抢，交给原链路。
  */
 function onRemoteKeyConfirm() {
+  if (!voicePageActive.value || pagePushedAway) return;
   if (voiceQueryActive.value) {
     // stopVoiceQuery 自带「正在收尾就不重复发 finish」的保护
     stopVoiceQuery();
@@ -1594,10 +1616,12 @@ function restoreRemoteKey(source: string) {
  * 真正回到本页时 onShow 会把 remoteKeyActive 置 true，不依赖这里。
  */
 function restoreRemoteKeyIfActive(source: string) {
-  if (pagePushedAway) {
+  const pages = getCurrentPages();
+  if (pagePushedAway || pages[pages.length - 1]?.route !== "pages/index/index") {
     logger.debug("本页已被压栈，跳过遥控器恢复", { source });
     return;
   }
+  voicePageActive.value = true;
   restoreRemoteKey(source);
 }
 
@@ -1874,9 +1898,11 @@ async function openLocalHistory(id: string | number, force = false) {
   }
 }
 
-function onSessionClick(session: { sessionId?: string | number; id?: string | number; inputs?: Record<string, unknown> }) {
+async function onSessionClick(session: { sessionId?: string | number; id?: string | number; inputs?: Record<string, unknown> }) {
   const id = getSessionId(session);
   if (!id) return;
+  const targetScene = getSessionScene(session);
+  if (targetScene === "GUIDE" || targetScene === "TASK") await releasePageVoice();
   if (navigateToSessionScene(session, "ASK")) return;
   if (String(chatStore.aiSessionId) === String(id)) return;
   void openLocalHistory(id);
@@ -2065,6 +2091,7 @@ function refreshListenReportState() {
   listenReportRefreshKey.value += 1;
 }
 
+const stopNativePause = onNativeEvent("pause", () => { void releasePageVoice(); });
 const stopNativeResume = onNativeEvent("resume", () => {
   logger.info("原生 resume：从场景窗口回到本页，尝试消费维修助理回调");
   refreshListenReportState();
@@ -2084,7 +2111,11 @@ const stopNativeResume = onNativeEvent("resume", () => {
  * onHide 已经把 remoteKeyActive 置成 false，只挂 onShow 会让音量键（语音输入）注册不回来。
  */
 function handleHostVisible() {
-  if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+  if (typeof document === "undefined") return;
+  if (document.visibilityState !== "visible") {
+    void releasePageVoice();
+    return;
+  }
   /**
    * 只改开关不够：安卓容器切换时 onHide 常常没触发，remoteKeyActive 一直是 true，
    * 赋值不变就不会触发 useRemoteKey 里的 watch，而原生监听已经失效 ——
@@ -2095,6 +2126,7 @@ function handleHostVisible() {
 }
 
 onShow(() => {
+  voicePageActive.value = true;
   syncWindowHeight();
   // 回到本页：解除「被压栈」标记，可见性 / resume 兜底重新对本页生效
   pagePushedAway = false;
@@ -2124,6 +2156,21 @@ onShow(() => {
   refreshListenReportState();
   startRepairSummaryCallback();
 });
+/** 跳转前关闭监听，并等待尚在启动的录音释放，防止随后抢掉子页麦克风。 */
+async function releasePageVoice() {
+  voicePageActive.value = false;
+  remoteKeyActive.value = false;
+  voiceListening.value = false;
+  chatInputRef.value?.cancelDuplexPress?.();
+  realtimeTts.stopForSceneLeave();
+  await Promise.allSettled([
+    duplex.stop(),
+    resetVoiceQuery(),
+    remoteKey.stop(),
+    chatInputRef.value?.releaseVoice?.(),
+  ]);
+}
+
 // 离开页面时停止自动听播：navigateTo 进入别的页面时本页只是被压栈隐藏、组件并不卸载，
 // useRealtimeTts 自带的 onBeforeUnmount(stop) 不会触发，必须挂在 onHide / onUnload 上。
 onHide(() => {
@@ -2132,17 +2179,18 @@ onHide(() => {
   pagePushedAway = true;
   // 遥控器按键还给系统：被压栈后继续拦截，子页面与系统返回键都会失灵
   remoteKeyActive.value = false;
-  realtimeTts.stop();
+  void releasePageVoice();
 });
 onUnload(() => {
-  remoteKeyActive.value = false;
-  realtimeTts.stop();
+  pagePushedAway = true;
+  void releasePageVoice();
   if (typeof document !== "undefined") document.removeEventListener("visibilitychange", handleHostVisible);
 });
 onBeforeUnmount(() => {
   speechEndDetector.reset();
   clearRepairSummaryPolling();
   stopNativeResume();
+  stopNativePause();
   if (typeof document !== "undefined") document.removeEventListener("visibilitychange", handleHostVisible);
   uni.$off("listen-report-marked", refreshListenReportState);
   cancelActiveStream();

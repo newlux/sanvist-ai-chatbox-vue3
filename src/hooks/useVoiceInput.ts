@@ -1,4 +1,5 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, toRefs } from "vue";
+import { onHide } from "@dcloudio/uni-app";
 import { useI18n } from "vue-i18n";
 import { recognizeSpeechByBase64, recognizeSpeechByUpload, recognizeSpeechByUrl } from "@/api/chat";
 import { isAsrServiceFailure } from "@/utils/asr-error";
@@ -294,11 +295,16 @@ export function useVoiceInput(options: VoiceInputOptions) {
     state.keepOldRecognizedText = false;
 
     // 容器里要先向原生申请麦克风权限，拿到授权浏览器那层才不会被静默拒绝
-    const result: RecorderResult = await ensureMicPermission()
+    const granted = await ensureMicPermission();
+    if (jobSeq !== state.jobSeq) return { success: false, cancelled: true };
+    const result: RecorderResult = granted
       ? await instance.start({ sampleRate: 16000, timeSlice: 1000 })
       : { success: false, error: permissionDeniedMessage("record_audio") };
 
-    if (jobSeq !== state.jobSeq) return { success: false, error: "任务已失效" };
+    if (jobSeq !== state.jobSeq) {
+      await (instance.release ?? instance.cancel)?.call(instance);
+      return { success: false, cancelled: true };
+    }
     if (result?.success) return result;
 
     if (!result?.cancelled) {
@@ -639,6 +645,17 @@ export function useVoiceInput(options: VoiceInputOptions) {
     resetVoiceText();
   }
 
+  async function releaseForPageLeave() {
+    const instance = recorder;
+    const pending = currentJob?.start;
+    cancelVoiceRecording();
+    recorder = null;
+    await pending?.catch(() => undefined);
+    await (instance?.release ?? instance?.cancel)?.call(instance);
+  }
+
+  onHide(() => { void releaseForPageLeave(); });
+
   onBeforeUnmount(() => {
     removeRestartWindowListeners();
     invalidateJob();
@@ -650,6 +667,7 @@ export function useVoiceInput(options: VoiceInputOptions) {
   });
 
   return {
+    releaseForPageLeave,
     // 状态
     inputMode,
     voicePhase,

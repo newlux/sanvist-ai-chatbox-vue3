@@ -31,6 +31,15 @@ import { onNativeEvent, onRemoteKeyEvent, registerRemoteKeyListener, unregisterR
 
 const logger = createLogger("remote-key");
 
+// 三个助手共用宿主按键监听，原生注销与注册必须跨页面按顺序执行。
+let nativeKeyOperations: Promise<unknown> = Promise.resolve();
+function runNativeKeyOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const pending = nativeKeyOperations.catch(() => undefined).then(operation);
+  nativeKeyOperations = pending.catch(() => undefined);
+  return pending;
+}
+
+
 const VOLUME_KEYS = new Set(["volumeup", "volumedown", "volumemute"]);
 /** 返回键：KEYCODE_BACK = 4，Linux scanCode 158 */
 const BACK_KEYS = new Set(["back", "escape", "esc", "browser_back"]);
@@ -85,6 +94,9 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
   const supported = ref(true);
   let unsubscribe: (() => void) | null = null;
   let starting = false;
+  let pendingConnection: Promise<boolean> | null = null;
+  let pendingStop: Promise<void> | null = null;
+  let disposed = false;
   /** 连续注册失败次数（成功一次即清零），用来区分「临时超时」和「宿主不支持」 */
   let registerFailures = 0;
   /** 正在重连（sync）：避免和 start / stop 并发注册 */
@@ -117,6 +129,8 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
   }
 
   function handleKey(payload: RemoteKeyEventPayload) {
+    // 原生可能继续调用旧的注册 callback；停用后必须在派发入口直接丢弃。
+    if (disposed || !options.enabled.value) return;
     // 只认按下：抬起不触发动作，长按产生的重复事件（repeatCount > 0）也不触发
     if (payload.action !== "down" || payload.repeatCount > 0) return;
 
@@ -157,7 +171,15 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
    * 那样必须把刚挂上的监听还回去，否则原生一直拦截按键、本页却已退订，
    * 返回键没反应、用户被困；而且下次 start() 会被 registered 挡住，再也补不回来。
    */
-  async function connect(token: number, forceResubscribe = false) {
+  function connect(token: number, forceResubscribe = false) {
+    const pending = connectImpl(token, forceResubscribe);
+    pendingConnection = pending;
+    const clear = () => { if (pendingConnection === pending) pendingConnection = null; };
+    void pending.then(clear, clear);
+    return pending;
+  }
+
+  async function connectImpl(token: number, forceResubscribe = false) {
     const startedAt = Date.now();
     if (forceResubscribe && unsubscribe) {
       // 旧订阅可能绑在已经失效的 bridge 上，解绑本身也可能抛错：不能让它挡住后面的重订阅
@@ -172,30 +194,34 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
     if (!unsubscribe) unsubscribe = onRemoteKeyEvent(handleKey);
     // 除了 bridge.on / DOM 两条通道，注册接口的回调也接上：部分自研桥没有 on，
     // 按键是复用这个 callback 反复推回来的（见 mpaas.registerRemoteKeyListener 的说明）
-    await registerRemoteKeyListener(handleKey);
-    if (token !== lifecycle || !options.enabled.value) {
-      // 注册是异步的，期间页面可能已经离开（或被容器盖住）：把刚挂上的监听还回去，
-      // 否则原生一直拦截按键、本页却已退订，返回键与音量键都会失灵
-      logger.info("遥控器注册结果作废：生命周期已变或页面已失活", {
+    return runNativeKeyOperation(async () => {
+      await registerRemoteKeyListener(handleKey);
+      if (token !== lifecycle || !options.enabled.value) {
+        // 注册是异步的，期间页面可能已经离开（或被容器盖住）：把刚挂上的监听还回去，
+        // 否则原生一直拦截按键、本页却已退订，返回键与音量键都会失灵
+        logger.info("遥控器注册结果作废：生命周期已变或页面已失活", {
+          costMs: Date.now() - startedAt,
+          enabled: options.enabled.value,
+        });
+        await unregisterRemoteKeyListener().catch(() => undefined);
+        registered.value = false;
+        return false;
+      }
+      registered.value = true;
+      // 注册成功说明原生侧可用，之前的超时计数作废
+      registerFailures = 0;
+      logger.info("遥控器按键监听已就绪", {
         costMs: Date.now() - startedAt,
-        enabled: options.enabled.value,
+        reconnected: lastSyncAt > 0,
+        resubscribed: forceResubscribe,
       });
-      await unregisterRemoteKeyListener().catch(() => undefined);
-      registered.value = false;
-      return false;
-    }
-    registered.value = true;
-    // 注册成功说明原生侧可用，之前的超时计数作废
-    registerFailures = 0;
-    logger.info("遥控器按键监听已就绪", {
-      costMs: Date.now() - startedAt,
-      reconnected: lastSyncAt > 0,
-      resubscribed: forceResubscribe,
+      return true;
     });
-    return true;
   }
 
   async function start() {
+    if (pendingStop) await pendingStop;
+    if (disposed || !options.enabled.value) return;
     if (registered.value || starting || syncing || !supported.value) return;
     if (!REMOTE_VOICE_KEY_ENABLED) {
       // 配置里关掉了「音量键触发语音输入」：不注册，按键全部交回系统（音量键照常调音量）
@@ -216,6 +242,7 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
        *   否则一次超时就会把整页遥控器永久废掉，只能重载页面恢复；
        * - 明确报错（宿主返回了错误码）：实现了 JSAPI 却调不通，直接降级，别反复重试刷日志。
        */
+      if (token !== lifecycle || !options.enabled.value) return;
       registerFailures += 1;
       const timeout = error instanceof Error && error.message.includes("超时");
       if (timeout && registerFailures < REGISTER_FAIL_TOLERANCE) {
@@ -235,26 +262,41 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
     }
   }
 
-  async function stop(quiet = false) {
+  function stop(quiet = false): Promise<void> {
+    if (pendingStop) return pendingStop;
+    const pending = stopImpl(quiet);
+    pendingStop = pending;
+    const finish = () => {
+      if (pendingStop === pending) pendingStop = null;
+      // 快速返回时 enabled 已恢复，但 watcher 可能曾被旧注销挡住，完成后补注册。
+      if (!disposed && options.enabled.value) void start();
+    };
+    void pending.then(finish, finish);
+    return pending;
+  }
+
+  async function stopImpl(quiet = false) {
     // 作废在途注册（见 connect 里的 token 判断），否则会留下「原生在拦截、本页无订阅」的死局
     lifecycle += 1;
     clearRetry();
     lastTriggerAt.clear();
+    const pending = pendingConnection;
+    unsubscribe?.();
+    unsubscribe = null;
     if (!registered.value) {
-      unsubscribe?.();
-      unsubscribe = null;
+      // 等待旧注册完成后的作废/注销，避免它迟到后注销了子页的新监听。
+      await pending?.catch(() => false);
       return;
     }
     registered.value = false;
     logger.info("遥控器按键监听注销", { quiet });
     try {
-      await unregisterRemoteKeyListener();
+      await runNativeKeyOperation(() => unregisterRemoteKeyListener());
     }
     catch (error) {
       if (!quiet) logger.warn("遥控器按键监听注销失败", error);
     }
-    unsubscribe?.();
-    unsubscribe = null;
+    await pending?.catch(() => false);
   }
 
   /**
@@ -275,7 +317,8 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
    * 对比首页正常：它走的是 onHide → stop()（解绑）→ onShow → start()（全新订阅）。
    */
   async function sync(source = "unknown") {
-    if (!options.enabled.value || !supported.value || syncing || starting) {
+    if (pendingStop) await pendingStop;
+    if (disposed || !options.enabled.value || !supported.value || syncing || starting) {
       // 重连被挡住的四种原因分开打：容器回来时 enabled 没翻、宿主不支持、
       // 上一次重连还没结束、首次注册还在途中 —— 真机排查直接看这一行
       logger.debug("遥控器重连跳过", {
@@ -321,6 +364,7 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
       // 重连失败：订阅留着（宿主不推事件时就是空转），registered 维持原值 ——
       // 别因为一次重试失败就把它标成 false，否则卸载时 stop() 会跳过注销，
       // 原生那边可能还在拦截按键。改成隔一拍再补一次。
+      if (token !== lifecycle || !options.enabled.value) return;
       registered.value = wasRegistered;
       logger.warn("遥控器按键监听重连失败，稍后重试", {
         source,
@@ -444,6 +488,7 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
 
   // 组件卸载（页面被销毁 / 路由离开）时兜底注销，避免原生侧继续拦截按键
   onBeforeUnmount(() => {
+    disposed = true;
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", onHostVisible);
     }

@@ -8,6 +8,7 @@ import { createDuplexVoiceRuntime } from '@/utils/asr/duplex-runtime';
 import { ensureNativePermission, permissionDeniedMessage } from '@/utils/platform/mpaas';
 
 export function useDuplexVoice(options: {
+  enabled?: () => boolean;
   cancelManual: () => unknown;
   submit: (text: string) => void;
   setGain: (gain: number) => void;
@@ -53,7 +54,7 @@ export function useDuplexVoice(options: {
       if (!handlers.isCurrent()) throw new Error("cancelled");
       return startWebCapture();
     },
-    submit: options.submit,
+    submit: text => { if (options.enabled?.() !== false) options.submit(text); },
     setGain: options.setGain,
     onState(state) {
       active.value = state.active;
@@ -78,7 +79,9 @@ export function useDuplexVoice(options: {
     });
   }
   function stop() { return restoreAudioSession(runtime.stop()); }
+  watch(() => options.enabled?.(), enabled => { if (enabled === false) void stop(); }, { flush: "sync" });
   function toggle() {
+    if (options.enabled?.() === false) return;
     if (active.value || starting.value) { stop(); return; }
     activation += 1;
     if (ios && audioSession) {

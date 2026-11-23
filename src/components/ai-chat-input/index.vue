@@ -845,6 +845,8 @@ async function cancelGlobalVoiceHold() {
  * 注意 appendAttachments 对应 hook 里的 appendUploadedAttachments，两处名字必须一致。
  */
 defineExpose({
+  releaseVoice: voice.releaseForPageLeave,
+  cancelDuplexPress: clearHoldTimer,
   appendAttachments: appendUploadedAttachments,
   focusTextInput,
   startGlobalVoiceHold,

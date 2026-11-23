@@ -36,6 +36,7 @@ class NativeVoiceRecorder {
     this.sessionId = 0;
     this.recording = false;
     this.startedAt = 0;
+    this.releasePromise = Promise.resolve();
   }
 
   get isRecording() {
@@ -47,15 +48,17 @@ class NativeVoiceRecorder {
   }
 
   async start() {
-    this.hardReset();
+    const releasing = this.hardReset();
     const sessionId = this.sessionId;
+    await releasing;
+    if (sessionId !== this.sessionId) return { success: false, cancelled: true };
     const beganAt = Date.now();
 
     try {
       await startNativeRecord();
       // 授权弹窗、启动耗时期间用户可能已经松手，这一路结果直接作废
       if (sessionId !== this.sessionId) {
-        void cancelNativeRecord();
+        await cancelNativeRecord().catch(() => {});
         return { success: false, error: "录音已取消", cancelled: true };
       }
       this.recording = true;
@@ -111,21 +114,23 @@ class NativeVoiceRecorder {
    * 徒增一次超时。没在录就什么都不用做。
    */
   discardIfRecording() {
-    if (!this.recording) return;
+    if (!this.recording) return this.releasePromise;
     this.recording = false;
     this.startedAt = 0;
-    cancelNativeRecord().catch(() => {});
+    this.releasePromise = cancelNativeRecord().catch(() => {});
+    return this.releasePromise;
   }
 
   hardReset() {
     this.sessionId += 1;
-    this.discardIfRecording();
+    const released = this.discardIfRecording();
     this.startedAt = 0;
+    return released;
   }
 
   /** 识别失败等异常路径调用：确保原生侧不会残留会话 */
   release() {
-    this.discardIfRecording();
+    return this.hardReset();
   }
 }
 
