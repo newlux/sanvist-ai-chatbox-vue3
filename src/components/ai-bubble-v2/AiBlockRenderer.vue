@@ -203,7 +203,9 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
 </script>
 
 <template>
-  <!-- tips 是后端一次下发的过程提示短句，不走打字机：只有回答正文才逐字揭示 -->
+  <!-- tips 是后端一次下发的过程提示短句，不走打字机：只有回答正文才逐字揭示；
+       落定动效一并关掉（settle=false）—— 它每换一句文案就整行重挂一次，
+       落定动画跟着重放，思考过程中这行字就会明暗闪烁 -->
   <AnswerBlock
     v-if="block.type === 'answer' || block.type === 'tips'"
     :content="block.payload.content || ''"
@@ -211,6 +213,7 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
     :replayed="Boolean(block.payload.replayed)"
     :embedded="embedded"
     :typewriter="block.type === 'tips' ? false : null"
+    :settle="block.type === 'tips' ? false : undefined"
     @typing="onAnswerTyping(block, $event)"
   />
   <ThinkBlock

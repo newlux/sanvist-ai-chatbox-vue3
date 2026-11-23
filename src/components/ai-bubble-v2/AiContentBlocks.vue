@@ -2,7 +2,7 @@
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import type { Ref } from "vue";
 import type { AiBlock } from "@/utils/ai-stream/chatStreamParser";
-import { computed, ref, inject } from "vue";
+import { computed, ref, inject, watch } from "vue";
 import { useChatScope } from "@/stores";
 import { expandChartFences, expandMarkdownTables } from "@/utils/ai-stream";
 import AiBlockRenderer from "./AiBlockRenderer.vue";
@@ -269,10 +269,59 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
 function onGanttOpen(payload) {
   emit("gantt-open", payload);
 }
+
+/**
+ * tips → 正文交接时的「高度保持」。
+ *
+ * 后端吐第一条正文时，解析层会一次性把 tips 块摘掉（见 chatStreamParser 的 applyEventToBlocks），
+ * 而正文是打字机从 0 个字开始吐的 —— 交接这一帧气泡里只剩「品牌行 + 空正文」，
+ * 原来 tips 那一行（连同它下面那行过程副标题）的高度整块消失，几百毫秒后正文追上才长回来。
+ * 视觉上就是「快要出正文的时候气泡和正文一起上下闪一下」。
+ *
+ * 处理：在 tips 被摘掉的那一拍（pre-flush，DOM 还是移除前那一帧）量一下容器当前高度，作为 min-height 兜住。
+ * 正文随后在自己的槽位里逐字长出来，长过这个高度后 min-height 自然失效（不会再跳第二次）；
+ * 本轮收尾时清掉，避免影响下一轮。
+ */
+const rootRef = ref<unknown>(null);
+const holdMinHeight = ref(0);
+const holdStyle = computed(() => (holdMinHeight.value > 0 ? { minHeight: `${holdMinHeight.value}px` } : undefined));
+
+/** view 的 ref 在 H5 下可能是组件实例（取 $el）也可能是元素本身，两种都兜住 */
+function rootElement(): HTMLElement | null {
+  if (typeof HTMLElement === "undefined") return null;
+  const value = rootRef.value as HTMLElement | { $el?: unknown } | null;
+  if (value instanceof HTMLElement) return value;
+  const element = (value as { $el?: unknown } | null)?.$el;
+  return element instanceof HTMLElement ? element : null;
+}
+
+function hasTipsBlock(list: AiBlock[] | undefined) {
+  return (list || []).some(block => block?.type === "tips");
+}
+
+watch(
+  () => props.blocks,
+  (next, previous) => {
+    // 只在「这一拍把 tips 摘掉」时兜高度：tips 还在、或本来就没有，都不用管
+    if (!hasTipsBlock(previous) || hasTipsBlock(next)) return;
+    const root = rootElement();
+    const height = root ? Math.round(root.getBoundingClientRect().height) : 0;
+    if (height > 0) holdMinHeight.value = height;
+  },
+  { flush: "pre" },
+);
+
+/** 本轮结束就放开：此时正文早已长过兜底高度，收回不产生位移 */
+watch(
+  () => props.loading,
+  (loading) => {
+    if (!loading) holdMinHeight.value = 0;
+  },
+);
 </script>
 
 <template>
-  <view class="ai-content-blocks">
+  <view ref="rootRef" class="ai-content-blocks" :style="holdStyle">
     <!-- key 必须落在 template 上：放到分支子节点上编译到小程序会丢掉 a:key，只能按下标 diff -->
     <template v-for="item in visibleItems" :key="item.id">
       <AnswerGroupBlock

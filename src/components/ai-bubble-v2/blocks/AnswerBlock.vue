@@ -19,6 +19,13 @@ const props = defineProps({
    * 逐字放出来只是让状态行显得卡顿，这里按块关掉 —— 与 GuideCheckBlock 的同名 prop 语义一致。
    */
   typewriter: { type: Boolean, default: null },
+  /**
+   * 落定动效（文字停更后压淡再落定）开关：null（不传）= 跟随「打字机关了才开」。
+   * tips 显式传 false：它是被后端整句覆盖的状态行，每换一句文案就整行重挂一次，
+   * 落定动画跟着重放（opacity 0.7 → 1），看起来就是这行字在明暗闪烁 ——
+   * 思考阶段的「气泡内明暗闪烁」就是它（见 ai-bubble-v2 的思考期排查结论）。
+   */
+  settle: { type: Boolean, default: null },
 });
 
 const emit = defineEmits(["typing"]);
@@ -75,6 +82,13 @@ watch(
 );
 /** 这一块到底走不走打字机：本块锁存过开关，且不是「重放出来的最终正文」 */
 const typewriterActive = computed(() => typewriterLatched.value && !replayedAsFinished.value);
+/**
+ * 落定动效是否开启：显式传了 settle 就听 prop 的；没传则维持原口径
+ * （打字机逐字揭示期间关掉，打完字 / 非打字机场景才开）。
+ */
+const settleEnabled = computed(() =>
+  props.settle === null ? !typewriterActive.value : props.settle,
+);
 const { visible, typing } = useTypewriter(() => props.content, {
   enabled: () => typewriterActive.value,
 });
@@ -132,7 +146,7 @@ onBeforeUnmount(() => {
     <MarkdownRenderer
       :content="visible"
       :streaming="streaming || typing"
-      :settle="!typewriterActive"
+      :settle="settleEnabled"
     />
   </view>
 </template>

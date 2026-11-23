@@ -673,6 +673,34 @@ function pinnedTopGapPx() {
 }
 
 /**
+ * 最后一条回答是否还在「思考」：消息已发出、正文一个字都还没到。
+ *
+ * 这一段只有过程状态行 / 思考块在往下长（见 ThinkBlock 的步骤逐条追加），
+ * 视口该做的只有「发问那一拍把提问落到位」，之后不该再重算落点 —— 见 alignToReplyEnd 的守卫。
+ * 与 ai-chat-header 的 thinking 同一口径：出现 answer 正文才算思考结束。
+ */
+function isThinkingPhase() {
+  const messages = props.messages || [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role !== "ai" || message?.hidden) continue;
+    if (!message.loading) return false;
+    const hasAnswerText = (message.blocks || []).some(
+      block => block?.type === "answer" && String(block?.payload?.content || "").trim().length > 0,
+    );
+    return !hasAnswerText && !String(message.content || "").trim();
+  }
+  return false;
+}
+
+/**
+ * 对齐请求序号：量 DOM 是异步的，回包时这次量到的可能已经是上一帧的布局。
+ * 流式期间一拍能排好几次对齐，旧回包再写一次 scrollTop 就是「落点轮流生效」→ 整屏上下抖。
+ * 回包时若序号已被更新的请求覆盖，这批 rect 直接丢掉。
+ */
+let alignRequestSeq = 0;
+
+/**
  * @param forceUp 刚发过消息（强制回底）：允许把视图往上拉到落点；
  *                自动跟随时只往下，不打断用户看历史
  */
@@ -692,6 +720,17 @@ function alignToReplyEnd(forceUp = false, attempt = 0) {
    * 录音期间只让下面按需往下让位，不重算落点；说完之后才恢复对齐。
    */
   if (hasAsrPendingMessage() || props.voiceTopPad > 0) return;
+  /**
+   * 思考阶段不重算落点（发问那一拍 forceUp 除外）。
+   *
+   * 这一阶段提问已经钉在头部下沿，下面只有过程状态行 / 思考块在逐条往下长，
+   * 落点本来就不会变；每来一条过程事件都重新量一遍，等于和一个正在变高的元素抢 scrollTop，
+   * 每改一次整屏就挪一下 —— 表现就是「发问后思考过程中上下猛抖」。
+   * 和上面录音态同一条口径：只让内容往下长，等正文到了再恢复对齐。
+   */
+  if (!forceUp && props.capRoundAtTop && isThinkingPhase()) return;
+  // 每次对齐占一个号：回包时若已被更新的请求覆盖，说明这批 rect 量的是旧布局
+  const alignRequest = ++alignRequestSeq;
   const userAnchor = lastUserAnchorSelector();
   const query = uni.createSelectorQuery()
     .select(".msg-list")
@@ -706,6 +745,8 @@ function alignToReplyEnd(forceUp = false, attempt = 0) {
   if (userAnchor) query.select(userAnchor).boundingClientRect();
   query
     .exec((rects) => {
+      // 期间又发起过对齐：这批 rect 是旧布局，落点算出来也是旧的，丢掉（见 alignRequestSeq）
+      if (alignRequest !== alignRequestSeq) return;
       const listRect = (Array.isArray(rects) ? rects[0] : null) as { top?: number; height?: number } | null;
       const innerRect = (Array.isArray(rects) ? rects[1] : null) as { top?: number; height?: number } | null;
       const blockRects = (Array.isArray(rects) ? rects[2] : null) as Array<{ top?: number; bottom?: number }> | null;
@@ -772,26 +813,31 @@ function alignToReplyEnd(forceUp = false, attempt = 0) {
       if (props.capRoundAtTop && props.pinMessageId) {
         const userTop = Number(userRect?.top);
         const topTarget = userTop - innerTop - pinnedTopGapPx();
-        if (Number.isFinite(topTarget)) {
-          const bottomTarget = Math.max(0, Math.round(baseContentHeight - listHeight));
-          const capTarget = Math.max(0, Math.round(topTarget));
-          // 补白会反过来改变实测高度；布局未收敛时不能无限 nextTick，
-          // 否则点击机型后的首轮定位会饿死渲染和网络回调。与提问定位共用重试上限。
-          if (attempt < PIN_LIFT_MAX_TRIES && ensureScrollableTo(capTarget)) {
-            nextTick(() => alignToReplyEnd(forceUp, attempt + 1));
-            return;
-          }
-          target = props.releaseSpacerOnReplyEnd && isLastAnswerSettled()
-            ? Math.min(capTarget, bottomTarget)
-            : capTarget;
-          /**
-           * 收尾后按「还剩多少正文没露出来」决定要不要上报「未贴底」，页面那边才显示「回到底部」。
-           * 只差一两行就不上报：按钮会浮在最后一行正文上，看着像把字挡了。
-           * 流式期间**不能**上报 —— 一旦 setPinned(false)，content-grow 不再触发，
-           * 后面长出来的内容就完全不跟随了，正好是「回答时气泡憋在下面、结束才跳出来」。
-           */
-          if (isLastAnswerSettled()) unpinIfContentHidden();
+        /**
+         * 提问锚点这一拍没量到（消息刚挂载 / 被临时隐藏）：这一拍直接不动。
+         *
+         * 不能退化成上面按块底算出来的「贴底」落点 —— 封顶轮次唯一合法的落点就是提问，
+         * 退到贴底会把视口一下拽到内容末尾，下一拍再拽回来，来回就是整屏上下猛抖。
+         */
+        if (!Number.isFinite(topTarget)) return;
+        const bottomTarget = Math.max(0, Math.round(baseContentHeight - listHeight));
+        const capTarget = Math.max(0, Math.round(topTarget));
+        // 补白会反过来改变实测高度；布局未收敛时不能无限 nextTick，
+        // 否则点击机型后的首轮定位会饿死渲染和网络回调。与提问定位共用重试上限。
+        if (attempt < PIN_LIFT_MAX_TRIES && ensureScrollableTo(capTarget)) {
+          nextTick(() => alignToReplyEnd(forceUp, attempt + 1));
+          return;
         }
+        target = props.releaseSpacerOnReplyEnd && isLastAnswerSettled()
+          ? Math.min(capTarget, bottomTarget)
+          : capTarget;
+        /**
+         * 收尾后按「还剩多少正文没露出来」决定要不要上报「未贴底」，页面那边才显示「回到底部」。
+         * 只差一两行就不上报：按钮会浮在最后一行正文上，看着像把字挡了。
+         * 流式期间**不能**上报 —— 一旦 setPinned(false)，content-grow 不再触发，
+         * 后面长出来的内容就完全不跟随了，正好是「回答时气泡憋在下面、结束才跳出来」。
+         */
+        if (isLastAnswerSettled()) unpinIfContentHidden();
       }
       else {
         // 不封顶（用户点了回到底部 / 滑到了底）：垫的空白没有用武之地，收回

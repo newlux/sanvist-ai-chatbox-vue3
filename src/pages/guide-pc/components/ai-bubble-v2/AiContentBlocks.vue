@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { GuideStepSelectEvent } from "@/api/chat/types";
 import type { AiBlock } from "@/utils/ai-stream/chatStreamParser";
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { expandChartFences, expandMarkdownTables } from "@/utils/ai-stream";
 import AiBlockRenderer from "./AiBlockRenderer.vue";
 import AnswerGroupBlock from "./blocks/AnswerGroupBlock.vue";
@@ -174,10 +174,50 @@ function onGuideCheckStepSelect(payload: GuideStepSelectEvent) {
 function onGanttOpen(payload) {
   emit("gantt-open", payload);
 }
+
+/**
+ * tips → 正文交接时的「高度保持」：解析层把 tips 摘掉的那一拍，正文还在打字机里从 0 个字吐，
+ * 气泡会先丢掉 tips 那一行（含过程副标题）的高度、几百毫秒后再长回来 —— 视觉上是「上下闪一下」。
+ * 这里在移除前那一帧（pre-flush）量容器高度兜成 min-height，正文长过它之后自然失效，收尾时清掉。
+ */
+const rootRef = ref<unknown>(null);
+const holdMinHeight = ref(0);
+const holdStyle = computed(() => (holdMinHeight.value > 0 ? { minHeight: `${holdMinHeight.value}px` } : undefined));
+
+/** view 的 ref 在 H5 下可能是组件实例（取 $el）也可能是元素本身，两种都兜住 */
+function rootElement(): HTMLElement | null {
+  if (typeof HTMLElement === "undefined") return null;
+  const value = rootRef.value as HTMLElement | { $el?: unknown } | null;
+  if (value instanceof HTMLElement) return value;
+  const element = (value as { $el?: unknown } | null)?.$el;
+  return element instanceof HTMLElement ? element : null;
+}
+
+function hasTipsBlock(list: AiBlock[] | undefined) {
+  return (list || []).some(block => block?.type === "tips");
+}
+
+watch(
+  () => props.blocks,
+  (next, previous) => {
+    if (!hasTipsBlock(previous) || hasTipsBlock(next)) return;
+    const root = rootElement();
+    const height = root ? Math.round(root.getBoundingClientRect().height) : 0;
+    if (height > 0) holdMinHeight.value = height;
+  },
+  { flush: "pre" },
+);
+
+watch(
+  () => props.loading,
+  (loading) => {
+    if (!loading) holdMinHeight.value = 0;
+  },
+);
 </script>
 
 <template>
-  <view class="ai-content-blocks">
+  <view ref="rootRef" class="ai-content-blocks" :style="holdStyle">
     <!-- key 必须落在 template 上：放到分支子节点上编译到小程序会丢掉 a:key，只能按下标 diff -->
     <template v-for="item in renderItems" :key="item.id">
       <AnswerGroupBlock

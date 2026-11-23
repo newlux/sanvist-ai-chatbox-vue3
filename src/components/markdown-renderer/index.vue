@@ -176,6 +176,8 @@ let pendingContent = "";
 let lastRenderedContent = "";
 let renderTimer = null;
 let lastRenderAt = 0;
+/** 上一次真正交给 mp-html 的 HTML：内容没变就不换 key，避免无意义的整棵重挂 */
+let lastMountedHtml = "";
 
 function getStreamRenderInterval(length) {
   if (length >= 12000) return VERY_LONG_STREAM_RENDER_INTERVAL_MS;
@@ -367,8 +369,20 @@ function renderLatest() {
   if (html && darkContainer.value) html = paintTableText(html);
   // 有正文却解析不出任何标签，说明 markdown-it 在当前运行环境失效了，
   // 直接把原文交给 mp-html，至少不会白屏
-  renderedHtml.value = !html && pendingContent ? pendingContent : html;
-  renderVersion.value += 1;
+  const finalHtml = !html && pendingContent ? pendingContent : html;
+  renderedHtml.value = finalHtml;
+  /**
+   * 渲染结果没变就不自增版本号：settle 开着时版本号一变，renderKey 随之变化，
+   * mp-html 就整棵重挂一次。停更补渲染（scheduleSettleCheck 清掉 lastRenderedContent
+   * 强制走到这里）在内容没变时是「同一份 HTML 再挂一遍」——节点全部重建、落定动画重放。
+   * 思考阶段的 tips 块（短句反复覆盖、settle 常开）每次提示替换都会走到这条路径，
+   * 表现就是这一行字反复拆了重建、明暗闪烁，跟着上下抖。
+   * 只有 HTML 真的变了（内容更新 / 有块进入落定窗口）才值得重挂一次。
+   */
+  if (finalHtml !== lastMountedHtml) {
+    renderVersion.value += 1;
+    lastMountedHtml = finalHtml;
+  }
   lastRenderedContent = pendingContent;
   lastRenderAt = Date.now();
   scheduleSettleCheck();

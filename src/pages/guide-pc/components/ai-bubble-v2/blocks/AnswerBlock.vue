@@ -1,19 +1,29 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import MarkdownRenderer from "../../markdown-renderer/index.vue";
 
 defineOptions({ name: "AnswerBlock" });
 
-defineProps({
+const props = defineProps({
   content: { type: String, default: "" },
   embedded: { type: Boolean, default: false },
   // 未结束的回答按流式处理，降低解析频率
   streaming: { type: Boolean, default: false },
+  /**
+   * 落定动效（文字停更后压淡再落定）开关：null（不传）= 开，正常正文照旧「写完落一下」。
+   * tips 显式传 false —— 它是被后端整句覆盖的状态行，每换一句文案就整行重挂一次，
+   * 落定动画跟着重放（opacity 0.7 → 1），看起来就是这行字在明暗闪烁。
+   */
+  settle: { type: Boolean, default: null },
 });
+
+/** 透传给渲染器的实值：null 不能直接往下传（Boolean prop 会被当成 false） */
+const settleEnabled = computed(() => (props.settle === null ? true : props.settle));
 </script>
 
 <template>
   <view class="answer-block" :class="[{ 'answer-block--embedded': embedded }]">
-    <MarkdownRenderer :content="content" :streaming="streaming" />
+    <MarkdownRenderer :content="content" :streaming="streaming" :settle="settleEnabled" />
   </view>
 </template>
 

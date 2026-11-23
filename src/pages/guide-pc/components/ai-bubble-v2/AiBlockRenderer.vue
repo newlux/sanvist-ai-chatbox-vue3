@@ -188,11 +188,13 @@ function onGuideCheckShare(payload: { element: HTMLElement | null }) {
 </script>
 
 <template>
+  <!-- tips 是后端一次下发的过程提示短句：落定动效显式关掉，否则每换一句就整行重挂 + 动画重放（明暗闪烁） -->
   <AnswerBlock
     v-if="block.type === 'answer' || block.type === 'tips'"
     :content="block.payload.content || ''"
     :streaming="!block.complete"
     :embedded="embedded"
+    :settle="block.type === 'tips' ? false : undefined"
   />
   <ThinkBlock
     v-else-if="block.type === 'think'"

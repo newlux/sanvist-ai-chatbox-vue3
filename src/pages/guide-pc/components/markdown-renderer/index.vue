@@ -10,6 +10,12 @@ const props = defineProps({
   content: { type: String, default: "" },
   // 流式阶段：合并高频更新，降低全量解析与渲染频率
   streaming: { type: Boolean, default: false },
+  /**
+   * 落定动效（文字停更后压淡再落定）开关，默认开。
+   * tips（过程提示语，被后端整句覆盖的状态行）显式关掉：它每换一句文案就整行重挂一次，
+   * 落定动画跟着重放，看起来就是这行字在明暗闪烁。
+   */
+  settle: { type: Boolean, default: true },
 });
 const emit = defineEmits(["ready"]);
 const logger = createLogger("markdown");
@@ -182,6 +188,8 @@ let pendingContent = "";
 let lastRenderedContent = "";
 let renderTimer = null;
 let lastRenderAt = 0;
+/** 上一次真正交给 mp-html 的 HTML：内容没变就不换 key，避免无意义的整棵重挂 */
+let lastMountedHtml = "";
 
 function getStreamRenderInterval(length) {
   if (length >= 12000) return VERY_LONG_STREAM_RENDER_INTERVAL_MS;
@@ -298,7 +306,7 @@ function decorateSettle(tokens: MarkdownToken[], content: string) {
   }
 }
 
-function parseMarkdown(content) {
+function parseMarkdown(content, settle = true) {
   const trimmed = content.trim();
   if (!trimmed) return "";
   if (trimmed.startsWith(TRUSTED_HTML_PREFIX)) {
@@ -308,7 +316,7 @@ function parseMarkdown(content) {
     // 先出 token 再自己 render：落定动效要挂在块级 token 的 style 上，纯 render 拿不到这一层
     const env = {};
     const tokens = markdown.parse(content, env);
-    decorateSettle(tokens, content);
+    if (settle) decorateSettle(tokens, content);
     return markdown.renderer.render(tokens, markdown.options, env);
   }
   catch (error) {
@@ -348,6 +356,11 @@ function scheduleSettleCheck() {
     clearTimeout(settleTimer);
     settleTimer = null;
   }
+  // 落定动效这一块关掉了（tips 这类整句覆盖的状态行）：不挂动画，也不用为它补渲染
+  if (!props.settle) {
+    settlePending = false;
+    return;
+  }
   if (!settlePending) return;
   const scheduledFor = pendingContent;
   settleTimer = setTimeout(() => {
@@ -363,13 +376,23 @@ function scheduleSettleCheck() {
 function renderLatest() {
   clearRenderTimer();
   if (pendingContent === lastRenderedContent) return;
-  let html = parseMarkdown(pendingContent);
+  let html = parseMarkdown(pendingContent, props.settle);
   // 深色容器里给表格补正文色（mp-html 会覆盖 tagStyle 注入的 color）
   if (html && darkContainer.value) html = paintTableText(html);
   // 有正文却解析不出任何标签，说明 markdown-it 在当前运行环境失效了，
   // 直接把原文交给 mp-html，至少不会白屏
-  renderedHtml.value = !html && pendingContent ? pendingContent : html;
-  renderVersion.value += 1;
+  const finalHtml = !html && pendingContent ? pendingContent : html;
+  renderedHtml.value = finalHtml;
+  /**
+   * HTML 没变就不自增版本号：key 一变 mp-html 就整棵重挂，落定动画跟着重放。
+   * 停更补渲染（scheduleSettleCheck 清掉 lastRenderedContent 强制走到这里）在
+   * 内容没变时是「同一份 HTML 再挂一遍」，纯浪费；只有 HTML 真变了才值得重挂
+   * （重建是为了清掉分片中残留的临时列表 / 换行节点，见 renderVersion 的注释）。
+   */
+  if (finalHtml !== lastMountedHtml) {
+    renderVersion.value += 1;
+    lastMountedHtml = finalHtml;
+  }
   lastRenderedContent = pendingContent;
   lastRenderAt = Date.now();
   scheduleSettleCheck();
