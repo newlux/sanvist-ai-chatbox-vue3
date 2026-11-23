@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import type { GuideCheckPayload, GuideStepSelectEvent } from "@/api/chat/types";
+import type { Ref } from "vue";
 import { computed, inject, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import iconCopy from "@/assets/img/icon-action-copy.svg";
-import iconRadioOn from "@/assets/img/icon-action-radio-on.svg";
 import iconShare from "@/assets/img/icon-action-share.svg";
-import saniIcon from "@/assets/img/icon-sani.png";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { useTypewriter } from "@/hooks/useTypewriter";
 import { useSettingsStore } from "@/stores";
@@ -162,6 +161,28 @@ const { visible: typedContent, typing: typedContentTyping } = useTypewriter(() =
 });
 const { visible: typedSummary, typing: typedSummaryTyping } = useTypewriter(() => summary.value, {
   enabled: () => typewriterEnabled.value,
+});
+
+/**
+ * 正文 / 小结正在逐字时上报气泡（见 ai-bubble-v2 的 provide），
+ * 让紧跟其后的推荐问题等选项等正文打完再出现，保持「正文 → 选项」的节奏。
+ *
+ * 必须 immediate：useTypewriter 在 setup 阶段（watch immediate）就把 typing 置成 true，
+ * 普通 watch 注册时那次变化已经过去了，计数会一直停在 0（同 AnswerBlock 的说明）。
+ * 卸载时按本地标记补减：这一步的卡片切步会被整块重新挂载，打字中途卸载不能留下残值。
+ */
+const typingReporter = inject<Ref<number> | null>("ai-bubble-answer-typing", null);
+const cardTyping = computed(() => typedContentTyping.value || typedSummaryTyping.value);
+let reportedTyping = false;
+watch(cardTyping, (on) => {
+  if (!typingReporter || on === reportedTyping) return;
+  reportedTyping = on;
+  typingReporter.value = Math.max(0, typingReporter.value + (on ? 1 : -1));
+}, { immediate: true });
+onBeforeUnmount(() => {
+  if (!typingReporter || !reportedTyping) return;
+  reportedTyping = false;
+  typingReporter.value = Math.max(0, typingReporter.value - 1);
 });
 /**
  * 进度：轨道按步等分，只亮「当前这一步」，不累积已完成的步。
@@ -370,17 +391,6 @@ function onCopyTap() {
   emit("copy-click", { text: copyText.value });
 }
 
-/** 播报：完成态念「当前步（标题 + 正文）+ 步骤小结」，普通步骤不带文本、由页面按 step action 兜底 */
-function onTtsTap() {
-  if (!props.ttsEnabled) return;
-  if (isSummaryMode.value) {
-    // 与切回步骤的自动播报同口径：完成态下无论当前停在哪一步，都念「这一步正文 + 小结」
-    emit("tts-click", [title.value, content.value, summary.value].filter(Boolean).join("\n"));
-    return;
-  }
-  emit("tts-click");
-}
-
 /** 分享：把卡片根节点交给页面的 useChatShare 截图（动作区带 data-share-poster-ignore，不会进海报） */
 function onShareTap() {
   emit("share-click", { element: resolveRootElement() });
@@ -398,6 +408,12 @@ function resolveRootElement(): HTMLElement | null {
 </script>
 
 <template>
+  <!--
+    内容卡只渲染内容：品牌署名行（SANY Neo + 播报按钮）已独立成 GuideCheckBrand，
+    由消息列表放在卡片容器的固定层。切一步 = 换一个 block.id = 这张卡整块重挂载，
+    品牌行留在组件里就会跟着重建（图标重插、播放态跳回静止、入场动画连它一起平移）。
+    入场动画因此也只作用在这层内容上，品牌行保持不动。
+  -->
   <view
     ref="rootRef"
     class="guide-check-block"
@@ -409,31 +425,6 @@ function resolveRootElement(): HTMLElement | null {
     @touchstart="onCardTouchStart"
     @touchend="onCardTouchEnd"
   >
-    <!-- 卡片左上角品牌署名：SANY Neo logo + SANY Neo + 语音播报控制（与气泡里的完成态同一套观感） -->
-    <view class="guide-check-block__brand">
-      <image class="guide-check-block__brand-icon" :src="saniIcon" mode="aspectFit" />
-      <text class="guide-check-block__brand-text">
-        SANY Neo
-      </text>
-      <view
-        v-if="ttsEnabled"
-        class="guide-check-block__action-btn guide-check-block__brand-tts"
-        data-share-poster-ignore
-        @tap.stop="onTtsTap"
-      >
-        <view v-if="ttsLoading" class="guide-check-block__tts-spinner" />
-        <view v-else-if="ttsPlaying" class="guide-check-block__tts-wave">
-          <view
-            v-for="index in 4"
-            :key="index"
-            class="guide-check-block__tts-wave-bar"
-            :class="`guide-check-block__tts-wave-bar--${index}`"
-          />
-        </view>
-        <image v-else :src="iconRadioOn" mode="aspectFit" class="guide-check-block__action-icon" />
-      </view>
-    </view>
-
     <view class="guide-check-block__header">
       <text class="guide-check-block__title">
         {{ headerTitle }}
@@ -488,7 +479,9 @@ function resolveRootElement(): HTMLElement | null {
     <!-- 确认问题 + 选项：作业指导一步做完之后的三个出口（下一步 / 换个方式 / 其他问题）。
          最后一步确认完会 emit finish，消息列表把步骤小结注入 payload.summary，
          完成态下确认区被小结替换（见下方 summary 区块）。 -->
-    <template v-if="!isSummaryMode">
+    <!-- 确认问题与选项等正文打完再出现：正文还在逐字时就把选项摆好，
+         用户没读完正文就能点，顺序和节奏都断了（与气泡里的追问卡同一口径） -->
+    <template v-if="!isSummaryMode && !cardTyping">
       <text v-if="question" class="guide-check-block__question">
         {{ question }}
       </text>
@@ -604,31 +597,7 @@ function resolveRootElement(): HTMLElement | null {
   }
 }
 
-/* 左上角品牌署名：SANY Neo logo + SANY Neo + 播报按钮（与气泡完成态同一套观感） */
-.guide-check-block__brand {
-  display: flex;
-  align-items: center;
-  margin-bottom: 20rpx;
-}
-
-.guide-check-block__brand-icon {
-  flex-shrink: 0;
-  width: 52rpx;
-  height: 52rpx;
-}
-
-.guide-check-block__brand-text {
-  margin-left: 12rpx;
-  font-family: "PingFang SC", "Inter", sans-serif;
-  font-size: 26rpx;
-  font-weight: 500;
-  line-height: 36rpx;
-  color: #1a1a1a;
-}
-
-.guide-check-block__brand-tts {
-  margin-left: 12rpx;
-}
+/* 品牌署名行已独立成 GuideCheckBrand（渲染在卡片容器的固定层），这里不再画 */
 
 .guide-check-block__header {
   display: flex;
@@ -789,12 +758,26 @@ function resolveRootElement(): HTMLElement | null {
   color: #1a1a1a;
 }
 
-/* 选项组：纵向排列、左对齐，胶囊按内容宽度收缩，不铺满整行 */
+/* 选项组：纵向排列、左对齐，胶囊按内容宽度收缩，不铺满整行。
+   选项在正文打完那一刻才挂载（见模板上的 cardTyping），补一次淡入上移 */
 .guide-check-block__options {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   margin-top: 24rpx;
+  animation: guide-check-options-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes guide-check-options-in {
+  from {
+    opacity: 0;
+    transform: translateY(8rpx);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .guide-check-block__option {
@@ -880,63 +863,10 @@ function resolveRootElement(): HTMLElement | null {
   height: 32rpx;
 }
 
-.guide-check-block__tts-spinner {
-  box-sizing: border-box;
-  width: 24rpx;
-  height: 24rpx;
-  border: 3rpx solid rgba(136, 136, 136, 0.22);
-  border-top-color: #888888;
-  border-radius: 50%;
-  animation: guide-check-tts-spin 0.8s linear infinite;
-}
-
-/* 播放中的语音图标：蓝色声波，四根条错峰起伏，视觉上从左往右推进 */
-.guide-check-block__tts-wave {
-  display: flex;
-  width: 32rpx;
-  height: 32rpx;
-  align-items: center;
-  justify-content: center;
-  gap: 4rpx;
-}
-
-.guide-check-block__tts-wave-bar {
-  width: 4rpx;
-  height: 24rpx;
-  border-radius: 4rpx;
-  background: #1a6dff;
-  transform-origin: center center;
-  animation: guide-check-tts-wave 0.9s ease-in-out infinite;
-}
-
-.guide-check-block__tts-wave-bar--1 { animation-delay: 0s; }
-.guide-check-block__tts-wave-bar--2 { animation-delay: 0.12s; }
-.guide-check-block__tts-wave-bar--3 { animation-delay: 0.24s; }
-.guide-check-block__tts-wave-bar--4 { animation-delay: 0.36s; }
-
-@keyframes guide-check-tts-spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes guide-check-tts-wave {
-  0%,
-  100% {
-    transform: scaleY(0.35);
-    opacity: 0.6;
-  }
-
-  50% {
-    transform: scaleY(1);
-    opacity: 1;
-  }
-}
+/* 播报按钮的 spinner / 声波随品牌行一起搬到 GuideCheckBrand，这里只留动作区图标 */
 
 /* ===== 深色：与气泡内其它块同一套材质（正文 #E5E5E5、次要 45% 白、块底 6% 白） ===== */
 .guide-check-block--dark {
-  .guide-check-block__brand-text {
-    color: #fff;
-  }
-
   .guide-check-block__title {
     color: #fff;
   }
@@ -1026,15 +956,6 @@ function resolveRootElement(): HTMLElement | null {
   /* 复制的 svg 在深底上接近隐形，整体提亮一档（与 GuideSourceBlock 同做法） */
   .guide-check-block__action-icon {
     filter: brightness(1.7);
-  }
-
-  .guide-check-block__tts-spinner {
-    border-color: rgba(255, 255, 255, 0.22);
-    border-top-color: rgba(255, 255, 255, 0.72);
-  }
-
-  .guide-check-block__tts-wave-bar {
-    background: #4c8dff;
   }
 }
 </style>

@@ -15,6 +15,7 @@ import { requestSummaryTts } from "@/utils/guide-step-tts";
 import { isListenReportListened } from "@/utils/listen-report";
 import AiBlockRenderer from "../ai-bubble-v2/AiBlockRenderer.vue";
 import AiBubbleV2 from "../ai-bubble-v2/index.vue";
+import GuideCheckBrand from "../ai-bubble-v2/blocks/GuideCheckBrand.vue";
 
 defineOptions({
   name: "AiMessageList",
@@ -1203,6 +1204,28 @@ function onStepCardReady(payload?: { keepPosition?: boolean }) {
 }
 
 /**
+ * 步骤卡的播报：品牌行已提到卡片容器外（见模板与 GuideCheckBrand），文案在这里按
+ * 「当前展示的那张卡」组装 —— 与原来卡片内 onTtsTap 同一口径：
+ * 完成态（有步骤小结）念「标题 + 正文 + 小结」，普通步骤不带文本，由页面按 step action 兜底。
+ */
+function onStepCardTts(index: number, msg: UiChatMessage) {
+  if (!msg?.ttsEnabled) return;
+  const payload = (standaloneBlocks(msg, index)[0]?.payload || {}) as {
+    title?: string;
+    content?: string;
+    summary?: string;
+  };
+  const summary = String(payload.summary || "").trim();
+  if (!summary) {
+    onTtsClick(index);
+    return;
+  }
+  const title = String(payload.title || "").trim() || "核对任务与资料";
+  const content = String(payload.content || "");
+  onTtsClick(index, [title, content, summary].filter(Boolean).join("\n"));
+}
+
+/**
  * 卡片上报自己的实测高度（挂载时 + 图片字体撑开后的两次补量）：把这一轮的高度下限顶上去。
  *
  * 只升不降 —— 高度下限就是「这一轮见过的最高卡片」，切到矮的一步才撑得住、不会缩水。
@@ -1890,33 +1913,48 @@ watch(
               @copy-click="onCopyClick(index, msg)"
             />
             <!-- 核对/步骤卡独立成卡，不放进回答气泡；一轮问答一张，多轮各留一张 -->
-            <!-- 容器高度按这一轮见过的最高卡片托住：切到更短的一步时内容不缩水，视口与卡片都不动 -->
+            <!-- 品牌署名行（SANY Neo + 播报按钮）固定在容器这一层：切一步 = 换一个 block.id =
+                 下面的内容卡整块重挂载，品牌行不跟着重建、也不吃进场动画（见 GuideCheckBrand） -->
+            <!-- domId 落在这个容器上（含品牌行），滚动定位 / 置顶对齐的锚点与拆分前一致；
+                 并进消息 id 是为了区分「同一份指导重复触发」的多轮卡片 -->
             <view
-              v-for="block in standaloneBlocks(msg, index)"
-              :key="block.id"
+              v-if="standaloneBlocks(msg, index).length"
+              :id="guideStepCardDomId(msg?.id, standaloneBlocks(msg, index)[0]?.id)"
               class="chat-box__card"
-              :style="stepCardMinHeightStyle(index, msg)"
             >
-              <!-- domId 并进消息 id：同一份指导重复触发时 block id 会撞，滚动定位要能区分是哪一轮 -->
-              <AiBlockRenderer
-                :block="block"
-                :dom-id="guideStepCardDomId(msg?.id, block.id)"
-                :show-card-actions="msg?.role === 'ai' && !msg.loading && !msg.interrupted"
-                :compact-guide-card="compactGuideCard"
+              <GuideCheckBrand
                 :dark="props.dark"
-                :typewriter="isFreshMessage(msg)"
                 :tts-enabled="!!msg.ttsEnabled"
                 :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
                 :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
-                @guide-check-step-select="onGuideCheckStepSelect(index, msg, $event)"
-                @guide-check-finish="onGuideCheckFinish(index)"
-                @card-ready="onStepCardReady"
-                @card-height="onStepCardHeight(index, msg, $event)"
-                @suggestion-tap="onSuggestionTap($event, index)"
-                @tts-click="onTtsClick(index, $event)"
-                @copy-click="onGuideCheckCopy(index, msg, $event)"
-                @share-click="onGuideCheckShare(index, msg, $event)"
+                @tts-click="onStepCardTts(index, msg)"
               />
+              <!-- 容器高度按这一轮见过的最高卡片托住：切到更短的一步时内容不缩水，视口与卡片都不动 -->
+              <view
+                v-for="block in standaloneBlocks(msg, index)"
+                :key="block.id"
+                :style="stepCardMinHeightStyle(index, msg)"
+              >
+                <!-- 不再传 dom-id：定位锚点已上移到外层容器 -->
+                <AiBlockRenderer
+                  :block="block"
+                  :show-card-actions="msg?.role === 'ai' && !msg.loading && !msg.interrupted"
+                  :compact-guide-card="compactGuideCard"
+                  :dark="props.dark"
+                  :typewriter="isFreshMessage(msg)"
+                  :tts-enabled="!!msg.ttsEnabled"
+                  :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
+                  :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
+                  @guide-check-step-select="onGuideCheckStepSelect(index, msg, $event)"
+                  @guide-check-finish="onGuideCheckFinish(index)"
+                  @card-ready="onStepCardReady"
+                  @card-height="onStepCardHeight(index, msg, $event)"
+                  @suggestion-tap="onSuggestionTap($event, index)"
+                  @tts-click="onTtsClick(index, $event)"
+                  @copy-click="onGuideCheckCopy(index, msg, $event)"
+                  @share-click="onGuideCheckShare(index, msg, $event)"
+                />
+              </view>
             </view>
             <!-- 完成态：整段指导全部确认完，steps 小结已注入最后一张核对卡；底部补上同一条回答的推荐问题 -->
             <view v-if="isStepCardFinished(msg, index) && guideSuggestionBlockOf(msg)" class="chat-box__card">

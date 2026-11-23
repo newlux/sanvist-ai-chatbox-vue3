@@ -301,6 +301,76 @@ provide("ai-bubble-typewriter", computed(() =>
 ));
 
 /**
+ * 正文「还在展示」的块数（多段正文各打各的，所以用计数而不是布尔）。
+ *
+ * 由正文类块上报：AnswerBlock（回答正文）、GuideCheckBlock（步骤正文 / 小结）逐字期间计一，
+ * VoiceBlock（导语整段直出，但按字数占一段展示时长）计时期间也计一。
+ * AiContentBlocks 据此把「选项类块」压到正文打完再出现 —— 追问卡 / 推荐问题 / 跳转卡的
+ * 数据往往和正文同一帧到达，不压的话就是「正文才吐两行，下面选项已经摆好」，
+ * 用户还没读完正文就能点，阅读顺序和打字机的节奏都断了。
+ * 历史回看消息从不逐字、也不计时，计数恒为 0，选项照旧立即显示。
+ */
+const answerTypingCount = ref(0);
+provide("ai-bubble-answer-typing", answerTypingCount);
+
+/**
+ * 气泡外的追问区（推荐问题）是否该出现：与 AiContentBlocks 的选项压制同一口径 ——
+ * 本轮生成结束（loading=false）且正文不再逐字，才把推荐问题摆出来。
+ *
+ * 这里提前判一次而不只靠组件内部过滤，是为了不留下一个空的追问容器：
+ * 气泡带 row-gap、外层是 flex-wrap，空容器也会占掉一行间距。
+ */
+const suggestionsVisible = computed(() => !isUser.value
+  && suggestionBlocks.value.length > 0
+  && !props.loading
+  && answerTypingCount.value === 0);
+
+/**
+ * 【临时排查 · 打字机观感】搜索 `typewriter-diagnose` 可定位，排查完整段删掉。
+ *
+ * 要区分「为什么有时像整段刷出」的三种成因：
+ * - answerBlocks > 1：正文被拆成多块，每块各自从第一个字开打，观感是分段刷新；
+ * - replayedBlocks > 0：收尾重放把正文按权威顺序重新分配后打了标记，
+ *   那几块会整段显示（有意设计，见 AnswerBlock 的 replayedAsFinished）；
+ * - 两者都没有：只是文本到达太快，打字机按 catchUpTicks 追平，属于预期。
+ *
+ * 用 warn 而不是 info：生产包默认只保留 warn / error，真机上才看得到。
+ */
+watch(
+  () => (props.blocks || []).filter(block => block?.type === "answer").length,
+  (count, previous) => {
+    if (props.role === "user" || count === previous) return;
+    logger.warn("[typewriter-diagnose] answer 块数变化", {
+      from: previous,
+      to: count,
+      loading: props.loading,
+      bubble: String(props.content || "").slice(0, 16),
+    });
+  },
+);
+
+watch(
+  () => props.loading,
+  (loading, previous) => {
+    if (loading || !previous || props.role === "user") return;
+    const answers = (props.blocks || []).filter(block => block?.type === "answer");
+    if (!answers.length) return;
+    logger.warn("[typewriter-diagnose] 本轮回答结束", {
+      bubble: String(props.content || "").slice(0, 16),
+      answerBlocks: answers.length,
+      replayedBlocks: answers.filter(block => Boolean(block.payload?.replayed)).length,
+      details: answers.map(block => ({
+        len: String(block.payload?.content || "").length,
+        replayed: Boolean(block.payload?.replayed),
+        complete: block.complete,
+      })),
+      // fresh=false 说明这条走的是历史回看，本来就不该打字机
+      fresh: isFreshAnswer.value,
+    });
+  },
+);
+
+/**
  * 消息里带独立卡片（核对卡 / 调度视图入口卡）时，气泡正文为空属于正常情况，
  * 不能再补「系统繁忙」兜底提示——内容在气泡外那张卡上。
  */
@@ -540,7 +610,7 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
       'ai-bubble-v2--user': isUser,
       'ai-bubble-v2--asr-pending': isUser && props.asrPending,
       'ai-bubble-v2--no-answer-group': props.noAnswerGroup,
-      'ai-bubble-v2--with-suggestions': !isUser && suggestionBlocks.length,
+      'ai-bubble-v2--with-suggestions': suggestionsVisible,
       'ai-bubble-v2--dark': props.dark,
     }"
     @tap="onSelectTap"
@@ -805,12 +875,15 @@ onBeforeUnmount(() => cancelVoiceArrival?.());
              语音播报按钮上移到过程状态行的 SANY Neo 后面，其余动作不再展示 -->
       </template>
     </view>
-    <!-- 追问属于当前回答，但不放进回答卡片；与卡片保持独立且紧邻的视觉关系。 -->
-    <view v-if="!isUser && suggestionBlocks.length" class="ai-bubble-v2__suggestions">
+    <!-- 追问属于当前回答，但不放进回答卡片；与卡片保持独立且紧邻的视觉关系。
+         loading 一并传下去：推荐问题和正文常常同一帧到达，气泡外这一层也要
+         按「正文收尾 → 选项出现」压住（判定见 AiContentBlocks 的 bodyPending）。 -->
+    <view v-if="suggestionsVisible" class="ai-bubble-v2__suggestions">
       <AiContentBlocks
         :blocks="suggestionBlocks"
         :force-thinking-expanded="props.forceThinkingExpanded"
         :no-answer-group="true"
+        :loading="props.loading"
         @suggestion-tap="onSuggestionTap"
       />
     </view>

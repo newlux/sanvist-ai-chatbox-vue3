@@ -405,9 +405,26 @@ function reduceEventToBlocks(
        * 否则上方正文会先整段消失、表格被顶上去，再逐字长回来把表格顶下去。
        * 只标 answer：其它块（表格 / 图表 / 追问卡）在后续去重里会用到 payloadKey，多一个键会让去重失配。
        */
-      const marked = rebuilt.map(block => (block.type === "answer"
-        ? { ...block, payload: { ...block.payload, replayed: true } }
-        : block));
+      /**
+       * 但**内容与流式期间一模一样**的块不打标：纯文本回答（没有图文重排）重放后正文往往
+       * 逐字未变，这时打标会让 AnswerBlock 立刻关掉打字机，还没吐完的积压瞬间补全，
+       * 表现就是「前半段逐字、后半段整段刷出」。只有内容真被重新分配过（拆分 / 覆盖）
+       * 才需要挂载即完成，避免「文字先消失 → 表格上移 → 再逐字长回来」。
+       * 旧块按 answer 出现顺序对齐（重放内外 id 都是 answer-N，顺序即编号）。
+       */
+      const previousAnswerContents = blocks
+        .filter(block => block.type === "answer")
+        .map(block => String(block.payload?.content || ""));
+      let answerCursor = 0;
+      const marked = rebuilt.map((block) => {
+        if (block.type !== "answer") return block;
+        const previousContent = previousAnswerContents[answerCursor];
+        answerCursor += 1;
+        if (previousContent !== undefined && previousContent === String(block.payload?.content || "")) {
+          return block;
+        }
+        return { ...block, payload: { ...block.payload, replayed: true } };
+      });
       return {
         ...base,
         blocks: marked,

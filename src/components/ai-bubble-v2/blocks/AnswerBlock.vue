@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Ref } from "vue";
-import { computed, inject, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import MarkdownRenderer from "@/components/markdown-renderer/index.vue";
 import { useTypewriter } from "@/hooks/useTypewriter";
 
@@ -55,34 +55,84 @@ const typewriterAllowed = computed(() => {
  * 拆成两帧，也不该再从第一个字重打。
  */
 const replayedAsFinished = computed(() => Boolean(props.replayed) && props.content.trim().length > 0);
-/** 这一块到底走不走打字机：本块允许，且不是「重放出来的最终正文」 */
-const typewriterActive = computed(() => typewriterAllowed.value && !replayedAsFinished.value);
+/**
+ * 打字机开关一旦打开就锁住，不跟着「这轮是否还在生成」一起关。
+ *
+ * `ai-bubble-typewriter` 是气泡级 computed（页面开关 && isFreshAnswer），而 isFreshAnswer
+ * 依赖 `loading / interrupted / processStatus` —— 生成结束时这两个条件都会翻转，开关随即变 false。
+ * 长回答的逐字展示本身有追平过程（积压多时最长约 2 秒），如果结束时立刻关开关，
+ * `useTypewriter` 的 visible 会直接返回整段文本，用户看到的就是
+ * 「前半段正常逐字、后半段唰一下全出来」。
+ * 这里只在首次为真时锁存：历史回看消息从一开始就是 false，不受影响，仍整段显示。
+ */
+const typewriterLatched = ref(false);
+watch(
+  () => typewriterAllowed.value,
+  (allowed) => {
+    if (allowed) typewriterLatched.value = true;
+  },
+  { immediate: true },
+);
+/** 这一块到底走不走打字机：本块锁存过开关，且不是「重放出来的最终正文」 */
+const typewriterActive = computed(() => typewriterLatched.value && !replayedAsFinished.value);
 const { visible, typing } = useTypewriter(() => props.content, {
   enabled: () => typewriterActive.value,
 });
+
 /**
- * 把「这一块还在逐字揭示」上报给上层（AiContentBlocks 汇总）。
+ * 通道一：把「这一块还在逐字揭示」用事件上报给上层（AiContentBlocks 汇总成 typingMap）。
  *
  * 用途：表格 / 图表块要等它前面的正文打完字再出现（见 AiContentBlocks 的媒体闸门）。
  * 流式时后端先推正文、再推表格事件，打字机还落后一大截，表格却已经渲染在正文下方 ——
  * 用户看到的就是「文字还在一个字一个字往外长，表格已经摆好了」。
+ *
+ * 这一条走查过的 map（按 block.id 逐块记），和下面的计数通道各管一段，别互相替代：
+ * 闸门要判断「某一块前面还有没有字在打」，只有 id 维度能做到。
  */
 watch(typing, value => emit("typing", Boolean(value)));
 // 初始态等挂载后再补一条：setup 阶段就往上抛会在父组件渲染途中改状态
 onMounted(() => emit("typing", Boolean(typing.value)));
 // 卸载时补一条 false：否则压着后续媒体块的那条「还在打字」永远不会解除
 onBeforeUnmount(() => emit("typing", false));
+
+/**
+ * 通道二：上报「正文还在逐字」给气泡（见 ai-bubble-v2 的 provide）：选项类块据此延后出现，
+ * 保证「正文打完 → 选项出现」的节奏。计数而不是布尔，多段正文各自独立。
+ * 卸载时补一次减一，避免打字中途被卸载留下残值让选项一直不出现。
+ *
+ * **必须 immediate**：useTypewriter 的 watch(source, sync, { immediate: true }) 在 setup 阶段
+ * 就把 typing 置成 true，等这里再注册普通 watch 时那一次变化已经过去了 —— 计数停在 0，
+ * 选项类块（追问卡 / 推荐问题）会和正文同一帧摆出来，正好是「正文才吐两行，选项已经冒出来」。
+ *
+ * 用本地标记记住「有没有把自己算进计数」，而不是卸载时再看 typing：
+ * 卸载阶段的 stop() 会先把 typing 置回 false，而这次变化对应的 watch 回调随组件销毁被丢弃，
+ * 看 typing 会漏减、留下残值，那条消息的选项就再也不出现了。
+ */
+const typingReporter = inject<Ref<number> | null>("ai-bubble-answer-typing", null);
+let reportedTyping = false;
+watch(typing, (on) => {
+  if (!typingReporter || on === reportedTyping) return;
+  reportedTyping = on;
+  typingReporter.value = Math.max(0, typingReporter.value + (on ? 1 : -1));
+}, { immediate: true });
+onBeforeUnmount(() => {
+  if (!typingReporter || !reportedTyping) return;
+  reportedTyping = false;
+  typingReporter.value = Math.max(0, typingReporter.value - 1);
+});
 </script>
 
 <template>
   <view class="answer-block" :class="[{ 'answer-block--embedded': embedded }]">
     <!-- 打字机还在吐字时按流式交给 markdown：走它自己的节流，不会每帧重排。
-         打字机开着（含重放块直接整段显示的情况）就关掉落定动效（settle）：
-         逐字揭示时可见文本每 40ms 变一次，落定动画会被反复打断重启，观感就是文字抖动 -->
+         打字机开着就关掉落定动效（settle）：逐字揭示时可见文本每 40ms 变一次，
+         落定动画会被反复打断重启，观感就是文字抖动。
+         这里跟 typewriterActive 而不是 typewriterEnabled：生成结束会让后者变 false，
+         而打字机可能还在吐最后一段（开关已锁存），此时仍不该启动落定 -->
     <MarkdownRenderer
       :content="visible"
       :streaming="streaming || typing"
-      :settle="!typewriterEnabled"
+      :settle="!typewriterActive"
     />
   </view>
 </template>

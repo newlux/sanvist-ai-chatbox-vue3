@@ -142,11 +142,25 @@ export async function callNative<T extends BridgeResult = BridgeResult>(
 }
 
 /**
+ * bridge 通道订阅失败后的重试节奏。
+ *
+ * 容器切换（openH5Container 关容器回来）后宿主会重新注入 bridge：先给 call，
+ * `on` 稍后才补上，而且**不再派发 AlipayJSBridgeReady**。只靠 ready 事件重绑的话，
+ * 一次错过就永久收不到推送（真机表现：注册成功 listening: true，按键就是没日志）。
+ * 这里按 300ms × 12（约 3.6s）等到 on 出现为止。
+ */
+const BIND_RETRY_INTERVAL_MS = 300;
+const BIND_RETRY_MAX_TIMES = 12;
+
+/**
  * 订阅原生主动推送的事件。
  *
  * Nebula 有两条推送通道，宿主用哪条不确定，两条都挂上：
  * - AlipayJSBridge.on(eventName, handler)
  * - document 上派发的同名 DOM 事件（payload 在 event.data 或 event.detail）
+ *
+ * bridge 通道不是「试一次」：拿不到 bridge、或 bridge 上暂时没有 on 方法时会有限重试
+ * （见 BIND_RETRY_INTERVAL_MS 的说明），成功后立刻停。
  *
  * 返回取消订阅的函数。宿主没推这个事件时，这里就是纯粹的空转，无副作用。
  */
@@ -155,7 +169,17 @@ export function onNativeEvent(eventName: string, handler: (payload: BridgeResult
     const source = event as { data?: BridgeResult; detail?: BridgeResult };
     return (source?.data || source?.detail || (event as BridgeResult) || {}) as BridgeResult;
   };
-  const domHandler = (event: Event) => handler(readPayload(event));
+  /**
+   * document 与 window 都挂同一个处理函数：有的容器把事件 dispatch 到 window，
+   * document 上的监听收不到（事件目标是 window，不在 document 的传播路径上）。
+   * 反过来，document 上 bubbling 的事件也会冒到 window，同一个 Event 对象要按对象去重。
+   */
+  const handledEvents = new WeakSet<Event>();
+  const domHandler = (event: Event) => {
+    if (handledEvents.has(event)) return;
+    handledEvents.add(event);
+    handler(readPayload(event));
+  };
   const bridgeHandler = (payload: BridgeResult) => handler(payload || {});
   type EventBridge = AlipayBridge & {
     on?: (name: string, cb: (payload: BridgeResult) => void) => void;
@@ -164,20 +188,64 @@ export function onNativeEvent(eventName: string, handler: (payload: BridgeResult
 
   let disposed = false;
   let subscribedBridge: EventBridge | undefined;
+  let bindRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let bindRetryCount = 0;
+  /** 是否见过 bridge：区分「本来就不在容器里」（浏览器 / 纯 H5）与「容器切换后桥没恢复」 */
+  let sawBridge = false;
+
+  function clearBindRetry() {
+    if (!bindRetryTimer) return;
+    clearTimeout(bindRetryTimer);
+    bindRetryTimer = null;
+  }
+
+  function scheduleBindRetry(reason: "no-bridge" | "no-on") {
+    if (disposed || bindRetryTimer) return;
+    if (bindRetryCount >= BIND_RETRY_MAX_TIMES) {
+      // 容器里明确见过桥却没等到 on，是真问题（生产包也要能看到）；纯浏览器下只是降噪。
+      // 把 bridge 上实际有哪些方法打出来：宿主那份桥缺 on 是客户端要修的依据
+      const current = readBridge() as EventBridge | undefined;
+      const detail = {
+        reason,
+        retries: bindRetryCount,
+        sawBridge,
+        hasBridge: Boolean(current),
+        bridgeMethods: current ? Object.keys(current).slice(0, 24) : [],
+      };
+      if (sawBridge) logger.warn(`[mpaas] ${eventName} 的 bridge 通道最终不可用，仅保留 DOM 通道`, detail);
+      else logger.debug(`[mpaas] ${eventName} 不在容器内，跳过 bridge 通道`, detail);
+      return;
+    }
+    bindRetryCount += 1;
+    bindRetryTimer = setTimeout(() => {
+      bindRetryTimer = null;
+      bindBridgeEvent();
+    }, BIND_RETRY_INTERVAL_MS);
+  }
 
   function bindBridgeEvent() {
     if (disposed) return;
     const bridge = readBridge() as EventBridge | undefined;
-    if (!bridge || bridge === subscribedBridge || typeof bridge.on !== "function") {
-      logger.debug("[mpaas] 未通过 bridge.on 订阅", { eventName, hasBridge: Boolean(bridge), hasOn: typeof bridge?.on === "function" });
+    if (!bridge) {
+      // 容器刚回来时 bridge 可能整份都还没注入（连 call 都没有），等下一次重试
+      scheduleBindRetry("no-bridge");
       return;
     }
+    sawBridge = true;
+    if (typeof bridge.on !== "function") {
+      // 真机实测：返回宿主后 bridge 只有 call、on 延迟补上，且不会再有 ready 事件
+      scheduleBindRetry("no-on");
+      return;
+    }
+    if (bridge === subscribedBridge) return;
     if (typeof subscribedBridge?.off === "function") {
       subscribedBridge.off(eventName, bridgeHandler);
     }
     subscribedBridge = bridge;
     bridge.on(eventName, bridgeHandler);
-    logger.info(`[mpaas] 已通过 AlipayJSBridge.on 订阅 ${eventName}`);
+    logger.info(`[mpaas] 已通过 AlipayJSBridge.on 订阅 ${eventName}`, { retried: bindRetryCount });
+    bindRetryCount = 0;
+    clearBindRetry();
   }
 
   bindBridgeEvent();
@@ -185,13 +253,20 @@ export function onNativeEvent(eventName: string, handler: (payload: BridgeResult
     document.addEventListener(eventName, domHandler);
     document.addEventListener(BRIDGE_READY_EVENT, bindBridgeEvent);
   }
+  if (typeof window !== "undefined") {
+    window.addEventListener(eventName, domHandler);
+  }
 
   return () => {
     disposed = true;
+    clearBindRetry();
     if (typeof subscribedBridge?.off === "function") subscribedBridge.off(eventName, bridgeHandler);
     if (typeof document !== "undefined") {
       document.removeEventListener(eventName, domHandler);
       document.removeEventListener(BRIDGE_READY_EVENT, bindBridgeEvent);
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener(eventName, domHandler);
     }
     subscribedBridge = undefined;
   };
@@ -1185,11 +1260,76 @@ function normalizeRemoteKeyPayload(raw: BridgeResult): RemoteKeyEventPayload {
  * 注意：注册成功后原生侧会**拦截**遥控器按键（含返回键），不再走系统默认行为。
  * 所以页面离开 / 失焦必须注销，并且要自己给返回键安排退路，否则用户会被困在当前页。
  * 宿主没实现这个 JSAPI 时抛错，调用方 catch 后按「没有遥控器」处理。
+ *
+ * `onKey`：第三条推送通道。真机上遇到过返回宿主后 bridge 只剩 `call`、`on` 始终不出现
+ * （订阅日志：`bridge 通道最终不可用 { reason: "no-on" }`），此时只能寄希望于宿主
+ * 复用注册接口的 callback 反复推按键 —— 自研桥常见写法。这里不自行 settled：
+ * - 回调里带按键字段（key / keyCode / scanCode）→ 当按键事件交给 onKey；
+ * - 不带按键字段 → 当注册结果，兑现 Promise。
+ * 若宿主同时走 `on` 通道，重复事件由 useRemoteKey 的 REPEAT_GUARD_MS 吃掉。
  */
-export async function registerRemoteKeyListener() {
-  const result = await callNative("registerRemoteKeyListener", {}, { timeoutMs: 3000 });
-  logger.info("[mpaas] 遥控器按键监听已注册", result);
-  return result;
+export function registerRemoteKeyListener(onKey?: (payload: RemoteKeyEventPayload) => void) {
+  const apiName = "registerRemoteKeyListener";
+  const timeoutMs = 3000;
+
+  return new Promise<BridgeResult>((resolve, reject) => {
+    const startedAt = Date.now();
+    let settled = false;
+    let pushCount = 0;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      logger.error(`${apiName} 调用超时`, { timeoutMs });
+      reject(new Error(`${apiName} 调用超时`));
+    }, timeoutMs);
+
+    void waitForMpaas(timeoutMs).then((bridge) => {
+      if (!bridge) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(new MpaasUnavailableError(apiName));
+        return;
+      }
+
+      try {
+        bridge.call(apiName, {}, (result) => {
+          const raw = (result || {}) as BridgeResult;
+          const payload = normalizeRemoteKeyPayload(raw);
+          const isKeyPush = Boolean(payload.key) || payload.keyCode > 0 || payload.scanCode > 0;
+
+          if (isKeyPush) {
+            if (!onKey) return;
+            pushCount += 1;
+            if (pushCount === 1) {
+              logger.info("[mpaas] 遥控器按键改走注册回调推送", summarizeResult(raw));
+            }
+            onKey(payload);
+            return;
+          }
+
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          logger.info("[mpaas] 遥控器按键监听已注册", summarizeResult(raw), { costMs: Date.now() - startedAt });
+          const errorCode = Number(raw.error ?? raw.errorCode ?? 0);
+          if (errorCode) {
+            const message = String(raw.errorMessage || raw.message || `${apiName} 调用失败`);
+            logger.error(`${apiName} 调用失败`, summarizeResult(raw));
+            reject(new Error(`${message}（${errorCode}）`));
+            return;
+          }
+          resolve(raw);
+        });
+      }
+      catch (error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  });
 }
 
 /** 注销遥控器按键监听（页面卸载 / 失焦时调用，恢复系统默认按键行为） */

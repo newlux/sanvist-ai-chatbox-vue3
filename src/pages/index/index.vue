@@ -1552,11 +1552,26 @@ function onRemoteKeyBack() {
   backToWelcome();
 }
 
-useRemoteKey({
+const remoteKey = useRemoteKey({
   enabled: computed(() => remoteKeyActive.value && !shareSheetVisible.value),
   onConfirm: onRemoteKeyConfirm,
   onBack: onRemoteKeyBack,
 });
+
+/**
+ * 从容器（甘特离线包 / 场景窗口）回到本页时，重新打开遥控器接管并重建原生监听。
+ *
+ * 只把开关置回 true 不够：安卓用 openH5Container 打开甘特离线包时**不经过 uni 路由**，
+ * onHide 不会触发，开关一直是 true —— 赋同样的值不产生变化，`useRemoteKey` 内部的
+ * watch 不会 fire，而原生侧监听在容器切换后已经失效。所以这里必须显式 sync()，
+ * 把「订阅 + 注册」重建一遍，否则回来之后音量键（语音输入）就再也注册不回来。
+ */
+function restoreRemoteKey(source: string) {
+  const changed = !remoteKeyActive.value;
+  remoteKeyActive.value = true;
+  logger.info("恢复遥控器接管", { source, changed });
+  void remoteKey.sync(source);
+}
 
 /**
  * 初始页「点击说话」的落地动作：起飞的同时把语音会话跑起来，
@@ -2028,8 +2043,8 @@ const stopNativeResume = onNativeEvent("resume", () => {
   // 维修助理是独立场景窗口：关窗回到本页时原 webview 一直在，不会经历 onHide/onShow，
   // 只靠 onShow 消费回调会漏，这里在原生 resume 上补一次（重复调用有 pending 判空，安全）。
   startRepairSummaryCallback();
-  // 与可见性兜底同理：resume 也是「回到本页」的信号，遥控器接管一并恢复
-  remoteKeyActive.value = true;
+  // 与可见性兜底同理：resume 也是「回到本页」的信号，遥控器接管一并恢复（含重建注册）
+  restoreRemoteKey("resume");
 });
 
 /**
@@ -2041,7 +2056,12 @@ const stopNativeResume = onNativeEvent("resume", () => {
  */
 function handleHostVisible() {
   if (typeof document === "undefined" || document.visibilityState !== "visible") return;
-  remoteKeyActive.value = true;
+  /**
+   * 只改开关不够：安卓容器切换时 onHide 常常没触发，remoteKeyActive 一直是 true，
+   * 赋值不变就不会触发 useRemoteKey 里的 watch，而原生监听已经失效 ——
+   * 必须显式 sync() 重建（见 restoreRemoteKey 的说明）。
+   */
+  restoreRemoteKey("visibilitychange");
 }
 
 onShow(() => {

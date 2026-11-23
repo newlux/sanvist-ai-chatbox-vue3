@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { GuideStepSelectEvent } from "@/api/chat/types";
+import type { Ref } from "vue";
 import type { AiBlock } from "@/utils/ai-stream/chatStreamParser";
-import { computed, ref } from "vue";
+import { computed, ref, inject } from "vue";
 import { useChatScope } from "@/stores";
 import { expandChartFences, expandMarkdownTables } from "@/utils/ai-stream";
 import AiBlockRenderer from "./AiBlockRenderer.vue";
@@ -84,6 +85,31 @@ const lastTipId = computed(() => {
 const renderVoiceBlock = useChatScope() !== "task";
 
 /**
+ * 正文是不是还没结束（还在逐字，或本轮还在生成）。
+ *
+ * 选项类块（追问卡 / 推荐问题 / 跳转卡）的数据常常和正文同一帧到达，不压的话
+ * 就是「正文才吐两行，下面选项已经摆好」，用户没读完就能点，顺序和节奏都断了。
+ *
+ * 只看「正在逐字」的计数不够：打字机把**已到达的那部分**追平就会立刻停下（见 useTypewriter
+ * 的 tick → stop），而 SSE 后面的正文可能过几十毫秒才到 —— 这个空档里计数回到 0，
+ * 选项就被放出来，等下一段正文到达再被摘掉，表现正是「选项在正文中途冒出来又消失」。
+ * 所以叠上 loading：本轮没收尾之前，正文都还没算「说完」。
+ *
+ * 历史回看消息 loading 为 false、计数恒为 0，选项照旧立即显示。
+ */
+const answerTypingCount = inject<Ref<number> | null>("ai-bubble-answer-typing", null);
+const bodyTyping = computed(() => Boolean(answerTypingCount?.value));
+/** 正文未收尾：生成中（loading）或正在逐字（bodyTyping）都算 */
+const bodyPending = computed(() => Boolean(props.loading) || bodyTyping.value);
+
+/** 需要等正文打完才出现的选项类块 */
+const OPTION_BLOCK_TYPES = new Set(["ask-slot", "suggestion", "guide-suggestion", "assistant-navigation"]);
+
+function isOptionBlock(block: AiBlock) {
+  return OPTION_BLOCK_TYPES.has(block.type);
+}
+
+/**
  * 追问卡（ask-slot）固定排在回答最底部。
  *
  * 块顺序来自流式事件顺序：后端有时先推 ask_slot、再吐正文，blocks 里就成了
@@ -112,11 +138,17 @@ const renderItems = computed(() => {
   // 任务协同不渲染 voice 块，但它们仍先用上面的 stripVoiceFromAnswers 把正文里重复的导语剔掉
   const visibleVoiceBlocks = renderVoiceBlock ? voiceBlocks : [];
   const slotBlocks = rest.filter(block => block.type === "ask-slot");
-  const contentBlocks = rest.filter(block => block.type !== "ask-slot");
+  /**
+   * 正文逐字 / 本轮生成期间先摘掉选项类块（追问卡 / 推荐问题 / 跳转卡），正文收尾后再放回来。
+   * 只影响渲染：store 里的块序不变，播报 / 分享按块取内容不受影响。
+   */
+  const contentBlocks = rest.filter(block => block.type !== "ask-slot"
+    && !(bodyPending.value && isOptionBlock(block)));
+  const trailingSlots = bodyPending.value ? [] : slotBlocks;
 
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
   // 避免展示「输出结果」标题和分隔线；chart 内容本身仍由 AiBlockRenderer 渲染
-  if (props.noAnswerGroup) return [...visibleVoiceBlocks, ...contentBlocks, ...slotBlocks];
+  if (props.noAnswerGroup) return [...visibleVoiceBlocks, ...contentBlocks, ...trailingSlots];
 
   const items: any[] = [...visibleVoiceBlocks];
   let group = [];
@@ -141,7 +173,7 @@ const renderItems = computed(() => {
   });
   appendGroup();
 
-  return [...items, ...slotBlocks];
+  return [...items, ...slotBlocks, ...trailingSlots];
 });
 
 /**
@@ -247,6 +279,7 @@ function onGanttOpen(payload) {
       <AiBlockRenderer
         v-else
         :block="item"
+        :class="{ 'ai-content-blocks__option': isOptionBlock(item) }"
         :force-thinking-expanded="forceThinkingExpanded"
         :embedded="noAnswerGroup"
         :loading="loading"
@@ -273,4 +306,22 @@ function onGanttOpen(payload) {
 
 <style lang="scss" scoped>
 .ai-content-blocks { display: flex; flex-direction: column; width: 100%; min-width: 0; gap: 0; }
+
+/* 选项类块在正文打完那一刻才挂载（见 renderItems）：补一次淡入上移，
+   否则会整块「啪」地出现在正文末尾，像是被硬塞进来的 */
+.ai-content-blocks__option {
+  animation: ai-option-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes ai-option-in {
+  from {
+    opacity: 0;
+    transform: translateY(8rpx);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 </style>

@@ -14,6 +14,7 @@ import { guideStepCardDomId } from "@/utils/guide-content";
 import { requestSummaryTts } from "@/utils/guide-step-tts";
 import { isListenReportListened } from "@/utils/listen-report";
 import AiBlockRenderer from "@/components/ai-bubble-v2/AiBlockRenderer.vue";
+import GuideCheckBrand from "@/components/ai-bubble-v2/blocks/GuideCheckBrand.vue";
 import AiBubbleV2 from "@/pages/task-pc/private/components/ai-bubble-v2/index.vue";
 
 defineOptions({
@@ -1190,6 +1191,28 @@ function onStepCardReady() {
 }
 
 /**
+ * 步骤卡的播报：品牌行已提到卡片容器外（见 GuideCheckBrand），文案在这里按
+ * 「当前展示的那张卡」组装 —— 与原来卡片内 onTtsTap 同一口径：
+ * 完成态（有步骤小结）念「标题 + 正文 + 小结」，普通步骤不带文本，由页面按 step action 兜底。
+ */
+function onStepCardTts(index: number, msg: UiChatMessage) {
+  if (!msg?.ttsEnabled) return;
+  const payload = (standaloneBlocks(msg, index)[0]?.payload || {}) as {
+    title?: string;
+    content?: string;
+    summary?: string;
+  };
+  const summary = String(payload.summary || "").trim();
+  if (!summary) {
+    onTtsClick(index);
+    return;
+  }
+  const title = String(payload.title || "").trim() || "核对任务与资料";
+  const content = String(payload.content || "");
+  onTtsClick(index, [title, content, summary].filter(Boolean).join("\n"));
+}
+
+/**
  * 最后一步确认完：这一轮切到完成态，整段指导的步骤卡换成「小结 + 推荐问题」。
  * 完成标记只活在列表内部（按消息 key 记），不进 store、不弹层。
  */
@@ -1848,29 +1871,41 @@ watch(
               @copy-click="onCopyClick(index, msg)"
             />
             <!-- 核对/步骤卡独立成卡，不放进回答气泡；一轮问答一张，多轮各留一张 -->
+            <!-- 品牌署名行固定在容器这一层：切一步只重挂载下面的内容卡，品牌行不跟着重建 -->
             <view
-              v-for="block in standaloneBlocks(msg, index)"
-              :key="block.id"
+              v-if="standaloneBlocks(msg, index).length"
+              :id="guideStepCardDomId(msg?.id, standaloneBlocks(msg, index)[0]?.id)"
               class="chat-box__card"
             >
-              <!-- domId 并进消息 id：同一份指导重复触发时 block id 会撞，滚动定位要能区分是哪一轮 -->
-              <AiBlockRenderer
-                :block="block"
-                :dom-id="guideStepCardDomId(msg?.id, block.id)"
-                :show-card-actions="msg?.role === 'ai' && !msg.loading && !msg.interrupted"
-                :compact-guide-card="compactGuideCard"
+              <GuideCheckBrand
                 :dark="props.dark"
                 :tts-enabled="!!msg.ttsEnabled"
                 :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
                 :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
-                @guide-check-step-select="onGuideCheckStepSelect(index, msg, $event)"
-                @guide-check-finish="onGuideCheckFinish(index)"
-                @card-ready="onStepCardReady"
-                @suggestion-tap="onSuggestionTap($event, index)"
-                @tts-click="onTtsClick(index, $event)"
-                @copy-click="onGuideCheckCopy(index, msg, $event)"
-                @share-click="onGuideCheckShare(index, msg, $event)"
+                @tts-click="onStepCardTts(index, msg)"
               />
+              <view
+                v-for="block in standaloneBlocks(msg, index)"
+                :key="block.id"
+              >
+                <!-- 不再传 dom-id：定位锚点已上移到外层容器 -->
+                <AiBlockRenderer
+                  :block="block"
+                  :show-card-actions="msg?.role === 'ai' && !msg.loading && !msg.interrupted"
+                  :compact-guide-card="compactGuideCard"
+                  :dark="props.dark"
+                  :tts-enabled="!!msg.ttsEnabled"
+                  :tts-loading="isActiveRealtimeTts(msg) ? !Boolean(realtimeTtsPlaying) : !!msg.ttsLoading"
+                  :tts-playing="isActiveRealtimeTts(msg) ? Boolean(realtimeTtsPlaying) : !!msg.ttsPlaying"
+                  @guide-check-step-select="onGuideCheckStepSelect(index, msg, $event)"
+                  @guide-check-finish="onGuideCheckFinish(index)"
+                  @card-ready="onStepCardReady"
+                  @suggestion-tap="onSuggestionTap($event, index)"
+                  @tts-click="onTtsClick(index, $event)"
+                  @copy-click="onGuideCheckCopy(index, msg, $event)"
+                  @share-click="onGuideCheckShare(index, msg, $event)"
+                />
+              </view>
             </view>
             <!-- 完成态：整段指导全部确认完，steps 小结已注入最后一张核对卡；底部补上同一条回答的推荐问题 -->
             <view v-if="isStepCardFinished(msg, index) && guideSuggestionBlockOf(msg)" class="chat-box__card">

@@ -1524,24 +1524,23 @@ onBeforeUnmount(() => {
   transform: translate(-3rpx, 2rpx) scale(1.69);
 }
 
-/* think.webp（正在思考）：画布沿用旧 gif 的 2:1 构图（源 1920×960 缩到 480×240），
-   图案只占中间（宽约 33%、高约 58%），两侧是透明留白。
-   1) 留白用 aspectFill 裁掉（盒高 124rpx 铺满画布，缩放系数 124/240 ≈ 0.517），
-      盒内图案实际只显示约 82×72rpx；
-   2) 另外三层（idle / tell / listen）的图案视觉尺寸都是 ~124rpx，
-      想和它们等大就按面积对齐：√(124² / (82 × 72)) ≈ 1.62，
-      放大后图案约 132×116rpx，观感与其它状态一致；
-   3) 图案中心在画布上偏下约 2.5%（盒内约 3.1rpx），按 1.62 放大后上移 4rpx 复位。 */
+/* think.webp（正在思考）：480×240 画布 + aspectFill，图案实测占画布 42.1% × 78.8%
+   （旧注释的 33%/58% 是 gif 估值，按它算出的 1.18 / 1.62 都会偏大，勿再沿用）。
+   1) 盒内图案宽 = 480 × 42.1% × (124/240) ≈ 104.4rpx；待机图 sani-logo.webp
+      图案宽 = 280 × 90% × (138/280) ≈ 124.2rpx，故放大 124.2 / 104.4 ≈ 1.19 后等宽；
+   2) 图案中心在画布上偏上（y = 103 / 240），aspectFill 后落在盒内 y ≈ 53.2，
+      按 1.19 倍换算后下移 9.5rpx，与待机图图案中心（island 内 y ≈ 71.4）重合；
+   3) 与移动端 ai-chat-header 同一套数值，改一处要同步另一处。 */
 .chat-header__island-logo--think {
   z-index: 3;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-4rpx) scale(1);
+  transform: translate(0, 9.5rpx) scale(1);
 }
 
 .chat-header__island-logo--think-on {
   opacity: 1;
-  transform: translateY(-4rpx) scale(1.62);
+  transform: translate(0, 9.5rpx) scale(1.19);
 }
 
 // --- icons (用 CSS 近似 Figma 形状，后续可替换为 svg 资源) ---

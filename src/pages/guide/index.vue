@@ -1075,11 +1075,35 @@ function onRemoteKeyBack() {
   onBack();
 }
 
-useRemoteKey({
+const remoteKey = useRemoteKey({
   enabled: computed(() => remoteKeyActive.value && !shareSheetVisible.value),
   onConfirm: onRemoteKeyConfirm,
   onBack: onRemoteKeyBack,
 });
+
+/**
+ * 从容器（甘特离线包 / 场景窗口）回到本页时，重新打开遥控器接管并重建原生监听。
+ *
+ * 只把开关置回 true 不够：安卓用 openH5Container 打开容器时**不经过 uni 路由**，
+ * onHide 不会触发，开关一直是 true —— 赋同样的值不产生变化，`useRemoteKey` 内部的
+ * watch 不会 fire，而原生侧监听在容器切换后已经失效。所以这里必须显式 sync()，
+ * 把「订阅 + 注册」重建一遍，否则回来之后音量键（语音输入）就再也注册不回来。
+ */
+function restoreRemoteKey(source: string) {
+  const changed = !remoteKeyActive.value;
+  remoteKeyActive.value = true;
+  logger.info("恢复遥控器接管", { source, changed });
+  void remoteKey.sync(source);
+}
+
+/**
+ * 页面重新可见 = 上层容器已经关掉。安卓容器切换不保证走 onShow，也不一定推原生 resume，
+ * 可见性变化 + window.focus（hook 内部已接）是这条路径上最可靠的信号。
+ */
+function handleHostVisible() {
+  if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+  restoreRemoteKey("visibilitychange");
+}
 
 /**
  * 右上角房子按钮「返回主页」：调用宿主原生 goHome 回 App 首页
@@ -1449,11 +1473,15 @@ onLoad((options) => {
 onMounted(() => {
   syncWindowHeight();
   loadAwakeningPrompt();
+  // 安卓离线包（openH5Container）关容器回来时既不一定走 onShow、也不一定收到原生 resume，
+  // 可见性变化是遥控器接管恢复的唯一稳定信号
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", handleHostVisible);
 });
 
 onShow(() => {
   syncWindowHeight();
-  // 页面可见才接管遥控器：注册后原生会拦截按键（含返回键），压在栈里时必须放回去
+  // 页面可见才接管遥控器：注册后原生会拦截按键（含返回键），压在栈里时必须放回去。
+  // 这里只改开关：useRemoteKey 内部 onShow 会 sync 一次，不必重复注册。
   remoteKeyActive.value = true;
   const sessionId = consumePendingHistorySession("GUIDE");
   if (sessionId) void openLocalHistory(sessionId, true);
@@ -1461,9 +1489,11 @@ onShow(() => {
 
 /**
  * 原生 resume：本页打开的场景页是独立 webview（pushWindow），关窗回来时本页一直在，
- * 不一定会走 onShow。这里补一次待打开会话的消费，重复调用有 peek 判空，安全。
+ * 不一定会走 onShow。这里补一次待打开会话的消费，重复调用有 peek 判空，安全；
+ * 遥控器接管一并恢复（含重建原生注册）。
  */
 const stopNativeResume = onNativeEvent("resume", () => {
+  restoreRemoteKey("resume");
   const sessionId = consumePendingHistorySession("GUIDE");
   if (sessionId) void openLocalHistory(sessionId, true);
 });
@@ -1491,6 +1521,7 @@ onUnload(() => {
   stopNativeResume();
   resetVoiceQuery();
   disarmIntroVoiceRetry();
+  if (typeof document !== "undefined") document.removeEventListener("visibilitychange", handleHostVisible);
 });
 const voiceHoldActive = ref(false);
 const voiceHoldCancelPending = ref(false);

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, inject } from "vue";
+import type { Ref } from "vue";
+import { computed, inject, ref, watch } from "vue";
+import { useTypewriter } from "@/hooks/useTypewriter";
 
 defineOptions({ name: "GuideLeadBlock" });
 
@@ -27,6 +29,30 @@ const options = computed(() => (Array.isArray(props.payload?.options) ? props.pa
   .map(item => String(item ?? "").trim())
   .filter(Boolean));
 
+/**
+ * 开场白逐字 + 选项后置（与回答正文同一套手感）。
+ *
+ * 这张卡是进页面时的「自我介绍」：正文和选项都在同一个块里、同一帧挂载，
+ * 不处理的话一进来就是「一大段话 + 三个选项」同时铺开，用户还没读完正文就能点，
+ * 节奏和随后的真实回答（正文逐字 → 选项淡入）也对不上。
+ *
+ * 开关走气泡 provide 的 ai-bubble-typewriter（页面级开关 && 本轮新生成）：
+ * 历史会话回看拿到的是 false，正文整段直出、选项立即显示。
+ * 打开后锁存：本轮收尾时开关会翻 false，不锁的话最后一段会被「唰」地整段顶出来。
+ */
+const typewriterOn = inject<Ref<boolean> | null>("ai-bubble-typewriter", null);
+const typewriterLatched = ref(false);
+watch(
+  () => Boolean(typewriterOn?.value),
+  (on) => {
+    if (on) typewriterLatched.value = true;
+  },
+  { immediate: true },
+);
+const { visible: typedText, typing } = useTypewriter(() => text.value, {
+  enabled: () => typewriterLatched.value,
+});
+
 function pick(option: string) {
   emit("pick", option);
 }
@@ -40,9 +66,10 @@ function pick(option: string) {
   -->
   <view v-if="text || options.length" class="guide-lead" :class="{ 'guide-lead--dark': isDark }">
     <text v-if="text" class="guide-lead__text">
-      {{ text }}
+      {{ typedText }}
     </text>
-    <view v-if="options.length" class="guide-lead__options">
+    <!-- 选项等正文打完再出现（见上面 typing 的说明），挂载时补一次淡入上移 -->
+    <view v-if="options.length && !typing" class="guide-lead__options">
       <text v-if="leadText" class="guide-lead__label">
         {{ leadText }}
       </text>
@@ -81,13 +108,27 @@ function pick(option: string) {
 }
 
 /* 选项组：与首页追问卡（AskSlotBlock）一致 —— 纵向排列、左对齐、间距 8px，
-   胶囊按内容宽度收缩，不铺满整行 */
+   胶囊按内容宽度收缩，不铺满整行。
+   选项是在正文打完那一刻才挂载的，补一次淡入上移，避免整块「啪」地插到正文末尾 */
 .guide-lead__options {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 16rpx;
   margin-top: 16rpx;
+  animation: guide-lead-options-in 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes guide-lead-options-in {
+  from {
+    opacity: 0;
+    transform: translateY(8rpx);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 引导语：灰色小标签，压在选项列表上方 */

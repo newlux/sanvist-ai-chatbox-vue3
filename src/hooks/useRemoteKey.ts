@@ -10,8 +10,11 @@
  * 2. 事件规整：长按的 `repeatCount > 0` 丢掉；宿主漏推 `up` 时用时间窗兜住重复 `down`；
  * 3. 按键分发：音量加 / 音量减 / 静音→ onConfirm，返回键 → onBack，其余键忽略；
  * 4. 重连：宿主新开 webview 盖住本页（甘特离线包、场景窗口）再回来时，本页
- *    onHide / onShow 不一定触发，而原生侧监听已经失效 —— 靠可见性恢复 / 原生 resume
- *    把监听重建一遍（见 sync）。
+ *    onHide / onShow 不一定触发，而原生侧监听与前端订阅都已失效 —— 靠「可见 /
+ *    window.focus / pageshow / 原生 resume / uni onShow」五路信号把「订阅 + 注册」
+ *    整对重建一遍（见 sync 的 forceResubscribe）。只重注册是不够的。
+ *    **不要求先收到 hidden**：安卓用 openH5Container 开离线包时宿主 webview 常不产生
+ *    hidden，按「先 hidden 再 visible」判定会把回来那次 visible 吞掉，音量键从此失灵。
  *
  * 宿主没实现这套 JSAPI（浏览器 / 旧容器）时静默降级：只打一条 warn，触屏交互照旧。
  *
@@ -145,14 +148,38 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
   /**
    * 建立监听：先订阅再注册（宿主可能在注册回调里就推第一帧按键事件）。
    *
+   * `forceResubscribe`：容器切换后旧订阅已经失效 —— `AlipayJSBridge.on` 那条绑在切换前的
+   * bridge 对象上（返回宿主时对象可能被替换或底层代理已断），DOM 通道也可能被容器重建。
+   * 只重新调 `registerRemoteKeyListener` 会让原生返回 `listening: true`，但事件回不到本页，
+   * 表现就是「注册成功、音量键没反应」。所以重连时必须把订阅一起重建。
+   *
    * 注册是异步的，期间 `enabled` 可能已经翻成 false（用户点开甘特容器 / 场景窗口）：
    * 那样必须把刚挂上的监听还回去，否则原生一直拦截按键、本页却已退订，
    * 返回键没反应、用户被困；而且下次 start() 会被 registered 挡住，再也补不回来。
    */
-  async function connect(token: number) {
+  async function connect(token: number, forceResubscribe = false) {
+    const startedAt = Date.now();
+    if (forceResubscribe && unsubscribe) {
+      // 旧订阅可能绑在已经失效的 bridge 上，解绑本身也可能抛错：不能让它挡住后面的重订阅
+      try {
+        unsubscribe();
+      }
+      catch (error) {
+        logger.warn("遥控器旧订阅解绑失败，继续重建", error);
+      }
+      unsubscribe = null;
+    }
     if (!unsubscribe) unsubscribe = onRemoteKeyEvent(handleKey);
-    await registerRemoteKeyListener();
+    // 除了 bridge.on / DOM 两条通道，注册接口的回调也接上：部分自研桥没有 on，
+    // 按键是复用这个 callback 反复推回来的（见 mpaas.registerRemoteKeyListener 的说明）
+    await registerRemoteKeyListener(handleKey);
     if (token !== lifecycle || !options.enabled.value) {
+      // 注册是异步的，期间页面可能已经离开（或被容器盖住）：把刚挂上的监听还回去，
+      // 否则原生一直拦截按键、本页却已退订，返回键与音量键都会失灵
+      logger.info("遥控器注册结果作废：生命周期已变或页面已失活", {
+        costMs: Date.now() - startedAt,
+        enabled: options.enabled.value,
+      });
       await unregisterRemoteKeyListener().catch(() => undefined);
       registered.value = false;
       return false;
@@ -160,6 +187,11 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
     registered.value = true;
     // 注册成功说明原生侧可用，之前的超时计数作废
     registerFailures = 0;
+    logger.info("遥控器按键监听已就绪", {
+      costMs: Date.now() - startedAt,
+      reconnected: lastSyncAt > 0,
+      resubscribed: forceResubscribe,
+    });
     return true;
   }
 
@@ -214,6 +246,7 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
       return;
     }
     registered.value = false;
+    logger.info("遥控器按键监听注销", { quiet });
     try {
       await unregisterRemoteKeyListener();
     }
@@ -235,30 +268,70 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
    * 这里不先注销：容器回来时原生侧通常已经没有监听，多余的 unregister 只会多一次
    * 3s 超时风险，直接覆盖注册即可。失败隔一拍补一次，订阅与 registered 原值都留着，
    * 等下一次可见性变化 / resume（用户再切一次页面）继续重试，不会永久废掉。
+   *
+   * 但**订阅必须重建**（forceResubscribe）：真机上出现过「重连后原生返回
+   * `{ listening: true }`、日志也打了重连成功，按音量键却毫无反应」——
+   * 原因是 `onNativeEvent` 的 `AlipayJSBridge.on` 那条还挂在容器切换前的那份 bridge 上。
+   * 对比首页正常：它走的是 onHide → stop()（解绑）→ onShow → start()（全新订阅）。
    */
-  async function sync() {
-    if (!options.enabled.value || !supported.value || syncing || starting) return;
+  async function sync(source = "unknown") {
+    if (!options.enabled.value || !supported.value || syncing || starting) {
+      // 重连被挡住的四种原因分开打：容器回来时 enabled 没翻、宿主不支持、
+      // 上一次重连还没结束、首次注册还在途中 —— 真机排查直接看这一行
+      logger.debug("遥控器重连跳过", {
+        source,
+        enabled: options.enabled.value,
+        supported: supported.value,
+        syncing,
+        starting,
+        registered: registered.value,
+      });
+      return;
+    }
     const now = Date.now();
-    if (now - lastSyncAt < SYNC_GUARD_MS) return;
+    if (now - lastSyncAt < SYNC_GUARD_MS) {
+      logger.debug("遥控器重连节流中", { source, gapMs: now - lastSyncAt, guardMs: SYNC_GUARD_MS });
+      return;
+    }
     lastSyncAt = now;
     syncing = true;
     clearRetry();
     const wasRegistered = registered.value;
     const token = ++lifecycle;
+    const startedAt = Date.now();
+    logger.info("遥控器重连开始", {
+      source,
+      registered: wasRegistered,
+      supported: supported.value,
+      // 重连会把「订阅 + 注册」都重建：只重注册的话原生返回 listening: true，
+      // 但事件还挂在失效的旧订阅上，表现就是「注册成功、音量键没反应」
+      resubscribe: true,
+    });
     try {
-      const reconnected = await connect(token);
-      if (reconnected) logger.info("遥控器按键监听已重连");
+      const reconnected = await connect(token, true);
+      if (reconnected) {
+        logger.info("遥控器按键监听已重连", { source, costMs: Date.now() - startedAt });
+      }
+      else {
+        // 注册完成但结果被作废：说明这期间页面又失活（或被容器盖住）
+        logger.warn("遥控器重连未生效：注册期间页面已失活", { source, costMs: Date.now() - startedAt });
+      }
     }
     catch (error) {
       // 重连失败：订阅留着（宿主不推事件时就是空转），registered 维持原值 ——
       // 别因为一次重试失败就把它标成 false，否则卸载时 stop() 会跳过注销，
       // 原生那边可能还在拦截按键。改成隔一拍再补一次。
       registered.value = wasRegistered;
-      logger.warn("遥控器按键监听重连失败，稍后重试", error);
+      logger.warn("遥控器按键监听重连失败，稍后重试", {
+        source,
+        costMs: Date.now() - startedAt,
+        registered: wasRegistered,
+        message: error instanceof Error ? error.message : String(error),
+      }, error);
       retryTimer = setTimeout(() => {
         retryTimer = null;
         lastSyncAt = 0;
-        void sync();
+        void sync("retry");
       }, SYNC_RETRY_MS);
     }
     finally {
@@ -266,12 +339,9 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
     }
   }
 
-  /** 本页是否被容器盖住过（hidden 过一次才算「回来」，避免首次加载就白重连一遍） */
-  let hostHidden = false;
-
   /**
-   * 降级标记的复位节流：回到前台本身是低频事件，但 visibilitychange / resume / onShow
-   * 可能同时到达，别让三个信号各触发一次「注册 → 超时」。
+   * 降级标记的复位节流：回到前台本身是低频事件，但 visibilitychange / window.focus /
+   * pageshow / resume / onShow 常一起到达，别让几个信号各触发一次「注册 → 超时」。
    */
   const REVIVE_GUARD_MS = 10_000;
   let lastReviveAt = 0;
@@ -283,39 +353,66 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
    * 这里把 supported 与失败计数一起复位 —— 否则「音量键触发语音输入」会一直失效到用户重载页面。
    * 真不支持时下一次仍会失败并再次降级，10s 内不重复尝试。
    */
-  function revive() {
+  function revive(source: string) {
     if (supported.value) return;
     const now = Date.now();
     if (now - lastReviveAt < REVIVE_GUARD_MS) return;
     lastReviveAt = now;
     supported.value = true;
     registerFailures = 0;
-    logger.info("遥控器按键监听：回到前台，重新尝试注册");
+    logger.info("遥控器按键监听：回到前台，重新尝试注册", { source, guardMs: REVIVE_GUARD_MS });
   }
 
   /**
-   * 页面重新可见 = 上层容器已经关掉 / 本页重新回到前台，是「回来」这件事最稳的信号
-   * （宿主新开 webview 时不保证走 onShow，也不保证推原生 resume）。
+   * 「回到本页」的统一出口：可见 / 窗口聚焦 / 往返缓存恢复 / 原生 resume / onShow 都走这里。
+   *
+   * 原来的实现要求「先收到 hidden 才认 visible」（hostHidden 门槛）。但安卓上用
+   * openH5Container 打开甘特离线包时，宿主 webview 是被另一个 Activity 盖住的：
+   * 往往不产生 hidden（或压根不派发 visibilitychange），回来后那次 visible 被门槛挡掉，
+   * 音量键（语音输入）从此失灵。现在只要当前不是 hidden 就重建一次监听，
+   * 重复触发由 SYNC_GUARD_MS 节流，不会重复注册。
    */
-  function onHostVisible() {
-    if (typeof document === "undefined") return;
-    if (document.visibilityState === "hidden") {
-      hostHidden = true;
+  function onHostReturn(source: string, extra: Record<string, unknown> = {}) {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      logger.info("页面不可见，跳过遥控器重连", { source, registered: registered.value, ...extra });
       return;
     }
-    if (!hostHidden) return;
-    hostHidden = false;
-    revive();
-    void sync();
+    logger.info("回到前台，尝试重连遥控器监听", {
+      source,
+      registered: registered.value,
+      supported: supported.value,
+      enabled: options.enabled.value,
+      ...extra,
+    });
+    revive(source);
+    void sync(source);
+  }
+
+  function onHostVisible() {
+    if (typeof document === "undefined") return;
+    onHostReturn("visibilitychange", { visibilityState: document.visibilityState });
+  }
+
+  /** 窗口重新聚焦：安卓 WebView 从别的 Activity 回来时，除 visible 之外最可靠的信号 */
+  function onWindowFocus() {
+    onHostReturn("window-focus");
+  }
+
+  /** 往返缓存恢复（部分容器把本页放进 bfcache 再拿出来） */
+  function onPageShow() {
+    onHostReturn("pageshow");
   }
 
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onHostVisible);
   }
-  // 原生 resume 是同义信号（场景窗口 / pushWindow 关闭），两个通道都接，重复触发有节流
+  if (typeof window !== "undefined") {
+    window.addEventListener("focus", onWindowFocus);
+    window.addEventListener("pageshow", onPageShow);
+  }
+  // 原生 resume 是同义信号（场景窗口 / pushWindow 关闭），多个通道都接，重复触发有节流
   const offResume = onNativeEvent("resume", () => {
-    revive();
-    void sync();
+    onHostReturn("resume");
   });
 
   watch(
@@ -323,10 +420,12 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
     (enabled) => {
       if (enabled) {
         // 页面重新接管遥控器：之前被降级的（容器切换导致的临时失败）在这里复位
-        revive();
+        logger.info("遥控器接管开启", { registered: registered.value, supported: supported.value });
+        revive("enabled-change");
         void start();
       }
       else {
+        logger.info("遥控器接管关闭", { registered: registered.value });
         void stop();
       }
     },
@@ -340,14 +439,17 @@ export function useRemoteKey(options: UseRemoteKeyOptions) {
    * 不会重复注册。
    */
   onShow(() => {
-    revive();
-    void sync();
+    onHostReturn("uni-onshow");
   });
 
   // 组件卸载（页面被销毁 / 路由离开）时兜底注销，避免原生侧继续拦截按键
   onBeforeUnmount(() => {
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", onHostVisible);
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("focus", onWindowFocus);
+      window.removeEventListener("pageshow", onPageShow);
     }
     offResume();
     void stop(true);

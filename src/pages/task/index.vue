@@ -529,8 +529,8 @@ async function flushOfflineGanttAsk() {
 }
 
 const stopNativeResume = onNativeEvent("resume", () => {
-  // 与可见性兜底同理：resume 也是「回到本页」的信号，遥控器接管一并恢复
-  restoreRemoteKey();
+  // 与可见性兜底同理：resume 也是「回到本页」的信号，遥控器接管一并恢复（含重建注册）
+  restoreRemoteKey("resume");
   void flushOfflineGanttAsk();
 });
 
@@ -542,12 +542,11 @@ const stopNativeResume = onNativeEvent("resume", () => {
 function handleHostVisible() {
   if (typeof document === "undefined" || document.visibilityState !== "visible") return;
   /**
-   * 遥控器接管要和待发问题一起恢复：打开甘特离线包时宿主可能走了 onHide 把
-   * remoteKeyActive 置成 false，而关容器回来不一定走 onShow —— 只挂在 onShow 上，
-   * 音量键（语音输入）就再也注册不回来。可见性变化是这条路径上唯一稳定的信号。
-   * 值本来就 true 时是无变化的幂等赋值，不会重复注册（useRemoteKey 内部有守卫）。
+   * 遥控器接管要和待发问题一起恢复。**不能只改开关**：安卓容器切换时 onHide 常常没触发，
+   * remoteKeyActive 一直是 true，赋值不变就不会触发 useRemoteKey 里的 watch，
+   * 而原生监听已经失效 —— 必须显式 sync() 重建（见 restoreRemoteKey 的说明）。
    */
-  restoreRemoteKey();
+  restoreRemoteKey("visibilitychange");
   void flushOfflineGanttAsk();
 }
 const {
@@ -1057,16 +1056,6 @@ function onBack() {
  */
 const remoteKeyActive = ref(false);
 
-/**
- * 从容器（甘特离线包 / 场景窗口）回到本页时，重新打开遥控器接管。
- *
- * 供 handleHostVisible / 原生 resume 调用：这两个入口在 setup 前段就要用，
- * 而开关本身声明在这里（遥控器分区），所以单独包一层函数，避免前向引用。
- */
-function restoreRemoteKey() {
-  remoteKeyActive.value = true;
-}
-
 /** 连按保护：startVoiceQuery 起手要先等双工释放，这段时间 voiceQueryActive 还是 false，挡住第二次 */
 let remoteKeyStarting = false;
 
@@ -1100,11 +1089,26 @@ function onRemoteKeyBack() {
   onBack();
 }
 
-useRemoteKey({
+const remoteKey = useRemoteKey({
   enabled: computed(() => remoteKeyActive.value && !shareSheetVisible.value),
   onConfirm: onRemoteKeyConfirm,
   onBack: onRemoteKeyBack,
 });
+
+/**
+ * 从容器（甘特离线包 / 场景窗口）回到本页时，重新打开遥控器接管并重建原生监听。
+ *
+ * 只把开关置回 true 不够：安卓用 openH5Container 打开甘特离线包时**不经过 uni 路由**，
+ * onHide 不会触发，开关一直是 true —— 赋同样的值不产生变化，`useRemoteKey` 内部的
+ * watch 不会 fire，而原生侧监听在容器切换后已经失效。所以这里必须显式 sync()，
+ * 把「订阅 + 注册」重建一遍，否则回来之后音量键（语音输入）就再也注册不回来。
+ */
+function restoreRemoteKey(source: string) {
+  const changed = !remoteKeyActive.value;
+  remoteKeyActive.value = true;
+  logger.info("恢复遥控器接管", { source, changed });
+  void remoteKey.sync(source);
+}
 
 /**
  * 右上角房子按钮「返回主页」：调用宿主原生 goHome 回 App 首页
