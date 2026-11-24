@@ -168,13 +168,13 @@ const renderItems = computed(() => {
   const visibleVoiceBlocks = renderVoiceBlock ? voiceBlocks : [];
   const slotBlocks = rest.filter(block => block.type === "ask-slot");
   /**
-   * 正文逐字 / 本轮生成期间先摘掉选项类块（追问卡 / 推荐问题 / 跳转卡）、正文里的图片
-   * 与参考资料，正文收尾后再按「图片 → 参考资料 → 选项」的顺序放回来。
-   * 只影响渲染：store 里的块序不变，播报 / 分享按块取内容不受影响。
+   * 先按完整块序列确定正文分组，延后展示只在模板里控制。
+   * 不能在这里按 bodyPending 摘掉参考资料/图片/选项：它们可能夹在两段 answer 中间，
+   * 摘掉会合并 answer-group，放回又拆开，后半段正文被反复卸载/挂载并重启打字机，
+   * 导致 typing 计数无法归零，参考资料和推荐问题始终不能稳定出现。
    */
-  const contentBlocks = rest.filter(block => block.type !== "ask-slot"
-    && !(bodyPending.value && isDeferredBlock(block)));
-  const trailingSlots = bodyPending.value ? [] : slotBlocks;
+  const contentBlocks = rest.filter(block => block.type !== "ask-slot");
+  const trailingSlots = slotBlocks;
 
   // 海报模式（noAnswerGroup）：answer/chart 逐块渲染，不使用 answer-group 分组，
   // 避免展示「输出结果」标题和分隔线；chart 内容本身仍由 AiBlockRenderer 渲染
@@ -361,7 +361,7 @@ watch(
         @typing="onBlockTyping"
       />
       <AiBlockRenderer
-        v-else
+        v-else-if="noAnswerGroup || !isDeferredBlock(item) || !bodyPending"
         :block="item"
         :class="{
           'ai-content-blocks__option': isOptionBlock(item),
