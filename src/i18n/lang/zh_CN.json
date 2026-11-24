@@ -312,6 +312,8 @@
   "qrcode-failed": "二维码生成失败",
   "qrcode-copy": "复制内容",
   "qrcode-copied": "已复制",
+  "qrcode-download-title": "扫码下载 SanVIST App",
+  "qrcode-download-subtitle": "很高兴认识你，快把我带走吧！",
   "guide-init-guest": "100号游客",
   "guide-init-welcome-title": "欢迎了解作业指导AI助手",
   "guide-init-welcome-subtitle": "师傅远在千里，\n经验近在车里",

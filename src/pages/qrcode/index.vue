@@ -159,9 +159,9 @@ function onBack() {
         <!-- 标题区：标题 865:1775 + 副标题 865:1332 -->
         <view class="qrcode-page__head">
           <!-- 标题：y=139，24px / 行高 35px / Bold / #0D0D0D，居中 -->
-          <text class="qrcode-page__title">扫码下载 SanVIST App</text>
+          <text class="qrcode-page__title">{{ t("qrcode-download-title") }}</text>
           <!-- 副标题：y=181（暗色稿 y=244），16px / Regular，浅色 #5E5E5E / 深色 #9A9A9A，居中 -->
-          <text class="qrcode-page__subtitle">很高兴认识你，快把我带走吧！</text>
+          <text class="qrcode-page__subtitle">{{ t("qrcode-download-subtitle") }}</text>
         </view>
 
         <view class="qrcode-page__body">
@@ -381,7 +381,9 @@ function onBack() {
   font-weight: 700;
   line-height: 70rpx; // 35px
   text-align: center;
-  white-space: nowrap;
+  // 英文词条比中文长（"Scan to download the SanVIST App"），这里允许折行：
+  // 写死 nowrap 会被卡片宽度裁掉；中文够宽不会折
+  max-width: 100%;
 }
 
 /* 865:1332：16px / 行高 23px / Regular / #5E5E5E */
@@ -392,7 +394,8 @@ function onBack() {
   font-weight: 400;
   line-height: 46rpx; // 23px
   text-align: center;
-  white-space: nowrap;
+  // 同标题：英文词条按需折行，中文仍是一行
+  max-width: 100%;
 }
 
 /* 卡片与登记行的纵向节奏：卡片底 → 提示顶 30px */

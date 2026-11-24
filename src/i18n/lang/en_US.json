@@ -312,6 +312,8 @@
   "qrcode-failed": "Failed to generate the QR code",
   "qrcode-copy": "Copy content",
   "qrcode-copied": "Copied",
+  "qrcode-download-title": "Scan to download the SanVIST App",
+  "qrcode-download-subtitle": "Nice to meet you — take me with you!",
   "guide-init-guest": "Guest",
   "guide-init-welcome-title": "Welcome to Guidance AI",
   "guide-init-welcome-subtitle": "Your mentor is far away,\nexperience is in the cab",
