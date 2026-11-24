@@ -70,7 +70,7 @@ function selectModel(modelKey: string) {
     </view>
 
     <text class="device-model__footer">
-      Powered by IROOTECH
+      内容由AI生成，请核实重要信息
     </text>
   </view>
 </template>
