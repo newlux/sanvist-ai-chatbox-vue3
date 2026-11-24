@@ -32,9 +32,15 @@ import { backFromScene } from "@/utils/scene-navigation";
 
 defineOptions({ name: "QrCodePage" });
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const { safeAreaStyle } = useSafeArea();
 const logger = createLogger("qrcode-page");
+/**
+ * 英文版单独排版：标题按「Scan to Download / Get Started」断成两行（词条里带 \n，
+ * 靠 .qrcode-page__title 的 white-space: pre-line 落地），副标题整段不展示。
+ * 中文与其余语种保持原样（一行标题 + 副标题）。
+ */
+const isEnglish = computed(() => String(locale.value || "").trim().toLowerCase().startsWith("en"));
 
 /**
  * 深色模式（Ardot 430:1「二维码页面-方案1」暗色稿）：
@@ -160,8 +166,9 @@ function onBack() {
         <view class="qrcode-page__head">
           <!-- 标题：y=139，24px / 行高 35px / Bold / #0D0D0D，居中 -->
           <text class="qrcode-page__title">{{ t("qrcode-download-title") }}</text>
-          <!-- 副标题：y=181（暗色稿 y=244），16px / Regular，浅色 #5E5E5E / 深色 #9A9A9A，居中 -->
-          <text class="qrcode-page__subtitle">{{ t("qrcode-download-subtitle") }}</text>
+          <!-- 副标题：y=181（暗色稿 y=244），16px / Regular，浅色 #5E5E5E / 深色 #9A9A9A，居中。
+               英文版不展示副标题，只留两行标题 -->
+          <text v-if="!isEnglish" class="qrcode-page__subtitle">{{ t("qrcode-download-subtitle") }}</text>
         </view>
 
         <view class="qrcode-page__body">
@@ -381,8 +388,10 @@ function onBack() {
   font-weight: 700;
   line-height: 70rpx; // 35px
   text-align: center;
-  // 英文词条比中文长（"Scan to download the SanVIST App"），这里允许折行：
-  // 写死 nowrap 会被卡片宽度裁掉；中文够宽不会折
+  // 英文词条比中文长，这里允许折行：写死 nowrap 会被卡片宽度裁掉；中文够宽不会折。
+  // pre-line：英文词条里写死的 \n（"Scan to Download\nGet Started"）按换行落地，
+  // 中文没有 \n，表现与之前一致
+  white-space: pre-line;
   max-width: 100%;
 }
 
